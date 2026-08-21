@@ -32,5 +32,6 @@ def authenticate(session: Session, nombre_usuario: str, clave: str) -> Usuario |
             modulo="AUTH",
             detalle=f"Usuario '{usuario.nombre_usuario}' inicio sesion",
         )
+        _ = usuario.rol  # el commit de arriba expira los atributos ya cargados
         return usuario
     return None
