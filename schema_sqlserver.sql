@@ -566,6 +566,23 @@ END
 GO
 
 
+-- schema_migrations: registro de que cambios de schema (archivos en migrations/) ya se
+-- aplicaron en este entorno. Este script (schema_sqlserver.sql) arma el schema completo
+-- para un entorno nuevo y se auto-registra como la migracion '0000_baseline' al final del
+-- archivo -- a partir de ahi, todo cambio de schema se agrega como un .sql nuevo en
+-- migrations/ (aplicado con `python -m app.db.migrar`), nunca editando este archivo. Ver
+-- migrations/README.md.
+IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NULL
+BEGIN
+CREATE TABLE dbo.schema_migrations (
+	[version] VARCHAR(255) NOT NULL,
+	[aplicada_en] DATETIME NOT NULL DEFAULT GETDATE(),
+	CONSTRAINT PK_schema_migrations PRIMARY KEY ([version])
+);
+END
+GO
+
+
 -- =========================================================================
 -- FOREIGN KEYS
 -- =========================================================================
@@ -1278,5 +1295,16 @@ BEGIN
 	JOIN inserted i ON i.[id_caja] = c.[id_caja]
 	JOIN deleted d ON d.[id_caja] = i.[id_caja]
 	WHERE i.[fecha_cierre] IS NOT NULL AND d.[fecha_cierre] IS NULL;
+END
+GO
+
+
+-- =========================================================================
+-- BASELINE: marca este script como la migracion '0000_baseline' ya aplicada
+-- =========================================================================
+
+IF NOT EXISTS (SELECT 1 FROM dbo.schema_migrations WHERE [version] = '0000_baseline')
+BEGIN
+	INSERT INTO dbo.schema_migrations ([version]) VALUES ('0000_baseline');
 END
 GO

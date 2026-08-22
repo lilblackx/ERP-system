@@ -57,6 +57,10 @@ docker exec -i distribuidora_dj_sqlserver /opt/mssql-tools18/bin/sqlcmd \
   < schema_sqlserver.sql
 ```
 
+A partir de aca, cualquier cambio de schema (nuevo trigger, `ALTER TABLE`, etc.) se
+aplica con `python -m app.db.migrar` en vez de volver a correr `schema_sqlserver.sql`
+completo (no es idempotente para triggers/constraints) -- ver `migrations/README.md`.
+
 (Opcional) correr las pruebas de triggers para validar que todo quedo bien:
 
 ```bash

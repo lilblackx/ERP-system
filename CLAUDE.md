@@ -34,6 +34,9 @@ pytest tests/services/test_ventas.py::test_emitir_factura_credito_abre_cuenta_po
 
 # Install dev deps (adds pytest on top of requirements.txt)
 pip install -r requirements-dev.txt
+
+# Apply pending schema migrations (migrations/*.sql) to the configured database
+python -m app.db.migrar
 ```
 
 Tests run against a **real, dedicated SQL Server database** (`distribuidora_dj_test` by
@@ -73,11 +76,15 @@ how the Python code must sequence inserts/deletes, e.g.:
   their `INSTEAD OF INSERT` triggers for SQLAlchemy to be able to read back the
   generated id at all — see the note in that section for why.
 
-**`schema_sqlserver.sql` is not a migration tool.** Table creation is idempotent
-(`IF OBJECT_ID(...) IS NULL`), but triggers and constraints are not — the script is
-meant to run once against an empty database. Changing a trigger means hand-writing an
-`ALTER TRIGGER` and applying it to every existing environment yourself; there's no
-migration framework.
+**`schema_sqlserver.sql` builds the schema once, from empty.** Table creation is
+idempotent (`IF OBJECT_ID(...) IS NULL`), but triggers and constraints are not — it's
+meant to run once against a brand-new database, and self-registers as the
+`0000_baseline` row in `dbo.schema_migrations` when it does. Any schema change to an
+environment that already has data (new trigger, `ALTER TABLE`, etc.) goes in a new
+numbered file under `migrations/` instead of editing `schema_sqlserver.sql` — see
+`migrations/README.md`. Apply pending ones with `python -m app.db.migrar`
+(`app/db/migrar.py`), which tracks what's applied per environment in
+`dbo.schema_migrations`.
 
 **Test isolation** (`tests/conftest.py`): services call `session.commit()` themselves,
 so per-test rollback doesn't work. Instead each test gets the same database cleaned by

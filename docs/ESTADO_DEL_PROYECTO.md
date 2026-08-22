@@ -102,6 +102,30 @@ el schema instalado necesita el mismo `ALTER TRIGGER` manual, porque el script n
 idempotente para triggers (solo las `CREATE TABLE` están guardadas con
 `IF OBJECT_ID ... IS NULL`).
 
+### Migraciones de schema (2026-08-22)
+
+`schema_sqlserver.sql` sigue siendo el script que arma el schema completo para un
+entorno nuevo, pero ya no es el lugar donde se editan cambios de schema en un entorno
+que ya tiene datos (como el fix de arriba, que tuvo que aplicarse a mano con
+`ALTER TRIGGER` en cada entorno). Ahora existe `dbo.schema_migrations` (tabla que
+registra qué cambios ya se aplicaron en esa base) y una carpeta `migrations/` con
+archivos `.sql` numerados — ver `migrations/README.md` para la convención completa.
+`schema_sqlserver.sql` se auto-registra como la migración `0000_baseline` al final del
+propio script.
+
+`python -m app.db.migrar` (`app/db/migrar.py`) aplica los archivos pendientes de
+`migrations/` en orden y los registra uno por uno. Si apunta a una base que ya existía
+antes de este mecanismo (sin `dbo.schema_migrations`), la crea y marca `0000_baseline`
+como aplicada automáticamente antes de seguir — así no hace falta re-ejecutar
+`schema_sqlserver.sql` completo (que de todos modos fallaría sobre una base ya poblada,
+ver más arriba). Ya se corrió una vez contra `distribuidora_dj` (dev) para bootstrapear
+la tabla; `distribuidora_dj_test` la recibe automáticamente porque `tests/conftest.py`
+corre el script completo (ya actualizado) la primera vez que crea esa base.
+
+No hay `down`/rollback: revertir un cambio ya aplicado es una migración nueva que
+deshace el anterior, igual que se viene manejando con los `ALTER TRIGGER` manuales hasta
+ahora.
+
 ## 4. Cuentas por pagar "otros": transferencias sin conciliar
 
 El módulo de "cuentas por pagar otros" **no modela pasivos comerciales** (alquileres,
@@ -204,15 +228,12 @@ schema — por eso la cuenta se borra en vez de cambiarle el estado.
   nota en la sección 5). Si el negocio necesita poder anular igual, revirtiendo también
   los pagos y sus movimientos de caja/banco, es un desarrollo aparte y bastante más
   grande (afecta saldos ya conciliados).
-- Sin migraciones formales del schema: los cambios a `schema_sqlserver.sql` (como el fix
-  de la sección 3) se aplican a mano en cada entorno con `ALTER TRIGGER`/`ALTER TABLE`.
-  El script tampoco es idempotente para triggers (solo las `CREATE TABLE` están
-  guardadas con `IF OBJECT_ID ... IS NULL`), así que no se puede simplemente
-  re-ejecutar completo sobre una base ya poblada.
-- Cobertura de pruebas automatizadas: hecha para los 16 módulos de servicio. Hay un
-  harness de pytest (`tests/`) contra una base de datos SQL Server de prueba dedicada
-  (real, no mock — necesario para validar los triggers), con 260 tests. Ver
-  `tests/conftest.py` para la estrategia de aislamiento entre tests (limpieza por
-  `DELETE` en orden trigger-safe, no rollback, porque los servicios hacen su propio
-  `commit()`) y `tests/factories.py` para los helpers de datos base. Pendiente: correrlo
-  en CI (hoy es manual, `pytest` requiere Docker/SQL Server arriba).
+- ~~Sin migraciones formales del schema~~ — resuelto (2026-08-22). Ver nota al final de
+  la sección 3.
+- Cobertura de pruebas automatizadas: hecha para los 16 módulos de servicio más el
+  runner de migraciones. Hay un harness de pytest (`tests/`) contra una base de datos
+  SQL Server de prueba dedicada (real, no mock — necesario para validar los triggers),
+  con 263 tests. Ver `tests/conftest.py` para la estrategia de aislamiento entre tests
+  (limpieza por `DELETE` en orden trigger-safe, no rollback, porque los servicios hacen
+  su propio `commit()`) y `tests/factories.py` para los helpers de datos base.
+  Pendiente: correrlo en CI (hoy es manual, `pytest` requiere Docker/SQL Server arriba).
