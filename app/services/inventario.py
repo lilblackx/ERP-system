@@ -5,8 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Inventario, ProductoPrecio
 from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
 
 TIPOS_PRECIO_VALIDOS = {"DETAL", "MAYOR", "ESPECIAL"}
+ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
 class ProductoService:
@@ -19,11 +21,13 @@ class ProductoService:
             raise ValueError(f"El codigo de producto '{cod_producto}' ya esta en uso")
 
     @staticmethod
-    def obtener(session: Session, id_producto: int) -> Inventario | None:
+    def obtener(session: Session, id_producto: int, id_usuario: int | None = None) -> Inventario | None:
+        require_permiso(session, id_usuario, "inventario", "ver")
         return session.get(Inventario, id_producto)
 
     @staticmethod
     def crear(session: Session, **datos) -> Inventario:
+        require_permiso(session, datos.get("creado_por"), "inventario", "crear")
         cod_producto = datos.get("cod_producto")
         if not cod_producto:
             raise ValueError("cod_producto es requerido")
@@ -44,6 +48,7 @@ class ProductoService:
 
     @staticmethod
     def actualizar(session: Session, id_producto: int, id_usuario: int | None = None, **datos) -> Inventario:
+        require_permiso(session, id_usuario, "inventario", "editar")
         producto = session.get(Inventario, id_producto)
         if producto is None:
             raise ValueError("Producto no encontrado")
@@ -64,18 +69,44 @@ class ProductoService:
         )
         return producto
 
+    # Un producto nunca se borra fisicamente: FK_factura_detalle_id_producto_factura,
+    # FK_compra_detalle_id_producto_compra y FK_producto_precios_id_producto (todas
+    # ON DELETE NO ACTION) hacen que borrar uno ya vendido/comprado reviente con un
+    # IntegrityError crudo de pyodbc -- y aunque no tenga movimientos todavia, podria
+    # tenerlos despues, asi que la politica es no permitir el DELETE nunca. Usar
+    # cambiar_estado(..., "INACTIVO") para retirarlo de circulacion preservando el
+    # historial. Decision de producto 2026-08-22 (hallazgo de auditoria del mismo dia).
     @staticmethod
     def eliminar(session: Session, id_producto: int, id_usuario: int | None = None) -> None:
+        require_permiso(session, id_usuario, "inventario", "eliminar")
+        raise ValueError(
+            "No se puede eliminar un producto para proteger la integridad de los datos. "
+            "Use ProductoService.cambiar_estado() para desactivarlo."
+        )
+
+    @staticmethod
+    def cambiar_estado(
+        session: Session, id_producto: int, nuevo_estado: str, id_usuario: int | None = None
+    ) -> Inventario:
+        require_permiso(session, id_usuario, "inventario", "eliminar")
+        if nuevo_estado not in ESTADOS_VALIDOS:
+            raise ValueError(f"nuevo_estado debe ser uno de {ESTADOS_VALIDOS}")
         producto = session.get(Inventario, id_producto)
         if producto is None:
-            return
-        detalle = {"id_producto": producto.id_producto, "cod_producto": producto.cod_producto}
-        session.delete(producto)
+            raise ValueError("Producto no encontrado")
+
+        producto.estado_producto = nuevo_estado
         session.commit()
+        session.refresh(producto)
 
         AuditoriaService.registrar_evento(
-            session, id_usuario=id_usuario, accion="ELIMINAR_PRODUCTO", modulo="INVENTARIO", detalle=detalle
+            session,
+            id_usuario=id_usuario,
+            accion="CAMBIAR_ESTADO_PRODUCTO",
+            modulo="INVENTARIO",
+            detalle={"id_producto": producto.id_producto, "nuevo_estado": nuevo_estado},
         )
+        return producto
 
     @staticmethod
     def buscar(
@@ -84,7 +115,9 @@ class ProductoService:
         nombre: str | None = None,
         id_categoria: int | None = None,
         solo_con_stock: bool = False,
+        id_usuario: int | None = None,
     ) -> list[Inventario]:
+        require_permiso(session, id_usuario, "inventario", "ver")
         query = session.query(Inventario)
         if codigo:
             query = query.filter(Inventario.cod_producto.ilike(f"%{codigo}%"))
@@ -98,8 +131,9 @@ class ProductoService:
 
     @staticmethod
     def obtener_alertas_stock(
-        session: Session, limite_minimo: int = 10, dias_vencimiento: int = 30
+        session: Session, limite_minimo: int = 10, dias_vencimiento: int = 30, id_usuario: int | None = None
     ) -> dict[str, list[Inventario]]:
+        require_permiso(session, id_usuario, "inventario", "ver")
         hoy = date.today()
         limite_fecha = hoy + timedelta(days=dias_vencimiento)
         bajo_stock = (
@@ -126,7 +160,8 @@ class PrecioService:
         return margen.quantize(Decimal("0.01"))
 
     @staticmethod
-    def listar_precios(session: Session, id_producto: int) -> list[ProductoPrecio]:
+    def listar_precios(session: Session, id_producto: int, id_usuario: int | None = None) -> list[ProductoPrecio]:
+        require_permiso(session, id_usuario, "inventario", "ver")
         return (
             session.query(ProductoPrecio)
             .filter(ProductoPrecio.id_producto == id_producto)
@@ -138,6 +173,7 @@ class PrecioService:
     def establecer_precio(
         session: Session, id_producto: int, tipo_precio: str, precio_venta, id_usuario: int | None = None
     ) -> ProductoPrecio:
+        require_permiso(session, id_usuario, "inventario", "editar")
         if tipo_precio not in TIPOS_PRECIO_VALIDOS:
             raise ValueError(f"tipo_precio invalido: {tipo_precio}")
         producto = session.get(Inventario, id_producto)
@@ -183,6 +219,7 @@ class PrecioService:
 
     @staticmethod
     def eliminar_precio(session: Session, id_producto_precio: int, id_usuario: int | None = None) -> None:
+        require_permiso(session, id_usuario, "inventario", "eliminar")
         precio = session.get(ProductoPrecio, id_producto_precio)
         if precio is None:
             return

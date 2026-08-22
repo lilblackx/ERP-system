@@ -7,13 +7,63 @@ from app.services.auditoria import AuditoriaService
 # gestiona desde aqui. Este servicio solo administra roles y la matriz rol_permisos.
 
 
+class PermisoDenegadoError(PermissionError):
+    """Se lanza cuando un usuario no tiene el permiso requerido para una operacion.
+    Subclase de PermissionError (no ValueError) a proposito: es un tipo de falla
+    distinto a un dato invalido, y los llamadores pueden distinguirlos."""
+
+
+def require_permiso(session: Session, id_usuario: int | None, recurso: str, accion: str) -> None:
+    """Punto de entrada de autorizacion para el resto de los servicios.
+
+    id_usuario=None (actor desconocido) se trata como NO autorizado -- no como "confiar
+    por defecto". El rol 'ADMIN' bypassa la matriz de permisos por completo
+    (superusuario): el seed de schema_sqlserver.sql no le asigna ninguna fila en
+    rol_permisos a proposito, así que sin este bypass ADMIN quedaria bloqueado de todo.
+
+    La consulta contra rol_permisos esta duplicada aqui en vez de reusar
+    UsuarioService.verificar_permiso() (misma logica, app/services/usuarios.py) a
+    proposito: usuarios.py necesita importar require_permiso() para proteger sus propios
+    metodos de escritura, e importar UsuarioService desde aca crearia un ciclo.
+    """
+    if id_usuario is None:
+        raise PermisoDenegadoError(
+            f"Accion no autorizada: '{accion}' sobre '{recurso}' requiere un usuario autenticado"
+        )
+
+    usuario = session.get(Usuario, id_usuario)
+    if usuario is None:
+        raise PermisoDenegadoError(f"Accion no autorizada: usuario {id_usuario} no encontrado")
+
+    if usuario.id_rol is None:
+        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' no tiene rol asignado")
+
+    rol = session.get(Rol, usuario.id_rol)
+    if rol is not None and rol.nombre == "ADMIN":
+        return
+
+    tiene_permiso = (
+        session.query(RolPermiso)
+        .join(Permiso, Permiso.id_permiso == RolPermiso.id_permiso)
+        .filter(RolPermiso.id_rol == usuario.id_rol, Permiso.recurso == recurso, Permiso.accion == accion)
+        .first()
+        is not None
+    )
+    if not tiene_permiso:
+        raise PermisoDenegadoError(
+            f"El usuario '{usuario.nombre_usuario}' no tiene permiso '{accion}' sobre '{recurso}'"
+        )
+
+
 class RolService:
     @staticmethod
-    def listar_roles(session: Session) -> list[Rol]:
+    def listar_roles(session: Session, id_usuario: int | None = None) -> list[Rol]:
+        require_permiso(session, id_usuario, "permisos", "ver")
         return session.query(Rol).order_by(Rol.nombre).all()
 
     @staticmethod
-    def obtener_rol(session: Session, id_rol: int) -> Rol | None:
+    def obtener_rol(session: Session, id_rol: int, id_usuario: int | None = None) -> Rol | None:
+        require_permiso(session, id_usuario, "permisos", "ver")
         return session.get(Rol, id_rol)
 
     @staticmethod
@@ -26,6 +76,7 @@ class RolService:
 
     @staticmethod
     def crear_rol(session: Session, nombre: str, descripcion: str | None = None, id_usuario: int | None = None) -> Rol:
+        require_permiso(session, id_usuario, "permisos", "crear")
         if not nombre:
             raise ValueError("nombre es requerido")
         RolService._validar_nombre_unico(session, nombre)
@@ -46,6 +97,7 @@ class RolService:
 
     @staticmethod
     def actualizar_rol(session: Session, id_rol: int, id_usuario: int | None = None, **datos) -> Rol:
+        require_permiso(session, id_usuario, "permisos", "editar")
         rol = session.get(Rol, id_rol)
         if rol is None:
             raise ValueError("Rol no encontrado")
@@ -72,6 +124,7 @@ class RolService:
 
     @staticmethod
     def eliminar_rol(session: Session, id_rol: int, id_usuario: int | None = None) -> None:
+        require_permiso(session, id_usuario, "permisos", "eliminar")
         rol = session.get(Rol, id_rol)
         if rol is None:
             return
@@ -93,16 +146,20 @@ class RolService:
 
 class PermisoService:
     @staticmethod
-    def listar_permisos(session: Session, recurso: str | None = None) -> list[Permiso]:
+    def listar_permisos(
+        session: Session, recurso: str | None = None, id_usuario: int | None = None
+    ) -> list[Permiso]:
+        require_permiso(session, id_usuario, "permisos", "ver")
         query = session.query(Permiso)
         if recurso:
             query = query.filter(Permiso.recurso == recurso)
         return query.order_by(Permiso.recurso, Permiso.accion).all()
 
     @staticmethod
-    def obtener_matriz_rol(session: Session, id_rol: int) -> list[dict]:
+    def obtener_matriz_rol(session: Session, id_rol: int, id_usuario: int | None = None) -> list[dict]:
         """Catalogo completo de permisos con un flag 'asignado' por cada uno, listo para
         pintar un checkbox-grid en la UI (una fila por permiso, marcado si el rol lo tiene)."""
+        require_permiso(session, id_usuario, "permisos", "ver")
         if session.get(Rol, id_rol) is None:
             raise ValueError("Rol no encontrado")
 
@@ -110,7 +167,7 @@ class PermisoService:
             id_permiso
             for (id_permiso,) in session.query(RolPermiso.id_permiso).filter(RolPermiso.id_rol == id_rol).all()
         }
-        permisos = PermisoService.listar_permisos(session)
+        permisos = PermisoService.listar_permisos(session, id_usuario=id_usuario)
         return [
             {
                 "id_permiso": permiso.id_permiso,
@@ -124,6 +181,7 @@ class PermisoService:
 
     @staticmethod
     def asignar_permiso(session: Session, id_rol: int, id_permiso: int, id_usuario: int | None = None) -> RolPermiso:
+        require_permiso(session, id_usuario, "permisos", "editar")
         if session.get(Rol, id_rol) is None:
             raise ValueError("Rol no encontrado")
         if session.get(Permiso, id_permiso) is None:
@@ -148,6 +206,7 @@ class PermisoService:
 
     @staticmethod
     def revocar_permiso(session: Session, id_rol: int, id_permiso: int, id_usuario: int | None = None) -> None:
+        require_permiso(session, id_usuario, "permisos", "editar")
         rol_permiso = session.get(RolPermiso, (id_rol, id_permiso))
         if rol_permiso is None:
             return
@@ -170,6 +229,7 @@ class PermisoService:
         """Reemplaza de una vez el conjunto completo de permisos de un rol: pensado para
         guardar un checkbox-grid completo en una sola llamada en vez de un
         asignar/revocar por casilla."""
+        require_permiso(session, id_usuario, "permisos", "editar")
         if session.get(Rol, id_rol) is None:
             raise ValueError("Rol no encontrado")
 

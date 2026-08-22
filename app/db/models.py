@@ -85,6 +85,7 @@ class Cliente(Base):
     creado_por = Column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion = Column(DateTime, server_default=func.getdate())
     id_categoria_cliente = Column(BigInteger, ForeignKey("categorias_cliente.id_categoria_cliente"))
+    estado_cliente = Column(String(20), server_default="ACTIVO")
 
     vendedor = relationship("Vendedor")
     categoria = relationship("CategoriaCliente")
@@ -161,6 +162,7 @@ class Inventario(Base):
     fecha_registro: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     fecha_vencimiento: Mapped[Optional[datetime.date]] = mapped_column(Date)
     creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    estado_producto: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
 
     categoria = relationship("Categoria")
     creador = relationship("Usuario")
@@ -208,6 +210,7 @@ class Proveedor(Base):
     dias_credito: Mapped[int] = mapped_column(Integer, server_default="0")
     creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    estado_proveedor: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
 
     creador = relationship("Usuario")
 
@@ -390,6 +393,57 @@ class CuentaPorPagarOtro(Base):
     creador = relationship("Usuario", foreign_keys=[creado_por])
 
 
+class NotaCreditoCliente(Base):
+    """Saldo a favor del cliente generado al anular una factura que ya tenia pagos
+    aplicados: en vez de revertir el pago (borrar/editar caja_movimientos o
+    banco_movimientos ya registrados, potencialmente de un turno ya cerrado o
+    conciliado), el dinero ya cobrado queda como credito disponible para aplicar a una
+    compra futura o devolver luego como una operacion nueva, real y fechada -- ver
+    NotaCreditoService y la nota en VentaService.anular_factura.
+
+    Es un documento fiscal que la empresa emite (reduce lo que el cliente le debe), por
+    eso numero_nota_credito es correlativo y unico, igual que factura_venta.numero_factura
+    -- reportable al SENIAT cuando se solicite."""
+
+    __tablename__ = "notas_credito_clientes"
+
+    id_nota_credito: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    numero_nota_credito: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    id_cliente: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id_cliente"), nullable=False)
+    id_factura_origen: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
+    monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    saldo_disponible: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    motivo: Mapped[Optional[str]] = mapped_column(String(255))
+    estado: Mapped[str] = mapped_column(String(15), server_default="disponible")
+    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+
+    cliente = relationship("Cliente")
+    factura_origen = relationship("FacturaVenta")
+    creador = relationship("Usuario")
+
+
+class NotaCreditoProveedor(Base):
+    """Simetrico a NotaCreditoCliente, para el lado de compras: saldo a favor de la
+    empresa cuando se anula una compra que ya tenia pagos aplicados al proveedor."""
+
+    __tablename__ = "notas_credito_proveedores"
+
+    id_nota_credito: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_proveedor: Mapped[int] = mapped_column(BigInteger, ForeignKey("proveedores.id_proveedor"), nullable=False)
+    id_compra_origen: Mapped[int] = mapped_column(BigInteger, ForeignKey("compras.id_compra"), nullable=False)
+    monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    saldo_disponible: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    motivo: Mapped[Optional[str]] = mapped_column(String(255))
+    estado: Mapped[str] = mapped_column(String(15), server_default="disponible")
+    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+
+    proveedor = relationship("Proveedor")
+    compra_origen = relationship("Compra")
+    creador = relationship("Usuario")
+
+
 class Banco(Base):
     __tablename__ = "bancos"
 
@@ -403,6 +457,7 @@ class Banco(Base):
     modificado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    estado_banco: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
 
     modificador = relationship("Usuario", foreign_keys=[modificado_por])
     creador = relationship("Usuario", foreign_keys=[creado_por])
@@ -420,6 +475,7 @@ class CuentaBancaria(Base):
     saldo_total_banco: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
     creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    estado_cuenta: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
 
     banco = relationship("Banco")
     creador = relationship("Usuario")
@@ -517,6 +573,7 @@ class BancoMovimiento(Base):
 
 class CajaMovimiento(Base):
     __tablename__ = "caja_movimientos"
+    __table_args__ = {"implicit_returning": False}
 
     id_movimiento: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_caja: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))

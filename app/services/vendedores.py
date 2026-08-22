@@ -5,15 +5,20 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Cliente, FacturaVenta, Vendedor
 from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
+
+ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
 class VendedorService:
     @staticmethod
-    def obtener(session: Session, id_vendedor: int) -> Vendedor | None:
+    def obtener(session: Session, id_vendedor: int, id_usuario: int | None = None) -> Vendedor | None:
+        require_permiso(session, id_usuario, "vendedores", "ver")
         return session.get(Vendedor, id_vendedor)
 
     @staticmethod
-    def listar(session: Session, texto_busqueda: str | None = None) -> list[Vendedor]:
+    def listar(session: Session, texto_busqueda: str | None = None, id_usuario: int | None = None) -> list[Vendedor]:
+        require_permiso(session, id_usuario, "vendedores", "ver")
         query = session.query(Vendedor)
         if texto_busqueda:
             like = f"%{texto_busqueda}%"
@@ -26,6 +31,7 @@ class VendedorService:
 
     @staticmethod
     def crear(session: Session, **datos) -> Vendedor:
+        require_permiso(session, datos.get("creado_por"), "vendedores", "crear")
         vendedor = Vendedor(**datos)
         session.add(vendedor)
         session.commit()
@@ -42,6 +48,7 @@ class VendedorService:
 
     @staticmethod
     def actualizar(session: Session, id_vendedor: int, id_usuario: int | None = None, **datos) -> Vendedor:
+        require_permiso(session, id_usuario, "vendedores", "editar")
         vendedor = session.get(Vendedor, id_vendedor)
         if vendedor is None:
             raise ValueError("Vendedor no encontrado")
@@ -59,21 +66,51 @@ class VendedorService:
         )
         return vendedor
 
+    # Un vendedor nunca se borra fisicamente: FK_factura_venta_id_vendedor y
+    # FK_usuarios_id_vendedor_usuario (ambas ON DELETE NO ACTION) hacen que borrar uno
+    # con facturas asignadas o vinculado a un usuario reviente con un IntegrityError
+    # crudo de pyodbc -- y aunque no tenga ninguna todavia, podria tenerlas despues, asi
+    # que la politica es no permitir el DELETE nunca. Usar cambiar_estado(...,
+    # "INACTIVO") para retirarlo de circulacion preservando el historial (la columna
+    # estado_vendedor ya existia, pero nada la usaba). Decision de producto 2026-08-22
+    # (hallazgo de auditoria del mismo dia).
     @staticmethod
     def eliminar(session: Session, id_vendedor: int, id_usuario: int | None = None) -> None:
-        vendedor = session.get(Vendedor, id_vendedor)
-        if vendedor is None:
-            return
-        detalle = {"id_vendedor": vendedor.id_vendedor, "nombre_vendedor": vendedor.nombre_vendedor}
-        session.delete(vendedor)
-        session.commit()
-
-        AuditoriaService.registrar_evento(
-            session, id_usuario=id_usuario, accion="ELIMINAR_VENDEDOR", modulo="VENDEDORES", detalle=detalle
+        require_permiso(session, id_usuario, "vendedores", "eliminar")
+        raise ValueError(
+            "No se puede eliminar un vendedor para proteger la integridad de los datos. "
+            "Use VendedorService.cambiar_estado() para desactivarlo."
         )
 
     @staticmethod
-    def obtener_desempeno_mes(session: Session, id_vendedor: int, anio: int, mes: int) -> dict:
+    def cambiar_estado(
+        session: Session, id_vendedor: int, nuevo_estado: str, id_usuario: int | None = None
+    ) -> Vendedor:
+        require_permiso(session, id_usuario, "vendedores", "eliminar")
+        if nuevo_estado not in ESTADOS_VALIDOS:
+            raise ValueError(f"nuevo_estado debe ser uno de {ESTADOS_VALIDOS}")
+        vendedor = session.get(Vendedor, id_vendedor)
+        if vendedor is None:
+            raise ValueError("Vendedor no encontrado")
+
+        vendedor.estado_vendedor = nuevo_estado
+        session.commit()
+        session.refresh(vendedor)
+
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=id_usuario,
+            accion="CAMBIAR_ESTADO_VENDEDOR",
+            modulo="VENDEDORES",
+            detalle={"id_vendedor": vendedor.id_vendedor, "nuevo_estado": nuevo_estado},
+        )
+        return vendedor
+
+    @staticmethod
+    def obtener_desempeno_mes(
+        session: Session, id_vendedor: int, anio: int, mes: int, id_usuario: int | None = None
+    ) -> dict:
+        require_permiso(session, id_usuario, "vendedores", "ver")
         vendedor = session.get(Vendedor, id_vendedor)
         if vendedor is None:
             raise ValueError("Vendedor no encontrado")

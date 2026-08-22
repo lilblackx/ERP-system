@@ -176,3 +176,15 @@ def crear_usuario(session: Session, **overrides) -> Usuario:
     session.commit()
     session.refresh(usuario)
     return usuario
+
+
+def crear_usuario_admin(session: Session, **overrides) -> Usuario:
+    """Usuario con rol ADMIN: bypassa PermisoService.require_permiso() por completo (ver
+    la nota de bypass en app/services/permisos.py). Helper para tests que solo necesitan
+    un actor autorizado como para poder ejercitar el resto del metodo bajo prueba -- para
+    probar la matriz de permisos en si (bloqueo por falta de permiso), usar crear_rol()
+    + crear_permiso() + asignar_permiso() como en tests/services/test_permisos.py."""
+    rol = session.query(Rol).filter_by(nombre="ADMIN").first()
+    if rol is None:
+        rol = crear_rol(session, nombre="ADMIN")
+    return crear_usuario(session, id_rol=rol.id_rol, **overrides)

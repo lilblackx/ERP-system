@@ -3,15 +3,18 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Categoria, Inventario
 from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
 
 
 class CategoriaService:
     @staticmethod
-    def listar(session: Session) -> list[Categoria]:
+    def listar(session: Session, id_usuario: int | None = None) -> list[Categoria]:
+        require_permiso(session, id_usuario, "categorias", "ver")
         return session.query(Categoria).order_by(Categoria.nombre).all()
 
     @staticmethod
-    def listar_con_conteo(session: Session) -> list[dict]:
+    def listar_con_conteo(session: Session, id_usuario: int | None = None) -> list[dict]:
+        require_permiso(session, id_usuario, "categorias", "ver")
         filas = (
             session.query(Categoria, func.count(Inventario.id_producto).label("total_productos"))
             .outerjoin(Inventario, Inventario.id_categoria == Categoria.id_categoria)
@@ -22,7 +25,8 @@ class CategoriaService:
         return [{"categoria": categoria, "total_productos": total} for categoria, total in filas]
 
     @staticmethod
-    def obtener(session: Session, id_categoria: int) -> Categoria | None:
+    def obtener(session: Session, id_categoria: int, id_usuario: int | None = None) -> Categoria | None:
+        require_permiso(session, id_usuario, "categorias", "ver")
         return session.get(Categoria, id_categoria)
 
     @staticmethod
@@ -31,6 +35,7 @@ class CategoriaService:
 
     @staticmethod
     def crear(session: Session, **datos) -> Categoria:
+        require_permiso(session, datos.get("creado_por"), "categorias", "crear")
         categoria = Categoria(**datos)
         session.add(categoria)
         session.commit()
@@ -47,6 +52,7 @@ class CategoriaService:
 
     @staticmethod
     def actualizar(session: Session, id_categoria: int, id_usuario: int | None = None, **datos) -> Categoria:
+        require_permiso(session, id_usuario, "categorias", "editar")
         categoria = session.get(Categoria, id_categoria)
         if categoria is None:
             raise ValueError("Categoria no encontrada")
@@ -66,6 +72,7 @@ class CategoriaService:
 
     @staticmethod
     def eliminar(session: Session, id_categoria: int, id_usuario: int | None = None) -> None:
+        require_permiso(session, id_usuario, "categorias", "eliminar")
         categoria = session.get(Categoria, id_categoria)
         if categoria is None:
             return

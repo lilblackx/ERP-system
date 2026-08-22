@@ -1,26 +1,60 @@
+import pytest
+
 from app.services.empresa import EmpresaService
+from app.services.permisos import PermisoDenegadoError
+from tests.factories import crear_usuario_admin
 
 
 def test_obtener_configuracion_sin_datos(db_session):
-    assert EmpresaService.obtener_configuracion(db_session) is None
+    admin = crear_usuario_admin(db_session)
+    assert EmpresaService.obtener_configuracion(db_session, id_usuario=admin.id_usuario) is None
+
+
+def test_obtener_configuracion_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        EmpresaService.obtener_configuracion(db_session)
 
 
 def test_guardar_configuracion_crea_si_no_existe(db_session):
+    admin = crear_usuario_admin(db_session)
     config = EmpresaService.guardar_configuracion(
-        db_session, rif="J-12345678-9", razon_social="Distribuidora DJ", direccion="Calle 1", telefono="0212-1234567"
+        db_session,
+        rif="J-12345678-9",
+        razon_social="Distribuidora DJ",
+        direccion="Calle 1",
+        telefono="0212-1234567",
+        modificado_por=admin.id_usuario,
     )
 
     assert config.id_config is not None
     assert config.razon_social_empresa == "Distribuidora DJ"
 
 
+def test_guardar_configuracion_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        EmpresaService.guardar_configuracion(
+            db_session, rif="J-12345678-9", razon_social="Distribuidora DJ", direccion=None, telefono=None
+        )
+
+
 def test_guardar_configuracion_actualiza_registro_singleton(db_session):
+    admin = crear_usuario_admin(db_session)
     primero = EmpresaService.guardar_configuracion(
-        db_session, rif="J-11111111-1", razon_social="Nombre Original", direccion=None, telefono=None
+        db_session,
+        rif="J-11111111-1",
+        razon_social="Nombre Original",
+        direccion=None,
+        telefono=None,
+        modificado_por=admin.id_usuario,
     )
 
     segundo = EmpresaService.guardar_configuracion(
-        db_session, rif="J-11111111-1", razon_social="Nombre Actualizado", direccion=None, telefono=None
+        db_session,
+        rif="J-11111111-1",
+        razon_social="Nombre Actualizado",
+        direccion=None,
+        telefono=None,
+        modificado_por=admin.id_usuario,
     )
 
     assert segundo.id_config == primero.id_config
@@ -31,36 +65,54 @@ def test_guardar_configuracion_actualiza_registro_singleton(db_session):
 
 
 def test_guardar_configuracion_logo_sentinel_no_toca_logo(db_session):
+    admin = crear_usuario_admin(db_session)
     EmpresaService.guardar_configuracion(
-        db_session, rif=None, razon_social=None, direccion=None, telefono=None, logo_bytes=b"logo-original"
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        logo_bytes=b"logo-original",
+        modificado_por=admin.id_usuario,
     )
 
     actualizado = EmpresaService.guardar_configuracion(
-        db_session, rif=None, razon_social="Nuevo nombre", direccion=None, telefono=None
+        db_session, rif=None, razon_social="Nuevo nombre", direccion=None, telefono=None, modificado_por=admin.id_usuario
     )
 
     assert actualizado.logotipo_empresa == b"logo-original"
 
 
 def test_guardar_configuracion_logo_none_lo_borra(db_session):
+    admin = crear_usuario_admin(db_session)
     EmpresaService.guardar_configuracion(
-        db_session, rif=None, razon_social=None, direccion=None, telefono=None, logo_bytes=b"logo-original"
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        logo_bytes=b"logo-original",
+        modificado_por=admin.id_usuario,
     )
 
     actualizado = EmpresaService.guardar_configuracion(
-        db_session, rif=None, razon_social=None, direccion=None, telefono=None, logo_bytes=None
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        logo_bytes=None,
+        modificado_por=admin.id_usuario,
     )
 
     assert actualizado.logotipo_empresa is None
 
 
 def test_guardar_configuracion_registra_modificado_por(db_session):
-    from tests.factories import crear_usuario
-
-    usuario = crear_usuario(db_session)
+    admin = crear_usuario_admin(db_session)
 
     config = EmpresaService.guardar_configuracion(
-        db_session, rif=None, razon_social=None, direccion=None, telefono=None, modificado_por=usuario.id_usuario
+        db_session, rif=None, razon_social=None, direccion=None, telefono=None, modificado_por=admin.id_usuario
     )
 
-    assert config.modificado_por == usuario.id_usuario
+    assert config.modificado_por == admin.id_usuario

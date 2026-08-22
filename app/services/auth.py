@@ -17,6 +17,9 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
+# TODO(seguridad): solo se audita el login exitoso. No hay registro de intentos
+# fallidos ni bloqueo tras N intentos -- sin rastro de fuerza bruta si el acceso no es
+# unicamente desde red local. Hallazgo de auditoria 2026-08-22.
 def authenticate(session: Session, nombre_usuario: str, clave: str) -> Usuario | None:
     usuario = (
         session.query(Usuario)

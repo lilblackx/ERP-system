@@ -2,13 +2,15 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ConfiguracionEmpresa
 from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
 
 _SENTINEL = object()
 
 
 class EmpresaService:
     @staticmethod
-    def obtener_configuracion(session: Session) -> ConfiguracionEmpresa | None:
+    def obtener_configuracion(session: Session, id_usuario: int | None = None) -> ConfiguracionEmpresa | None:
+        require_permiso(session, id_usuario, "empresa", "ver")
         return session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
 
     @staticmethod
@@ -26,7 +28,8 @@ class EmpresaService:
         logo_bytes usa un sentinel: si se omite, el logotipo actual no se toca; para
         borrarlo explicitamente hay que pasar logo_bytes=None o b"".
         """
-        config = EmpresaService.obtener_configuracion(session)
+        require_permiso(session, modificado_por, "empresa", "editar")
+        config = session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
 
         if config is None:
             config = ConfiguracionEmpresa()

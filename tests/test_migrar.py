@@ -1,6 +1,7 @@
+import pytest
 from sqlalchemy import text
 
-from app.db.migrar import aplicar_migraciones
+from app.db.migrar import _CREATE_SCHEMA_MIGRATIONS, aplicar_migraciones
 
 
 def _limpiar_schema_migrations(test_engine) -> None:
@@ -8,6 +9,40 @@ def _limpiar_schema_migrations(test_engine) -> None:
         connection.execute(
             text("IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NOT NULL DROP TABLE dbo.schema_migrations")
         )
+        connection.commit()
+
+
+@pytest.fixture(autouse=True)
+def _preservar_schema_migrations_real(test_engine):
+    """Estos tests dropean/recrean dbo.schema_migrations contra la base de datos de test
+    REAL (test_engine es la misma base que usa db_session, no una copia aislada) para
+    poder probar el bootstrap de aplicar_migraciones(). Sin este fixture, correr esta
+    suite borra el registro de que las migraciones reales de migrations/ (por ejemplo
+    0001_reversion_automatica_pagos.sql) ya se aplicaron -- los objetos SQL siguen
+    existiendo, pero migrar.py los cree pendientes de nuevo y falla con "already exists"
+    en la siguiente corrida. Bug real encontrado el 2026-08-22 corriendo la suite
+    completa entre dos migraciones nuevas. Este fixture guarda el contenido real antes de
+    cada test de este archivo y lo restaura despues, sin importar que haga el test."""
+    with test_engine.connect() as connection:
+        existe = connection.execute(text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")).scalar()
+        filas_previas = []
+        if existe is not None:
+            filas_previas = connection.execute(
+                text("SELECT [version], [aplicada_en] FROM dbo.schema_migrations")
+            ).fetchall()
+
+    yield
+
+    with test_engine.connect() as connection:
+        connection.execute(
+            text("IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NOT NULL DROP TABLE dbo.schema_migrations")
+        )
+        connection.execute(text(_CREATE_SCHEMA_MIGRATIONS))
+        for version, aplicada_en in filas_previas:
+            connection.execute(
+                text("INSERT INTO dbo.schema_migrations ([version], [aplicada_en]) VALUES (:v, :a)"),
+                {"v": version, "a": aplicada_en},
+            )
         connection.commit()
 
 

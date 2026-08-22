@@ -14,6 +14,7 @@ from app.db.models import (
     CuentaPorPagarOtro,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
 
 ESTADOS_CXC_OTRO = ("pendiente", "parcial", "pagada", "vencida")
 
@@ -36,6 +37,7 @@ class OtrosMovimientosService:
         fecha_vencimiento: date | None,
         creado_por: int | None,
     ) -> CuentaPorCobrarOtro:
+        require_permiso(session, creado_por, "otros_movimientos", "crear")
         if Decimal(str(monto_total)) <= 0:
             raise ValueError("monto_total debe ser mayor a cero")
         if session.get(Cliente, id_cliente) is None:
@@ -74,6 +76,7 @@ class OtrosMovimientosService:
         referencia: str | None = None,
         id_usuario: int | None = None,
     ) -> CuentaPorCobrarOtro:
+        require_permiso(session, id_usuario, "otros_movimientos", "editar")
         _validar_origen_pago(id_caja, id_cuenta_bancaria)
 
         monto = Decimal(str(monto))
@@ -146,7 +149,9 @@ class OtrosMovimientosService:
         id_cliente: int | None = None,
         fecha_desde: date | datetime | None = None,
         fecha_hasta: date | datetime | None = None,
+        id_usuario: int | None = None,
     ) -> list[CuentaPorCobrarOtro]:
+        require_permiso(session, id_usuario, "otros_movimientos", "ver")
         if estado and estado not in ESTADOS_CXC_OTRO:
             raise ValueError(f"estado invalido: {estado}")
 
@@ -175,6 +180,7 @@ class OtrosMovimientosService:
         descripcion: str | None = None,
         creado_por: int | None = None,
     ) -> CuentaPorPagarOtro:
+        require_permiso(session, creado_por, "otros_movimientos", "crear")
         if Decimal(str(monto)) <= 0:
             raise ValueError("monto debe ser mayor a cero")
         if session.get(CuentaBancaria, id_cuenta_bancaria) is None:
@@ -215,6 +221,7 @@ class OtrosMovimientosService:
         monto,
         id_usuario: int | None,
     ) -> dict:
+        require_permiso(session, id_usuario, "otros_movimientos", "editar")
         monto = Decimal(str(monto))
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
@@ -277,10 +284,12 @@ class OtrosMovimientosService:
         fecha_desde: date | datetime | None = None,
         fecha_hasta: date | datetime | None = None,
         responsable: int | None = None,
+        id_usuario: int | None = None,
     ) -> list[CuentaPorPagarOtro]:
         """fecha_desde/fecha_hasta filtran por fecha_recepcion (estas partidas no tienen
         vencimiento propio, es dinero ya recibido pendiente de identificar). responsable
         filtra por quien registro la partida (creado_por) o quien la concilio (conciliado_por)."""
+        require_permiso(session, id_usuario, "otros_movimientos", "ver")
         if estado and estado not in ("pendiente", "parcial", "conciliado"):
             raise ValueError(f"estado invalido: {estado}")
 

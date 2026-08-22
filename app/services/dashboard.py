@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Caja, CuentaPorCobrar, CuentaPorPagar, FacturaVenta, Inventario
+from app.services.permisos import require_permiso
 
 CUENTA_ABIERTA = ("pendiente", "parcial", "vencida")
 
@@ -16,7 +17,10 @@ def _rango_dia(dia: date) -> tuple[datetime, datetime]:
 
 class DashboardService:
     @staticmethod
-    def get_panel_general_data(session: Session, umbral_stock_minimo: int = 10) -> dict:
+    def get_panel_general_data(
+        session: Session, umbral_stock_minimo: int = 10, id_usuario: int | None = None
+    ) -> dict:
+        require_permiso(session, id_usuario, "dashboard", "ver")
         hoy = date.today()
         ayer = hoy - timedelta(days=1)
 

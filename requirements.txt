@@ -1,3 +1,5 @@
+# TODO: sin pines exactos (==) ni lockfile -- dos instalaciones en fechas distintas
+# pueden traer versiones distintas. Hallazgo de auditoria 2026-08-22.
 PySide6>=6.7
 SQLAlchemy>=2.0
 pyodbc>=5.1

@@ -6,9 +6,11 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Banco, BancoMovimiento, Caja, CajaMovimiento, CuentaBancaria
 from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
 
 TIPOS_MOVIMIENTO_BANCO = {"abono", "cargo", "transferencia", "deposito"}
 TIPOS_MOVIMIENTO_CAJA = {"entrada", "salida"}
+ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
 def _enmascarar_numero_cuenta(numero_cuenta: str | None) -> str | None:
@@ -20,11 +22,13 @@ def _enmascarar_numero_cuenta(numero_cuenta: str | None) -> str | None:
 
 class BancoService:
     @staticmethod
-    def listar_bancos(session: Session) -> list[Banco]:
+    def listar_bancos(session: Session, id_usuario: int | None = None) -> list[Banco]:
+        require_permiso(session, id_usuario, "bancos", "ver")
         return session.query(Banco).order_by(Banco.nombre_banco).all()
 
     @staticmethod
     def crear_banco(session: Session, **datos) -> Banco:
+        require_permiso(session, datos.get("creado_por"), "bancos", "crear")
         banco = Banco(**datos)
         session.add(banco)
         session.commit()
@@ -41,6 +45,7 @@ class BancoService:
 
     @staticmethod
     def actualizar_banco(session: Session, id_banco: int, id_usuario: int | None = None, **datos) -> Banco:
+        require_permiso(session, id_usuario, "bancos", "editar")
         banco = session.get(Banco, id_banco)
         if banco is None:
             raise ValueError("Banco no encontrado")
@@ -58,21 +63,49 @@ class BancoService:
         )
         return banco
 
+    # Un banco nunca se borra fisicamente: FK_cuentas_bancarias_id_banco es ON DELETE NO
+    # ACTION, asi que borrar uno con cuentas bancarias asociadas revienta con un
+    # IntegrityError crudo de pyodbc -- y aunque no tenga ninguna todavia, podria
+    # tenerlas despues, asi que la politica es no permitir el DELETE nunca. Usar
+    # cambiar_estado_banco(..., "INACTIVO") para retirarlo de circulacion preservando el
+    # historial. Decision de producto 2026-08-22 (hallazgo de auditoria del mismo dia).
     @staticmethod
     def eliminar_banco(session: Session, id_banco: int, id_usuario: int | None = None) -> None:
-        banco = session.get(Banco, id_banco)
-        if banco is None:
-            return
-        detalle = {"id_banco": banco.id_banco, "nombre_banco": banco.nombre_banco}
-        session.delete(banco)
-        session.commit()
-
-        AuditoriaService.registrar_evento(
-            session, id_usuario=id_usuario, accion="ELIMINAR_BANCO", modulo="BANCOS", detalle=detalle
+        require_permiso(session, id_usuario, "bancos", "eliminar")
+        raise ValueError(
+            "No se puede eliminar un banco para proteger la integridad de los datos. "
+            "Use BancoService.cambiar_estado_banco() para desactivarlo."
         )
 
     @staticmethod
-    def listar_cuentas(session: Session, id_banco: int | None = None) -> list[CuentaBancaria]:
+    def cambiar_estado_banco(
+        session: Session, id_banco: int, nuevo_estado: str, id_usuario: int | None = None
+    ) -> Banco:
+        require_permiso(session, id_usuario, "bancos", "eliminar")
+        if nuevo_estado not in ESTADOS_VALIDOS:
+            raise ValueError(f"nuevo_estado debe ser uno de {ESTADOS_VALIDOS}")
+        banco = session.get(Banco, id_banco)
+        if banco is None:
+            raise ValueError("Banco no encontrado")
+
+        banco.estado_banco = nuevo_estado
+        session.commit()
+        session.refresh(banco)
+
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=id_usuario,
+            accion="CAMBIAR_ESTADO_BANCO",
+            modulo="BANCOS",
+            detalle={"id_banco": banco.id_banco, "nuevo_estado": nuevo_estado},
+        )
+        return banco
+
+    @staticmethod
+    def listar_cuentas(
+        session: Session, id_banco: int | None = None, id_usuario: int | None = None
+    ) -> list[CuentaBancaria]:
+        require_permiso(session, id_usuario, "bancos", "ver")
         query = session.query(CuentaBancaria).options(joinedload(CuentaBancaria.banco))
         if id_banco:
             query = query.filter(CuentaBancaria.id_banco == id_banco)
@@ -80,6 +113,7 @@ class BancoService:
 
     @staticmethod
     def crear_cuenta(session: Session, **datos) -> CuentaBancaria:
+        require_permiso(session, datos.get("creado_por"), "bancos", "crear")
         if not session.get(Banco, datos.get("id_banco")):
             raise ValueError("Banco no encontrado")
         cuenta = CuentaBancaria(**datos)
@@ -98,6 +132,7 @@ class BancoService:
 
     @staticmethod
     def actualizar_cuenta(session: Session, id_cuenta: int, id_usuario: int | None = None, **datos) -> CuentaBancaria:
+        require_permiso(session, id_usuario, "bancos", "editar")
         cuenta = session.get(CuentaBancaria, id_cuenta)
         if cuenta is None:
             raise ValueError("Cuenta bancaria no encontrada")
@@ -115,21 +150,49 @@ class BancoService:
         )
         return cuenta
 
+    # Una cuenta bancaria nunca se borra fisicamente: FK_banco_movimientos_id_cuenta,
+    # FK_pagos_cobros_id_cuenta_bancaria, FK_pagos_proveedores_id_cuenta_bancaria y
+    # FK_cxp_otros_id_cuenta_bancaria (todas ON DELETE NO ACTION) hacen que borrar una
+    # con movimientos o pagos ya registrados reviente con un IntegrityError crudo de
+    # pyodbc -- y aunque no tenga ninguno todavia, podria tenerlos despues, asi que la
+    # politica es no permitir el DELETE nunca. Usar cambiar_estado_cuenta(...,
+    # "INACTIVO") para retirarla de circulacion preservando el historial. Decision de
+    # producto 2026-08-22 (hallazgo de auditoria del mismo dia).
     @staticmethod
     def eliminar_cuenta(session: Session, id_cuenta: int, id_usuario: int | None = None) -> None:
-        cuenta = session.get(CuentaBancaria, id_cuenta)
-        if cuenta is None:
-            return
-        detalle = {"id_cuenta": cuenta.id_cuenta, "numero_cuenta": _enmascarar_numero_cuenta(cuenta.numero_cuenta)}
-        session.delete(cuenta)
-        session.commit()
-
-        AuditoriaService.registrar_evento(
-            session, id_usuario=id_usuario, accion="ELIMINAR_CUENTA_BANCARIA", modulo="BANCOS", detalle=detalle
+        require_permiso(session, id_usuario, "bancos", "eliminar")
+        raise ValueError(
+            "No se puede eliminar una cuenta bancaria para proteger la integridad de los datos. "
+            "Use BancoService.cambiar_estado_cuenta() para desactivarla."
         )
 
     @staticmethod
-    def obtener_resumen_cuentas(session: Session) -> list[dict]:
+    def cambiar_estado_cuenta(
+        session: Session, id_cuenta: int, nuevo_estado: str, id_usuario: int | None = None
+    ) -> CuentaBancaria:
+        require_permiso(session, id_usuario, "bancos", "eliminar")
+        if nuevo_estado not in ESTADOS_VALIDOS:
+            raise ValueError(f"nuevo_estado debe ser uno de {ESTADOS_VALIDOS}")
+        cuenta = session.get(CuentaBancaria, id_cuenta)
+        if cuenta is None:
+            raise ValueError("Cuenta bancaria no encontrada")
+
+        cuenta.estado_cuenta = nuevo_estado
+        session.commit()
+        session.refresh(cuenta)
+
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=id_usuario,
+            accion="CAMBIAR_ESTADO_CUENTA_BANCARIA",
+            modulo="BANCOS",
+            detalle={"id_cuenta": cuenta.id_cuenta, "nuevo_estado": nuevo_estado},
+        )
+        return cuenta
+
+    @staticmethod
+    def obtener_resumen_cuentas(session: Session, id_usuario: int | None = None) -> list[dict]:
+        require_permiso(session, id_usuario, "bancos", "ver")
         cuentas = (
             session.query(CuentaBancaria)
             .options(joinedload(CuentaBancaria.banco))
@@ -155,7 +218,9 @@ class BancoService:
         fecha_desde: date | datetime | None = None,
         fecha_hasta: date | datetime | None = None,
         tipo_movimiento: str | None = None,
+        id_usuario: int | None = None,
     ) -> list[BancoMovimiento]:
+        require_permiso(session, id_usuario, "bancos", "ver")
         if tipo_movimiento and tipo_movimiento not in TIPOS_MOVIMIENTO_BANCO:
             raise ValueError(f"tipo_movimiento invalido: {tipo_movimiento}")
 
@@ -174,11 +239,13 @@ class BancoService:
 
 class CajaService:
     @staticmethod
-    def listar_cajas(session: Session) -> list[Caja]:
+    def listar_cajas(session: Session, id_usuario: int | None = None) -> list[Caja]:
+        require_permiso(session, id_usuario, "cajas", "ver")
         return session.query(Caja).options(joinedload(Caja.usuario)).order_by(Caja.nombre_caja).all()
 
     @staticmethod
     def abrir_caja(session: Session, id_caja: int, id_usuario: int, saldo_apertura) -> Caja:
+        require_permiso(session, id_usuario, "cajas", "editar")
         caja = session.get(Caja, id_caja)
         if caja is None:
             raise ValueError("Caja no encontrada")
@@ -206,6 +273,7 @@ class CajaService:
 
     @staticmethod
     def cerrar_caja(session: Session, id_caja: int, id_usuario_cierre: int) -> Caja:
+        require_permiso(session, id_usuario_cierre, "cajas", "editar")
         caja = session.get(Caja, id_caja)
         if caja is None:
             raise ValueError("Caja no encontrada")
@@ -229,8 +297,8 @@ class CajaService:
         return caja
 
     @staticmethod
-    def obtener_estado_cajas(session: Session) -> list[dict]:
-        cajas = CajaService.listar_cajas(session)
+    def obtener_estado_cajas(session: Session, id_usuario: int | None = None) -> list[dict]:
+        cajas = CajaService.listar_cajas(session, id_usuario=id_usuario)
         resultado = []
         for caja in cajas:
             esta_abierta = caja.fecha_apertura is not None and caja.fecha_cierre is None
@@ -266,6 +334,7 @@ class CajaService:
         descripcion: str | None,
         id_usuario: int | None,
     ) -> CajaMovimiento:
+        require_permiso(session, id_usuario, "cajas", "crear")
         if tipo not in TIPOS_MOVIMIENTO_CAJA:
             raise ValueError(f"tipo invalido: {tipo}, debe ser uno de {TIPOS_MOVIMIENTO_CAJA}")
         if Decimal(str(monto)) <= 0:

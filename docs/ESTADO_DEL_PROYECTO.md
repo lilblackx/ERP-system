@@ -35,8 +35,9 @@ están implementadas, qué decisiones de diseño se tomaron y qué queda pendien
 | Pagos | `pagos.py` | Aplica pagos de clientes/proveedores contra `cuentas_por_cobrar`/`cuentas_por_pagar` (ver nota técnica de la sección 3) |
 | Tasas de cambio | `tasas.py` | Registro de tasa, tasa actual con % vs. día anterior, histórico con brecha cambiaria |
 | Usuarios | `usuarios.py` | CRUD de usuarios (hash de clave, vínculo opcional con vendedor), verificación de permisos vía matriz `rol_permisos` |
-| Roles y permisos | `permisos.py` | CRUD de roles, y escritura de la matriz `rol_permisos` (asignar/revocar/reemplazar conjunto completo). El catálogo de permisos (`recurso`+`accion`) se mantiene fijo vía schema/seed, no se crea desde aquí |
+| Roles y permisos | `permisos.py` | CRUD de roles, y escritura de la matriz `rol_permisos` (asignar/revocar/reemplazar conjunto completo). El catálogo de permisos (`recurso`+`accion`) se mantiene fijo vía schema/seed, no se crea desde aquí. También expone `require_permiso()`, el punto de entrada de autorización que usan los otros 17 servicios (ver sección 7) |
 | Cuentas por cobrar/pagar "otros" | `otros_movimientos.py` | Préstamos/anticipos a cobrar, y conciliación de transferencias bancarias sin identificar (ver sección 4) |
+| Notas de crédito | `notas_credito.py` | Saldo a favor de cliente/proveedor generado automáticamente al anular una factura/compra con pagos ya aplicados (ver sección 3, "Notas de credito automaticas") |
 | Configuración de empresa | `empresa.py` | Datos fiscales y logotipo (registro singleton) |
 | Auditoría | `auditoria.py` | Bitácora transversal de eventos críticos (ver sección 5) |
 | Panel general | `dashboard.py` | KPIs consolidados para el panel principal (ver sección 6) |
@@ -66,6 +67,73 @@ backend:
   `cuentas_bancarias.saldo_total_banco` en cada movimiento.
 - **Cierre de caja**: `trg_cajas_cierre` calcula `saldo_cierre` a partir de
   `saldo_apertura` y los movimientos del turno cuando se registra `fecha_cierre`.
+- **Reversion automatica de un pago borrado directamente**
+  (`migrations/0001_reversion_automatica_pagos.sql`, 2026-08-22): borrar una fila de
+  `pagos_cobros`/`pagos_proveedores` deshace en cascada todo lo que el
+  `INSTEAD OF INSERT` genero:
+  - Las FK de `banco_movimientos`/`caja_movimientos` hacia `pagos_cobros`/
+    `pagos_proveedores` son `ON DELETE CASCADE` (antes `NO ACTION`): borrar el pago borra
+    su movimiento de banco/caja.
+  - `trg_banco_movimientos_saldo_del` revierte `saldo_total_banco` (espejo de
+    `trg_banco_movimientos_saldo`, AFTER INSERT).
+  - `trg_caja_movimientos_cierre_recalc_del` recalcula `cajas.saldo_cierre` si el turno
+    ya estaba cerrado cuando se revierte el pago -- sin esto quedaria desactualizado,
+    porque `saldo_cierre` solo se calcula una vez, al cerrar.
+  - `trg_pagos_cobros_del`/`trg_pagos_proveedores_del` revierten `saldo_pendiente`/
+    `estado` de `cuentas_por_cobrar`/`cuentas_por_pagar`, comparando contra
+    `factura_venta.total_venta`/`compras.total_compra` para decidir entre `'pendiente'`
+    y `'parcial'` (espejo de `trg_pagos_cobros_io`/`trg_pagos_proveedores_io`).
+
+  **Importante**: `VentaService.anular_factura()`/`CompraService.anular_compra()` **ya no
+  usan este mecanismo** (ver "Notas de credito automaticas" mas abajo, 2026-08-22) --
+  estos triggers quedaron para el caso de borrar directamente un pago mal registrado
+  (fuera del flujo de anulacion), donde SI tiene sentido revertirlo por completo porque
+  nunca debio existir. Se evaluo usarlos tambien para anular facturas/compras con pagos
+  aplicados, pero se descarto: mutan retroactivamente un turno de caja ya cerrado o un
+  movimiento bancario ya conciliado (no hay columna `conciliado` que lo impida a nivel de
+  schema), y no dejan rastro de que un pago real se revirtio.
+
+- **Notas de credito automaticas al anular** (`migrations/0002_notas_credito_anulacion.sql`,
+  2026-08-22, `app/services/notas_credito.py`): cuando `anular_factura()`/
+  `anular_compra()` encuentran pagos ya aplicados, en vez de revertirlos (ver punto
+  anterior) generan una `NotaCreditoCliente`/`NotaCreditoProveedor` por el monto ya
+  cobrado/pagado:
+  - `pagos_cobros`/`pagos_proveedores` y sus `banco_movimientos`/`caja_movimientos`
+    **no se tocan** -- quedan con su fecha e historial reales para siempre.
+  - `cuentas_por_cobrar`/`cuentas_por_pagar` agregaron el estado `'anulada'` al `CHECK`
+    de `estado` (antes no existia forma de marcarlas asi, por eso se borraban). Con pagos
+    aplicados, la cuenta pasa a `estado='anulada'`, `saldo_pendiente=0` -- no se borra,
+    para conservar el vinculo con los pagos que ya se le aplicaron. Sin pagos aplicados,
+    se sigue borrando igual que siempre (nada que preservar).
+  - `notas_credito_clientes`/`notas_credito_proveedores` (tablas nuevas): registran el
+    saldo a favor, vinculado a la factura/compra de origen. Aplicarlo a una operacion
+    futura o devolverlo es un desarrollo aparte -- todavia no hay un flujo que consuma
+    estas notas, `NotaCreditoService` solo las crea y lista.
+
+  Sigue bloqueada la anulacion si hay `comisiones_factura` calculadas sobre alguna
+  linea -- no hay modulo que las gestione todavia, revertirlas queda fuera de alcance.
+
+  **Correlativo fiscal** (`migrations/0003_correlativo_notas_credito_clientes.sql`,
+  2026-08-22): `NotaCreditoCliente` es un documento que la empresa emite (reduce lo que
+  el cliente le debe) y por lo tanto reportable al SENIAT cuando se solicite -- tiene
+  `numero_nota_credito` correlativo y unico (`NC-000001`, `MAX(id)+1`, mismo esquema
+  simple que `factura_venta.numero_factura`/`_generar_numero_factura()`), generado por
+  `_generar_numero_nota_credito_cliente()` en `notas_credito.py`. `listar_notas_credito_clientes()`
+  (con filtros de fecha/cliente/estado y paginacion, igual que `listar_facturas()`) esta
+  pensado para armar ese reporte cuando lo pidan.
+
+  `NotaCreditoProveedor` **no** tiene correlativo: si se anula una compra ya pagada, el
+  documento fiscal (si aplica) lo emite el proveedor hacia la empresa, no al revés -- esa
+  tabla sigue siendo solo un registro interno de que se nos debe. Decision confirmada con
+  el usuario 2026-08-22.
+
+  Nota: igual que `_generar_numero_factura()`/`_generar_numero_compra()`, el esquema
+  `MAX(id)+1` asume que las filas nunca se borran (cierto en producción: una factura
+  anulada conserva su fila, y una nota de crédito tampoco se borra nunca). En el entorno
+  de test, donde `tests/conftest.py` sí borra filas entre tests pero el `IDENTITY` de SQL
+  Server no se resetea, el número generado puede no coincidir con lo que uno esperaría a
+  simple vista (no es un bug nuevo, ya lo tenía `numero_factura`; ver
+  `tests/services/test_notas_credito.py::test_crear_nota_credito_cliente_correlativo_es_unico_y_valido`).
 
 ### Nota técnica sobre SQLAlchemy y triggers
 
@@ -179,19 +247,18 @@ parámetro opcional (`id_usuario` o, en `usuarios.py`, `realizado_por` para no
 confundirlo con el usuario que es objeto de la operación). Todos son opcionales con
 valor por defecto `None`, así que no rompen código existente que no lo use.
 
-Nota: `anular_factura()`/`anular_compra()` (2026-08-22) revierten el stock y cierran la
-cuenta por cobrar/pagar asociada, pero **solo si nada se aplicó todavía contra esa
-cuenta**: se bloquean con `ValueError` si ya hay `pagos_cobros`/`pagos_proveedores`
-aplicados, o (en el caso de ventas) si ya se calculó una `comisiones_factura` sobre
-alguna línea. Revertir pagos/comisiones ya aplicados queda fuera de alcance — hay que
-deshacerlos a mano primero. El mecanismo es borrar las líneas de
-`factura_detalle`/`compra_detalle` (dispara los triggers de stock y de recálculo de
-total) y solo después borrar la fila de `cuentas_por_cobrar`/`cuentas_por_pagar` — en ese
-orden, porque si se borrara la cuenta primero, `trg_factura_venta_cxc`/`trg_compras_cxp`
-la volvería a crear al recalcular el total (mismo problema de reapertura que
-`tests/conftest.py` resuelve para el orden de limpieza entre tests). No existe un estado
-`ANULADA`/cancelado para `cuentas_por_cobrar`/`cuentas_por_pagar` en el `CHECK` del
-schema — por eso la cuenta se borra en vez de cambiarle el estado.
+Nota: `anular_factura()`/`anular_compra()` (2026-08-22, actualizado 2026-08-22) revierten
+el stock y cierran la cuenta por cobrar/pagar asociada. Si ya se le aplicaron pagos, esos
+pagos no se tocan — se genera una nota de crédito por el monto ya cobrado/pagado y la
+cuenta pasa a `estado='anulada'` en vez de borrarse, ver "Notas de credito automaticas"
+en la sección 3. Sin pagos aplicados, la cuenta se sigue borrando (nada que preservar).
+Sigue bloqueada con `ValueError` si ya se calculó una `comisiones_factura` sobre alguna
+línea (solo aplica a ventas): no hay módulo que gestione comisiones todavía, revertirlas
+queda fuera de alcance. El mecanismo es borrar las líneas de `factura_detalle`/
+`compra_detalle` (dispara los triggers de stock y de recálculo de total) antes de tocar
+`cuentas_por_cobrar`/`cuentas_por_pagar` — `trg_factura_venta_cxc`/`trg_compras_cxp` solo
+tocan cuentas en estado `'pendiente'`, así que si ya hay pagos aplicados (`'parcial'`/
+`'pagada'`) el trigger no la altera y fijar `estado='anulada'` después es seguro.
 
 ## 6. Panel general (`dashboard.py`)
 
@@ -205,7 +272,67 @@ schema — por eso la cuenta se borra en vez de cambiarle el estado.
 - Últimas 5 facturas emitidas
 - Top 5 productos con menor stock (con categoría)
 
-## 7. Validaciones de negocio destacadas
+## 7. Autorización (RBAC)
+
+**Hallazgo de auditoría 2026-08-22, resuelto el mismo día**: `UsuarioService.verificar_permiso()`
+existía desde el principio (con tests), pero ningún servicio lo llamaba — la matriz de
+permisos se podía editar pero no bloqueaba nada. Ahora está aplicado en los 18 módulos
+de servicio.
+
+- **Punto de entrada**: `require_permiso(session, id_usuario, recurso, accion)` en
+  `app/services/permisos.py`. Se llama como primera línea de cada método de **escritura**
+  (crear/editar/eliminar/emitir/anular/aplicar/asignar/etc.) **y de lectura**
+  (`listar_*`/`obtener_*`/`buscar`/`consultar_*`/`dashboard.py`) en los 18 servicios.
+  `id_usuario=None` (actor desconocido) se trata como **no autorizado**, no como "confiar
+  por defecto" — decisión explícita del usuario, más estricta que dejarlo pasar.
+- **ADMIN bypassa la matriz por completo** (superusuario): el seed de
+  `schema_sqlserver.sql` no le asigna ninguna fila en `rol_permisos` a propósito, así que
+  sin este bypass ADMIN quedaría bloqueado de todo. Cualquier otro rol se valida contra
+  `rol_permisos`.
+- La consulta contra `rol_permisos` está **duplicada** entre `require_permiso()` y
+  `UsuarioService.verificar_permiso()` (misma lógica) a propósito: `usuarios.py` necesita
+  importar `require_permiso()` para proteger sus propios métodos, e importar
+  `UsuarioService` desde `permisos.py` crearía un ciclo de imports.
+- **Catálogo de permisos** (`migrations/0004_catalogo_permisos_modulos.sql`): el seed
+  original solo tenía 3 filas (`inventario:ver`, `reportes_ventas:ver`,
+  `reportes_comisiones:ver`, todas para VENDEDOR). Se agregaron ~51 permisos más, uno por
+  cada combinación recurso/acción relevante en los 18 módulos. `accion` está restringido
+  por `CK_permisos_accion` a exactamente `'ver'/'crear'/'editar'/'eliminar'` — operaciones
+  que no son CRUD literal se mapearon al más cercano (emitir factura/registrar compra →
+  `crear`, anular factura/compra → `eliminar`, abrir/cerrar turno de caja → `editar`,
+  asignar permisos a un rol → `editar`). Ningún permiso nuevo se asignó a VENDEDOR/CAJERO
+  en el seed — quedan cerrados hasta que un ADMIN los otorgue explícitamente.
+- **Lecturas gateadas (2026-08-22, segunda pasada)**: se agregó `id_usuario` a todos los
+  `listar_*`/`obtener_*`/`buscar` de los 18 servicios, más `DashboardService.get_panel_general_data()`
+  y `AuditoriaService.consultar_auditoria()` (acción `ver` sobre el recurso del módulo).
+  Un método interno que ya llama a otro método gateado con la misma acción/actor
+  (`CajaService.obtener_estado_cajas()` → `listar_cajas()`, `PermisoService.obtener_matriz_rol()`
+  → `listar_permisos()`) simplemente reenvía el `id_usuario` recibido en vez de duplicar el
+  chequeo. `EmpresaService.guardar_configuracion()` es la excepción: en vez de llamar a
+  `obtener_configuracion()` (gateada con `empresa:ver`) usa la query directa, porque su
+  propio actor solo tiene garantizado `empresa:editar` — acoplar una escritura a un
+  permiso de lectura distinto sería un bug esperando pasar.
+- **`AuditoriaService.consultar_auditoria()` usa `id_usuario_actor`, no `id_usuario`**:
+  ese nombre de parámetro ya estaba tomado (filtro "traer solo los eventos de este
+  usuario"), así que el actor que ejecuta la consulta va en un parámetro nuevo separado.
+  También es el único módulo con un *lazy import* de `require_permiso()` (dentro del
+  método, no al tope del archivo) en vez de la duplicación de lógica que usa
+  `usuarios.py`/`permisos.py`: `auditoria.py` no puede importar `permisos.py` al cargar el
+  módulo porque `permisos.py` importa `AuditoriaService` para su propio logging, y ambos
+  enfoques (import diferido vs. duplicar la consulta a `rol_permisos`) resuelven el mismo
+  ciclo — se eligió el import diferido aquí para no triplicar esa lógica.
+- **`crear_nota_credito_cliente()`/`crear_nota_credito_proveedor()` (`notas_credito.py`)
+  siguen sin gatear a propósito** (a diferencia de sus `listar_notas_credito_*`, que sí lo
+  están): son un efecto secundario interno de `anular_factura()`/`anular_compra()` (ya
+  gateadas con `ventas:eliminar`/`compras:eliminar`), no una acción que un usuario invoque
+  directamente. `AuditoriaService.registrar_evento()` tampoco se gatea, por la misma razón
+  (logging interno, no una acción de usuario).
+- **Bootstrap del primer ADMIN no se ve afectado**: `scripts/create_admin_user.py` inserta
+  el `Usuario` directo contra el modelo (no pasa por `UsuarioService.crear_usuario()`),
+  igual que `tests/factories.py::crear_usuario_admin()` — evita el problema de "necesito
+  un ADMIN para crear el primer ADMIN".
+
+## 8. Validaciones de negocio destacadas
 
 - **Códigos/identificaciones obligatorios**: `clientes.py` y `proveedores.py` exigen
   código e identificación al crear y no permiten vaciarlos al editar. Esto es necesario
@@ -214,26 +341,66 @@ schema — por eso la cuenta se borra en vez de cambiarle el estado.
 - **Stock y crédito en ventas**: `emitir_factura()` valida disponibilidad de stock
   (agrupando ítems repetidos) y, si la condición es `credito`, que la deuda actual del
   cliente más la nueva factura no supere `limite_credito`.
+- **Clientes, proveedores, vendedores, productos, bancos y cuentas bancarias nunca se
+  borran físicamente** (resuelto 2026-08-22, ver el hallazgo "deletes sin guarda" en la
+  sección 9): `delete_cliente()`/`ProveedorService.eliminar()`/`VendedorService.eliminar()`/
+  `ProductoService.eliminar()`/`BancoService.eliminar_banco()`/`eliminar_cuenta()` ahora
+  siempre lanzan `ValueError` explicando que hay que usar `cambiar_estado(...)` /
+  `cambiar_estado_cliente(...)` / `cambiar_estado_banco(...)` / `cambiar_estado_cuenta(...)`
+  en su lugar — sin importar si la fila tiene dependientes o no, para no depender de un
+  conteo que puede quedar desactualizado apenas se registre la primera factura/compra/
+  movimiento. El nuevo campo `estado_*` (`ACTIVO`/`INACTIVO`, migración
+  `0005_estado_desactivacion_entidades.sql`) sigue el mismo patrón que ya existía en
+  `usuarios.estado` y `vendedores.estado_vendedor` (este último existía pero no lo usaba
+  nada hasta ahora). `CategoriaService.eliminar()`/`RolService.eliminar_rol()` NO
+  cambiaron — ya tenían su propia guarda por conteo de dependientes y siguen borrando de
+  verdad cuando no hay ninguno.
 - **Crédito de proveedor en compras**: `registrar_compra()` aplica la misma validación
   simétrica sobre `proveedores.limite_credito`.
 
-## 8. Pendiente / próximos pasos sugeridos
+## 9. Pendiente / próximos pasos sugeridos
 
 - UI: solo están cubiertos login y clientes; falta construir las pantallas para el
   resto de los módulos de servicio ya implementados (incluida la nueva matriz de
   permisos de `permisos.py`, pensada para un checkbox-grid por rol vía
   `PermisoService.obtener_matriz_rol()` / `establecer_permisos_rol()`).
-- Reversión de pagos/comisiones ya aplicados a una cuenta por cobrar/pagar: hoy
-  `anular_factura()`/`anular_compra()` simplemente se niegan a anular si eso ya pasó (ver
-  nota en la sección 5). Si el negocio necesita poder anular igual, revirtiendo también
-  los pagos y sus movimientos de caja/banco, es un desarrollo aparte y bastante más
-  grande (afecta saldos ya conciliados).
+- ~~RBAC modelado pero no aplicado~~ — resuelto (2026-08-22), ver sección 7. ~~Sigue
+  pendiente extenderlo a operaciones de lectura~~ — también resuelto (2026-08-22, misma
+  sección).
+- ~~Deletes sin guarda de integridad (clientes, proveedores, vendedores, inventario,
+  bancos/cuentas bancarias)~~ — resuelto (2026-08-22): en vez de agregar una guarda de
+  conteo, se decidió que estas 5 entidades nunca se borran físicamente. Ver sección 8.
+- ~~Reversión de pagos ya aplicados a una cuenta por cobrar/pagar~~ — resuelto
+  (2026-08-22) con nota de crédito automática. Ver "Notas de credito automaticas" en la
+  sección 3. Sigue pendiente la reversión de **comisiones** (`comisiones_factura`): no
+  hay módulo que las gestione todavía, así que `anular_factura()` sigue bloqueando si hay
+  comisiones calculadas.
+- Notas de crédito (`notas_credito.py`): ~~sin correlativo fiscal~~ — resuelto
+  (2026-08-22), ver sección 3. Sigue faltando el flujo para consumirlas — aplicar una
+  nota disponible como abono a una venta/compra futura, o devolverla como un movimiento
+  de caja/banco nuevo (fechado en el momento real de la devolución, no retroactivo). Es
+  un desarrollo aparte.
+- Riesgo de *clock skew* entre el reloj de la app (Python `datetime.now()`, usado por
+  `CajaService.abrir_caja()`/`cerrar_caja()`) y el reloj del SQL Server (`GETDATE()`,
+  usado por `trg_pagos_cobros_io`/`trg_pagos_proveedores_io` cuando `registrar_pago_cobro()`/
+  `registrar_pago_proveedor()` no reciben `fecha_pago` explícito): si difieren, un pago
+  registrado cerca del cierre de turno podría quedar fuera del rango que
+  `trg_cajas_cierre` usa para sumar `saldo_cierre`. Detectado 2026-08-22 escribiendo
+  `tests/services/test_pagos.py::test_borrar_pago_cobro_con_turno_de_caja_ya_cerrado_recalcula_saldo_cierre`
+  (el test necesitó pasar `fecha_pago=datetime.now()` explícito para no ser flaky). No
+  resuelto — pendiente decidir si `pagos.py` siempre debe fijar `fecha_pago` en Python o
+  si `trg_cajas_cierre` debe usar el reloj del servidor de forma consistente.
 - ~~Sin migraciones formales del schema~~ — resuelto (2026-08-22). Ver nota al final de
   la sección 3.
-- Cobertura de pruebas automatizadas: hecha para los 16 módulos de servicio más el
+- Cobertura de pruebas automatizadas: hecha para los 18 módulos de servicio más el
   runner de migraciones. Hay un harness de pytest (`tests/`) contra una base de datos
   SQL Server de prueba dedicada (real, no mock — necesario para validar los triggers),
-  con 263 tests. Ver `tests/conftest.py` para la estrategia de aislamiento entre tests
+  con 383 tests. Ver `tests/conftest.py` para la estrategia de aislamiento entre tests
   (limpieza por `DELETE` en orden trigger-safe, no rollback, porque los servicios hacen
   su propio `commit()`) y `tests/factories.py` para los helpers de datos base.
-  Pendiente: correrlo en CI (hoy es manual, `pytest` requiere Docker/SQL Server arriba).
+  `tests/test_migrar.py` corre contra la base de datos de test real (no una copia
+  aislada) para probar el bootstrap de `dbo.schema_migrations`; tiene un fixture
+  (`_preservar_schema_migrations_real`, agregado 2026-08-22 tras encontrar el bug) que
+  respalda y restaura esa tabla para no borrar el registro de migraciones ya aplicadas.
+  Pendiente: correr la suite en CI (hoy es manual, `pytest` requiere Docker/SQL Server
+  arriba).

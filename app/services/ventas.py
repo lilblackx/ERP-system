@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Cliente, ComisionFactura, CuentaPorCobrar, FacturaDetalle, FacturaVenta, Inventario, PagoCobro
 from app.services.auditoria import AuditoriaService
+from app.services.notas_credito import NotaCreditoService
+from app.services.permisos import require_permiso
 
 
 def _generar_numero_factura(session: Session) -> str:
@@ -38,6 +40,7 @@ class VentaService:
         id_tasa: int | None = None,
         observaciones: str | None = None,
     ) -> FacturaVenta:
+        require_permiso(session, id_usuario, "ventas", "crear")
         _validar_items(items)
 
         cliente = session.get(Cliente, id_cliente)
@@ -131,19 +134,30 @@ class VentaService:
     @staticmethod
     def anular_factura(session: Session, id_factura: int, id_usuario: int | None, motivo: str) -> FacturaVenta:
         """Anula la factura: repone el stock vendido y cierra la cuenta por cobrar (si la
-        hubiera). Bloqueada si ya se le aplicaron pagos o se calcularon comisiones sobre
-        alguna de sus lineas -- revertir eso queda fuera de alcance, hay que deshacerlo a
-        mano primero (los FK de pagos_cobros y comisiones_factura hacia estas tablas son
-        ON DELETE NO ACTION, asi que de todos modos fallarian con un error de integridad
-        menos claro si no se valida antes).
+        hubiera).
+
+        Si la cuenta por cobrar ya tenia pagos aplicados, esos pagos NO se revierten --
+        pagos_cobros y sus banco_movimientos/caja_movimientos quedan intactos, con su
+        fecha e historial reales (no se edita retroactivamente un turno de caja ya
+        cerrado ni un movimiento bancario ya conciliado; ver migrations/
+        0002_notas_credito_anulacion.sql). En su lugar, esa plata queda como
+        NotaCreditoCliente a favor del cliente -- la cuenta por cobrar pasa a
+        estado='anulada' (no se borra, para no perder el vinculo con los pagos ya
+        aplicados) y su saldo_pendiente se pone en 0. Sin pagos aplicados, la cuenta por
+        cobrar se sigue borrando igual que antes (no hay nada que preservar).
+
+        Sigue bloqueada si se calcularon comisiones sobre alguna de sus lineas -- no hay
+        modulo que las gestione todavia (comisiones_factura.FK hacia factura_detalle es
+        ON DELETE NO ACTION), asi que revertirlas queda fuera de alcance por ahora.
 
         El stock se repone eliminando las lineas de factura_detalle: dispara
         trg_factura_detalle_stock_del (repone cantidad_unidad) y trg_factura_total_del
-        (recalcula total_venta). Ese recalculo, a su vez, dispara trg_factura_venta_cxc
-        -- por eso las lineas se borran ANTES de tocar la cuenta por cobrar: si ya
-        estuviera borrada, el trigger la volveria a crear (NOT EXISTS), el mismo problema
-        que resolvimos en tests/conftest.py para el orden de limpieza entre tests.
+        (recalcula total_venta). Ese recalculo, a su vez, dispara trg_factura_venta_cxc,
+        pero solo toca cuentas_por_cobrar en estado 'pendiente' -- si ya hay pagos
+        aplicados (estado 'parcial'/'pagada'), el trigger no la reabre ni la altera, asi
+        que fijar estado='anulada' despues es seguro sin importar el orden.
         """
+        require_permiso(session, id_usuario, "ventas", "eliminar")
         if not motivo:
             raise ValueError("motivo es requerido para anular una factura")
 
@@ -173,34 +187,50 @@ class VentaService:
                 )
 
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
+        monto_pagado = Decimal("0.00")
         if cxc is not None:
-            tiene_pagos = (
-                session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar).first()
-                is not None
+            monto_pagado = (
+                session.query(func.coalesce(func.sum(PagoCobro.monto), 0))
+                .filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar)
+                .scalar()
             )
-            if tiene_pagos:
-                raise ValueError(
-                    "No se puede anular: la cuenta por cobrar ya tiene pagos aplicados. "
-                    "Revierta los pagos antes de anular."
-                )
+            monto_pagado = Decimal(str(monto_pagado))
 
         session.query(FacturaDetalle).filter(FacturaDetalle.id_factura == id_factura).delete(
             synchronize_session=False
         )
         if cxc is not None:
-            session.delete(cxc)
+            if monto_pagado > 0:
+                cxc.estado = "anulada"
+                cxc.saldo_pendiente = Decimal("0.00")
+            else:
+                session.delete(cxc)
 
         factura.estado_factura = "ANULADA"
         factura.modificado_por = id_usuario
         session.commit()
         session.refresh(factura)
 
+        if monto_pagado > 0:
+            NotaCreditoService.crear_nota_credito_cliente(
+                session,
+                id_cliente=factura.id_cliente_factura,
+                id_factura_origen=id_factura,
+                monto=monto_pagado,
+                motivo=motivo,
+                id_usuario=id_usuario,
+            )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
             accion="ANULACION_FACTURA",
             modulo="VENTAS",
-            detalle={"numero_factura": factura.numero_factura, "motivo": motivo},
+            detalle={
+                "numero_factura": factura.numero_factura,
+                "motivo": motivo,
+                "nota_credito_generada": str(monto_pagado) if monto_pagado > 0 else None,
+            },
         )
         return factura
 
@@ -214,7 +244,9 @@ class VentaService:
         estado: str | None = None,
         pagina: int = 1,
         por_pagina: int = 20,
+        id_usuario: int | None = None,
     ) -> dict:
+        require_permiso(session, id_usuario, "ventas", "ver")
         query = session.query(FacturaVenta)
         if fecha_desde:
             query = query.filter(FacturaVenta.fecha_emision >= fecha_desde)

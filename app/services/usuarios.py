@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models import Permiso, Rol, RolPermiso, Usuario, Vendedor
 from app.services.auditoria import AuditoriaService
 from app.services.auth import hash_password
+from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
@@ -44,6 +45,7 @@ class UsuarioService:
         id_vendedor_usuario: int | None = None,
         realizado_por: int | None = None,
     ) -> Usuario:
+        require_permiso(session, realizado_por, "usuarios", "crear")
         if not nombre_usuario:
             raise ValueError("nombre_usuario es requerido")
         if not clave:
@@ -82,6 +84,7 @@ class UsuarioService:
         nueva_clave: str | None = None,
         realizado_por: int | None = None,
     ) -> Usuario:
+        require_permiso(session, realizado_por, "usuarios", "editar")
         usuario = session.get(Usuario, id_usuario)
         if usuario is None:
             raise ValueError("Usuario no encontrado")
@@ -123,6 +126,7 @@ class UsuarioService:
     def cambiar_estado(
         session: Session, id_usuario: int, nuevo_estado: str, realizado_por: int | None = None
     ) -> Usuario:
+        require_permiso(session, realizado_por, "usuarios", "editar")
         if nuevo_estado not in ESTADOS_VALIDOS:
             raise ValueError(f"nuevo_estado debe ser uno de {ESTADOS_VALIDOS}")
 
@@ -149,7 +153,9 @@ class UsuarioService:
         texto_busqueda: str | None = None,
         id_rol: int | None = None,
         estado: str | None = None,
+        id_usuario: int | None = None,
     ) -> list[dict]:
+        require_permiso(session, id_usuario, "usuarios", "ver")
         query = session.query(Usuario).options(joinedload(Usuario.rol))
 
         if texto_busqueda:
@@ -174,6 +180,11 @@ class UsuarioService:
             for usuario in usuarios
         ]
 
+    # Misma consulta que require_permiso() en app/services/permisos.py (el punto de
+    # entrada de autorizacion real, con el bypass de ADMIN incluido) -- duplicada en vez
+    # de reusada para evitar un import circular (permisos.py no puede importar
+    # UsuarioService si usuarios.py importa require_permiso). Hallazgo de auditoria
+    # 2026-08-22, resuelto el mismo dia.
     @staticmethod
     def verificar_permiso(session: Session, id_usuario: int, recurso: str, accion: str) -> bool:
         usuario = session.get(Usuario, id_usuario)

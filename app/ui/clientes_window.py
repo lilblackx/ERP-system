@@ -13,10 +13,20 @@ from PySide6.QtWidgets import (
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Cliente, Usuario
-from app.services.clientes import create_cliente, delete_cliente, list_clientes, update_cliente
+from app.services.clientes import cambiar_estado_cliente, create_cliente, list_clientes, update_cliente
 from app.ui.cliente_form_dialog import ClienteFormDialog
 
-COLUMNAS = ["ID", "Codigo", "Identificacion", "Razon social", "Telefono", "Vendedor", "Categoria", "Limite credito"]
+COLUMNAS = [
+    "ID",
+    "Codigo",
+    "Identificacion",
+    "Razon social",
+    "Telefono",
+    "Vendedor",
+    "Categoria",
+    "Limite credito",
+    "Estado",
+]
 
 
 class ClientesWindow(QWidget):
@@ -40,8 +50,8 @@ class ClientesWindow(QWidget):
         editar_btn = QPushButton("Editar")
         editar_btn.clicked.connect(self.editar_cliente)
 
-        eliminar_btn = QPushButton("Eliminar")
-        eliminar_btn.clicked.connect(self.eliminar_cliente)
+        estado_btn = QPushButton("Activar/Desactivar")
+        estado_btn.clicked.connect(self.cambiar_estado_cliente_seleccionado)
 
         botones = QHBoxLayout()
         botones.addWidget(self.buscar_input)
@@ -49,7 +59,7 @@ class ClientesWindow(QWidget):
         botones.addStretch()
         botones.addWidget(nuevo_btn)
         botones.addWidget(editar_btn)
-        botones.addWidget(eliminar_btn)
+        botones.addWidget(estado_btn)
 
         self.tabla = QTableWidget(0, len(COLUMNAS))
         self.tabla.setHorizontalHeaderLabels(COLUMNAS)
@@ -69,7 +79,9 @@ class ClientesWindow(QWidget):
     def cargar_clientes(self):
         session = self.session_factory()
         try:
-            clientes = list_clientes(session, self.buscar_input.text().strip() or None)
+            clientes = list_clientes(
+                session, self.buscar_input.text().strip() or None, id_usuario=self.usuario.id_usuario
+            )
             self.tabla.setRowCount(len(clientes))
             for fila, cliente in enumerate(clientes):
                 valores = [
@@ -81,6 +93,7 @@ class ClientesWindow(QWidget):
                     cliente.vendedor.nombre_vendedor if cliente.vendedor else "",
                     cliente.categoria.nombre if cliente.categoria else "",
                     f"{cliente.limite_credito:,.2f}" if cliente.limite_credito is not None else "0.00",
+                    cliente.estado_cliente or "ACTIVO",
                 ]
                 for columna, valor in enumerate(valores):
                     self.tabla.setItem(fila, columna, QTableWidgetItem(valor))
@@ -124,7 +137,7 @@ class ClientesWindow(QWidget):
             cliente = session.get(Cliente, id_cliente)
             dialogo = ClienteFormDialog(session, cliente)
             if dialogo.exec():
-                update_cliente(session, id_cliente, **dialogo.get_data())
+                update_cliente(session, id_cliente, id_usuario=self.usuario.id_usuario, **dialogo.get_data())
                 self.cargar_clientes()
         except IntegrityError:
             session.rollback()
@@ -135,28 +148,25 @@ class ClientesWindow(QWidget):
         finally:
             session.close()
 
-    def eliminar_cliente(self):
+    def cambiar_estado_cliente_seleccionado(self):
         id_cliente = self._fila_seleccionada_id()
         if id_cliente is None:
             return
 
-        respuesta = QMessageBox.question(
-            self, "Confirmar", "Seguro que deseas eliminar este cliente?"
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
-            return
-
         session = self.session_factory()
         try:
-            delete_cliente(session, id_cliente)
-            self.cargar_clientes()
-        except IntegrityError:
-            session.rollback()
-            QMessageBox.warning(
-                self,
-                "No se puede eliminar",
-                "Este cliente tiene facturas u otros registros asociados. No puede eliminarse.",
+            cliente = session.get(Cliente, id_cliente)
+            estado_actual = cliente.estado_cliente or "ACTIVO"
+            nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
+
+            respuesta = QMessageBox.question(
+                self, "Confirmar", f"Cambiar el estado del cliente a {nuevo_estado}?"
             )
+            if respuesta != QMessageBox.StandardButton.Yes:
+                return
+
+            cambiar_estado_cliente(session, id_cliente, nuevo_estado, id_usuario=self.usuario.id_usuario)
+            self.cargar_clientes()
         except Exception as exc:
             session.rollback()
             QMessageBox.critical(self, "Error", str(exc))

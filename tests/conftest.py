@@ -50,6 +50,8 @@ TABLES_DELETE_ORDER = [
     "banco_movimientos",
     "cuentas_por_pagar_otros",
     "cuentas_por_cobrar_otros",
+    "notas_credito_clientes",
+    "notas_credito_proveedores",
     "pagos_cobros",
     "pagos_proveedores",
     "factura_detalle",

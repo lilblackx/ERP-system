@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 import pytest
 
 from app.services.auditoria import AuditoriaService
-from tests.factories import crear_usuario
+from app.services.permisos import PermisoDenegadoError
+from tests.factories import crear_usuario, crear_usuario_admin
 
 
 def test_registrar_evento_requiere_accion(db_session):
@@ -40,38 +41,49 @@ def test_registrar_evento_con_usuario(db_session):
 
 
 def test_consultar_auditoria_filtra_por_modulo(db_session):
+    admin = crear_usuario_admin(db_session)
     AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGIN", modulo="AUTH")
     AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="CREAR_CLIENTE", modulo="CLIENTES")
 
-    resultado = AuditoriaService.consultar_auditoria(db_session, modulo="AUTH")
+    resultado = AuditoriaService.consultar_auditoria(db_session, modulo="AUTH", id_usuario_actor=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].modulo == "AUTH"
 
 
+def test_consultar_auditoria_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        AuditoriaService.consultar_auditoria(db_session)
+
+
 def test_consultar_auditoria_filtra_por_accion(db_session):
+    admin = crear_usuario_admin(db_session)
     AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGIN", modulo="AUTH")
     AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGOUT", modulo="AUTH")
 
-    resultado = AuditoriaService.consultar_auditoria(db_session, accion="LOGOUT")
+    resultado = AuditoriaService.consultar_auditoria(db_session, accion="LOGOUT", id_usuario_actor=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].accion == "LOGOUT"
 
 
 def test_consultar_auditoria_filtra_por_usuario(db_session):
+    admin = crear_usuario_admin(db_session)
     usuario_a = crear_usuario(db_session)
     usuario_b = crear_usuario(db_session)
     AuditoriaService.registrar_evento(db_session, id_usuario=usuario_a.id_usuario, accion="LOGIN", modulo="AUTH")
     AuditoriaService.registrar_evento(db_session, id_usuario=usuario_b.id_usuario, accion="LOGIN", modulo="AUTH")
 
-    resultado = AuditoriaService.consultar_auditoria(db_session, id_usuario=usuario_a.id_usuario)
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, id_usuario=usuario_a.id_usuario, id_usuario_actor=admin.id_usuario
+    )
 
     assert resultado["total"] == 1
     assert resultado["items"][0].id_usuario == usuario_a.id_usuario
 
 
 def test_consultar_auditoria_filtra_por_rango_de_fechas(db_session):
+    admin = crear_usuario_admin(db_session)
     ahora = datetime.now()
 
     reciente = AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGIN", modulo="AUTH")
@@ -80,18 +92,21 @@ def test_consultar_auditoria_filtra_por_rango_de_fechas(db_session):
 
     AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGOUT", modulo="AUTH")
 
-    resultado = AuditoriaService.consultar_auditoria(db_session, fecha_desde=ahora - timedelta(days=1))
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, fecha_desde=ahora - timedelta(days=1), id_usuario_actor=admin.id_usuario
+    )
 
     assert resultado["total"] == 1
     assert resultado["items"][0].accion == "LOGOUT"
 
 
 def test_consultar_auditoria_paginacion(db_session):
+    admin = crear_usuario_admin(db_session)
     for i in range(5):
         AuditoriaService.registrar_evento(db_session, id_usuario=None, accion=f"EVENTO_{i}", modulo="AUTH")
 
-    pagina1 = AuditoriaService.consultar_auditoria(db_session, pagina=1, por_pagina=2)
-    pagina2 = AuditoriaService.consultar_auditoria(db_session, pagina=2, por_pagina=2)
+    pagina1 = AuditoriaService.consultar_auditoria(db_session, pagina=1, por_pagina=2, id_usuario_actor=admin.id_usuario)
+    pagina2 = AuditoriaService.consultar_auditoria(db_session, pagina=2, por_pagina=2, id_usuario_actor=admin.id_usuario)
 
     assert pagina1["total"] == 5
     assert len(pagina1["items"]) == 2

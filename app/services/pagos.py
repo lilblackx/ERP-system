@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
 from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
 
 # trg_pagos_cobros_io / trg_pagos_proveedores_io (INSTEAD OF INSERT) ya validan
 # "exactamente un origen" y "monto <= saldo_pendiente" en la base de datos, pero lo
@@ -27,6 +28,7 @@ class PagoService:
         fecha_pago: date | datetime | None = None,
         id_usuario: int | None = None,
     ) -> PagoCobro:
+        require_permiso(session, id_usuario, "pagos", "crear")
         if (id_cuenta_bancaria is None) == (id_caja is None):
             raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
 
@@ -82,6 +84,7 @@ class PagoService:
         fecha_pago: date | datetime | None = None,
         id_usuario: int | None = None,
     ) -> PagoProveedor:
+        require_permiso(session, id_usuario, "pagos", "crear")
         if (id_cuenta_bancaria is None) == (id_caja is None):
             raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
 
@@ -125,7 +128,10 @@ class PagoService:
         return pago
 
     @staticmethod
-    def listar_pagos_cobro(session: Session, id_cuenta_por_cobrar: int) -> list[PagoCobro]:
+    def listar_pagos_cobro(
+        session: Session, id_cuenta_por_cobrar: int, id_usuario: int | None = None
+    ) -> list[PagoCobro]:
+        require_permiso(session, id_usuario, "pagos", "ver")
         return (
             session.query(PagoCobro)
             .filter(PagoCobro.id_cuenta_por_cobrar == id_cuenta_por_cobrar)
@@ -134,7 +140,10 @@ class PagoService:
         )
 
     @staticmethod
-    def listar_pagos_proveedor(session: Session, id_cuenta_por_pagar: int) -> list[PagoProveedor]:
+    def listar_pagos_proveedor(
+        session: Session, id_cuenta_por_pagar: int, id_usuario: int | None = None
+    ) -> list[PagoProveedor]:
+        require_permiso(session, id_usuario, "pagos", "ver")
         return (
             session.query(PagoProveedor)
             .filter(PagoProveedor.id_cuenta_por_pagar == id_cuenta_por_pagar)

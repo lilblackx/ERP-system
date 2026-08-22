@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ControlDeTasa
 from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
 
 
 def _calcular_porcentaje(valor_actual, valor_anterior) -> float | None:
@@ -28,6 +29,7 @@ class TasaService:
         tasa_cop=None,
         creado_por: int | None = None,
     ) -> ControlDeTasa:
+        require_permiso(session, creado_por, "tasas", "crear")
         if Decimal(str(tasa_bcv)) <= 0:
             raise ValueError("tasa_bcv debe ser mayor a cero")
 
@@ -57,7 +59,8 @@ class TasaService:
         return tasa
 
     @staticmethod
-    def obtener_tasa_actual(session: Session) -> dict | None:
+    def obtener_tasa_actual(session: Session, id_usuario: int | None = None) -> dict | None:
+        require_permiso(session, id_usuario, "tasas", "ver")
         actual = session.query(ControlDeTasa).order_by(
             ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc()
         ).first()
@@ -87,7 +90,8 @@ class TasaService:
         }
 
     @staticmethod
-    def obtener_historico_tasas(session: Session, limite: int = 30) -> list[dict]:
+    def obtener_historico_tasas(session: Session, limite: int = 30, id_usuario: int | None = None) -> list[dict]:
+        require_permiso(session, id_usuario, "tasas", "ver")
         tasas = (
             session.query(ControlDeTasa)
             .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())

@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Compra, CompraDetalle, CuentaPorPagar, PagoProveedor, Proveedor
 from app.services.auditoria import AuditoriaService
+from app.services.notas_credito import NotaCreditoService
+from app.services.permisos import require_permiso
 
 
 def _generar_numero_compra(session: Session) -> str:
@@ -37,6 +39,7 @@ class CompraService:
         id_tasa: int | None = None,
         observaciones: str | None = None,
     ) -> Compra:
+        require_permiso(session, id_usuario, "compras", "crear")
         _validar_items(items)
 
         proveedor = session.get(Proveedor, id_proveedor)
@@ -119,15 +122,17 @@ class CompraService:
     @staticmethod
     def anular_compra(session: Session, id_compra: int, id_usuario: int | None, motivo: str) -> Compra:
         """Anula la compra: repone el stock recibido y cierra la cuenta por pagar (si la
-        hubiera). Bloqueada si ya se le aplicaron pagos -- revertirlos queda fuera de
-        alcance, hay que deshacerlos a mano primero (ver la misma nota en
-        VentaService.anular_factura).
+        hubiera). Si ya se le aplicaron pagos, no se revierten -- quedan como
+        NotaCreditoProveedor a favor de la empresa, sin tocar pagos_proveedores ni sus
+        banco_movimientos/caja_movimientos (ver la misma nota en VentaService.anular_factura
+        y migrations/0002_notas_credito_anulacion.sql).
 
         El stock se repone eliminando las lineas de compra_detalle: dispara
         trg_compra_detalle_stock_del y trg_compra_total_del, que a su vez dispara
         trg_compras_cxp -- por eso las lineas se borran ANTES de tocar la cuenta por
         pagar, para no reabrirla.
         """
+        require_permiso(session, id_usuario, "compras", "eliminar")
         if not motivo:
             raise ValueError("motivo es requerido para anular una compra")
 
@@ -138,32 +143,48 @@ class CompraService:
             raise ValueError("La compra ya esta anulada")
 
         cxp = session.query(CuentaPorPagar).filter(CuentaPorPagar.id_compra == id_compra).first()
+        monto_pagado = Decimal("0.00")
         if cxp is not None:
-            tiene_pagos = (
-                session.query(PagoProveedor).filter(PagoProveedor.id_cuenta_por_pagar == cxp.id_cuenta).first()
-                is not None
+            monto_pagado = (
+                session.query(func.coalesce(func.sum(PagoProveedor.monto), 0))
+                .filter(PagoProveedor.id_cuenta_por_pagar == cxp.id_cuenta)
+                .scalar()
             )
-            if tiene_pagos:
-                raise ValueError(
-                    "No se puede anular: la cuenta por pagar ya tiene pagos aplicados. "
-                    "Revierta los pagos antes de anular."
-                )
+            monto_pagado = Decimal(str(monto_pagado))
 
         session.query(CompraDetalle).filter(CompraDetalle.id_compra == id_compra).delete(synchronize_session=False)
         if cxp is not None:
-            session.delete(cxp)
+            if monto_pagado > 0:
+                cxp.estado = "anulada"
+                cxp.saldo_pendiente = Decimal("0.00")
+            else:
+                session.delete(cxp)
 
         compra.estado_compra = "ANULADA"
         compra.modificado_por = id_usuario
         session.commit()
         session.refresh(compra)
 
+        if monto_pagado > 0:
+            NotaCreditoService.crear_nota_credito_proveedor(
+                session,
+                id_proveedor=compra.id_proveedor,
+                id_compra_origen=id_compra,
+                monto=monto_pagado,
+                motivo=motivo,
+                id_usuario=id_usuario,
+            )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
             accion="ANULACION_COMPRA",
             modulo="COMPRAS",
-            detalle={"numero_compra": compra.numero_compra, "motivo": motivo},
+            detalle={
+                "numero_compra": compra.numero_compra,
+                "motivo": motivo,
+                "nota_credito_generada": str(monto_pagado) if monto_pagado > 0 else None,
+            },
         )
         return compra
 
@@ -176,7 +197,9 @@ class CompraService:
         fecha_hasta: date | datetime | None = None,
         pagina: int = 1,
         por_pagina: int = 20,
+        id_usuario: int | None = None,
     ) -> dict:
+        require_permiso(session, id_usuario, "compras", "ver")
         query = session.query(Compra)
         if id_proveedor:
             query = query.filter(Compra.id_proveedor == id_proveedor)

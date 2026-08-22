@@ -48,7 +48,14 @@ class AuditoriaService:
         accion: str | None = None,
         pagina: int = 1,
         por_pagina: int = 50,
+        id_usuario_actor: int | None = None,
     ) -> dict:
+        # Import diferido (no al tope del modulo) para evitar un ciclo: permisos.py
+        # importa AuditoriaService para loguear sus propios eventos, asi que
+        # auditoria.py no puede importar permisos.py al cargar el modulo.
+        from app.services.permisos import require_permiso
+
+        require_permiso(session, id_usuario_actor, "auditoria", "ver")
         query = session.query(Auditoria)
         if fecha_desde:
             query = query.filter(Auditoria.fecha_evento >= fecha_desde)
