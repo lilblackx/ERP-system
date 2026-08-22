@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.models import Cliente, CuentaPorCobrar, FacturaDetalle, FacturaVenta, Inventario
+from app.db.models import Cliente, ComisionFactura, CuentaPorCobrar, FacturaDetalle, FacturaVenta, Inventario, PagoCobro
 from app.services.auditoria import AuditoriaService
 
 
@@ -130,13 +130,19 @@ class VentaService:
 
     @staticmethod
     def anular_factura(session: Session, id_factura: int, id_usuario: int | None, motivo: str) -> FacturaVenta:
-        """Marca la factura como ANULADA y registra el evento en auditoria.
+        """Anula la factura: repone el stock vendido y cierra la cuenta por cobrar (si la
+        hubiera). Bloqueada si ya se le aplicaron pagos o se calcularon comisiones sobre
+        alguna de sus lineas -- revertir eso queda fuera de alcance, hay que deshacerlo a
+        mano primero (los FK de pagos_cobros y comisiones_factura hacia estas tablas son
+        ON DELETE NO ACTION, asi que de todos modos fallarian con un error de integridad
+        menos claro si no se valida antes).
 
-        No revierte stock ni cuentas por cobrar automaticamente: los triggers de stock
-        (trg_factura_detalle_stock_*) y de totales solo reaccionan a INSERT/UPDATE/DELETE
-        sobre factura_detalle, no a un cambio de estado_factura. Si se requiere reponer
-        stock o cancelar la cuenta por cobrar, debe hacerse explicitamente (por ejemplo
-        eliminando las lineas de factura_detalle, lo cual si dispara esos triggers).
+        El stock se repone eliminando las lineas de factura_detalle: dispara
+        trg_factura_detalle_stock_del (repone cantidad_unidad) y trg_factura_total_del
+        (recalcula total_venta). Ese recalculo, a su vez, dispara trg_factura_venta_cxc
+        -- por eso las lineas se borran ANTES de tocar la cuenta por cobrar: si ya
+        estuviera borrada, el trigger la volveria a crear (NOT EXISTS), el mismo problema
+        que resolvimos en tests/conftest.py para el orden de limpieza entre tests.
         """
         if not motivo:
             raise ValueError("motivo es requerido para anular una factura")
@@ -146,6 +152,43 @@ class VentaService:
             raise ValueError("Factura no encontrada")
         if factura.estado_factura == "ANULADA":
             raise ValueError("La factura ya esta anulada")
+
+        ids_detalle = [
+            id_factura_detalle
+            for (id_factura_detalle,) in session.query(FacturaDetalle.id_factura_detalle)
+            .filter(FacturaDetalle.id_factura == id_factura)
+            .all()
+        ]
+        if ids_detalle:
+            tiene_comisiones = (
+                session.query(ComisionFactura)
+                .filter(ComisionFactura.id_factura_detalle.in_(ids_detalle))
+                .first()
+                is not None
+            )
+            if tiene_comisiones:
+                raise ValueError(
+                    "No se puede anular: hay comisiones calculadas sobre esta factura. "
+                    "Revierta las comisiones antes de anular."
+                )
+
+        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
+        if cxc is not None:
+            tiene_pagos = (
+                session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar).first()
+                is not None
+            )
+            if tiene_pagos:
+                raise ValueError(
+                    "No se puede anular: la cuenta por cobrar ya tiene pagos aplicados. "
+                    "Revierta los pagos antes de anular."
+                )
+
+        session.query(FacturaDetalle).filter(FacturaDetalle.id_factura == id_factura).delete(
+            synchronize_session=False
+        )
+        if cxc is not None:
+            session.delete(cxc)
 
         factura.estado_factura = "ANULADA"
         factura.modificado_por = id_usuario

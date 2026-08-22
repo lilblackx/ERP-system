@@ -1166,6 +1166,16 @@ BEGIN
 	INSERT INTO dbo.caja_movimientos ([id_caja], [tipo_movimiento], [descripcion_movimiento], [monto_movimiento], [fecha_registro], [id_pago_cobro], [creado_por])
 	SELECT [id_caja], 'entrada', 'Cobro a cliente', [monto], [fecha_pago], [id_pago_cobro], [creado_por]
 	FROM @nuevos WHERE [id_caja] IS NOT NULL;
+
+	-- Un INSTEAD OF INSERT reemplaza el INSERT del caller: SCOPE_IDENTITY() no ve el
+	-- id generado aqui adentro (es un scope distinto) y @@IDENTITY devolveria el de
+	-- banco_movimientos/caja_movimientos (insertados despues). Este SELECT final es
+	-- el unico resultset no vacio que llega al cliente antes del "select
+	-- scope_identity()" que SQLAlchemy agrega automaticamente, asi que su primera fila
+	-- es la que SQLAlchemy toma como id autogenerado — permite usar
+	-- session.add(PagoCobro(...)); session.commit() de forma normal, igual que en el
+	-- resto de los servicios.
+	SELECT [id_pago_cobro] FROM @nuevos;
 END
 GO
 
@@ -1224,6 +1234,9 @@ BEGIN
 	INSERT INTO dbo.caja_movimientos ([id_caja], [tipo_movimiento], [descripcion_movimiento], [monto_movimiento], [fecha_registro], [id_pago_proveedor], [creado_por])
 	SELECT [id_caja], 'salida', 'Pago a proveedor', [monto], [fecha_pago], [id_pago_proveedor], [creado_por]
 	FROM @nuevos WHERE [id_caja] IS NOT NULL;
+
+	-- Ver el comentario equivalente en trg_pagos_cobros_io.
+	SELECT [id_pago_proveedor] FROM @nuevos;
 END
 GO
 

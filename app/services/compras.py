@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.models import Compra, CompraDetalle, CuentaPorPagar, Proveedor
+from app.db.models import Compra, CompraDetalle, CuentaPorPagar, PagoProveedor, Proveedor
 from app.services.auditoria import AuditoriaService
 
 
@@ -113,6 +113,57 @@ class CompraService:
                 "condicion_pago": condicion_pago,
                 "total_compra": str(compra.total_compra),
             },
+        )
+        return compra
+
+    @staticmethod
+    def anular_compra(session: Session, id_compra: int, id_usuario: int | None, motivo: str) -> Compra:
+        """Anula la compra: repone el stock recibido y cierra la cuenta por pagar (si la
+        hubiera). Bloqueada si ya se le aplicaron pagos -- revertirlos queda fuera de
+        alcance, hay que deshacerlos a mano primero (ver la misma nota en
+        VentaService.anular_factura).
+
+        El stock se repone eliminando las lineas de compra_detalle: dispara
+        trg_compra_detalle_stock_del y trg_compra_total_del, que a su vez dispara
+        trg_compras_cxp -- por eso las lineas se borran ANTES de tocar la cuenta por
+        pagar, para no reabrirla.
+        """
+        if not motivo:
+            raise ValueError("motivo es requerido para anular una compra")
+
+        compra = session.get(Compra, id_compra)
+        if compra is None:
+            raise ValueError("Compra no encontrada")
+        if compra.estado_compra == "ANULADA":
+            raise ValueError("La compra ya esta anulada")
+
+        cxp = session.query(CuentaPorPagar).filter(CuentaPorPagar.id_compra == id_compra).first()
+        if cxp is not None:
+            tiene_pagos = (
+                session.query(PagoProveedor).filter(PagoProveedor.id_cuenta_por_pagar == cxp.id_cuenta).first()
+                is not None
+            )
+            if tiene_pagos:
+                raise ValueError(
+                    "No se puede anular: la cuenta por pagar ya tiene pagos aplicados. "
+                    "Revierta los pagos antes de anular."
+                )
+
+        session.query(CompraDetalle).filter(CompraDetalle.id_compra == id_compra).delete(synchronize_session=False)
+        if cxp is not None:
+            session.delete(cxp)
+
+        compra.estado_compra = "ANULADA"
+        compra.modificado_por = id_usuario
+        session.commit()
+        session.refresh(compra)
+
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=id_usuario,
+            accion="ANULACION_COMPRA",
+            modulo="COMPRAS",
+            detalle={"numero_compra": compra.numero_compra, "motivo": motivo},
         )
         return compra
 
