@@ -51,10 +51,22 @@ jobs:
       # Signed-By") y hace fallar apt-get update. trusted.gpg.d no tiene ese problema.
       - name: Instalar ODBC Driver 18 para SQL Server
         run: |
+          set -x
+          echo "--- apt sources preexistentes relacionados a microsoft ---"
+          grep -rH microsoft /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true
+          apt-cache policy msodbcsql18 msodbcsql17 2>&1 || true
+
           curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
           curl -sSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
-          sudo apt-get update
-          ACCEPT_EULA=Y sudo apt-get install -y msodbcsql18
+
+          if ! sudo apt-get update 2>&1 | tee /tmp/apt-update.log; then
+            echo "::error::apt-get update fallo -- $(tail -c 1500 /tmp/apt-update.log | tr '\n' ' ')"
+            exit 1
+          fi
+          if ! ACCEPT_EULA=Y sudo apt-get install -y msodbcsql18 2>&1 | tee /tmp/apt-install.log; then
+            echo "::error::apt-get install fallo -- $(tail -c 1500 /tmp/apt-install.log | tr '\n' ' ')"
+            exit 1
+          fi
 
       - name: Configurar Python
         uses: actions/setup-python@v5
