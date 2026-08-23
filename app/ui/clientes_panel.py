@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+import qtawesome as qta
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Cliente, Usuario
@@ -62,18 +63,33 @@ class BadgeItem(QWidget):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 0, 4, 0)
+        layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         activo = estado.upper() == "ACTIVO"
         bg_color = "#DCFCE7" if activo else "#FEF2F2"
         text_color = COLOR_SUCCESS if activo else COLOR_DANGER
+        icon_name = "fa5s.check-circle" if activo else "fa5s.times-circle"
 
-        lbl = QLabel(("● " if activo else "○ ") + estado.capitalize())
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(qta.icon(icon_name, color=text_color).pixmap(12, 12))
+        icon_lbl.setStyleSheet("background: transparent;")
+
+        lbl = QLabel(estado.capitalize())
         lbl.setStyleSheet(
-            f"background-color: {bg_color}; color: {text_color}; border-radius: 10px;"
-            " padding: 3px 10px; font-size: 11px; font-weight: bold;"
+            f"background-color: transparent; color: {text_color};"
+            " font-size: 11px; font-weight: bold;"
         )
-        layout.addWidget(lbl)
+
+        container = QWidget()
+        container.setStyleSheet(f"background-color: {bg_color}; border-radius: 10px; padding: 2px 8px;")
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(6, 2, 6, 2)
+        c_layout.setSpacing(4)
+        c_layout.addWidget(icon_lbl)
+        c_layout.addWidget(lbl)
+
+        layout.addWidget(container)
 
 
 class AccionesItem(QWidget):
@@ -86,7 +102,8 @@ class AccionesItem(QWidget):
         layout.setSpacing(6)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.btn_editar = QPushButton("✏ Editar")
+        self.btn_editar = QPushButton(" Editar")
+        self.btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_PRIMARY))
         self.btn_editar.setStyleSheet(f"""
             QPushButton {{
                 background-color: #EFF6FF; color: {COLOR_PRIMARY};
@@ -96,7 +113,8 @@ class AccionesItem(QWidget):
             QPushButton:hover {{ background-color: #DBEAFE; }}
         """)
 
-        self.btn_estado = QPushButton("⚡ Estado")
+        self.btn_estado = QPushButton(" Estado")
+        self.btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_SUCCESS))
         self.btn_estado.setStyleSheet(f"""
             QPushButton {{
                 background-color: #F0FDF4; color: {COLOR_SUCCESS};
@@ -172,7 +190,8 @@ class ClientesPanel(QWidget):
 
         # Buscar
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText("🔍  Buscar cliente…")
+        self.buscar_input.setPlaceholderText("Buscar cliente…")
+        self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
         self.buscar_input.setFixedWidth(220)
@@ -180,14 +199,17 @@ class ClientesPanel(QWidget):
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
 
         # Botones primarios
-        self.btn_nuevo = QPushButton("＋  Nuevo Cliente")
+        self.btn_nuevo = QPushButton("Nuevo Cliente")
+        self.btn_nuevo.setIcon(qta.icon("fa5s.plus", color="white"))
         self.btn_nuevo.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_nuevo.clicked.connect(self.nuevo_cliente)
 
-        btn_filtrar = QPushButton("⚙  Filtrar")
+        btn_filtrar = QPushButton("Filtrar")
+        btn_filtrar.setIcon(qta.icon("fa5s.filter", color=COLOR_TEXT_DARK))
         btn_filtrar.setStyleSheet(BUTTON_SECONDARY_QSS)
 
-        btn_exportar = QPushButton("⬇  Exportar")
+        btn_exportar = QPushButton("Exportar")
+        btn_exportar.setIcon(qta.icon("fa5s.file-export", color=COLOR_TEXT_DARK))
         btn_exportar.setStyleSheet(BUTTON_SECONDARY_QSS)
 
         h.addWidget(self.buscar_input)
@@ -230,11 +252,13 @@ class ClientesPanel(QWidget):
         self.lbl_pagina = QLabel("Mostrando todos los registros")
         self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
 
-        btn_editar = QPushButton("✏  Editar seleccionado")
+        btn_editar = QPushButton("Editar seleccionado")
+        btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_editar.clicked.connect(self.editar_cliente)
 
-        btn_estado = QPushButton("⚡  Cambiar estado")
+        btn_estado = QPushButton("Cambiar estado")
+        btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
         btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_estado.clicked.connect(self.cambiar_estado_cliente_seleccionado)
 

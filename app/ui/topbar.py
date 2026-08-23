@@ -3,7 +3,7 @@ TopBar: barra superior del ERP con título de vista activa, búsqueda global,
 notificaciones y perfil de usuario.
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -14,9 +14,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+import qtawesome as qta
 
 from app.db.models import Usuario
 from app.ui.styles import (
+    COLOR_PRIMARY,
     COLOR_TEXT_DARK,
     TOPBAR_HEIGHT,
     TOPBAR_QSS,
@@ -68,14 +70,17 @@ class TopBar(QWidget):
 
         # Barra de búsqueda global
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText("   🔍  Buscar en el sistema…")
+        self.buscar_input.setPlaceholderText("Buscar en el sistema…")
+        self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
         self.buscar_input.setObjectName("TopBarSearch")
         self.buscar_input.setFixedWidth(240)
         self.buscar_input.setFixedHeight(36)
         self.buscar_input.textChanged.connect(self.busqueda_global.emit)
 
         # Botón de notificaciones
-        btn_notif = QPushButton("🔔")
+        btn_notif = QPushButton()
+        btn_notif.setIcon(qta.icon("fa5s.bell", color="#64748B"))
+        btn_notif.setIconSize(QSize(18, 18))
         btn_notif.setObjectName("TopBarBtn")
         btn_notif.setFixedSize(38, 38)
         btn_notif.setToolTip("Notificaciones")
@@ -96,9 +101,10 @@ class TopBar(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(8)
 
-        avatar = QLabel("👤")
+        avatar = QLabel()
+        avatar.setPixmap(qta.icon("fa5s.user", color=COLOR_PRIMARY).pixmap(20, 20))
         avatar.setStyleSheet(
-            "font-size: 22px; background-color: #EFF6FF;"
+            "background-color: #EFF6FF;"
             " border: 2px solid #BFDBFE; border-radius: 18px;"
             " width: 36px; height: 36px; padding: 2px;"
         )

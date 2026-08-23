@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+import qtawesome as qta
 
 from app.db.models import ConfiguracionEmpresa
 from app.db.session import SessionLocal
@@ -129,8 +130,9 @@ class LoginWindow(QDialog):
 
         user_layout = QHBoxLayout()
         user_layout.addWidget(self.usuario_input)
-        lbl_user_icon = QLabel("👤")
-        lbl_user_icon.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 18px;")
+        lbl_user_icon = QLabel()
+        lbl_user_icon.setPixmap(qta.icon("fa5s.user", color=COLOR_TEXT_MUTED).pixmap(18, 18))
+        lbl_user_icon.setStyleSheet("background: transparent;")
         user_layout.addWidget(lbl_user_icon)
         right_layout.addLayout(user_layout)
 
@@ -144,8 +146,9 @@ class LoginWindow(QDialog):
 
         pass_layout = QHBoxLayout()
         pass_layout.addWidget(self.clave_input)
-        lbl_pass_icon = QLabel("🔒")
-        lbl_pass_icon.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 18px;")
+        lbl_pass_icon = QLabel()
+        lbl_pass_icon.setPixmap(qta.icon("fa5s.lock", color=COLOR_TEXT_MUTED).pixmap(18, 18))
+        lbl_pass_icon.setStyleSheet("background: transparent;")
         pass_layout.addWidget(lbl_pass_icon)
         right_layout.addLayout(pass_layout)
 

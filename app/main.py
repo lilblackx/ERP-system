@@ -19,14 +19,16 @@ def main():
     setup_logging()
     app = QApplication(sys.argv)
 
-    login = LoginWindow()
-    if login.exec() != LoginWindow.DialogCode.Accepted:
-        sys.exit(0)
+    while True:
+        login = LoginWindow()
+        if login.exec() != LoginWindow.DialogCode.Accepted:
+            break
 
-    window = MainWindow(login.usuario_autenticado)
-    window.show()
+        window = MainWindow(login.usuario_autenticado)
+        window.show()
+        app.exec()
 
-    sys.exit(app.exec())
+    sys.exit(0)
 
 
 if __name__ == "__main__":
