@@ -9,7 +9,7 @@ no se pueden reproducir con SQLite ni con Base.metadata.create_all().
 
 Requiere una instancia de SQL Server accesible (ver docker-compose.yml) y
 las mismas variables de entorno que usa la app (.env), más opcionalmente
-TEST_DB_NAME para no chocar con la base de datos real.
+TEST_DB_NAME para no chocar con la base de datos real
 """
 
 import os
@@ -30,6 +30,7 @@ from app.config import (
     DB_TRUSTED_CONNECTION,
     DB_USER,
 )
+from app.db.migrar import aplicar_migraciones
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema_sqlserver.sql"
 TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test")
@@ -114,6 +115,7 @@ def _run_schema_script() -> None:
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT OBJECT_ID(N'dbo.usuarios', N'U')")
+        # pyrefly: ignore [unsupported-operation]
         ya_existe = cursor.fetchone()[0] is not None
         if ya_existe:
             return
@@ -133,6 +135,7 @@ def test_engine():
         "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(_odbc_connect_str(TEST_DB_NAME)),
         fast_executemany=True,
     )
+    aplicar_migraciones(engine)
     yield engine
     engine.dispose()
 
