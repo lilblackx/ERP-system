@@ -48,25 +48,20 @@ jobs:
       # ubuntu-22.04 de GitHub ya traen un repo de packages.microsoft.com preconfigurado
       # (para .NET/PowerShell/Azure CLI) con su propio keyring -- agregar un signed-by
       # nuevo para la misma URL choca con eso ("Conflicting values set for option
-      # Signed-By") y hace fallar apt-get update. trusted.gpg.d no tiene ese problema.
+      # Signed-By") y hace fallar apt-get update.
+      #
+      # ACCEPT_EULA=Y va DESPUES de sudo, no antes: "ACCEPT_EULA=Y sudo apt-get ..."
+      # fija la variable para el propio comando `sudo`, que por diseño no la propaga al
+      # proceso que ejecuta como root -- el postinst de msodbcsql18 nunca ve el EULA
+      # aceptado y no registra el driver en odbcinst.ini, aunque apt termine con exit 0.
+      # Sintoma real visto en el primer run verde-falso: pyodbc fallaba con "Can't open
+      # lib 'ODBC Driver 18 for SQL Server' : file not found" en cuanto corrian los tests.
       - name: Instalar ODBC Driver 18 para SQL Server
         run: |
-          set -x
-          echo "--- apt sources preexistentes relacionados a microsoft ---"
-          grep -rH microsoft /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true
-          apt-cache policy msodbcsql18 msodbcsql17 2>&1 || true
-
           curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
           curl -sSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
-
-          if ! sudo apt-get update 2>&1 | tee /tmp/apt-update.log; then
-            echo "::error::apt-get update fallo -- $(tail -c 1500 /tmp/apt-update.log | tr '\n' ' ')"
-            exit 1
-          fi
-          if ! ACCEPT_EULA=Y sudo apt-get install -y msodbcsql18 2>&1 | tee /tmp/apt-install.log; then
-            echo "::error::apt-get install fallo -- $(tail -c 1500 /tmp/apt-install.log | tr '\n' ' ')"
-            exit 1
-          fi
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -77,6 +72,17 @@ jobs:
       # entorno de CI sea el mismo bit a bit que el que corrio la suite localmente.
       - name: Instalar dependencias
         run: pip install -r requirements-dev-lock.txt
+
+      # DIAGNOSTICO TEMPORAL: el run anterior (c40fb52) tuvo el paso de instalar el
+      # driver en "success" pero pytest fallaba igual con "file not found" para el
+      # driver -- evidencia directa de lo que ve pyodbc en el runner real, para no
+      # seguir adivinando la causa.
+      - name: Diagnostico ODBC
+        run: |
+          echo "::notice::odbcinst -j: $(odbcinst -j 2>&1 | tr '\n' ' ')"
+          echo "::notice::odbcinst.ini: $(cat /etc/odbcinst.ini 2>&1 | tr '\n' ' ')"
+          echo "::notice::ls msodbcsql: $(ls -la /opt/microsoft/msodbcsql18/lib64/ 2>&1 | tr '\n' ' ')"
+          echo "::notice::pyodbc.drivers(): $(python -c 'import pyodbc; print(pyodbc.drivers())' 2>&1 | tr '\n' ' ')"
 
       # No hace falta crear la base ni correr schema_sqlserver.sql a mano:
       # tests/conftest.py (fixture test_engine) crea distribuidora_dj_test y aplica el
