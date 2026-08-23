@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Permiso, Rol, RolPermiso, Usuario, Vendedor
 from app.services.auditoria import AuditoriaService
-from app.services.auth import hash_password
+from app.services.auth import hash_password, validar_password_policy
 from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
@@ -50,6 +50,7 @@ class UsuarioService:
             raise ValueError("nombre_usuario es requerido")
         if not clave:
             raise ValueError("clave es requerida")
+        validar_password_policy(clave)
 
         _validar_nombre_usuario_unico(session, nombre_usuario)
         id_vendedor_usuario = _resolver_vinculo_vendedor(session, id_rol, id_vendedor_usuario)
@@ -104,6 +105,7 @@ class UsuarioService:
             )
 
         if nueva_clave:
+            validar_password_policy(nueva_clave)
             usuario.clave = hash_password(nueva_clave)
 
         session.commit()
@@ -144,6 +146,31 @@ class UsuarioService:
             accion="CAMBIO_ESTADO_USUARIO",
             modulo="USUARIOS",
             detalle={"id_usuario": usuario.id_usuario, "nuevo_estado": nuevo_estado},
+        )
+        return usuario
+
+    @staticmethod
+    def desbloquear_usuario(session: Session, id_usuario: int, realizado_por: int | None = None) -> Usuario:
+        """Via de escape manual para C7: si el usuario no tiene correo registrado (o el
+        envio de codigo falla), no hay auto-desbloqueo por tiempo -- un ADMIN tiene que
+        limpiar el bloqueo a mano. Sin panel de UI todavia (usuarios sigue en
+        PlaceholderView), pero el metodo de servicio ya existe para cuando se construya."""
+        require_permiso(session, realizado_por, "usuarios", "editar")
+        usuario = session.get(Usuario, id_usuario)
+        if usuario is None:
+            raise ValueError("Usuario no encontrado")
+
+        usuario.bloqueado_desde = None
+        usuario.intentos_fallidos = 0
+        session.commit()
+        session.refresh(usuario)
+
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=realizado_por,
+            accion="DESBLOQUEO_MANUAL_USUARIO",
+            modulo="USUARIOS",
+            detalle={"id_usuario": usuario.id_usuario},
         )
         return usuario
 

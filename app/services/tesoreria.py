@@ -114,8 +114,11 @@ class BancoService:
     @staticmethod
     def crear_cuenta(session: Session, **datos) -> CuentaBancaria:
         require_permiso(session, datos.get("creado_por"), "bancos", "crear")
-        if not session.get(Banco, datos.get("id_banco")):
+        banco = session.get(Banco, datos.get("id_banco"))
+        if banco is None:
             raise ValueError("Banco no encontrado")
+        if banco.estado_banco != "ACTIVO":
+            raise ValueError(f"El banco '{banco.nombre_banco}' esta inactivo")
         cuenta = CuentaBancaria(**datos)
         session.add(cuenta)
         session.commit()

@@ -5,13 +5,19 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.db.models import Rol, Usuario
 from app.db.session import SessionLocal
-from app.services.auth import hash_password
+from app.services.auth import hash_password, validar_password_policy
 
 
 def main():
     nombre_usuario = input("Nombre de usuario: ").strip()
     clave = input("Clave: ").strip()
     nombre = input("Nombre completo: ").strip()
+
+    try:
+        validar_password_policy(clave)
+    except ValueError as exc:
+        print(exc)
+        return
 
     session = SessionLocal()
     try:

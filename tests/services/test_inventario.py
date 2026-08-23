@@ -290,6 +290,13 @@ def test_establecer_precio_producto_inexistente(db_session):
         PrecioService.establecer_precio(db_session, 999999, "DETAL", "10.00", id_usuario=admin.id_usuario)
 
 
+def test_establecer_precio_producto_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, costo_producto=Decimal("10.00"), estado_producto="INACTIVO")
+    with pytest.raises(ValueError, match="inactivo"):
+        PrecioService.establecer_precio(db_session, producto.id_producto, "DETAL", "15.00", id_usuario=admin.id_usuario)
+
+
 def test_establecer_precio_costo_cero_margen_cero(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("0.00"))

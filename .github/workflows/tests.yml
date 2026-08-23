@@ -1,0 +1,72 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  DB_SERVER: localhost,1433
+  DB_NAME: distribuidora_dj
+  DB_USER: sa
+  # Solo para el contenedor efimero de este workflow -- nunca se usa contra una base real.
+  DB_PASSWORD: "CIPassword123*"
+  DB_DRIVER: ODBC Driver 18 for SQL Server
+  DB_TRUST_SERVER_CERTIFICATE: "yes"
+  DB_TRUSTED_CONNECTION: "no"
+
+jobs:
+  test:
+    # Fijo en 22.04 (no ubuntu-latest): el paquete msodbcsql18 de Microsoft se instala
+    # contra una version de Ubuntu especifica -- ubuntu-latest podria saltar a una
+    # version mas nueva sin aviso y romper la instalacion del driver.
+    runs-on: ubuntu-22.04
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "CIPassword123*"
+          MSSQL_PID: Express
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P $MSSQL_SA_PASSWORD -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pyodbc necesita el driver ODBC instalado en el SO -- no es un paquete pip (ver
+      # README.md, seccion Requisitos). Pasos oficiales de Microsoft para Ubuntu 22.04.
+      - name: Instalar ODBC Driver 18 para SQL Server
+        run: |
+          curl -sSL -O https://packages.microsoft.com/keys/microsoft.asc
+          sudo mkdir -p /etc/apt/keyrings
+          cat microsoft.asc | gpg --dearmor | sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
+          curl -sSL -O https://packages.microsoft.com/config/ubuntu/22.04/prod.list
+          sed 's/\[arch=amd64,armhf,arm64\]/[arch=amd64,armhf,arm64 signed-by=\/etc\/apt\/keyrings\/microsoft.gpg]/g' prod.list \
+            | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          ACCEPT_EULA=Y sudo apt-get install -y msodbcsql18
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # requirements-dev-lock.txt (C9): freeze completo con transitivas, para que el
+      # entorno de CI sea el mismo bit a bit que el que corrio la suite localmente.
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev-lock.txt
+
+      # No hace falta crear la base ni correr schema_sqlserver.sql a mano:
+      # tests/conftest.py (fixture test_engine) crea distribuidora_dj_test y aplica el
+      # schema + migraciones pendientes automaticamente la primera vez que corren los
+      # tests, igual que en local.
+      - name: Correr suite de tests
+        run: pytest -q

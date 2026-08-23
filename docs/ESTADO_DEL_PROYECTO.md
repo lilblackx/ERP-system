@@ -13,9 +13,10 @@ están implementadas, qué decisiones de diseño se tomaron y qué queda pendien
 - **Capa de servicios**: `app/services/`, un módulo por dominio de negocio. Cada
   servicio expone funciones o clases con métodos estáticos que reciben una `Session` de
   SQLAlchemy como primer parámetro y hacen su propio `commit()`.
-- **UI**: PySide6, arranque en `app/main.py`. Por ahora hay pantalla de login
-  (`login_window.py`), ventana principal (`main_window.py`) y el módulo de clientes
-  (`clientes_window.py`, `cliente_form_dialog.py`) como referencia de patrón de UI.
+- **UI**: PySide6, arranque en `app/main.py`. Pantalla de login (`login_window.py`),
+  ventana principal con sidebar/topbar (`main_window.py`, `sidebar.py`, `topbar.py`) y
+  paneles por módulo (`clientes_panel.py` + `cliente_form_dialog.py` como referencia de
+  patrón de UI; el resto vía `placeholder_view.py` hasta que se implementen).
 - **Configuración**: `app/config.py` arma la cadena de conexión ODBC desde variables de
   entorno (`.env`, ver `.env.example`). Nunca se versiona `.env` real.
 

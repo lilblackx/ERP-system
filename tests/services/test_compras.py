@@ -42,6 +42,50 @@ def test_registrar_compra_sin_usuario_autorizado_falla(db_session):
         )
 
 
+def test_registrar_compra_proveedor_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=10)
+    proveedor = crear_proveedor(db_session, estado_proveedor="INACTIVO")
+
+    with pytest.raises(ValueError, match="inactivo"):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=proveedor.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 5, "costo_unitario": "8.00"}],
+        )
+
+
+def test_registrar_compra_producto_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=10, estado_producto="INACTIVO")
+    proveedor = crear_proveedor(db_session)
+
+    with pytest.raises(ValueError, match="inactivo"):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=proveedor.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 5, "costo_unitario": "8.00"}],
+        )
+
+
+def test_registrar_compra_producto_inexistente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session)
+
+    with pytest.raises(ValueError, match="no encontrado"):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=proveedor.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="contado",
+            items=[{"id_producto": 999999, "cantidad": 5, "costo_unitario": "8.00"}],
+        )
+
+
 def test_registrar_compra_contado_no_abre_cuenta_por_pagar(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session)

@@ -15,7 +15,7 @@ from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
-from tests.factories import crear_caja, crear_cliente, crear_producto, crear_usuario_admin
+from tests.factories import crear_caja, crear_cliente, crear_producto, crear_usuario_admin, crear_vendedor
 
 
 def test_emitir_factura_contado_descuenta_stock_y_calcula_total(db_session):
@@ -148,6 +148,71 @@ def test_emitir_factura_stock_insuficiente(db_session):
 
     db_session.refresh(producto)
     assert producto.cantidad_unidad == Decimal("3.00")
+
+
+def test_emitir_factura_cliente_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, estado_cliente="INACTIVO")
+
+    with pytest.raises(ValueError, match="inactivo"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=None,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
+        )
+
+
+def test_emitir_factura_vendedor_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    vendedor = crear_vendedor(db_session, estado_vendedor="INACTIVO")
+
+    with pytest.raises(ValueError, match="inactivo"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
+        )
+
+
+def test_emitir_factura_vendedor_inexistente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="Vendedor no encontrado"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=999999,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
+        )
+
+
+def test_emitir_factura_producto_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50, estado_producto="INACTIVO")
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="inactivo"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=None,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
+        )
 
 
 def test_emitir_factura_agrupa_items_repetidos_para_validar_stock(db_session):

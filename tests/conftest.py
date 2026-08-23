@@ -76,6 +76,7 @@ TABLES_DELETE_ORDER = [
     "control_de_tasas",
     "rol_permisos",
     "permisos",
+    "codigos_verificacion",
     "usuarios",
     "roles",
 ]

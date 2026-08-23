@@ -2,5 +2,7 @@
 __pycache__/
 *.pyc
 .env
+logs/
 .claude/settings.local.json
 .pytest_cache/
+docs/CHECKLIST_PRODUCCION.md

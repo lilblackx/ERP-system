@@ -1,5 +1,13 @@
+import pytest
+
 from app.services.auditoria import AuditoriaService
-from app.services.auth import authenticate, hash_password, verify_password
+from app.services.auth import (
+    MAX_INTENTOS_FALLIDOS,
+    CuentaBloqueadaError,
+    authenticate,
+    hash_password,
+    verify_password,
+)
 from tests.factories import crear_usuario, crear_usuario_admin
 
 
@@ -95,3 +103,65 @@ def test_authenticate_fallido_no_registra_auditoria(db_session):
         db_session, modulo="AUTH", accion="LOGIN", id_usuario_actor=admin.id_usuario
     )
     assert resultado["total"] == 0
+
+
+# --- lockout tras intentos fallidos (C7) ----------------------------------------------
+
+
+def test_authenticate_fallido_registra_auditoria_login_fallido(db_session):
+    admin = crear_usuario_admin(db_session)
+    _crear_usuario_activo(db_session)
+
+    authenticate(db_session, "jperez", "ClaveMala")
+
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, modulo="AUTH", accion="LOGIN_FALLIDO", id_usuario_actor=admin.id_usuario
+    )
+    assert resultado["total"] == 1
+
+
+def test_authenticate_incrementa_intentos_fallidos(db_session):
+    usuario = _crear_usuario_activo(db_session)
+
+    authenticate(db_session, "jperez", "ClaveMala")
+    authenticate(db_session, "jperez", "ClaveMala")
+
+    db_session.refresh(usuario)
+    assert usuario.intentos_fallidos == 2
+
+
+def test_authenticate_exitoso_resetea_intentos_fallidos(db_session):
+    usuario = _crear_usuario_activo(db_session)
+
+    authenticate(db_session, "jperez", "ClaveMala")
+    authenticate(db_session, "jperez", "Secreta123")
+
+    db_session.refresh(usuario)
+    assert usuario.intentos_fallidos == 0
+    assert usuario.bloqueado_desde is None
+
+
+def test_authenticate_bloquea_tras_max_intentos_fallidos(db_session):
+    usuario = _crear_usuario_activo(db_session)
+
+    for _ in range(MAX_INTENTOS_FALLIDOS):
+        authenticate(db_session, "jperez", "ClaveMala")
+
+    db_session.refresh(usuario)
+    assert usuario.bloqueado_desde is not None
+
+    with pytest.raises(CuentaBloqueadaError):
+        authenticate(db_session, "jperez", "Secreta123")
+
+
+def test_authenticate_bloqueado_no_verifica_clave_correcta(db_session):
+    """Mientras la cuenta esta bloqueada, ni siquiera una clave correcta debe pasar --
+    de lo contrario el bloqueo seria inutil (bastaria con la clave real para saltarselo)."""
+    usuario = _crear_usuario_activo(db_session)
+    for _ in range(MAX_INTENTOS_FALLIDOS):
+        authenticate(db_session, "jperez", "ClaveMala")
+    db_session.refresh(usuario)
+    assert usuario.bloqueado_desde is not None
+
+    with pytest.raises(CuentaBloqueadaError):
+        authenticate(db_session, "jperez", "Secreta123")

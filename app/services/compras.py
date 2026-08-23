@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.models import Compra, CompraDetalle, CuentaPorPagar, PagoProveedor, Proveedor
+from app.db.models import Compra, CompraDetalle, CuentaPorPagar, Inventario, PagoProveedor, Proveedor
 from app.services.auditoria import AuditoriaService
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
@@ -45,9 +45,19 @@ class CompraService:
         proveedor = session.get(Proveedor, id_proveedor)
         if proveedor is None:
             raise ValueError("Proveedor no encontrado")
+        if proveedor.estado_proveedor != "ACTIVO":
+            raise ValueError(f"El proveedor '{proveedor.nombre_razon_social}' esta inactivo")
 
         if condicion_pago not in ("contado", "credito"):
             raise ValueError("condicion_pago debe ser 'contado' o 'credito'")
+
+        # --- Validar que los productos existan y esten activos (agrupando repetidos) ---
+        for id_producto in {item["id_producto"] for item in items}:
+            producto = session.get(Inventario, id_producto)
+            if producto is None:
+                raise ValueError(f"Producto {id_producto} no encontrado")
+            if producto.estado_producto != "ACTIVO":
+                raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo")
 
         total_compra = sum(
             (Decimal(str(item["cantidad"])) * Decimal(str(item["costo_unitario"])) for item in items),

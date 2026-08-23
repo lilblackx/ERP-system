@@ -40,6 +40,8 @@ class Usuario(Base):
     fecha_registro = Column(DateTime, server_default=func.getdate())
     estado = Column(String(20), server_default="ACTIVO")
     id_vendedor_usuario = Column(BigInteger)
+    intentos_fallidos = Column(Integer, nullable=False, server_default="0")
+    bloqueado_desde = Column(DateTime)  # NULL = no bloqueado; solo un codigo (o un ADMIN) lo limpia, no expira solo
 
     rol = relationship("Rol")
 
@@ -133,6 +135,21 @@ class Auditoria(Base):
     modulo: Mapped[str] = mapped_column(String(50), nullable=False)
     detalle: Mapped[Optional[str]] = mapped_column(String)
     fecha_evento: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+
+    usuario = relationship("Usuario")
+
+
+class CodigoVerificacion(Base):
+    __tablename__ = "codigos_verificacion"
+
+    id_codigo: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_usuario: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    codigo_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    fecha_expiracion: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+    usado: Mapped[bool] = mapped_column(nullable=False, server_default="0")
+    intentos_verificacion: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     usuario = relationship("Usuario")
 

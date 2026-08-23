@@ -12,6 +12,8 @@ en el QStackedWidget.  Los paneles se crean con lazy-loading la primera vez
 que se accede a cada módulo para minimizar el tiempo de arranque.
 """
 
+import logging
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -29,6 +31,8 @@ from app.ui.placeholder_view import PlaceholderView
 from app.ui.sidebar import Sidebar
 from app.ui.styles import GLOBAL_QSS, TOPBAR_HEIGHT
 from app.ui.topbar import TopBar
+
+logger = logging.getLogger(__name__)
 
 # Configuración de cada módulo: (clave, nombre_display, icono, clase_panel|None)
 # Si clase_panel es None → se usa PlaceholderView automáticamente.
@@ -126,7 +130,7 @@ class MainWindow(QMainWindow):
             if config and config.razon_social_empresa:
                 return config.razon_social_empresa
         except Exception:
-            pass
+            logger.exception("No se pudo cargar el nombre de la empresa")
         finally:
             session.close()
         return "Mi Empresa"

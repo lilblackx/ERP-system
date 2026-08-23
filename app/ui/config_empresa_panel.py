@@ -3,6 +3,8 @@ Panel para el módulo de Configuración de Empresa.
 Permite editar los datos de la empresa (RIF, Nombre, Dirección, Teléfono, Logo).
 """
 
+import logging
+
 from PySide6.QtCore import Qt, QByteArray
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
@@ -29,6 +31,9 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigEmpresaPanel(QWidget):
@@ -191,9 +196,8 @@ class ConfigEmpresaPanel(QWidget):
                 else:
                     self.lbl_logo_preview.clear()
                     self.lbl_logo_preview.setText("Sin Logo")
-        except Exception as exc:
-            # Si no tiene permiso o error, mostramos en consola/log (o pasamos)
-            pass
+        except Exception:
+            logger.exception("Fallo al cargar la configuración de empresa")
         finally:
             session.close()
 
@@ -215,8 +219,9 @@ class ConfigEmpresaPanel(QWidget):
                 
             self.logo_bytes = img_data
             self._mostrar_logo(img_data)
-        except Exception as exc:
-            QMessageBox.warning(self, "Error al cargar logo", str(exc))
+        except Exception:
+            logger.exception("Fallo al cargar el archivo de logo '%s'", file_path)
+            QMessageBox.warning(self, "Error al cargar logo", "No se pudo leer el archivo seleccionado.")
             
     def borrar_logo(self) -> None:
         self.logo_bytes = None
@@ -255,8 +260,9 @@ class ConfigEmpresaPanel(QWidget):
                 
             self.logo_bytes = _SENTINEL  # Reset sentinel para no re-guardar
             
-        except Exception as exc:
+        except Exception:
             session.rollback()
-            QMessageBox.critical(self, "Error", f"No se pudo guardar la configuración:\n{str(exc)}")
+            logger.exception("Fallo al guardar la configuración de empresa")
+            QMessageBox.critical(self, "Error", "No se pudo guardar la configuración. Intente nuevamente.")
         finally:
             session.close()

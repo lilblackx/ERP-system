@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.db.models import CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
+from app.db.models import CuentaBancaria, CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
@@ -41,6 +41,13 @@ class PagoService:
             raise ValueError("Cuenta por cobrar no encontrada")
         if monto > cuenta.saldo_pendiente:
             raise ValueError(f"El monto {monto} excede el saldo pendiente {cuenta.saldo_pendiente}")
+
+        if id_cuenta_bancaria is not None:
+            cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
+            if cuenta_bancaria is None:
+                raise ValueError("Cuenta bancaria no encontrada")
+            if cuenta_bancaria.estado_cuenta != "ACTIVO":
+                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
 
         pago = PagoCobro(
             id_cuenta_por_cobrar=id_cuenta_por_cobrar,
@@ -97,6 +104,13 @@ class PagoService:
             raise ValueError("Cuenta por pagar no encontrada")
         if monto > cuenta.saldo_pendiente:
             raise ValueError(f"El monto {monto} excede el saldo pendiente {cuenta.saldo_pendiente}")
+
+        if id_cuenta_bancaria is not None:
+            cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
+            if cuenta_bancaria is None:
+                raise ValueError("Cuenta bancaria no encontrada")
+            if cuenta_bancaria.estado_cuenta != "ACTIVO":
+                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
 
         pago = PagoProveedor(
             id_cuenta_por_pagar=id_cuenta_por_pagar,

@@ -6,11 +6,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtWidgets import QApplication
 
+from app.logging_config import setup_logging
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
 
 
 def main():
+    setup_logging()
     app = QApplication(sys.argv)
 
     login = LoginWindow()

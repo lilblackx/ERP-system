@@ -179,6 +179,8 @@ class PrecioService:
         producto = session.get(Inventario, id_producto)
         if producto is None:
             raise ValueError("Producto no encontrado")
+        if producto.estado_producto != "ACTIVO":
+            raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo, no se puede modificar su precio")
 
         precio_venta = Decimal(str(precio_venta))
         margen = PrecioService._calcular_margen(producto.costo_producto, precio_venta)

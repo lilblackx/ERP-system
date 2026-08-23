@@ -1,7 +1,8 @@
-# TODO: sin pines exactos (==) ni lockfile -- dos instalaciones en fechas distintas
-# pueden traer versiones distintas. Hallazgo de auditoria 2026-08-22.
-PySide6>=6.7
-SQLAlchemy>=2.0
-pyodbc>=5.1
-python-dotenv>=1.0
-bcrypt>=4.1
+# Pines exactos (C9, checklist de produccion): dos instalaciones en fechas distintas
+# deben traer las mismas versiones. Para reproducibilidad total (incluye dependencias
+# transitivas), usar requirements-lock.txt en vez de este archivo -- ver README.md.
+PySide6==6.11.2
+SQLAlchemy==2.0.52
+pyodbc==5.3.0
+python-dotenv==1.2.3
+bcrypt==5.0.0

@@ -82,3 +82,8 @@ python scripts/create_admin_user.py   # crea el primer usuario ADMIN
 
 python -m app.main   # OJO: no "python app/main.py" (rompe los imports absolutos)
 ```
+
+`requirements.txt`/`requirements-dev.txt` fijan version exacta (`==`) de las dependencias
+directas. Para una instalacion 100% reproducible (incluye dependencias transitivas), usar
+`requirements-lock.txt` (o `requirements-dev-lock.txt` para correr los tests) en vez de
+los archivos de arriba -- ver el comentario de cada uno para como regenerarlos.

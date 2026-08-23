@@ -4,6 +4,8 @@ Incluye barra de herramientas, tabla estilizada con datos reales y acciones CRUD
 Diseño moderno integrado en el MainWindow (no como ventana flotante).
 """
 
+import logging
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -47,6 +49,8 @@ from app.ui.styles import (
     SEARCH_QSS,
     TABLE_QSS,
 )
+
+logger = logging.getLogger(__name__)
 
 # Columnas visibles en la tabla (índice oculto 0 = ID interno)
 COLS_VISIBLES = ["ID", "Nombre Completo", "Identificación", "Email", "Teléfono", "Dirección", "Crédito", "Estado"]
@@ -263,8 +267,9 @@ class ClientesPanel(QWidget):
                 id_usuario=self.usuario.id_usuario,
             )
             self._poblar_tabla(clientes)
-        except Exception as exc:
-            QMessageBox.critical(self, "Error de conexión", str(exc))
+        except Exception:
+            logger.exception("Fallo al cargar la lista de clientes")
+            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de clientes.")
         finally:
             session.close()
 
@@ -311,9 +316,10 @@ class ClientesPanel(QWidget):
             session.rollback()
             QMessageBox.warning(self, "Dato duplicado",
                                 "El código o la identificación ya están registrados en otro cliente.")
-        except Exception as exc:
+        except Exception:
             session.rollback()
-            QMessageBox.critical(self, "Error", str(exc))
+            logger.exception("Fallo al crear cliente")
+            QMessageBox.critical(self, "Error", "No se pudo crear el cliente.")
         finally:
             session.close()
 
@@ -333,9 +339,10 @@ class ClientesPanel(QWidget):
             session.rollback()
             QMessageBox.warning(self, "Dato duplicado",
                                 "El código o la identificación ya están registrados en otro cliente.")
-        except Exception as exc:
+        except Exception:
             session.rollback()
-            QMessageBox.critical(self, "Error", str(exc))
+            logger.exception("Fallo al editar cliente")
+            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios del cliente.")
         finally:
             session.close()
 
@@ -359,8 +366,9 @@ class ClientesPanel(QWidget):
 
             cambiar_estado_cliente(session, id_cliente, nuevo_estado, id_usuario=self.usuario.id_usuario)
             self.cargar_clientes()
-        except Exception as exc:
+        except Exception:
             session.rollback()
-            QMessageBox.critical(self, "Error", str(exc))
+            logger.exception("Fallo al cambiar el estado del cliente %s", id_cliente)
+            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del cliente.")
         finally:
             session.close()

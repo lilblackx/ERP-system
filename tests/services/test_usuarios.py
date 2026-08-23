@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 
 from app.services.auth import verify_password
@@ -12,7 +14,7 @@ def _datos_usuario(**overrides) -> dict:
         "nombre": "Juan",
         "apellido": "Perez",
         "email": "jperez@example.com",
-        "clave": "Secreta123",
+        "clave": "Secreta123!",
         "id_rol": None,
     }
     datos.update(overrides)
@@ -29,8 +31,8 @@ def test_crear_usuario(db_session):
 
     assert usuario.id_usuario is not None
     assert usuario.nombre_usuario == "jperez"
-    assert usuario.clave != "Secreta123"
-    assert verify_password("Secreta123", usuario.clave)
+    assert usuario.clave != "Secreta123!"
+    assert verify_password("Secreta123!", usuario.clave)
 
 
 def test_crear_usuario_sin_usuario_autorizado_falla(db_session):
@@ -86,6 +88,12 @@ def test_crear_usuario_no_vincula_vendedor_si_rol_no_es_vendedor(db_session):
     )
 
     assert usuario.id_vendedor_usuario is None
+
+
+def test_crear_usuario_rechaza_clave_debil(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="politica de seguridad"):
+        UsuarioService.crear_usuario(db_session, **_datos_usuario(clave="debil"), realizado_por=admin.id_usuario)
 
 
 def test_crear_usuario_rol_vendedor_pero_vendedor_inexistente(db_session):
@@ -145,11 +153,21 @@ def test_editar_usuario_nueva_clave_la_hashea(db_session):
     usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     actualizado = UsuarioService.editar_usuario(
-        db_session, usuario.id_usuario, {}, nueva_clave="NuevaClave456", realizado_por=admin.id_usuario
+        db_session, usuario.id_usuario, {}, nueva_clave="NuevaClave456!", realizado_por=admin.id_usuario
     )
 
-    assert verify_password("NuevaClave456", actualizado.clave)
-    assert not verify_password("Secreta123", actualizado.clave)
+    assert verify_password("NuevaClave456!", actualizado.clave)
+    assert not verify_password("Secreta123!", actualizado.clave)
+
+
+def test_editar_usuario_rechaza_clave_debil(db_session):
+    admin = crear_usuario_admin(db_session)
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
+
+    with pytest.raises(ValueError, match="politica de seguridad"):
+        UsuarioService.editar_usuario(
+            db_session, usuario.id_usuario, {}, nueva_clave="debil", realizado_por=admin.id_usuario
+        )
 
 
 def test_editar_usuario_nombre_usuario_duplicado(db_session):
@@ -214,6 +232,36 @@ def test_cambiar_estado_ok(db_session):
     actualizado = UsuarioService.cambiar_estado(db_session, usuario.id_usuario, "INACTIVO", realizado_por=admin.id_usuario)
 
     assert actualizado.estado == "INACTIVO"
+
+
+# --- desbloquear_usuario (C7: via de escape manual, sin correo) --------------------
+
+
+def test_desbloquear_usuario_limpia_bloqueo_e_intentos(db_session):
+    admin = crear_usuario_admin(db_session)
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
+    usuario.intentos_fallidos = 5
+    usuario.bloqueado_desde = datetime.now()
+    db_session.commit()
+
+    actualizado = UsuarioService.desbloquear_usuario(db_session, usuario.id_usuario, realizado_por=admin.id_usuario)
+
+    assert actualizado.bloqueado_desde is None
+    assert actualizado.intentos_fallidos == 0
+
+
+def test_desbloquear_usuario_sin_usuario_autorizado_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
+
+    with pytest.raises(PermisoDenegadoError):
+        UsuarioService.desbloquear_usuario(db_session, usuario.id_usuario)
+
+
+def test_desbloquear_usuario_inexistente(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="Usuario no encontrado"):
+        UsuarioService.desbloquear_usuario(db_session, 999999, realizado_por=admin.id_usuario)
 
 
 # --- listar_usuarios --------------------------------------------------------------

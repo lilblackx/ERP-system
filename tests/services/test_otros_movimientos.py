@@ -88,6 +88,20 @@ def test_crear_cuenta_cobrar_otro_monto_invalido(db_session):
         )
 
 
+def test_crear_cuenta_cobrar_otro_cliente_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, estado_cliente="INACTIVO")
+    with pytest.raises(ValueError, match="inactivo"):
+        OtrosMovimientosService.crear_cuenta_cobrar_otro(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_total=Decimal("100.00"),
+            descripcion=None,
+            fecha_vencimiento=None,
+            creado_por=admin.id_usuario,
+        )
+
+
 def test_crear_cuenta_cobrar_otro_cliente_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Cliente no encontrado"):
@@ -192,6 +206,19 @@ def test_registrar_abono_cuenta_bancaria_inexistente(db_session):
     with pytest.raises(ValueError, match="Cuenta bancaria no encontrada"):
         OtrosMovimientosService.registrar_abono_otro(
             db_session, cuenta.id_cuenta, monto=Decimal("10.00"), id_cuenta_bancaria=999999, id_usuario=admin.id_usuario
+        )
+
+
+def test_registrar_abono_cuenta_bancaria_inactiva_falla(db_session):
+    cuenta, _cliente, admin = _crear_cxc_otro(db_session)
+    banco = crear_cuenta_bancaria(db_session, estado_cuenta="INACTIVO")
+    with pytest.raises(ValueError, match="inactiva"):
+        OtrosMovimientosService.registrar_abono_otro(
+            db_session,
+            cuenta.id_cuenta,
+            monto=Decimal("10.00"),
+            id_cuenta_bancaria=banco.id_cuenta,
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -332,6 +359,15 @@ def test_crear_partida_no_conciliada_cuenta_bancaria_inexistente(db_session):
         )
 
 
+def test_crear_partida_no_conciliada_cuenta_bancaria_inactiva_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    banco = crear_cuenta_bancaria(db_session, estado_cuenta="INACTIVO")
+    with pytest.raises(ValueError, match="inactiva"):
+        OtrosMovimientosService.crear_partida_no_conciliada(
+            db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("200.00"), creado_por=admin.id_usuario
+        )
+
+
 def test_crear_partida_no_conciliada_movimiento_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
@@ -419,6 +455,26 @@ def test_conciliar_partida_cliente_inexistente(db_session):
     with pytest.raises(ValueError, match="Cliente no encontrado"):
         OtrosMovimientosService.conciliar_partida(
             db_session, partida.id_cuenta, 999999, cxc.id_cuenta_por_cobrar, monto=Decimal("10.00"), id_usuario=admin.id_usuario
+        )
+
+
+def test_conciliar_partida_cliente_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    banco = crear_cuenta_bancaria(db_session)
+    partida = OtrosMovimientosService.crear_partida_no_conciliada(
+        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+    )
+    cliente_inactivo = crear_cliente(db_session, estado_cliente="INACTIVO")
+    cxc, _cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
+
+    with pytest.raises(ValueError, match="inactivo"):
+        OtrosMovimientosService.conciliar_partida(
+            db_session,
+            partida.id_cuenta,
+            cliente_inactivo.id_cliente,
+            cxc.id_cuenta_por_cobrar,
+            monto=Decimal("10.00"),
+            id_usuario=admin.id_usuario,
         )
 
 

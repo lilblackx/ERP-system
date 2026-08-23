@@ -89,6 +89,15 @@ def test_crear_cuenta_ok(db_session):
     assert cuenta.saldo_total_banco == Decimal("0.00")
 
 
+def test_crear_cuenta_banco_inactivo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    banco = crear_banco(db_session, estado_banco="INACTIVO")
+    with pytest.raises(ValueError, match="inactivo"):
+        BancoService.crear_cuenta(
+            db_session, id_banco=banco.id_banco, numero_cuenta="0123456789", creado_por=admin.id_usuario
+        )
+
+
 def test_actualizar_cuenta_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Cuenta bancaria no encontrada"):

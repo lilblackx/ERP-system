@@ -146,6 +146,35 @@ def test_registrar_pago_cobro_por_banco_actualiza_saldo(db_session):
     assert movimiento.id_pago_cobro == pago.id_pago_cobro
 
 
+def test_registrar_pago_cobro_por_banco_cuenta_inactiva_falla(db_session):
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    cuenta = crear_cuenta_bancaria(db_session, estado_cuenta="INACTIVO")
+
+    with pytest.raises(ValueError, match="inactiva"):
+        PagoService.registrar_pago_cobro(
+            db_session,
+            id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+            monto=Decimal("30.00"),
+            metodo_pago="transferencia",
+            id_cuenta_bancaria=cuenta.id_cuenta,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_registrar_pago_cobro_por_banco_cuenta_inexistente_falla(db_session):
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+
+    with pytest.raises(ValueError, match="Cuenta bancaria no encontrada"):
+        PagoService.registrar_pago_cobro(
+            db_session,
+            id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+            monto=Decimal("30.00"),
+            metodo_pago="transferencia",
+            id_cuenta_bancaria=999999,
+            id_usuario=admin.id_usuario,
+        )
+
+
 def test_registrar_pago_cobro_sin_origen(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     with pytest.raises(ValueError, match="exactamente un origen"):
@@ -332,6 +361,21 @@ def test_registrar_pago_proveedor_excede_saldo(db_session):
             monto=Decimal("999.00"),
             metodo_pago="efectivo",
             id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_registrar_pago_proveedor_por_banco_cuenta_inactiva_falla(db_session):
+    cxp, admin = _crear_cxp(db_session, Decimal("80.00"))
+    cuenta = crear_cuenta_bancaria(db_session, estado_cuenta="INACTIVO")
+
+    with pytest.raises(ValueError, match="inactiva"):
+        PagoService.registrar_pago_proveedor(
+            db_session,
+            id_cuenta_por_pagar=cxp.id_cuenta,
+            monto=Decimal("30.00"),
+            metodo_pago="transferencia",
+            id_cuenta_bancaria=cuenta.id_cuenta,
             id_usuario=admin.id_usuario,
         )
 

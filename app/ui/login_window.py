@@ -3,6 +3,8 @@ LoginWindow — Pantalla de inicio de sesión moderna del ERP.
 Diseño: Split-screen (izquierda azul con bienvenida, derecha blanca con formulario).
 """
 
+import logging
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QCursor
 from PySide6.QtWidgets import (
@@ -19,7 +21,9 @@ from PySide6.QtWidgets import (
 
 from app.db.models import ConfiguracionEmpresa
 from app.db.session import SessionLocal
-from app.services.auth import authenticate
+from app.services.auth import CuentaBloqueadaError, authenticate
+from app.services.recuperacion_acceso import TIPO_DESBLOQUEO, TIPO_RECUPERAR_CLAVE
+from app.ui.solicitar_codigo_dialog import SolicitarCodigoDialog
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -30,6 +34,8 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
 )
+
+logger = logging.getLogger(__name__)
 
 # Color azul claro similar al de la imagen de referencia
 COLOR_LEFT_BG = "#7A96EA"
@@ -50,7 +56,7 @@ class LoginWindow(QDialog):
             if config and config.razon_social_empresa:
                 empresa = config.razon_social_empresa
         except Exception:
-            pass
+            logger.exception("No se pudo cargar el nombre de la empresa para la pantalla de login")
         finally:
             session.close()
 
@@ -150,6 +156,7 @@ class LoginWindow(QDialog):
         lbl_olvidaste.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_olvidaste.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         lbl_olvidaste.setStyleSheet(f"color: {COLOR_PRIMARY}; font-size: 13px; text-decoration: underline;")
+        lbl_olvidaste.mousePressEvent = lambda event: self._abrir_recuperar_clave()
         right_layout.addWidget(lbl_olvidaste)
 
         # Mensaje de error (oculto por defecto)
@@ -218,8 +225,18 @@ class LoginWindow(QDialog):
         session = SessionLocal()
         try:
             usuario = authenticate(session, nombre_usuario, clave)
-        except Exception as exc:
-            QMessageBox.critical(self, "Error de conexión", str(exc))
+        except CuentaBloqueadaError:
+            self.mensaje.setText("⚠ Cuenta bloqueada por intentos fallidos")
+            self.clave_input.clear()
+            self.clave_input.setFocus()
+            dialogo = SolicitarCodigoDialog(SessionLocal, TIPO_DESBLOQUEO, nombre_usuario, parent=self)
+            dialogo.exec()
+            return
+        except Exception:
+            logger.exception("Fallo al autenticar al usuario '%s'", nombre_usuario)
+            QMessageBox.critical(
+                self, "Error de conexión", "No se pudo conectar con el servidor. Intente nuevamente."
+            )
             return
         finally:
             session.close()
@@ -234,3 +251,8 @@ class LoginWindow(QDialog):
 
         self.usuario_autenticado = usuario
         self.accept()
+
+    def _abrir_recuperar_clave(self) -> None:
+        nombre_usuario = self.usuario_input.text().strip()
+        dialogo = SolicitarCodigoDialog(SessionLocal, TIPO_RECUPERAR_CLAVE, nombre_usuario, parent=self)
+        dialogo.exec()

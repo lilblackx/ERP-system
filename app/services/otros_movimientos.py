@@ -40,8 +40,11 @@ class OtrosMovimientosService:
         require_permiso(session, creado_por, "otros_movimientos", "crear")
         if Decimal(str(monto_total)) <= 0:
             raise ValueError("monto_total debe ser mayor a cero")
-        if session.get(Cliente, id_cliente) is None:
+        cliente = session.get(Cliente, id_cliente)
+        if cliente is None:
             raise ValueError("Cliente no encontrado")
+        if cliente.estado_cliente != "ACTIVO":
+            raise ValueError(f"El cliente '{cliente.nombre_razon_social}' esta inactivo")
 
         cuenta = CuentaPorCobrarOtro(
             monto_total=monto_total,
@@ -91,8 +94,12 @@ class OtrosMovimientosService:
         if monto > cuenta.saldo_pendiente:
             raise ValueError(f"El monto excede el saldo pendiente ({cuenta.saldo_pendiente})")
 
-        if id_cuenta_bancaria is not None and session.get(CuentaBancaria, id_cuenta_bancaria) is None:
-            raise ValueError("Cuenta bancaria no encontrada")
+        if id_cuenta_bancaria is not None:
+            cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
+            if cuenta_bancaria is None:
+                raise ValueError("Cuenta bancaria no encontrada")
+            if cuenta_bancaria.estado_cuenta != "ACTIVO":
+                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
         if id_caja is not None:
             caja = session.get(Caja, id_caja)
             if caja is None:
@@ -183,8 +190,11 @@ class OtrosMovimientosService:
         require_permiso(session, creado_por, "otros_movimientos", "crear")
         if Decimal(str(monto)) <= 0:
             raise ValueError("monto debe ser mayor a cero")
-        if session.get(CuentaBancaria, id_cuenta_bancaria) is None:
+        cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
+        if cuenta_bancaria is None:
             raise ValueError("Cuenta bancaria no encontrada")
+        if cuenta_bancaria.estado_cuenta != "ACTIVO":
+            raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
         if id_movimiento is not None and session.get(BancoMovimiento, id_movimiento) is None:
             raise ValueError("Movimiento bancario no encontrado")
 
@@ -239,6 +249,8 @@ class OtrosMovimientosService:
         cliente = session.get(Cliente, id_cliente)
         if cliente is None:
             raise ValueError("Cliente no encontrado")
+        if cliente.estado_cliente != "ACTIVO":
+            raise ValueError(f"El cliente '{cliente.nombre_razon_social}' esta inactivo")
 
         cxc = session.get(CuentaPorCobrar, id_cuenta_por_cobrar)
         if cxc is None:

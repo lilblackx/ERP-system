@@ -1,10 +1,19 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Cliente, ComisionFactura, CuentaPorCobrar, FacturaDetalle, FacturaVenta, Inventario, PagoCobro
+from app.db.models import (
+    Cliente,
+    ComisionFactura,
+    CuentaPorCobrar,
+    FacturaDetalle,
+    FacturaVenta,
+    Inventario,
+    PagoCobro,
+    Vendedor,
+)
 from app.services.auditoria import AuditoriaService
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
@@ -46,6 +55,15 @@ class VentaService:
         cliente = session.get(Cliente, id_cliente)
         if cliente is None:
             raise ValueError("Cliente no encontrado")
+        if cliente.estado_cliente != "ACTIVO":
+            raise ValueError(f"El cliente '{cliente.nombre_razon_social}' esta inactivo")
+
+        if id_vendedor is not None:
+            vendedor = session.get(Vendedor, id_vendedor)
+            if vendedor is None:
+                raise ValueError("Vendedor no encontrado")
+            if vendedor.estado_vendedor != "ACTIVO":
+                raise ValueError(f"El vendedor '{vendedor.nombre_vendedor}' esta inactivo")
 
         if condicion_pago not in ("contado", "credito"):
             raise ValueError("condicion_pago debe ser 'contado' o 'credito'")
@@ -58,9 +76,20 @@ class VentaService:
             cantidades_por_producto[id_producto] = cantidades_por_producto.get(id_producto, Decimal("0")) + cantidad
 
         for id_producto, cantidad_requerida in cantidades_por_producto.items():
-            producto = session.get(Inventario, id_producto)
+            # WITH (UPDLOCK, ROWLOCK): bloquea la fila hasta el commit de esta
+            # transaccion para que una segunda factura concurrente sobre el mismo
+            # producto espere en vez de leer el mismo stock stale (TOCTOU). session.get()
+            # no sirve aca -- with_for_update() de SQLAlchemy es un no-op en el dialecto
+            # mssql (no existe "FOR UPDATE" en T-SQL), hace falta el table hint explicito.
+            producto = session.execute(
+                select(Inventario)
+                .where(Inventario.id_producto == id_producto)
+                .with_hint(Inventario, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one_or_none()
             if producto is None:
                 raise ValueError(f"Producto {id_producto} no encontrado")
+            if producto.estado_producto != "ACTIVO":
+                raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo")
             if producto.cantidad_unidad < cantidad_requerida:
                 raise ValueError(
                     f"Stock insuficiente para '{producto.nombre_producto}': "
