@@ -1,4 +1,8 @@
 import sys
+from pathlib import Path
+
+# Agregar la raíz del proyecto (ERP-system) al PYTHONPATH para permitir ejecución directa
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtWidgets import QApplication
 
