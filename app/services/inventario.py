@@ -7,8 +7,12 @@ from app.db.models import Inventario, ProductoPrecio
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
-TIPOS_PRECIO_VALIDOS = {"DETAL", "MAYOR", "ESPECIAL"}
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
+# C14: un solo precio de lista por producto (antes hasta 3, DETAL/MAYOR/ESPECIAL) -- ver
+# migrations/0011_consolidar_producto_precios.sql. tipo_precio se conserva en el schema
+# con este unico valor fijo en vez de borrar la columna (append-only, no se edita el
+# schema ya creado).
+TIPO_PRECIO_UNICO = "UNICO"
 
 
 class ProductoService:
@@ -136,15 +140,22 @@ class ProductoService:
         require_permiso(session, id_usuario, "inventario", "ver")
         hoy = date.today()
         limite_fecha = hoy + timedelta(days=dias_vencimiento)
+        # Un producto INACTIVO (descontinuado) no deberia seguir generando alertas para
+        # siempre (C21) -- a diferencia de un listado general (buscar()), que si muestra
+        # inactivos porque el usuario puede estar buscandolos a proposito.
         bajo_stock = (
             session.query(Inventario)
-            .filter(Inventario.cantidad_unidad <= limite_minimo)
+            .filter(Inventario.cantidad_unidad <= limite_minimo, Inventario.estado_producto == "ACTIVO")
             .order_by(Inventario.cantidad_unidad)
             .all()
         )
         proximos_vencer = (
             session.query(Inventario)
-            .filter(Inventario.fecha_vencimiento.isnot(None), Inventario.fecha_vencimiento <= limite_fecha)
+            .filter(
+                Inventario.fecha_vencimiento.isnot(None),
+                Inventario.fecha_vencimiento <= limite_fecha,
+                Inventario.estado_producto == "ACTIVO",
+            )
             .order_by(Inventario.fecha_vencimiento)
             .all()
         )
@@ -160,22 +171,17 @@ class PrecioService:
         return margen.quantize(Decimal("0.01"))
 
     @staticmethod
-    def listar_precios(session: Session, id_producto: int, id_usuario: int | None = None) -> list[ProductoPrecio]:
+    def obtener_precio(session: Session, id_producto: int, id_usuario: int | None = None) -> ProductoPrecio | None:
+        """Reemplaza el listar_precios() de antes de C14 -- a lo sumo 1 fila por producto
+        ahora (ver TIPO_PRECIO_UNICO)."""
         require_permiso(session, id_usuario, "inventario", "ver")
-        return (
-            session.query(ProductoPrecio)
-            .filter(ProductoPrecio.id_producto == id_producto)
-            .order_by(ProductoPrecio.tipo_precio)
-            .all()
-        )
+        return session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).first()
 
     @staticmethod
     def establecer_precio(
-        session: Session, id_producto: int, tipo_precio: str, precio_venta, id_usuario: int | None = None
+        session: Session, id_producto: int, precio_venta, id_usuario: int | None = None
     ) -> ProductoPrecio:
         require_permiso(session, id_usuario, "inventario", "editar")
-        if tipo_precio not in TIPOS_PRECIO_VALIDOS:
-            raise ValueError(f"tipo_precio invalido: {tipo_precio}")
         producto = session.get(Inventario, id_producto)
         if producto is None:
             raise ValueError("Producto no encontrado")
@@ -185,15 +191,11 @@ class PrecioService:
         precio_venta = Decimal(str(precio_venta))
         margen = PrecioService._calcular_margen(producto.costo_producto, precio_venta)
 
-        precio = (
-            session.query(ProductoPrecio)
-            .filter(ProductoPrecio.id_producto == id_producto, ProductoPrecio.tipo_precio == tipo_precio)
-            .first()
-        )
+        precio = session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).first()
         if precio is None:
             precio = ProductoPrecio(
                 id_producto=id_producto,
-                tipo_precio=tipo_precio,
+                tipo_precio=TIPO_PRECIO_UNICO,
                 precio_venta=precio_venta,
                 porcentaje_ganancia=margen,
             )
@@ -212,7 +214,6 @@ class PrecioService:
             modulo="INVENTARIO",
             detalle={
                 "id_producto": id_producto,
-                "tipo_precio": tipo_precio,
                 "precio_venta": str(precio.precio_venta),
                 "porcentaje_ganancia": str(precio.porcentaje_ganancia),
             },

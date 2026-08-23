@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import Compra, CompraDetalle, CuentaPorPagar, Inventario, PagoProveedor, Proveedor
@@ -146,7 +146,13 @@ class CompraService:
         if not motivo:
             raise ValueError("motivo es requerido para anular una compra")
 
-        compra = session.get(Compra, id_compra)
+        # Ver el comentario equivalente en VentaService.anular_factura() -- mismo patron
+        # de C1/C18/C22, aca resolviendo C24.
+        compra = session.execute(
+            select(Compra)
+            .where(Compra.id_compra == id_compra)
+            .with_hint(Compra, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if compra is None:
             raise ValueError("Compra no encontrada")
         if compra.estado_compra == "ANULADA":
@@ -221,10 +227,5 @@ class CompraService:
             query = query.filter(Compra.fecha_emision <= fecha_hasta)
 
         total = query.count()
-        compras = (
-            query.order_by(Compra.fecha_emision.desc())
-            .offset((pagina - 1) * por_pagina)
-            .limit(por_pagina)
-            .all()
-        )
+        compras = query.order_by(Compra.fecha_emision.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
         return {"items": compras, "total": total, "pagina": pagina, "por_pagina": por_pagina}

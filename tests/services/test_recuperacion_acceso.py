@@ -69,6 +69,41 @@ def test_solicitar_codigo_usuario_sin_email_no_envia(db_session, codigos_captura
     assert codigos_capturados == []
 
 
+def test_solicitar_codigo_en_cooldown_no_reenvia(db_session, codigos_capturados):
+    """C19: sin cooldown, este endpoint pre-autenticacion permite mail-bombear el correo
+    real de un usuario con solo su nombre de usuario."""
+    _crear_usuario_con_email(db_session)
+    RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+
+    mensaje = RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+
+    assert len(codigos_capturados) == 1
+    assert "correo" in mensaje.lower()  # misma respuesta generica, no delata el cooldown
+
+
+def test_solicitar_codigo_despues_del_cooldown_si_reenvia(db_session, codigos_capturados):
+    _crear_usuario_con_email(db_session)
+    RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+    codigo_previo = db_session.query(CodigoVerificacion).one()
+    codigo_previo.fecha_creacion = datetime.now() - timedelta(seconds=61)
+    db_session.commit()
+
+    RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+
+    assert len(codigos_capturados) == 2
+
+
+def test_solicitar_codigo_cooldown_es_por_tipo(db_session, codigos_capturados):
+    """Pedir un codigo de desbloqueo no debe consumir el cooldown del flujo de
+    recuperar-clave para el mismo usuario, son cosas distintas."""
+    _crear_usuario_con_email(db_session)
+    RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+
+    RecuperacionAccesoService.solicitar_codigo_recuperacion(db_session, "jperez")
+
+    assert len(codigos_capturados) == 2
+
+
 # --- verificar_codigo_desbloqueo ------------------------------------------------------
 
 

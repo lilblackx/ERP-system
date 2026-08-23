@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import text
 
-from app.db.migrar import _CREATE_SCHEMA_MIGRATIONS, aplicar_migraciones
+from app.db.migrar import _CREATE_SCHEMA_MIGRATIONS, aplicar_migraciones, verificar_migraciones_al_dia
 
 
 def _limpiar_schema_migrations(test_engine) -> None:
@@ -93,3 +93,34 @@ def test_aplica_migracion_pendiente_y_no_la_repite(test_engine, tmp_path):
                 text("IF OBJECT_ID(N'dbo.zz_migracion_prueba', N'U') IS NOT NULL DROP TABLE dbo.zz_migracion_prueba")
             )
             connection.commit()
+
+
+# --- verificar_migraciones_al_dia (C25) ---------------------------------------------
+# Solo lee, no aplica ni crea nada -- por eso estos tests no necesitan el try/finally de
+# limpieza de dbo.zz_migracion_prueba que usa el de arriba.
+
+
+def test_verificar_migraciones_al_dia_sin_pendientes_no_lanza(test_engine, tmp_path):
+    _limpiar_schema_migrations(test_engine)
+
+    verificar_migraciones_al_dia(motor=test_engine, migrations_dir=tmp_path)  # no debe lanzar
+
+
+def test_verificar_migraciones_al_dia_con_pendiente_lanza(test_engine, tmp_path):
+    _limpiar_schema_migrations(test_engine)
+    (tmp_path / "0001_pendiente_de_prueba.sql").write_text("SELECT 1;\nGO\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="0001_pendiente_de_prueba.sql"):
+        verificar_migraciones_al_dia(motor=test_engine, migrations_dir=tmp_path)
+
+
+def test_verificar_migraciones_al_dia_no_modifica_nada(test_engine, tmp_path):
+    """A diferencia de aplicar_migraciones(), esta funcion no debe crear
+    dbo.schema_migrations ni escribir la fila 0000_baseline -- es de solo lectura."""
+    _limpiar_schema_migrations(test_engine)
+
+    verificar_migraciones_al_dia(motor=test_engine, migrations_dir=tmp_path)
+
+    with test_engine.connect() as connection:
+        existe = connection.execute(text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")).scalar()
+    assert existe is None

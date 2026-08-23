@@ -123,6 +123,17 @@ def test_productos_alerta_cuenta_bajo_stock(db_session):
     assert resultado["productos_alerta"] == 1
 
 
+def test_productos_alerta_excluye_inactivos(db_session):
+    """C21: un producto descontinuado no deberia inflar el KPI de stock bajo para
+    siempre."""
+    admin = crear_usuario_admin(db_session)
+    crear_producto(db_session, cantidad_unidad=3, estado_producto="INACTIVO")
+
+    resultado = DashboardService.get_panel_general_data(db_session, umbral_stock_minimo=10, id_usuario=admin.id_usuario)
+
+    assert resultado["productos_alerta"] == 0
+
+
 def test_grafico_semanal_tiene_siete_dias_incluyendo_hoy(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session)
@@ -140,7 +151,9 @@ def test_grafico_semanal_tiene_siete_dias_incluyendo_hoy(db_session):
 def test_cajas_activas_solo_incluye_abiertas_hoy(db_session):
     admin = crear_usuario_admin(db_session)
     caja_abierta_hoy = crear_caja(db_session, nombre_caja="Abierta hoy")
-    CajaService.abrir_caja(db_session, caja_abierta_hoy.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("50.00"))
+    CajaService.abrir_caja(
+        db_session, caja_abierta_hoy.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("50.00")
+    )
 
     caja_cerrada = crear_caja(db_session, nombre_caja="Cerrada")
     CajaService.abrir_caja(db_session, caja_cerrada.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
@@ -167,7 +180,9 @@ def test_facturas_recientes_limita_a_cinco_y_ordena_desc(db_session):
     cliente = crear_cliente(db_session)
     ahora = datetime.now()
     for i in range(7):
-        _factura_directa(db_session, cliente, ahora - timedelta(minutes=i), total=Decimal("10.00"), numero=f"FV-REC-{i}")
+        _factura_directa(
+            db_session, cliente, ahora - timedelta(minutes=i), total=Decimal("10.00"), numero=f"FV-REC-{i}"
+        )
 
     resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
     recientes = resultado["facturas_recientes"]
@@ -190,3 +205,12 @@ def test_inventario_alerta_incluye_categoria(db_session):
     assert len(alertas) == 1
     assert alertas[0]["nombre_producto"] == "Leche"
     assert alertas[0]["categoria"] == "Lacteos"
+
+
+def test_inventario_alerta_excluye_inactivos(db_session):
+    admin = crear_usuario_admin(db_session)
+    crear_producto(db_session, cantidad_unidad=2, nombre_producto="Descontinuado", estado_producto="INACTIVO")
+
+    resultado = DashboardService.get_panel_general_data(db_session, umbral_stock_minimo=10, id_usuario=admin.id_usuario)
+
+    assert resultado["inventario_alerta"] == []

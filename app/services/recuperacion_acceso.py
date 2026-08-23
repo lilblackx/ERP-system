@@ -13,6 +13,7 @@ from app.services.email_service import enviar_correo
 
 VALIDEZ_CODIGO = timedelta(minutes=15)
 MAX_INTENTOS_VERIFICACION = 5
+COOLDOWN_SOLICITUD = timedelta(seconds=60)
 
 TIPO_DESBLOQUEO = "DESBLOQUEO"
 TIPO_RECUPERAR_CLAVE = "RECUPERAR_CLAVE"
@@ -32,12 +33,32 @@ def _buscar_usuario(session: Session, nombre_usuario: str) -> Usuario | None:
     return session.query(Usuario).filter(Usuario.nombre_usuario == nombre_usuario).first()
 
 
+def _dentro_del_cooldown(session: Session, usuario: Usuario, tipo: str) -> bool:
+    """C19: sin esto, el endpoint (pre-autenticacion, solo requiere el nombre de usuario)
+    permite mail-bombear el correo real de un usuario y agotar la cuota de envio de la
+    cuenta Gmail compartida por toda la app. `fecha_creacion` se compara contra
+    datetime.now() (reloj de la app) porque _crear_y_enviar_codigo() ahora la fija
+    explicito en vez de dejar el GETDATE() del server_default -- mismo criterio que C12
+    (un solo reloj para todo este tipo de comparaciones, no mezclar Python con SQL Server)."""
+    ultimo = (
+        session.execute(
+            select(CodigoVerificacion.fecha_creacion)
+            .where(CodigoVerificacion.id_usuario == usuario.id_usuario, CodigoVerificacion.tipo == tipo)
+            .order_by(CodigoVerificacion.fecha_creacion.desc())
+        )
+        .scalars()
+        .first()
+    )
+    return ultimo is not None and datetime.now() - ultimo < COOLDOWN_SOLICITUD
+
+
 def _crear_y_enviar_codigo(session: Session, usuario: Usuario, tipo: str) -> None:
     codigo = _generar_codigo()
     registro = CodigoVerificacion(
         id_usuario=usuario.id_usuario,
         tipo=tipo,
         codigo_hash=_hash_codigo(codigo),
+        fecha_creacion=datetime.now(),
         fecha_expiracion=datetime.now() + VALIDEZ_CODIGO,
     )
     session.add(registro)
@@ -63,9 +84,11 @@ def _crear_y_enviar_codigo(session: Session, usuario: Usuario, tipo: str) -> Non
 def _solicitar_codigo(session: Session, nombre_usuario: str, tipo: str) -> None:
     """No revela si el usuario existe o tiene correo -- siempre responde generico
     (MENSAJE_SOLICITUD_GENERICO), igual que authenticate() no distingue usuario
-    inexistente de clave incorrecta."""
+    inexistente de clave incorrecta. Por la misma razon, si esta en cooldown (C19) no se
+    reenvia el codigo pero tampoco se avisa nada distinto -- una respuesta diferente
+    revelaria que el usuario existe y tiene correo, aunque no se le mande nada nuevo."""
     usuario = _buscar_usuario(session, nombre_usuario)
-    if usuario is not None and usuario.email:
+    if usuario is not None and usuario.email and not _dentro_del_cooldown(session, usuario, tipo):
         _crear_y_enviar_codigo(session, usuario, tipo)
 
 
@@ -142,9 +165,7 @@ class RecuperacionAccesoService:
         return MENSAJE_SOLICITUD_GENERICO
 
     @staticmethod
-    def verificar_codigo_y_cambiar_clave(
-        session: Session, nombre_usuario: str, codigo: str, nueva_clave: str
-    ) -> None:
+    def verificar_codigo_y_cambiar_clave(session: Session, nombre_usuario: str, codigo: str, nueva_clave: str) -> None:
         usuario = _buscar_usuario(session, nombre_usuario)
         if usuario is None:
             raise ValueError("Codigo incorrecto.")

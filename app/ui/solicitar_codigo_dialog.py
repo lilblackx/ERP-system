@@ -140,9 +140,7 @@ class SolicitarCodigoDialog(QDialog):
         session = self.session_factory()
         try:
             if self.tipo == TIPO_DESBLOQUEO:
-                RecuperacionAccesoService.verificar_codigo_desbloqueo(
-                    session, self._nombre_usuario_confirmado, codigo
-                )
+                RecuperacionAccesoService.verificar_codigo_desbloqueo(session, self._nombre_usuario_confirmado, codigo)
                 QMessageBox.information(self, "Listo", "Cuenta desbloqueada. Ya puede iniciar sesion.")
             else:
                 RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(

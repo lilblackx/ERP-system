@@ -7,8 +7,8 @@ Sidebar izquierda del ERP — versión con toggle collapse/expand.
 - Emite `toggled(bool)` cuando se abre o cierra (True = abierto).
 """
 
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Signal, QSize
-from PySide6.QtGui import QPalette, QColor, QFont
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
@@ -19,40 +19,40 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.styles import COLOR_SIDEBAR_BG, COLOR_SIDEBAR_TEXT
+from app.ui.styles import COLOR_SIDEBAR_BG
 
 # ── Constantes de tamaño ────────────────────────────────────────────────────
-SIDEBAR_EXPANDED  = 230   # px cuando está abierto
-SIDEBAR_COLLAPSED = 58    # px cuando está cerrado (solo íconos)
-ANIM_DURATION_MS  = 220   # velocidad de la animación
+SIDEBAR_EXPANDED = 230  # px cuando está abierto
+SIDEBAR_COLLAPSED = 58  # px cuando está cerrado (solo íconos)
+ANIM_DURATION_MS = 220  # velocidad de la animación
 
 # ── Módulos ─────────────────────────────────────────────────────────────────
 # (clave_interna, texto_visible)
 MODULOS = [
-    ("clientes",            "Clientes"),
-    ("proveedores",         "Proveedores"),
-    ("inventario",          "Inventario"),
-    ("facturacion",         "Facturación"),
-    ("compras",             "Compras"),
-    ("bancos",              "Bancos"),
-    ("cuentas_bancarias",   "Cuentas Bancarias"),
-    ("cajas",               "Cajas"),
-    ("vendedores",          "Vendedores"),
-    ("comisiones",          "Comisiones"),
-    ("control_tasas",       "Control de Tasas"),
-    ("config_empresa",      "Config. de Empresa"),
-    ("usuarios",            "Usuarios"),
+    ("clientes", "Clientes"),
+    ("proveedores", "Proveedores"),
+    ("inventario", "Inventario"),
+    ("facturacion", "Facturación"),
+    ("compras", "Compras"),
+    ("bancos", "Bancos"),
+    ("cuentas_bancarias", "Cuentas Bancarias"),
+    ("cajas", "Cajas"),
+    ("vendedores", "Vendedores"),
+    ("comisiones", "Comisiones"),
+    ("control_tasas", "Control de Tasas"),
+    ("config_empresa", "Config. de Empresa"),
+    ("usuarios", "Usuarios"),
 ]
+
 
 # ── Paleta forzada (evita que Qt anule el color de fondo) ──────────────────
 def _paleta_azul() -> QPalette:
     p = QPalette()
-    for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Base,
-                 QPalette.ColorRole.AlternateBase):
+    for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Base, QPalette.ColorRole.AlternateBase):
         p.setColor(role, QColor(COLOR_SIDEBAR_BG))
     p.setColor(QPalette.ColorRole.WindowText, QColor("#FFFFFF"))
-    p.setColor(QPalette.ColorRole.ButtonText,  QColor("#FFFFFF"))
-    p.setColor(QPalette.ColorRole.Button,      QColor(COLOR_SIDEBAR_BG))
+    p.setColor(QPalette.ColorRole.ButtonText, QColor("#FFFFFF"))
+    p.setColor(QPalette.ColorRole.Button, QColor(COLOR_SIDEBAR_BG))
     return p
 
 
@@ -140,8 +140,8 @@ class SidebarButton(QPushButton):
 
     def __init__(self, clave: str, texto: str, parent=None):
         super().__init__(parent)
-        self.clave  = clave
-        self.texto  = texto
+        self.clave = clave
+        self.texto = texto
         self.setObjectName("SidebarBtn")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -174,15 +174,15 @@ class Sidebar(QWidget):
     """Barra lateral de navegación del ERP con toggle colapsar/expandir."""
 
     modulo_seleccionado = Signal(str)
-    toggled = Signal(bool)   # True = expandido, False = colapsado
+    toggled = Signal(bool)  # True = expandido, False = colapsado
 
     def __init__(self, empresa_nombre: str = "Mi Empresa", parent=None):
         super().__init__(parent)
         self.setObjectName("Sidebar")
         self._expandido = True
         self._botones: dict[str, SidebarButton] = {}
-        self._activo   = "inicio"
-        self._empresa  = empresa_nombre
+        self._activo = "inicio"
+        self._empresa = empresa_nombre
 
         # ── Paleta + stylesheet forzados ──────────────────────────────────
         self.setAutoFillBackground(True)
@@ -209,7 +209,7 @@ class Sidebar(QWidget):
         self._header.setAutoFillBackground(True)
         self._header.setPalette(_paleta_azul())
         self._header.setStyleSheet(
-            f"background-color: rgba(0,0,0,0.20); border-bottom: 1px solid rgba(255,255,255,0.10);"
+            "background-color: rgba(0,0,0,0.20); border-bottom: 1px solid rgba(255,255,255,0.10);"
         )
 
         lay = QVBoxLayout(self._header)
@@ -220,6 +220,7 @@ class Sidebar(QWidget):
         top_row = QWidget()
         top_row.setStyleSheet("background: transparent;")
         from PySide6.QtWidgets import QHBoxLayout
+
         h = QHBoxLayout(top_row)
         h.setContentsMargins(8, 0, 8, 0)
         h.setSpacing(6)
@@ -274,9 +275,7 @@ class Sidebar(QWidget):
             self._botones[clave] = btn
             self._nav_layout.addWidget(btn)
 
-        self._nav_layout.addSpacerItem(
-            QSpacerItem(1, 1, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-        )
+        self._nav_layout.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
         scroll.setWidget(content)
         return scroll
 

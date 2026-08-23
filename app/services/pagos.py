@@ -49,6 +49,14 @@ class PagoService:
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
 
+        # Reloj de la app (Python), no el del trigger (GETDATE()): CajaService.abrir_caja/
+        # cerrar_caja tambien usan datetime.now() para fecha_apertura/fecha_cierre, y
+        # trg_cajas_cierre compara fecha_registro de caja_movimientos contra ese rango. Si
+        # se dejara que el trigger use GETDATE(), un desfase entre el reloj de la app y el
+        # del SQL Server podria dejar un pago fuera del rango del turno (C12).
+        if fecha_pago is None:
+            fecha_pago = datetime.now()
+
         pago = PagoCobro(
             id_cuenta_por_cobrar=id_cuenta_por_cobrar,
             id_cuenta_bancaria=id_cuenta_bancaria,
@@ -111,6 +119,10 @@ class PagoService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+
+        # Ver el comentario equivalente en registrar_pago_cobro (C12).
+        if fecha_pago is None:
+            fecha_pago = datetime.now()
 
         pago = PagoProveedor(
             id_cuenta_por_pagar=id_cuenta_por_pagar,

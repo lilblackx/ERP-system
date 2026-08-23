@@ -5,7 +5,14 @@ import pytest
 from app.services.auth import verify_password
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
-from tests.factories import asignar_permiso, crear_permiso, crear_rol, crear_usuario, crear_usuario_admin, crear_vendedor
+from tests.factories import (
+    asignar_permiso,
+    crear_permiso,
+    crear_rol,
+    crear_usuario,
+    crear_usuario_admin,
+    crear_vendedor,
+)
 
 
 def _datos_usuario(**overrides) -> dict:
@@ -229,7 +236,9 @@ def test_cambiar_estado_ok(db_session):
     admin = crear_usuario_admin(db_session)
     usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
-    actualizado = UsuarioService.cambiar_estado(db_session, usuario.id_usuario, "INACTIVO", realizado_por=admin.id_usuario)
+    actualizado = UsuarioService.cambiar_estado(
+        db_session, usuario.id_usuario, "INACTIVO", realizado_por=admin.id_usuario
+    )
 
     assert actualizado.estado == "INACTIVO"
 
@@ -293,9 +302,7 @@ def test_listar_usuarios_filtra_por_rol(db_session):
     UsuarioService.crear_usuario(
         db_session, **_datos_usuario(nombre_usuario="admin1", id_rol=rol.id_rol), realizado_por=admin.id_usuario
     )
-    UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(nombre_usuario="sinrol"), realizado_por=admin.id_usuario
-    )
+    UsuarioService.crear_usuario(db_session, **_datos_usuario(nombre_usuario="sinrol"), realizado_por=admin.id_usuario)
 
     resultado = UsuarioService.listar_usuarios(db_session, id_rol=rol.id_rol, id_usuario=admin.id_usuario)
 
@@ -323,7 +330,8 @@ def test_listar_usuarios_filtra_por_estado(db_session):
 def test_listar_usuarios_nombre_completo(db_session):
     admin = crear_usuario_admin(db_session)
     UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(nombre="Juan", apellido="Perez", nombre_usuario="jperez2"),
+        db_session,
+        **_datos_usuario(nombre="Juan", apellido="Perez", nombre_usuario="jperez2"),
         realizado_por=admin.id_usuario,
     )
 
@@ -364,3 +372,25 @@ def test_verificar_permiso_no_concedido(db_session):
     usuario = crear_usuario(db_session, id_rol=rol.id_rol)
 
     assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "eliminar") is False
+
+
+def test_verificar_permiso_usuario_inactivo_es_false_aunque_tenga_el_permiso(db_session):
+    """C17: un usuario desactivado no debe seguir pasando el chequeo de permisos aunque
+    su rol si tenga el permiso concedido en la matriz."""
+    rol = crear_rol(db_session)
+    permiso = crear_permiso(db_session, recurso="clientes", accion="crear")
+    asignar_permiso(db_session, rol, permiso)
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol, estado="INACTIVO")
+
+    assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "crear") is False
+
+
+def test_verificar_permiso_usuario_bloqueado_es_false_aunque_tenga_el_permiso(db_session):
+    """C17: un usuario bloqueado (bloqueado_desde no nulo) no debe seguir pasando el
+    chequeo de permisos aunque su rol si tenga el permiso concedido en la matriz."""
+    rol = crear_rol(db_session)
+    permiso = crear_permiso(db_session, recurso="clientes", accion="crear")
+    asignar_permiso(db_session, rol, permiso)
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol, bloqueado_desde=datetime.now())
+
+    assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "crear") is False

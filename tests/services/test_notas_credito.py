@@ -74,12 +74,20 @@ def test_crear_nota_credito_cliente_correlativo_es_unico_y_valido(db_session):
     cliente, factura, _ = _crear_factura(db_session)
 
     primera = NotaCreditoService.crear_nota_credito_cliente(
-        db_session, id_cliente=cliente.id_cliente, id_factura_origen=factura.id_factura,
-        monto=Decimal("10.00"), motivo="x", id_usuario=None,
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura.id_factura,
+        monto=Decimal("10.00"),
+        motivo="x",
+        id_usuario=None,
     )
     segunda = NotaCreditoService.crear_nota_credito_cliente(
-        db_session, id_cliente=cliente.id_cliente, id_factura_origen=factura.id_factura,
-        monto=Decimal("5.00"), motivo="y", id_usuario=None,
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura.id_factura,
+        monto=Decimal("5.00"),
+        motivo="y",
+        id_usuario=None,
     )
 
     assert primera.numero_nota_credito != segunda.numero_nota_credito
@@ -137,12 +145,20 @@ def test_listar_notas_credito_clientes_reporte_filtra_por_cliente_y_pagina(db_se
     cliente_a, factura_a, admin = _crear_factura(db_session)
     cliente_b, factura_b, _ = _crear_factura(db_session)
     NotaCreditoService.crear_nota_credito_cliente(
-        db_session, id_cliente=cliente_a.id_cliente, id_factura_origen=factura_a.id_factura,
-        monto=Decimal("10.00"), motivo="x", id_usuario=None,
+        db_session,
+        id_cliente=cliente_a.id_cliente,
+        id_factura_origen=factura_a.id_factura,
+        monto=Decimal("10.00"),
+        motivo="x",
+        id_usuario=None,
     )
     NotaCreditoService.crear_nota_credito_cliente(
-        db_session, id_cliente=cliente_b.id_cliente, id_factura_origen=factura_b.id_factura,
-        monto=Decimal("20.00"), motivo="y", id_usuario=None,
+        db_session,
+        id_cliente=cliente_b.id_cliente,
+        id_factura_origen=factura_b.id_factura,
+        monto=Decimal("20.00"),
+        motivo="y",
+        id_usuario=None,
     )
 
     reporte = NotaCreditoService.listar_notas_credito_clientes(

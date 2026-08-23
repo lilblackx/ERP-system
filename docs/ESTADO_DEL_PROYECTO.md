@@ -29,7 +29,7 @@ están implementadas, qué decisiones de diseño se tomaron y qué queda pendien
 | Proveedores | `proveedores.py` | CRUD, unicidad de código/RIF, límite y días de crédito |
 | Vendedores | `vendedores.py` | CRUD, desempeño mensual (ventas, facturas, clientes asignados) |
 | Categorías | `categorias.py` | CRUD, conteo de productos asociados |
-| Inventario y precios | `inventario.py` | CRUD de productos, alertas de stock/vencimiento, precios por tipo (DETAL/MAYOR/ESPECIAL) con cálculo de margen |
+| Inventario y precios | `inventario.py` | CRUD de productos, alertas de stock/vencimiento, un precio de lista por producto (`obtener_precio`/`establecer_precio`, C14 2026-08-23 — antes hasta 3 tipos DETAL/MAYOR/ESPECIAL) con cálculo de margen |
 | Ventas | `ventas.py` | Emisión de factura (con validación de stock y de crédito), anulación de factura, listado con filtros |
 | Compras | `compras.py` | Registro de compra (con validación de crédito del proveedor), anulación de compra, listado con filtros |
 | Tesorería | `tesoreria.py` | Bancos y cuentas bancarias (CRUD, resumen con número enmascarado), apertura/cierre de caja, movimientos manuales de caja |
@@ -39,6 +39,7 @@ están implementadas, qué decisiones de diseño se tomaron y qué queda pendien
 | Roles y permisos | `permisos.py` | CRUD de roles, y escritura de la matriz `rol_permisos` (asignar/revocar/reemplazar conjunto completo). El catálogo de permisos (`recurso`+`accion`) se mantiene fijo vía schema/seed, no se crea desde aquí. También expone `require_permiso()`, el punto de entrada de autorización que usan los otros 17 servicios (ver sección 7) |
 | Cuentas por cobrar/pagar "otros" | `otros_movimientos.py` | Préstamos/anticipos a cobrar, y conciliación de transferencias bancarias sin identificar (ver sección 4) |
 | Notas de crédito | `notas_credito.py` | Saldo a favor de cliente/proveedor generado automáticamente al anular una factura/compra con pagos ya aplicados (ver sección 3, "Notas de credito automaticas") |
+| Comisiones de vendedor | `comisiones.py` | Cálculo automático al emitir factura (diferencia entre precio de venta y precio de lista) y pago real por caja/banco (C14 2026-08-23, ver sección 3, "Comisiones de vendedor") |
 | Configuración de empresa | `empresa.py` | Datos fiscales y logotipo (registro singleton) |
 | Auditoría | `auditoria.py` | Bitácora transversal de eventos críticos (ver sección 5) |
 | Panel general | `dashboard.py` | KPIs consolidados para el panel principal (ver sección 6) |
@@ -111,8 +112,45 @@ backend:
     futura o devolverlo es un desarrollo aparte -- todavia no hay un flujo que consuma
     estas notas, `NotaCreditoService` solo las crea y lista.
 
-  Sigue bloqueada la anulacion si hay `comisiones_factura` calculadas sobre alguna
-  linea -- no hay modulo que las gestione todavia, revertirlas queda fuera de alcance.
+  ~~Sigue bloqueada la anulacion si hay `comisiones_factura` calculadas~~ -- resuelto
+  (2026-08-23, C14): ver "Comisiones de vendedor" mas abajo. Comisiones `'pendiente'` se
+  borran antes de anular; `'pagada'` sigue bloqueando (no se puede revertir un pago ya
+  hecho).
+
+- **Comisiones de vendedor** (C14, `migrations/0011_consolidar_producto_precios.sql`,
+  `migrations/0012_comisiones_pagos.sql`, `migrations/0013_catalogo_permisos_comisiones.sql`,
+  2026-08-23, `app/services/comisiones.py`): regla de negocio -- un vendedor puede vender
+  un producto mas caro que su precio de lista (ej. producto de lista $1, lo vende a $2); la
+  diferencia ($1) es su comision, nunca negativa si vende igual o mas barato. El monto de
+  la venta (`factura_detalle.precio_unitario`/`total_venta`/`cuentas_por_cobrar`) nunca se
+  toca -- la comision es un pasivo derivado, calculado aparte, nunca neteado contra la
+  venta.
+  - **Precios**: se simplificaron a un solo precio de lista por producto (antes hasta 3
+    tipos, DETAL/MAYOR/ESPECIAL). `producto_precios` se mantiene (no se borro la tabla)
+    pero `CK_producto_precios_tipo` ahora exige `tipo_precio = 'UNICO'` -- la migracion
+    consolido los datos existentes con prioridad DETAL>MAYOR>ESPECIAL, respaldando en
+    `dbo.auditoria` (accion `MIGRACION_CONSOLIDAR_PRECIOS`) lo que se descarto.
+  - **Calculo**: `ComisionService.calcular_comisiones_factura()` se llama desde
+    `VentaService.emitir_factura()`, en la MISMA transaccion atomica que la venta (despues
+    del `flush()` de `factura_detalle`, sin `commit()` propio). Sin vendedor en la factura,
+    o sin precio de lista configurado para el producto: no genera comision para esa linea,
+    no bloquea la venta.
+  - **Pago**: `PagoComisionService.pagar_comisiones_vendedor()` paga en un solo batch TODAS
+    las comisiones `'pendiente'` de un vendedor (no hay pago parcial de una linea
+    individual), crea `PagoComision` (tabla nueva, **sin** trigger `INSTEAD OF INSERT` a
+    proposito -- a diferencia de `pagos_cobros`/`pagos_proveedores`, no hay
+    `saldo_pendiente` parcial que proteger; se verifico que `trg_banco_movimientos_saldo`/
+    `trg_cajas_cierre` procesan igual un `BancoMovimiento`/`CajaMovimiento` insertado
+    directo desde Python que uno insertado por un trigger de otra tabla) +
+    `CajaMovimiento`/`BancoMovimiento` con `id_pago_comision`. Lock `WITH (UPDLOCK,
+    ROWLOCK)` sobre las `ComisionFactura` pendientes (mismo patron que el resto de la
+    sesion, ver seccion de indices/locking) para que dos pagos concurrentes al mismo
+    vendedor no paguen dos veces.
+  - Catalogo de permisos nuevo modulo `comisiones` (ver/crear/editar/eliminar), distinto
+    del `reportes_comisiones` preexistente (solo lectura, ya asignado a VENDEDOR en el seed
+    original).
+  - Sin UI todavia (no existe ninguna UI real de ventas/inventario, solo login/clientes) --
+    `sidebar.py` ya tenia la entrada "Comisiones" apuntando a `PlaceholderView`.
 
   **Correlativo fiscal** (`migrations/0003_correlativo_notas_credito_clientes.sql`,
   2026-08-22): `NotaCreditoCliente` es un documento que la empresa emite (reduce lo que
@@ -253,9 +291,10 @@ el stock y cierran la cuenta por cobrar/pagar asociada. Si ya se le aplicaron pa
 pagos no se tocan — se genera una nota de crédito por el monto ya cobrado/pagado y la
 cuenta pasa a `estado='anulada'` en vez de borrarse, ver "Notas de credito automaticas"
 en la sección 3. Sin pagos aplicados, la cuenta se sigue borrando (nada que preservar).
-Sigue bloqueada con `ValueError` si ya se calculó una `comisiones_factura` sobre alguna
-línea (solo aplica a ventas): no hay módulo que gestione comisiones todavía, revertirlas
-queda fuera de alcance. El mecanismo es borrar las líneas de `factura_detalle`/
+Comisiones sobre alguna línea (solo aplica a ventas, C14 resuelto 2026-08-23, ver
+"Comisiones de vendedor" más abajo): las `'pendiente'` se borran antes de anular, las
+`'pagada'` siguen bloqueando con `ValueError`. El mecanismo es borrar las líneas de
+`factura_detalle`/
 `compra_detalle` (dispara los triggers de stock y de recálculo de total) antes de tocar
 `cuentas_por_cobrar`/`cuentas_por_pagar` — `trg_factura_venta_cxc`/`trg_compras_cxp` solo
 tocan cuentas en estado `'pendiente'`, así que si ya hay pagos aplicados (`'parcial'`/
@@ -373,24 +412,22 @@ de servicio.
   conteo, se decidió que estas 5 entidades nunca se borran físicamente. Ver sección 8.
 - ~~Reversión de pagos ya aplicados a una cuenta por cobrar/pagar~~ — resuelto
   (2026-08-22) con nota de crédito automática. Ver "Notas de credito automaticas" en la
-  sección 3. Sigue pendiente la reversión de **comisiones** (`comisiones_factura`): no
-  hay módulo que las gestione todavía, así que `anular_factura()` sigue bloqueando si hay
-  comisiones calculadas.
+  sección 3. ~~Reversión de comisiones~~ — resuelto (2026-08-23), ver "Comisiones de
+  vendedor" más abajo.
 - Notas de crédito (`notas_credito.py`): ~~sin correlativo fiscal~~ — resuelto
   (2026-08-22), ver sección 3. Sigue faltando el flujo para consumirlas — aplicar una
   nota disponible como abono a una venta/compra futura, o devolverla como un movimiento
   de caja/banco nuevo (fechado en el momento real de la devolución, no retroactivo). Es
   un desarrollo aparte.
-- Riesgo de *clock skew* entre el reloj de la app (Python `datetime.now()`, usado por
-  `CajaService.abrir_caja()`/`cerrar_caja()`) y el reloj del SQL Server (`GETDATE()`,
-  usado por `trg_pagos_cobros_io`/`trg_pagos_proveedores_io` cuando `registrar_pago_cobro()`/
-  `registrar_pago_proveedor()` no reciben `fecha_pago` explícito): si difieren, un pago
-  registrado cerca del cierre de turno podría quedar fuera del rango que
-  `trg_cajas_cierre` usa para sumar `saldo_cierre`. Detectado 2026-08-22 escribiendo
-  `tests/services/test_pagos.py::test_borrar_pago_cobro_con_turno_de_caja_ya_cerrado_recalcula_saldo_cierre`
-  (el test necesitó pasar `fecha_pago=datetime.now()` explícito para no ser flaky). No
-  resuelto — pendiente decidir si `pagos.py` siempre debe fijar `fecha_pago` en Python o
-  si `trg_cajas_cierre` debe usar el reloj del servidor de forma consistente.
+- ~~Riesgo de *clock skew*~~ — resuelto (2026-08-23). `registrar_pago_cobro()`/
+  `registrar_pago_proveedor()` (`app/services/pagos.py`) ahora fijan `fecha_pago =
+  datetime.now()` en Python cuando no se recibe explícito, en vez de dejar que
+  `trg_pagos_cobros_io`/`trg_pagos_proveedores_io` usen `ISNULL(fecha_pago, GETDATE())`
+  (reloj del SQL Server). Con esto todo el flujo de caja — `CajaService.abrir_caja()`/
+  `cerrar_caja()` y los pagos — queda en el mismo reloj (el de la app), eliminando el
+  desfase que `trg_cajas_cierre` podía usar mal al sumar `saldo_cierre`. Sin cambios de
+  schema/trigger. Detectado 2026-08-22 escribiendo
+  `tests/services/test_pagos.py::test_borrar_pago_cobro_con_turno_de_caja_ya_cerrado_recalcula_saldo_cierre`.
 - ~~Sin migraciones formales del schema~~ — resuelto (2026-08-22). Ver nota al final de
   la sección 3.
 - Cobertura de pruebas automatizadas: hecha para los 18 módulos de servicio más el

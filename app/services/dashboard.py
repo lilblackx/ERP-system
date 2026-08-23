@@ -17,9 +17,7 @@ def _rango_dia(dia: date) -> tuple[datetime, datetime]:
 
 class DashboardService:
     @staticmethod
-    def get_panel_general_data(
-        session: Session, umbral_stock_minimo: int = 10, id_usuario: int | None = None
-    ) -> dict:
+    def get_panel_general_data(session: Session, umbral_stock_minimo: int = 10, id_usuario: int | None = None) -> dict:
         require_permiso(session, id_usuario, "dashboard", "ver")
         hoy = date.today()
         ayer = hoy - timedelta(days=1)
@@ -38,11 +36,15 @@ class DashboardService:
     @staticmethod
     def _total_ventas_del_dia(session: Session, dia: date) -> Decimal:
         inicio, fin = _rango_dia(dia)
-        return session.query(func.coalesce(func.sum(FacturaVenta.total_venta), 0)).filter(
-            FacturaVenta.fecha_emision >= inicio,
-            FacturaVenta.fecha_emision < fin,
-            FacturaVenta.estado_factura != "ANULADA",
-        ).scalar()
+        return (
+            session.query(func.coalesce(func.sum(FacturaVenta.total_venta), 0))
+            .filter(
+                FacturaVenta.fecha_emision >= inicio,
+                FacturaVenta.fecha_emision < fin,
+                FacturaVenta.estado_factura != "ANULADA",
+            )
+            .scalar()
+        )
 
     @staticmethod
     def _kpi_ventas_hoy(session: Session, hoy: date, ayer: date) -> dict:
@@ -60,35 +62,51 @@ class DashboardService:
 
     @staticmethod
     def _kpi_por_cobrar(session: Session, hoy: date) -> dict:
-        saldo_total = session.query(func.coalesce(func.sum(CuentaPorCobrar.saldo_pendiente), 0)).filter(
-            CuentaPorCobrar.estado.in_(CUENTA_ABIERTA)
-        ).scalar()
+        saldo_total = (
+            session.query(func.coalesce(func.sum(CuentaPorCobrar.saldo_pendiente), 0))
+            .filter(CuentaPorCobrar.estado.in_(CUENTA_ABIERTA))
+            .scalar()
+        )
 
-        facturas_vencidas = session.query(func.count(CuentaPorCobrar.id_cuenta_por_cobrar)).filter(
-            CuentaPorCobrar.estado.in_(CUENTA_ABIERTA),
-            CuentaPorCobrar.fecha_vencimiento < hoy,
-        ).scalar()
+        facturas_vencidas = (
+            session.query(func.count(CuentaPorCobrar.id_cuenta_por_cobrar))
+            .filter(
+                CuentaPorCobrar.estado.in_(CUENTA_ABIERTA),
+                CuentaPorCobrar.fecha_vencimiento < hoy,
+            )
+            .scalar()
+        )
 
         return {"saldo_total": saldo_total, "facturas_vencidas": facturas_vencidas}
 
     @staticmethod
     def _kpi_por_pagar(session: Session, hoy: date) -> dict:
-        saldo_total = session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0)).filter(
-            CuentaPorPagar.estado.in_(CUENTA_ABIERTA)
-        ).scalar()
+        saldo_total = (
+            session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0))
+            .filter(CuentaPorPagar.estado.in_(CUENTA_ABIERTA))
+            .scalar()
+        )
 
-        compras_vencidas = session.query(func.count(CuentaPorPagar.id_cuenta)).filter(
-            CuentaPorPagar.estado.in_(CUENTA_ABIERTA),
-            CuentaPorPagar.fecha_vencimiento < hoy,
-        ).scalar()
+        compras_vencidas = (
+            session.query(func.count(CuentaPorPagar.id_cuenta))
+            .filter(
+                CuentaPorPagar.estado.in_(CUENTA_ABIERTA),
+                CuentaPorPagar.fecha_vencimiento < hoy,
+            )
+            .scalar()
+        )
 
         return {"saldo_total": saldo_total, "compras_vencidas": compras_vencidas}
 
     @staticmethod
     def _kpi_productos_alerta(session: Session, umbral_stock_minimo: int) -> int:
-        return session.query(func.count(Inventario.id_producto)).filter(
-            Inventario.cantidad_unidad <= umbral_stock_minimo
-        ).scalar()
+        # Excluye INACTIVOS (C21): un producto descontinuado no deberia inflar la alerta
+        # de stock bajo para siempre.
+        return (
+            session.query(func.count(Inventario.id_producto))
+            .filter(Inventario.cantidad_unidad <= umbral_stock_minimo, Inventario.estado_producto == "ACTIVO")
+            .scalar()
+        )
 
     @staticmethod
     def _grafico_semanal(session: Session, hoy: date) -> list[dict]:
@@ -144,7 +162,7 @@ class DashboardService:
         productos = (
             session.query(Inventario)
             .options(joinedload(Inventario.categoria))
-            .filter(Inventario.cantidad_unidad <= umbral_stock_minimo)
+            .filter(Inventario.cantidad_unidad <= umbral_stock_minimo, Inventario.estado_producto == "ACTIVO")
             .order_by(Inventario.cantidad_unidad)
             .limit(limite)
             .all()

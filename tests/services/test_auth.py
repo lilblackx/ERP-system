@@ -3,9 +3,11 @@ import pytest
 from app.services.auditoria import AuditoriaService
 from app.services.auth import (
     MAX_INTENTOS_FALLIDOS,
+    PASSWORD_MIN_LENGTH,
     CuentaBloqueadaError,
     authenticate,
     hash_password,
+    validar_password_policy,
     verify_password,
 )
 from tests.factories import crear_usuario, crear_usuario_admin
@@ -152,6 +154,50 @@ def test_authenticate_bloquea_tras_max_intentos_fallidos(db_session):
 
     with pytest.raises(CuentaBloqueadaError):
         authenticate(db_session, "jperez", "Secreta123")
+
+
+# --- validar_password_policy (C6) -----------------------------------------------------
+# Se ejercita indirectamente via UsuarioService/RecuperacionAccesoService, pero ningun
+# test la llamaba por nombre -- estos cubren cada regla por separado.
+
+
+def test_validar_password_policy_clave_valida_no_lanza():
+    validar_password_policy("Secreta123!")
+
+
+def test_validar_password_policy_muy_corta():
+    assert len("Aa1!") < PASSWORD_MIN_LENGTH
+    with pytest.raises(ValueError, match=f"minimo {PASSWORD_MIN_LENGTH} caracteres"):
+        validar_password_policy("Aa1!")
+
+
+def test_validar_password_policy_sin_mayuscula():
+    with pytest.raises(ValueError, match="una mayuscula"):
+        validar_password_policy("secreta123!")
+
+
+def test_validar_password_policy_sin_minuscula():
+    with pytest.raises(ValueError, match="una minuscula"):
+        validar_password_policy("SECRETA123!")
+
+
+def test_validar_password_policy_sin_numero():
+    with pytest.raises(ValueError, match="un numero"):
+        validar_password_policy("Secretaaa!")
+
+
+def test_validar_password_policy_sin_caracter_especial():
+    with pytest.raises(ValueError, match="un caracter especial"):
+        validar_password_policy("Secreta123")
+
+
+def test_validar_password_policy_acumula_todas_las_faltantes():
+    with pytest.raises(ValueError) as exc_info:
+        validar_password_policy("abc")
+    mensaje = str(exc_info.value)
+    assert "mayuscula" in mensaje
+    assert "numero" in mensaje
+    assert "caracter especial" in mensaje
 
 
 def test_authenticate_bloqueado_no_verifica_clave_correcta(db_session):

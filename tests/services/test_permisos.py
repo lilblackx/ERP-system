@@ -1,16 +1,19 @@
+from datetime import datetime
+
 import pytest
 
-from app.services.permisos import PermisoDenegadoError, PermisoService, RolService
+from app.services.permisos import PermisoDenegadoError, PermisoService, RolService, require_permiso
 from app.services.usuarios import UsuarioService
 from tests.factories import crear_permiso, crear_rol, crear_usuario, crear_usuario_admin
-
 
 # --- RolService -------------------------------------------------------------------
 
 
 def test_crear_rol(db_session):
     admin = crear_usuario_admin(db_session)
-    rol = RolService.crear_rol(db_session, nombre="SUPERVISOR", descripcion="Supervisa cajas", id_usuario=admin.id_usuario)
+    rol = RolService.crear_rol(
+        db_session, nombre="SUPERVISOR", descripcion="Supervisa cajas", id_usuario=admin.id_usuario
+    )
     assert rol.id_rol is not None
     assert rol.nombre == "SUPERVISOR"
 
@@ -61,7 +64,9 @@ def test_obtener_rol_sin_usuario_autorizado_falla(db_session):
 def test_actualizar_rol(db_session):
     admin = crear_usuario_admin(db_session)
     rol = RolService.crear_rol(db_session, nombre="SUPERVISOR", id_usuario=admin.id_usuario)
-    actualizado = RolService.actualizar_rol(db_session, rol.id_rol, id_usuario=admin.id_usuario, descripcion="Nueva descripcion")
+    actualizado = RolService.actualizar_rol(
+        db_session, rol.id_rol, id_usuario=admin.id_usuario, descripcion="Nueva descripcion"
+    )
     assert actualizado.descripcion == "Nueva descripcion"
 
 
@@ -197,7 +202,9 @@ def test_asignar_permiso_es_idempotente(db_session):
     permiso = crear_permiso(db_session, recurso="clientes", accion="crear")
 
     PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)
-    PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)  # no debe fallar
+    PermisoService.asignar_permiso(
+        db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario
+    )  # no debe fallar
 
     matriz = PermisoService.obtener_matriz_rol(db_session, rol.id_rol, id_usuario=admin.id_usuario)
     assert sum(1 for f in matriz if f["asignado"]) == 1
@@ -273,7 +280,10 @@ def test_establecer_permisos_rol_reemplaza_conjunto_completo(db_session):
         db_session, rol.id_rol, [permiso_b.id_permiso, permiso_c.id_permiso], id_usuario=admin.id_usuario
     )
 
-    matriz = {f["id_permiso"]: f["asignado"] for f in PermisoService.obtener_matriz_rol(db_session, rol.id_rol, id_usuario=admin.id_usuario)}
+    matriz = {
+        f["id_permiso"]: f["asignado"]
+        for f in PermisoService.obtener_matriz_rol(db_session, rol.id_rol, id_usuario=admin.id_usuario)
+    }
     assert matriz[permiso_a.id_permiso] is False
     assert matriz[permiso_b.id_permiso] is True
     assert matriz[permiso_c.id_permiso] is True
@@ -310,3 +320,69 @@ def test_establecer_permisos_rol_permiso_inexistente(db_session):
     rol = crear_rol(db_session)
     with pytest.raises(ValueError, match="no encontrado"):
         PermisoService.establecer_permisos_rol(db_session, rol.id_rol, [999999], id_usuario=admin.id_usuario)
+
+
+# --- require_permiso: estado / bloqueo del usuario (C17) ---------------------------
+# Una sesion de escritorio ya abierta mantiene el Usuario autenticado en memoria; el
+# unico punto que puede cortarle el acceso si otro ADMIN lo desactiva/bloquea despues es
+# este chequeo dentro de require_permiso(), en la proxima llamada a un servicio.
+
+
+def test_require_permiso_usuario_inactivo_falla(db_session):
+    usuario = crear_usuario_admin(db_session, estado="INACTIVO")
+    with pytest.raises(PermisoDenegadoError, match="inactivo"):
+        require_permiso(db_session, usuario.id_usuario, "permisos", "ver")
+
+
+def test_require_permiso_usuario_bloqueado_falla(db_session):
+    usuario = crear_usuario_admin(db_session, bloqueado_desde=datetime.now())
+    with pytest.raises(PermisoDenegadoError, match="bloqueado"):
+        require_permiso(db_session, usuario.id_usuario, "permisos", "ver")
+
+
+def test_require_permiso_admin_inactivo_no_bypassa(db_session):
+    """El chequeo de estado va antes del bypass de ADMIN a proposito: un ADMIN
+    desactivado tampoco deberia poder operar."""
+    admin = crear_usuario_admin(db_session, estado="INACTIVO")
+    with pytest.raises(PermisoDenegadoError):
+        require_permiso(db_session, admin.id_usuario, "clientes", "crear")
+
+
+def test_require_permiso_admin_bloqueado_no_bypassa(db_session):
+    admin = crear_usuario_admin(db_session, bloqueado_desde=datetime.now())
+    with pytest.raises(PermisoDenegadoError):
+        require_permiso(db_session, admin.id_usuario, "clientes", "crear")
+
+
+def test_require_permiso_usuario_sin_rol_asignado_falla(db_session):
+    usuario = crear_usuario(db_session, id_rol=None)
+    with pytest.raises(PermisoDenegadoError, match="no tiene rol asignado"):
+        require_permiso(db_session, usuario.id_usuario, "clientes", "ver")
+
+
+def test_require_permiso_usuario_none_falla(db_session):
+    with pytest.raises(PermisoDenegadoError, match="usuario autenticado"):
+        require_permiso(db_session, None, "clientes", "ver")
+
+
+def test_require_permiso_usuario_inexistente_falla(db_session):
+    with pytest.raises(PermisoDenegadoError, match="no encontrado"):
+        require_permiso(db_session, 999999, "clientes", "ver")
+
+
+def test_require_permiso_con_permiso_asignado_no_lanza(db_session):
+    admin = crear_usuario_admin(db_session)
+    rol = crear_rol(db_session)
+    permiso = crear_permiso(db_session, recurso="clientes", accion="ver")
+    PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+
+    require_permiso(db_session, usuario.id_usuario, "clientes", "ver")  # no debe lanzar
+
+
+def test_require_permiso_sin_permiso_asignado_falla(db_session):
+    rol = crear_rol(db_session)
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+
+    with pytest.raises(PermisoDenegadoError, match="no tiene permiso"):
+        require_permiso(db_session, usuario.id_usuario, "clientes", "ver")

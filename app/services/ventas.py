@@ -15,6 +15,7 @@ from app.db.models import (
     Vendedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.comisiones import ComisionService
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
 
@@ -131,17 +132,25 @@ class VentaService:
         session.add(factura)
         session.flush()
 
+        detalles_creados = []
         for item in items:
-            session.add(
-                FacturaDetalle(
-                    id_factura=factura.id_factura,
-                    id_producto_factura=item["id_producto"],
-                    descripcion=item.get("descripcion"),
-                    cantidad_producto=item["cantidad"],
-                    observaciones_item=item.get("observaciones"),
-                    precio_unitario=item["precio_unitario"],
-                )
+            detalle = FacturaDetalle(
+                id_factura=factura.id_factura,
+                id_producto_factura=item["id_producto"],
+                descripcion=item.get("descripcion"),
+                cantidad_producto=item["cantidad"],
+                observaciones_item=item.get("observaciones"),
+                precio_unitario=item["precio_unitario"],
             )
+            session.add(detalle)
+            detalles_creados.append(detalle)
+
+        # flush (no commit) para tener id_factura_detalle poblado -- ComisionService lo
+        # necesita para crear ComisionFactura en la MISMA transaccion atomica que la venta
+        # (C14: el vendedor puede vender mas caro que el precio de lista, la diferencia es
+        # su comision).
+        session.flush()
+        ComisionService.calcular_comisiones_factura(session, factura, detalles_creados, id_usuario)
 
         session.commit()
         session.refresh(factura)
@@ -175,9 +184,14 @@ class VentaService:
         aplicados) y su saldo_pendiente se pone en 0. Sin pagos aplicados, la cuenta por
         cobrar se sigue borrando igual que antes (no hay nada que preservar).
 
-        Sigue bloqueada si se calcularon comisiones sobre alguna de sus lineas -- no hay
-        modulo que las gestione todavia (comisiones_factura.FK hacia factura_detalle es
-        ON DELETE NO ACTION), asi que revertirlas queda fuera de alcance por ahora.
+        Si se calcularon comisiones sobre alguna de sus lineas (ComisionService, C14): las
+        que siguen 'pendiente' se borran (nada que preservar, el vendedor todavia no cobro
+        nada) ANTES de borrar factura_detalle -- ComisionFactura.id_factura_detalle tiene
+        FK ON DELETE NO ACTION, asi que borrar el detalle primero reventaria con un
+        IntegrityError crudo. Si alguna ya esta 'pagada' (el vendedor ya cobro ese dinero
+        real via PagoComisionService), la anulacion sigue bloqueada -- no hay forma de
+        revertir un pago ya hecho, mismo criterio que los pagos de cliente ya aplicados
+        (ver NotaCreditoCliente mas abajo).
 
         El stock se repone eliminando las lineas de factura_detalle: dispara
         trg_factura_detalle_stock_del (repone cantidad_unidad) y trg_factura_total_del
@@ -190,7 +204,14 @@ class VentaService:
         if not motivo:
             raise ValueError("motivo es requerido para anular una factura")
 
-        factura = session.get(FacturaVenta, id_factura)
+        # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18/C22 -- evita que dos clics de
+        # "anular" casi simultaneos sobre la misma factura pasen ambos el guard de
+        # estado_factura y generen una NotaCreditoCliente duplicada (C24).
+        factura = session.execute(
+            select(FacturaVenta)
+            .where(FacturaVenta.id_factura == id_factura)
+            .with_hint(FacturaVenta, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if factura is None:
             raise ValueError("Factura no encontrada")
         if factura.estado_factura == "ANULADA":
@@ -203,16 +224,14 @@ class VentaService:
             .all()
         ]
         if ids_detalle:
-            tiene_comisiones = (
-                session.query(ComisionFactura)
-                .filter(ComisionFactura.id_factura_detalle.in_(ids_detalle))
-                .first()
-                is not None
+            comisiones = (
+                session.query(ComisionFactura).filter(ComisionFactura.id_factura_detalle.in_(ids_detalle)).all()
             )
-            if tiene_comisiones:
-                raise ValueError(
-                    "No se puede anular: hay comisiones calculadas sobre esta factura. "
-                    "Revierta las comisiones antes de anular."
+            if any(comision.estado_pago == "pagada" for comision in comisiones):
+                raise ValueError("No se puede anular: hay comisiones ya pagadas sobre esta factura.")
+            if comisiones:
+                session.query(ComisionFactura).filter(ComisionFactura.id_factura_detalle.in_(ids_detalle)).delete(
+                    synchronize_session=False
                 )
 
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
@@ -225,9 +244,7 @@ class VentaService:
             )
             monto_pagado = Decimal(str(monto_pagado))
 
-        session.query(FacturaDetalle).filter(FacturaDetalle.id_factura == id_factura).delete(
-            synchronize_session=False
-        )
+        session.query(FacturaDetalle).filter(FacturaDetalle.id_factura == id_factura).delete(synchronize_session=False)
         if cxc is not None:
             if monto_pagado > 0:
                 cxc.estado = "anulada"
@@ -290,9 +307,6 @@ class VentaService:
 
         total = query.count()
         facturas = (
-            query.order_by(FacturaVenta.fecha_emision.desc())
-            .offset((pagina - 1) * por_pagina)
-            .limit(por_pagina)
-            .all()
+            query.order_by(FacturaVenta.fecha_emision.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
         )
         return {"items": facturas, "total": total, "pagina": pagina, "por_pagina": por_pagina}

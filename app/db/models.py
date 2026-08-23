@@ -1,10 +1,8 @@
 import datetime
 import decimal
-from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
-    Column,
     Date,
     DateTime,
     ForeignKey,
@@ -22,26 +20,27 @@ from app.db.session import Base
 class Rol(Base):
     __tablename__ = "roles"
 
-    id_rol = Column(BigInteger, primary_key=True, autoincrement=True)
-    nombre = Column(String(30), nullable=False, unique=True)
-    descripcion = Column(String(255))
+    id_rol: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
+    descripcion: Mapped[str | None] = mapped_column(String(255))
 
 
 class Usuario(Base):
     __tablename__ = "usuarios"
 
-    id_usuario = Column(BigInteger, primary_key=True, autoincrement=True)
-    nombre_usuario = Column(String(50), nullable=False, unique=True)
-    nombre = Column(String(100))
-    apellido = Column(String(100))
-    email = Column(String(150))
-    clave = Column(String(255))
-    id_rol = Column(BigInteger, ForeignKey("roles.id_rol"))
-    fecha_registro = Column(DateTime, server_default=func.getdate())
-    estado = Column(String(20), server_default="ACTIVO")
-    id_vendedor_usuario = Column(BigInteger)
-    intentos_fallidos = Column(Integer, nullable=False, server_default="0")
-    bloqueado_desde = Column(DateTime)  # NULL = no bloqueado; solo un codigo (o un ADMIN) lo limpia, no expira solo
+    id_usuario: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    nombre_usuario: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    nombre: Mapped[str | None] = mapped_column(String(100))
+    apellido: Mapped[str | None] = mapped_column(String(100))
+    email: Mapped[str | None] = mapped_column(String(150))
+    clave: Mapped[str | None] = mapped_column(String(255))
+    id_rol: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("roles.id_rol"))
+    fecha_registro: Mapped[datetime.datetime | None] = mapped_column(DateTime, server_default=func.getdate())
+    estado: Mapped[str | None] = mapped_column(String(20), server_default="ACTIVO")
+    id_vendedor_usuario: Mapped[int | None] = mapped_column(BigInteger)
+    intentos_fallidos: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # NULL = no bloqueado; solo un codigo (o un ADMIN) lo limpia, no expira solo.
+    bloqueado_desde: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
     rol = relationship("Rol")
 
@@ -49,45 +48,47 @@ class Usuario(Base):
 class Vendedor(Base):
     __tablename__ = "vendedores"
 
-    id_vendedor = Column(BigInteger, primary_key=True, autoincrement=True)
-    codigo_vendedor = Column(String(20))
-    identificacion_vendedor = Column(String(20))
-    nombre_vendedor = Column(String(150), nullable=False)
-    direccion_vendedor = Column(String(255))
-    telefono_vendedor = Column(String(20))
-    email_vendedor = Column(String(150))
-    fecha_creacion = Column(DateTime, server_default=func.getdate())
-    estado_vendedor = Column(String(20), server_default="ACTIVO")
-    creado_por = Column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    id_vendedor: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    codigo_vendedor: Mapped[str | None] = mapped_column(String(20))
+    identificacion_vendedor: Mapped[str | None] = mapped_column(String(20))
+    nombre_vendedor: Mapped[str] = mapped_column(String(150), nullable=False)
+    direccion_vendedor: Mapped[str | None] = mapped_column(String(255))
+    telefono_vendedor: Mapped[str | None] = mapped_column(String(20))
+    email_vendedor: Mapped[str | None] = mapped_column(String(150))
+    fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime, server_default=func.getdate())
+    estado_vendedor: Mapped[str | None] = mapped_column(String(20), server_default="ACTIVO")
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
 
 class CategoriaCliente(Base):
     __tablename__ = "categorias_cliente"
 
-    id_categoria_cliente = Column(BigInteger, primary_key=True, autoincrement=True)
-    nombre = Column(String(50), nullable=False, unique=True)
-    descuento_porcentaje = Column(Numeric(5, 2), server_default="0.00")
-    dias_credito_default = Column(Integer, server_default="0")
+    id_categoria_cliente: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    descuento_porcentaje: Mapped[decimal.Decimal | None] = mapped_column(Numeric(5, 2), server_default="0.00")
+    dias_credito_default: Mapped[int | None] = mapped_column(Integer, server_default="0")
 
 
 class Cliente(Base):
     __tablename__ = "clientes"
 
-    id_cliente = Column(BigInteger, primary_key=True, autoincrement=True)
-    id_legal = Column(String(20))
-    codigo_cliente = Column(String(20), unique=True)
-    identificacion_cliente = Column(String(20), unique=True)
-    nombre_razon_social = Column(String(200), nullable=False)
-    telefono = Column(String(20))
-    email = Column(String(150))
-    direccion = Column(String(255))
-    limite_credito = Column(Numeric(18, 2), server_default="0.00")
-    dias_credito = Column(Integer, server_default="0")
-    vendedor_cliente = Column(BigInteger, ForeignKey("vendedores.id_vendedor"))
-    creado_por = Column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    fecha_creacion = Column(DateTime, server_default=func.getdate())
-    id_categoria_cliente = Column(BigInteger, ForeignKey("categorias_cliente.id_categoria_cliente"))
-    estado_cliente = Column(String(20), server_default="ACTIVO")
+    id_cliente: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_legal: Mapped[str | None] = mapped_column(String(20))
+    codigo_cliente: Mapped[str | None] = mapped_column(String(20), unique=True)
+    identificacion_cliente: Mapped[str | None] = mapped_column(String(20), unique=True)
+    nombre_razon_social: Mapped[str] = mapped_column(String(200), nullable=False)
+    telefono: Mapped[str | None] = mapped_column(String(20))
+    email: Mapped[str | None] = mapped_column(String(150))
+    direccion: Mapped[str | None] = mapped_column(String(255))
+    limite_credito: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2), server_default="0.00")
+    dias_credito: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    vendedor_cliente: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("vendedores.id_vendedor"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime, server_default=func.getdate())
+    id_categoria_cliente: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("categorias_cliente.id_categoria_cliente")
+    )
+    estado_cliente: Mapped[str | None] = mapped_column(String(20), server_default="ACTIVO")
 
     vendedor = relationship("Vendedor")
     categoria = relationship("CategoriaCliente")
@@ -99,7 +100,7 @@ class Permiso(Base):
     id_permiso: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     recurso: Mapped[str] = mapped_column(String(50), nullable=False)
     accion: Mapped[str] = mapped_column(String(10), nullable=False)
-    descripcion: Mapped[Optional[str]] = mapped_column(String(255))
+    descripcion: Mapped[str | None] = mapped_column(String(255))
 
 
 class RolPermiso(Base):
@@ -116,12 +117,12 @@ class ConfiguracionEmpresa(Base):
     __tablename__ = "configuracion_empresa"
 
     id_config: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    logotipo_empresa: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
-    modificado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    rif_empresa: Mapped[Optional[str]] = mapped_column(String(20))
-    razon_social_empresa: Mapped[Optional[str]] = mapped_column(String(255))
-    direccion_empresa: Mapped[Optional[str]] = mapped_column(String(255))
-    telefono_empresa: Mapped[Optional[str]] = mapped_column(String(255))
+    logotipo_empresa: Mapped[bytes | None] = mapped_column(LargeBinary)
+    modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    rif_empresa: Mapped[str | None] = mapped_column(String(20))
+    razon_social_empresa: Mapped[str | None] = mapped_column(String(255))
+    direccion_empresa: Mapped[str | None] = mapped_column(String(255))
+    telefono_empresa: Mapped[str | None] = mapped_column(String(255))
 
     modificador = relationship("Usuario")
 
@@ -130,10 +131,10 @@ class Auditoria(Base):
     __tablename__ = "auditoria"
 
     id_auditoria: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    id_usuario: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    id_usuario: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     accion: Mapped[str] = mapped_column(String(50), nullable=False)
     modulo: Mapped[str] = mapped_column(String(50), nullable=False)
-    detalle: Mapped[Optional[str]] = mapped_column(String)
+    detalle: Mapped[str | None] = mapped_column(String)
     fecha_evento: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
 
     usuario = relationship("Usuario")
@@ -159,7 +160,7 @@ class Categoria(Base):
 
     id_categoria: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
 
     creador = relationship("Usuario")
@@ -172,13 +173,13 @@ class Inventario(Base):
     id_categoria: Mapped[int] = mapped_column(BigInteger, ForeignKey("categorias.id_categoria"), nullable=False)
     cod_producto: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     nombre_producto: Mapped[str] = mapped_column(String(200), nullable=False)
-    descripcion_producto: Mapped[Optional[str]] = mapped_column(String)
+    descripcion_producto: Mapped[str | None] = mapped_column(String)
     cantidad_caja: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.000")
     cantidad_unidad: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.000")
     costo_producto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
     fecha_registro: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
-    fecha_vencimiento: Mapped[Optional[datetime.date]] = mapped_column(Date)
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     estado_producto: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
 
     categoria = relationship("Categoria")
@@ -203,10 +204,10 @@ class ControlDeTasa(Base):
     id_tasa: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fecha_tasa: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     tasa_dolar_bcv: Mapped[decimal.Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    tasa_dolar_paralelo: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
-    tasa_cop: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
-    modificado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    tasa_dolar_paralelo: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 2))
+    tasa_cop: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 2))
+    modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     modificador = relationship("Usuario", foreign_keys=[modificado_por])
     creador = relationship("Usuario", foreign_keys=[creado_por])
@@ -216,16 +217,16 @@ class Proveedor(Base):
     __tablename__ = "proveedores"
 
     id_proveedor: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    id_legal: Mapped[Optional[str]] = mapped_column(String(20))
-    codigo_proveedor: Mapped[Optional[str]] = mapped_column(String(20), unique=True)
-    identificacion_proveedor: Mapped[Optional[str]] = mapped_column(String(20), unique=True)
+    id_legal: Mapped[str | None] = mapped_column(String(20))
+    codigo_proveedor: Mapped[str | None] = mapped_column(String(20), unique=True)
+    identificacion_proveedor: Mapped[str | None] = mapped_column(String(20), unique=True)
     nombre_razon_social: Mapped[str] = mapped_column(String(200), nullable=False)
-    telefono: Mapped[Optional[str]] = mapped_column(String(20))
-    email: Mapped[Optional[str]] = mapped_column(String(150))
-    direccion: Mapped[Optional[str]] = mapped_column(String(255))
+    telefono: Mapped[str | None] = mapped_column(String(20))
+    email: Mapped[str | None] = mapped_column(String(150))
+    direccion: Mapped[str | None] = mapped_column(String(255))
     limite_credito: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
     dias_credito: Mapped[int] = mapped_column(Integer, server_default="0")
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     estado_proveedor: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
 
@@ -239,16 +240,16 @@ class FacturaVenta(Base):
     id_factura: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     numero_factura: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     id_cliente_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id_cliente"), nullable=False)
-    id_usuario_factura: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    id_usuario_factura: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_emision: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     total_venta: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
     estado_factura: Mapped[str] = mapped_column(String(20), server_default="EMITIDA")
-    id_tasa_factura: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
+    id_tasa_factura: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
     condicion_pago: Mapped[str] = mapped_column(String(10), nullable=False)
-    fecha_vencimiento: Mapped[Optional[datetime.date]] = mapped_column(Date)
-    observaciones_factura: Mapped[Optional[str]] = mapped_column(String(255))
-    id_vendedor: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("vendedores.id_vendedor"))
-    modificado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
+    observaciones_factura: Mapped[str | None] = mapped_column(String(255))
+    id_vendedor: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("vendedores.id_vendedor"))
+    modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     cliente = relationship("Cliente")
     usuario = relationship("Usuario", foreign_keys=[id_usuario_factura])
@@ -264,9 +265,9 @@ class FacturaDetalle(Base):
     id_factura_detalle: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
     id_producto_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("inventario.id_producto"), nullable=False)
-    descripcion: Mapped[Optional[str]] = mapped_column(String(255))
+    descripcion: Mapped[str | None] = mapped_column(String(255))
     cantidad_producto: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    observaciones_item: Mapped[Optional[str]] = mapped_column(String(255))
+    observaciones_item: Mapped[str | None] = mapped_column(String(255))
     precio_unitario: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
 
     factura = relationship("FacturaVenta")
@@ -277,19 +278,29 @@ class ComisionFactura(Base):
     __tablename__ = "comisiones_factura"
 
     id_comision: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    monto_base_comision: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    monto_venta_comision: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    monto_base_comision: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
+    monto_venta_comision: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
     estado_pago: Mapped[str] = mapped_column(String(10), server_default="pendiente")
-    fecha_calculo: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    modificador_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_calculo: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    modificador_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     id_factura_detalle: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("factura_detalle.id_factura_detalle"), nullable=False, unique=True
     )
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    # id_vendedor denormalizado desde factura_venta.id_vendedor al calcular (C14): evita un
+    # join de 2 saltos (comisiones_factura -> factura_detalle -> factura_venta) en cada
+    # consulta de "comisiones pendientes de vendedor X".
+    id_vendedor: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("vendedores.id_vendedor"))
+    # Monto ya calculado y piso-en-cero (max(0, monto_venta_comision - monto_base_comision))
+    # -- lo que realmente se le debe al vendedor por esta linea.
+    monto_comision: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
+    id_pago_comision: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_comisiones.id_pago_comision"))
 
     modificador = relationship("Usuario", foreign_keys=[modificador_por])
     detalle = relationship("FacturaDetalle")
     creador = relationship("Usuario", foreign_keys=[creado_por])
+    vendedor = relationship("Vendedor")
+    pago_comision = relationship("PagoComision")
 
 
 class Compra(Base):
@@ -299,15 +310,15 @@ class Compra(Base):
     id_compra: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     numero_compra: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     id_proveedor: Mapped[int] = mapped_column(BigInteger, ForeignKey("proveedores.id_proveedor"), nullable=False)
-    id_usuario_compra: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    fecha_emision: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    id_usuario_compra: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_emision: Mapped[datetime.datetime | None] = mapped_column(DateTime)
     total_compra: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    estado_compra: Mapped[Optional[str]] = mapped_column(String(20))
-    id_tasa_compra: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
+    estado_compra: Mapped[str | None] = mapped_column(String(20))
+    id_tasa_compra: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
     condicion_pago: Mapped[str] = mapped_column(String(10), nullable=False)
-    fecha_vencimiento: Mapped[Optional[datetime.date]] = mapped_column(Date)
-    observaciones_compra: Mapped[Optional[str]] = mapped_column(String(255))
-    modificado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
+    observaciones_compra: Mapped[str | None] = mapped_column(String(255))
+    modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     proveedor = relationship("Proveedor")
     usuario = relationship("Usuario", foreign_keys=[id_usuario_compra])
@@ -322,10 +333,10 @@ class CompraDetalle(Base):
     id_compra_detalle: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_compra: Mapped[int] = mapped_column(BigInteger, ForeignKey("compras.id_compra"), nullable=False)
     id_producto_compra: Mapped[int] = mapped_column(BigInteger, ForeignKey("inventario.id_producto"), nullable=False)
-    descripcion: Mapped[Optional[str]] = mapped_column(String(255))
+    descripcion: Mapped[str | None] = mapped_column(String(255))
     cantidad_producto: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     costo_unitario: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    observaciones_item: Mapped[Optional[str]] = mapped_column(String(255))
+    observaciones_item: Mapped[str | None] = mapped_column(String(255))
 
     compra = relationship("Compra")
     producto = relationship("Inventario")
@@ -337,10 +348,10 @@ class CuentaPorCobrar(Base):
     id_cuenta_por_cobrar: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
     saldo_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    fecha_vencimiento: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
     estado: Mapped[str] = mapped_column(String(10), server_default="pendiente")
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    fecha_creacion: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
     factura = relationship("FacturaVenta")
     creador = relationship("Usuario")
@@ -351,12 +362,12 @@ class CuentaPorPagar(Base):
 
     id_cuenta: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     saldo_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    fecha_emision: Mapped[Optional[datetime.date]] = mapped_column(Date)
-    fecha_vencimiento: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    fecha_emision: Mapped[datetime.date | None] = mapped_column(Date)
+    fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
     estado: Mapped[str] = mapped_column(String(10), server_default="pendiente")
     id_compra: Mapped[int] = mapped_column(BigInteger, ForeignKey("compras.id_compra"), nullable=False)
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    fecha_creacion: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
     compra = relationship("Compra")
     creador = relationship("Usuario")
@@ -367,13 +378,13 @@ class CuentaPorCobrarOtro(Base):
 
     id_cuenta: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     monto_total: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    fecha_emision: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    descripcion: Mapped[Optional[str]] = mapped_column(String(255))
+    fecha_emision: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    descripcion: Mapped[str | None] = mapped_column(String(255))
     id_cliente: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id_cliente"), nullable=False)
     saldo_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    fecha_vencimiento: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
     estado: Mapped[str] = mapped_column(String(10), nullable=False)
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     cliente = relationship("Cliente")
     creador = relationship("Usuario")
@@ -389,18 +400,20 @@ class CuentaPorPagarOtro(Base):
     __tablename__ = "cuentas_por_pagar_otros"
 
     id_cuenta: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    id_cuenta_bancaria: Mapped[int] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"), nullable=False)
-    id_movimiento: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("banco_movimientos.id_movimiento"))
+    id_cuenta_bancaria: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"), nullable=False
+    )
+    id_movimiento: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("banco_movimientos.id_movimiento"))
     monto_total: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     saldo_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     fecha_recepcion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
-    referencia_bancaria: Mapped[Optional[str]] = mapped_column(String(100))
-    descripcion: Mapped[Optional[str]] = mapped_column(String(255))
+    referencia_bancaria: Mapped[str | None] = mapped_column(String(100))
+    descripcion: Mapped[str | None] = mapped_column(String(255))
     estado: Mapped[str] = mapped_column(String(10), server_default="pendiente")
-    id_cliente_identificado: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id_cliente"))
-    conciliado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    fecha_conciliacion: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    id_cliente_identificado: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id_cliente"))
+    conciliado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_conciliacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
 
     cuenta_bancaria = relationship("CuentaBancaria")
@@ -430,9 +443,9 @@ class NotaCreditoCliente(Base):
     id_factura_origen: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
     monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     saldo_disponible: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    motivo: Mapped[Optional[str]] = mapped_column(String(255))
+    motivo: Mapped[str | None] = mapped_column(String(255))
     estado: Mapped[str] = mapped_column(String(15), server_default="disponible")
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
 
     cliente = relationship("Cliente")
@@ -451,9 +464,9 @@ class NotaCreditoProveedor(Base):
     id_compra_origen: Mapped[int] = mapped_column(BigInteger, ForeignKey("compras.id_compra"), nullable=False)
     monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     saldo_disponible: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    motivo: Mapped[Optional[str]] = mapped_column(String(255))
+    motivo: Mapped[str | None] = mapped_column(String(255))
     estado: Mapped[str] = mapped_column(String(15), server_default="disponible")
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
 
     proveedor = relationship("Proveedor")
@@ -465,15 +478,15 @@ class Banco(Base):
     __tablename__ = "bancos"
 
     id_banco: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    codigo_banco: Mapped[Optional[str]] = mapped_column(String(4))
-    nombre_banco: Mapped[Optional[str]] = mapped_column(String(100))
-    tipo_banco: Mapped[Optional[str]] = mapped_column(String(30))
-    identificacion_banco: Mapped[Optional[str]] = mapped_column(String(20), unique=True)
-    correo_banco: Mapped[Optional[str]] = mapped_column(String(150))
-    numero_telefono_banco: Mapped[Optional[str]] = mapped_column(String(20))
-    modificado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    fecha_creacion: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    codigo_banco: Mapped[str | None] = mapped_column(String(4))
+    nombre_banco: Mapped[str | None] = mapped_column(String(100))
+    tipo_banco: Mapped[str | None] = mapped_column(String(30))
+    identificacion_banco: Mapped[str | None] = mapped_column(String(20), unique=True)
+    correo_banco: Mapped[str | None] = mapped_column(String(150))
+    numero_telefono_banco: Mapped[str | None] = mapped_column(String(20))
+    modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
     estado_banco: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
 
     modificador = relationship("Usuario", foreign_keys=[modificado_por])
@@ -484,14 +497,14 @@ class CuentaBancaria(Base):
     __tablename__ = "cuentas_bancarias"
 
     id_cuenta: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    id_banco: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("bancos.id_banco"))
-    numero_cuenta: Mapped[Optional[str]] = mapped_column(String(30))
-    tipo_cuenta_banco: Mapped[Optional[str]] = mapped_column(String(10))
-    nombre_titular: Mapped[Optional[str]] = mapped_column(String(150))
-    identificacion_titular: Mapped[Optional[str]] = mapped_column(String(20))
+    id_banco: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("bancos.id_banco"))
+    numero_cuenta: Mapped[str | None] = mapped_column(String(30))
+    tipo_cuenta_banco: Mapped[str | None] = mapped_column(String(10))
+    nombre_titular: Mapped[str | None] = mapped_column(String(150))
+    identificacion_titular: Mapped[str | None] = mapped_column(String(20))
     saldo_total_banco: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    fecha_creacion: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
     estado_cuenta: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
 
     banco = relationship("Banco")
@@ -503,14 +516,14 @@ class Caja(Base):
     __table_args__ = {"implicit_returning": False}
 
     id_caja: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    nombre_caja: Mapped[Optional[str]] = mapped_column(String(50))
-    estado_caja: Mapped[Optional[str]] = mapped_column(String(20))
+    nombre_caja: Mapped[str | None] = mapped_column(String(50))
+    estado_caja: Mapped[str | None] = mapped_column(String(20))
     saldo_apertura: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
-    saldo_cierre: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    fecha_apertura: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    fecha_cierre: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    id_usuario: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    modificado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    saldo_cierre: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
+    fecha_apertura: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    fecha_cierre: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    id_usuario: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     usuario = relationship("Usuario", foreign_keys=[id_usuario])
     modificador = relationship("Usuario", foreign_keys=[modificado_por])
@@ -524,14 +537,14 @@ class PagoCobro(Base):
     id_cuenta_por_cobrar: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("cuentas_por_cobrar.id_cuenta_por_cobrar"), nullable=False
     )
-    id_cuenta_bancaria: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"))
-    id_caja: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
-    id_tasa: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
+    id_cuenta_bancaria: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"))
+    id_caja: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
+    id_tasa: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
     metodo_pago: Mapped[str] = mapped_column(String(20), nullable=False)
     monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    referencia: Mapped[Optional[str]] = mapped_column(String(100))
+    referencia: Mapped[str | None] = mapped_column(String(100))
     fecha_pago: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     cuenta_por_cobrar = relationship("CuentaPorCobrar")
     cuenta_bancaria = relationship("CuentaBancaria")
@@ -548,14 +561,14 @@ class PagoProveedor(Base):
     id_cuenta_por_pagar: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("cuentas_por_pagar.id_cuenta"), nullable=False
     )
-    id_cuenta_bancaria: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"))
-    id_caja: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
-    id_tasa: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
+    id_cuenta_bancaria: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"))
+    id_caja: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
+    id_tasa: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
     metodo_pago: Mapped[str] = mapped_column(String(20), nullable=False)
     monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    referencia: Mapped[Optional[str]] = mapped_column(String(100))
+    referencia: Mapped[str | None] = mapped_column(String(100))
     fecha_pago: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     cuenta_por_pagar = relationship("CuentaPorPagar")
     cuenta_bancaria = relationship("CuentaBancaria")
@@ -564,28 +577,53 @@ class PagoProveedor(Base):
     creador = relationship("Usuario")
 
 
+class PagoComision(Base):
+    """Pago real (caja/banco) de un batch de ComisionFactura pendientes de un vendedor
+    (C14). A diferencia de PagoCobro/PagoProveedor no tiene trigger INSTEAD OF INSERT: no
+    hay saldo_pendiente parcial que proteger, un pago de comision liquida todo lo
+    pendiente de una vez -- ver PagoComisionService.pagar_comisiones_vendedor()."""
+
+    __tablename__ = "pagos_comisiones"
+    __table_args__ = {"implicit_returning": False}
+
+    id_pago_comision: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_vendedor: Mapped[int] = mapped_column(BigInteger, ForeignKey("vendedores.id_vendedor"), nullable=False)
+    id_cuenta_bancaria: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"))
+    id_caja: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
+    metodo_pago: Mapped[str] = mapped_column(String(20), nullable=False)
+    monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    referencia: Mapped[str | None] = mapped_column(String(100))
+    fecha_pago: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+
+    vendedor = relationship("Vendedor")
+    cuenta_bancaria = relationship("CuentaBancaria")
+    caja = relationship("Caja")
+    creador = relationship("Usuario")
+
+
 class BancoMovimiento(Base):
     __tablename__ = "banco_movimientos"
     __table_args__ = {"implicit_returning": False}
 
     id_movimiento: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    id_cuenta: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"))
-    tipo_movimiento: Mapped[Optional[str]] = mapped_column(String(15))
-    monto_movimiento: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    fecha_movimiento: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    referencia_movimiento: Mapped[Optional[str]] = mapped_column(String(100))
-    descripcion_movimiento: Mapped[Optional[str]] = mapped_column(String(255))
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    fecha_creacion: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    id_pago_cobro: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("pagos_cobros.id_pago_cobro"))
-    id_pago_proveedor: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("pagos_proveedores.id_pago_proveedor")
-    )
+    id_cuenta: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"))
+    tipo_movimiento: Mapped[str | None] = mapped_column(String(15))
+    monto_movimiento: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
+    fecha_movimiento: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    referencia_movimiento: Mapped[str | None] = mapped_column(String(100))
+    descripcion_movimiento: Mapped[str | None] = mapped_column(String(255))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    id_pago_cobro: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_cobros.id_pago_cobro"))
+    id_pago_proveedor: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_proveedores.id_pago_proveedor"))
+    id_pago_comision: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_comisiones.id_pago_comision"))
 
     cuenta = relationship("CuentaBancaria")
     creador = relationship("Usuario")
     pago_cobro = relationship("PagoCobro")
     pago_proveedor = relationship("PagoProveedor")
+    pago_comision = relationship("PagoComision")
 
 
 class CajaMovimiento(Base):
@@ -593,18 +631,18 @@ class CajaMovimiento(Base):
     __table_args__ = {"implicit_returning": False}
 
     id_movimiento: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    id_caja: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
-    tipo_movimiento: Mapped[Optional[str]] = mapped_column(String(10))
-    descripcion_movimiento: Mapped[Optional[str]] = mapped_column(String(255))
-    monto_movimiento: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    fecha_registro: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    id_pago_cobro: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("pagos_cobros.id_pago_cobro"))
-    id_pago_proveedor: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("pagos_proveedores.id_pago_proveedor")
-    )
-    creado_por: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    id_caja: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
+    tipo_movimiento: Mapped[str | None] = mapped_column(String(10))
+    descripcion_movimiento: Mapped[str | None] = mapped_column(String(255))
+    monto_movimiento: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
+    fecha_registro: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    id_pago_cobro: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_cobros.id_pago_cobro"))
+    id_pago_proveedor: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_proveedores.id_pago_proveedor"))
+    id_pago_comision: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_comisiones.id_pago_comision"))
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     caja = relationship("Caja")
     pago_cobro = relationship("PagoCobro")
     pago_proveedor = relationship("PagoProveedor")
+    pago_comision = relationship("PagoComision")
     creador = relationship("Usuario")

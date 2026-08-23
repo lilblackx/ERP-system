@@ -34,9 +34,7 @@ def test_create_cliente_requiere_codigo(db_session):
     admin = crear_usuario_admin(db_session)
 
     with pytest.raises(ValueError):
-        clientes_service.create_cliente(
-            db_session, **_datos_cliente(codigo_cliente="", creado_por=admin.id_usuario)
-        )
+        clientes_service.create_cliente(db_session, **_datos_cliente(codigo_cliente="", creado_por=admin.id_usuario))
 
 
 def test_create_cliente_requiere_identificacion(db_session):
@@ -161,7 +159,9 @@ def test_cambiar_estado_cliente_estado_invalido(db_session):
     cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError, match="nuevo_estado"):
-        clientes_service.cambiar_estado_cliente(db_session, cliente.id_cliente, "BLOQUEADO", id_usuario=admin.id_usuario)
+        clientes_service.cambiar_estado_cliente(
+            db_session, cliente.id_cliente, "BLOQUEADO", id_usuario=admin.id_usuario
+        )
 
 
 def test_cambiar_estado_cliente_inexistente(db_session):

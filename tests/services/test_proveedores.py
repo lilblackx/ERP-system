@@ -41,9 +41,7 @@ def test_crear_proveedor_requiere_codigo(db_session):
 def test_crear_proveedor_requiere_identificacion(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="identificacion_proveedor"):
-        ProveedorService.crear(
-            db_session, **_datos_proveedor(identificacion_proveedor="", creado_por=admin.id_usuario)
-        )
+        ProveedorService.crear(db_session, **_datos_proveedor(identificacion_proveedor="", creado_por=admin.id_usuario))
 
 
 def test_crear_proveedor_codigo_duplicado(db_session):
@@ -61,9 +59,7 @@ def test_crear_proveedor_identificacion_duplicada(db_session):
     ProveedorService.crear(db_session, **_datos_proveedor(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError, match="identificacion_proveedor"):
-        ProveedorService.crear(
-            db_session, **_datos_proveedor(codigo_proveedor="PROV-002", creado_por=admin.id_usuario)
-        )
+        ProveedorService.crear(db_session, **_datos_proveedor(codigo_proveedor="PROV-002", creado_por=admin.id_usuario))
 
 
 def test_obtener_proveedor(db_session):
@@ -132,7 +128,9 @@ def test_actualizar_proveedor_no_permite_vaciar_codigo(db_session):
     proveedor = ProveedorService.crear(db_session, **_datos_proveedor(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError, match="codigo_proveedor"):
-        ProveedorService.actualizar(db_session, proveedor.id_proveedor, id_usuario=admin.id_usuario, codigo_proveedor="")
+        ProveedorService.actualizar(
+            db_session, proveedor.id_proveedor, id_usuario=admin.id_usuario, codigo_proveedor=""
+        )
 
 
 def test_actualizar_proveedor_inexistente(db_session):
@@ -146,11 +144,15 @@ def test_actualizar_proveedor_codigo_duplicado(db_session):
     ProveedorService.crear(db_session, **_datos_proveedor(creado_por=admin.id_usuario))
     otro = ProveedorService.crear(
         db_session,
-        **_datos_proveedor(codigo_proveedor="PROV-002", identificacion_proveedor="J-87654321", creado_por=admin.id_usuario),
+        **_datos_proveedor(
+            codigo_proveedor="PROV-002", identificacion_proveedor="J-87654321", creado_por=admin.id_usuario
+        ),
     )
 
     with pytest.raises(ValueError, match="codigo_proveedor"):
-        ProveedorService.actualizar(db_session, otro.id_proveedor, id_usuario=admin.id_usuario, codigo_proveedor="PROV-001")
+        ProveedorService.actualizar(
+            db_session, otro.id_proveedor, id_usuario=admin.id_usuario, codigo_proveedor="PROV-001"
+        )
 
 
 def test_actualizar_credito(db_session):
@@ -158,7 +160,11 @@ def test_actualizar_credito(db_session):
     proveedor = ProveedorService.crear(db_session, **_datos_proveedor(creado_por=admin.id_usuario))
 
     actualizado = ProveedorService.actualizar_credito(
-        db_session, proveedor.id_proveedor, limite_credito=Decimal("5000.00"), dias_credito=30, id_usuario=admin.id_usuario
+        db_session,
+        proveedor.id_proveedor,
+        limite_credito=Decimal("5000.00"),
+        dias_credito=30,
+        id_usuario=admin.id_usuario,
     )
 
     assert actualizado.limite_credito == Decimal("5000.00")
@@ -190,7 +196,9 @@ def test_actualizar_credito_solo_campos_provistos(db_session):
 def test_actualizar_credito_proveedor_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Proveedor no encontrado"):
-        ProveedorService.actualizar_credito(db_session, 999999, limite_credito=Decimal("100.00"), id_usuario=admin.id_usuario)
+        ProveedorService.actualizar_credito(
+            db_session, 999999, limite_credito=Decimal("100.00"), id_usuario=admin.id_usuario
+        )
 
 
 def test_eliminar_proveedor_siempre_falla_para_proteger_integridad(db_session):
@@ -215,7 +223,9 @@ def test_cambiar_estado_proveedor_desactiva(db_session):
     admin = crear_usuario_admin(db_session)
     proveedor = ProveedorService.crear(db_session, **_datos_proveedor(creado_por=admin.id_usuario))
 
-    actualizado = ProveedorService.cambiar_estado(db_session, proveedor.id_proveedor, "INACTIVO", id_usuario=admin.id_usuario)
+    actualizado = ProveedorService.cambiar_estado(
+        db_session, proveedor.id_proveedor, "INACTIVO", id_usuario=admin.id_usuario
+    )
 
     assert actualizado.estado_proveedor == "INACTIVO"
 

@@ -72,5 +72,39 @@ def aplicar_migraciones(motor=None, migrations_dir: Path | None = None) -> None:
         print(f"{len(pendientes)} migracion(es) aplicada(s).")
 
 
+def verificar_migraciones_al_dia(motor=None, migrations_dir: Path | None = None) -> None:
+    """Falla rapido con un mensaje claro si hay migraciones sin aplicar, en vez de dejar
+    que el primer servicio que toque una columna/tabla nueva falle mas tarde de forma
+    confusa (C25, llamada desde app/main.py al arrancar). A proposito solo lee, no aplica
+    ni crea nada -- auto-aplicar migraciones de schema al arrancar la app de cualquier
+    empleado seria peligroso en una app multi-usuario de LAN (dos instancias arrancando a
+    la vez podrian competir por aplicar lo mismo, sin ningun lock entre ellas)."""
+    motor = motor if motor is not None else engine
+    migrations_dir = migrations_dir if migrations_dir is not None else MIGRATIONS_DIR
+
+    with motor.connect() as connection:
+        existe_schema_base = connection.execute(text("SELECT OBJECT_ID(N'dbo.usuarios', N'U')")).scalar()
+        if existe_schema_base is None:
+            raise RuntimeError(
+                "No se encontro el schema base (dbo.usuarios). Corre schema_sqlserver.sql "
+                "primero -- ver README.md, seccion 'Crear la base de datos y el schema'."
+            )
+
+        existe_tabla_migraciones = connection.execute(text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")).scalar()
+        aplicadas: set[str] = set()
+        if existe_tabla_migraciones is not None:
+            aplicadas = {fila[0] for fila in connection.execute(text("SELECT [version] FROM dbo.schema_migrations"))}
+        if not aplicadas:
+            aplicadas = {"0000_baseline"}
+
+    pendientes = [archivo.name for archivo in sorted(migrations_dir.glob("*.sql")) if archivo.name not in aplicadas]
+    if pendientes:
+        raise RuntimeError(
+            "Hay migraciones de schema sin aplicar: "
+            + ", ".join(pendientes)
+            + ". Corre 'python -m app.db.migrar' antes de iniciar la app."
+        )
+
+
 if __name__ == "__main__":
     aplicar_migraciones()

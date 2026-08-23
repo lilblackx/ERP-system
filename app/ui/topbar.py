@@ -17,28 +17,26 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.ui.styles import (
-    COLOR_PRIMARY,
     COLOR_TEXT_DARK,
-    COLOR_TEXT_MUTED,
     TOPBAR_HEIGHT,
     TOPBAR_QSS,
 )
 
 # Títulos presentables para cada módulo
 TITULOS = {
-    "clientes":          "Clientes",
-    "proveedores":       "Proveedores",
-    "inventario":        "Inventario",
-    "facturacion":       "Facturación / Ventas",
-    "compras":           "Compras",
-    "bancos":            "Bancos",
+    "clientes": "Clientes",
+    "proveedores": "Proveedores",
+    "inventario": "Inventario",
+    "facturacion": "Facturación / Ventas",
+    "compras": "Compras",
+    "bancos": "Bancos",
     "cuentas_bancarias": "Cuentas Bancarias",
-    "cajas":             "Cajas",
-    "vendedores":        "Vendedores",
-    "comisiones":        "Comisiones",
-    "control_tasas":     "Control de Tasas",
-    "config_empresa":    "Configuración de Empresa",
-    "usuarios":          "Usuarios",
+    "cajas": "Cajas",
+    "vendedores": "Vendedores",
+    "comisiones": "Comisiones",
+    "control_tasas": "Control de Tasas",
+    "config_empresa": "Configuración de Empresa",
+    "usuarios": "Usuarios",
 }
 
 
@@ -63,9 +61,7 @@ class TopBar(QWidget):
         # Título del módulo activo
         self.lbl_titulo = QLabel("Panel de Control")
         self.lbl_titulo.setObjectName("TopBarTitle")
-        self.lbl_titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        self.lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         # Spacer flexible
         spacer = QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
@@ -102,8 +98,8 @@ class TopBar(QWidget):
 
         avatar = QLabel("👤")
         avatar.setStyleSheet(
-            f"font-size: 22px; background-color: #EFF6FF;"
-            f" border: 2px solid #BFDBFE; border-radius: 18px;"
+            "font-size: 22px; background-color: #EFF6FF;"
+            " border: 2px solid #BFDBFE; border-radius: 18px;"
             " width: 36px; height: 36px; padding: 2px;"
         )
         avatar.setFixedSize(38, 38)

@@ -45,16 +45,14 @@ class PlaceholderView(QWidget):
         lbl_titulo = QLabel(nombre)
         lbl_titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_titulo.setStyleSheet(
-            f"font-size: 22px; font-weight: bold; color: {COLOR_PRIMARY};"
-            " background: transparent; border: none;"
+            f"font-size: 22px; font-weight: bold; color: {COLOR_PRIMARY}; background: transparent; border: none;"
         )
 
         lbl_desc = QLabel("Este modulo esta en desarrollo.\nPronto estara disponible.")
         lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_desc.setWordWrap(True)
         lbl_desc.setStyleSheet(
-            f"font-size: 13px; color: {COLOR_TEXT_MUTED}; line-height: 1.5;"
-            " background: transparent; border: none;"
+            f"font-size: 13px; color: {COLOR_TEXT_MUTED}; line-height: 1.5; background: transparent; border: none;"
         )
 
         inner.addWidget(lbl_titulo)
@@ -62,4 +60,3 @@ class PlaceholderView(QWidget):
 
         layout.addWidget(container)
         self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
-

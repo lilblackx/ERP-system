@@ -6,17 +6,16 @@ Diseño: Split-screen (izquierda azul con bienvenida, derecha blanca con formula
 import logging
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QCursor
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QDialog,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
-    QHBoxLayout,
-    QSizePolicy,
 )
 
 from app.db.models import ConfiguracionEmpresa
@@ -27,7 +26,6 @@ from app.ui.solicitar_codigo_dialog import SolicitarCodigoDialog
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
@@ -47,7 +45,7 @@ class LoginWindow(QDialog):
         self.setWindowTitle("ERP — Iniciar Sesión")
         self.setFixedSize(850, 500)
         self.usuario_autenticado = None
-        
+
         # Obtener nombre de empresa
         empresa = "Mi Empresa"
         session = SessionLocal()
@@ -62,7 +60,7 @@ class LoginWindow(QDialog):
 
         # Eliminar márgenes del QDialog base
         self.setStyleSheet(f"QDialog {{ background-color: {COLOR_CARD_BG}; font-family: '{FONT_FAMILY}', Arial; }}")
-        
+
         self._build_ui(empresa)
 
     # ── Construcción de la UI ─────────────────────────────────────────────
@@ -83,7 +81,7 @@ class LoginWindow(QDialog):
                 border-bottom-right-radius: 60px;
             }}
         """)
-        
+
         left_layout = QVBoxLayout(left_panel)
         left_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left_layout.setSpacing(16)
@@ -92,7 +90,7 @@ class LoginWindow(QDialog):
         lbl_hola = QLabel("Hola, Bienvenido")
         lbl_hola.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_hola.setStyleSheet("color: white; font-size: 32px; font-weight: bold; background: transparent;")
-        
+
         lbl_empresa = QLabel(empresa_nombre)
         lbl_empresa.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_empresa.setStyleSheet("color: white; font-size: 24px; font-weight: normal; background: transparent;")
@@ -111,7 +109,7 @@ class LoginWindow(QDialog):
                 background-color: {COLOR_CARD_BG};
             }}
         """)
-        
+
         right_layout = QVBoxLayout(right_panel)
         right_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right_layout.setSpacing(20)
@@ -128,7 +126,7 @@ class LoginWindow(QDialog):
         self.usuario_input.setPlaceholderText("Usuario")
         self.usuario_input.setStyleSheet(self._campo_qss())
         self.usuario_input.setFixedHeight(40)
-        
+
         user_layout = QHBoxLayout()
         user_layout.addWidget(self.usuario_input)
         lbl_user_icon = QLabel("👤")
@@ -143,7 +141,7 @@ class LoginWindow(QDialog):
         self.clave_input.setStyleSheet(self._campo_qss())
         self.clave_input.setFixedHeight(40)
         self.clave_input.returnPressed.connect(self.intentar_login)
-        
+
         pass_layout = QHBoxLayout()
         pass_layout.addWidget(self.clave_input)
         lbl_pass_icon = QLabel("🔒")
@@ -234,9 +232,7 @@ class LoginWindow(QDialog):
             return
         except Exception:
             logger.exception("Fallo al autenticar al usuario '%s'", nombre_usuario)
-            QMessageBox.critical(
-                self, "Error de conexión", "No se pudo conectar con el servidor. Intente nuevamente."
-            )
+            QMessageBox.critical(self, "Error de conexión", "No se pudo conectar con el servidor. Intente nuevamente.")
             return
         finally:
             session.close()

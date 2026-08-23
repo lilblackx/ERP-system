@@ -18,7 +18,9 @@ def test_registrar_evento_requiere_modulo(db_session):
 
 
 def test_registrar_evento_detalle_string(db_session):
-    evento = AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGIN", modulo="AUTH", detalle="texto libre")
+    evento = AuditoriaService.registrar_evento(
+        db_session, id_usuario=None, accion="LOGIN", modulo="AUTH", detalle="texto libre"
+    )
     assert evento.detalle == "texto libre"
 
 
@@ -105,8 +107,12 @@ def test_consultar_auditoria_paginacion(db_session):
     for i in range(5):
         AuditoriaService.registrar_evento(db_session, id_usuario=None, accion=f"EVENTO_{i}", modulo="AUTH")
 
-    pagina1 = AuditoriaService.consultar_auditoria(db_session, pagina=1, por_pagina=2, id_usuario_actor=admin.id_usuario)
-    pagina2 = AuditoriaService.consultar_auditoria(db_session, pagina=2, por_pagina=2, id_usuario_actor=admin.id_usuario)
+    pagina1 = AuditoriaService.consultar_auditoria(
+        db_session, pagina=1, por_pagina=2, id_usuario_actor=admin.id_usuario
+    )
+    pagina2 = AuditoriaService.consultar_auditoria(
+        db_session, pagina=2, por_pagina=2, id_usuario_actor=admin.id_usuario
+    )
 
     assert pagina1["total"] == 5
     assert len(pagina1["items"]) == 2

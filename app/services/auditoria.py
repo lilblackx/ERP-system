@@ -70,9 +70,6 @@ class AuditoriaService:
 
         total = query.count()
         eventos = (
-            query.order_by(Auditoria.fecha_evento.desc())
-            .offset((pagina - 1) * por_pagina)
-            .limit(por_pagina)
-            .all()
+            query.order_by(Auditoria.fecha_evento.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
         )
         return {"items": eventos, "total": total, "pagina": pagina, "por_pagina": por_pagina}

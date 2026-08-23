@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.db.models import BancoMovimiento, CajaMovimiento, CuentaPorCobrar
 from app.services.otros_movimientos import OtrosMovimientosService
@@ -260,7 +261,11 @@ def test_registrar_abono_completo_por_banco(db_session):
     banco = crear_cuenta_bancaria(db_session)
 
     actualizada = OtrosMovimientosService.registrar_abono_otro(
-        db_session, cuenta.id_cuenta, monto=Decimal("100.00"), id_cuenta_bancaria=banco.id_cuenta, id_usuario=admin.id_usuario
+        db_session,
+        cuenta.id_cuenta,
+        monto=Decimal("100.00"),
+        id_cuenta_bancaria=banco.id_cuenta,
+        id_usuario=admin.id_usuario,
     )
 
     assert actualizada.saldo_pendiente == Decimal("0.00")
@@ -394,7 +399,12 @@ def test_conciliar_partida_sin_usuario_autorizado_falla(db_session):
 
     with pytest.raises(PermisoDenegadoError):
         OtrosMovimientosService.conciliar_partida(
-            db_session, partida.id_cuenta, cliente.id_cliente, cxc.id_cuenta_por_cobrar, monto=Decimal("10.00"), id_usuario=None
+            db_session,
+            partida.id_cuenta,
+            cliente.id_cliente,
+            cxc.id_cuenta_por_cobrar,
+            monto=Decimal("10.00"),
+            id_usuario=None,
         )
 
 
@@ -421,7 +431,12 @@ def test_conciliar_partida_inexistente(db_session):
     cxc, cliente, admin = _crear_cxc_real(db_session, Decimal("100.00"))
     with pytest.raises(ValueError, match="Partida no conciliada no encontrada"):
         OtrosMovimientosService.conciliar_partida(
-            db_session, 999999, cliente.id_cliente, cxc.id_cuenta_por_cobrar, monto=Decimal("10.00"), id_usuario=admin.id_usuario
+            db_session,
+            999999,
+            cliente.id_cliente,
+            cxc.id_cuenta_por_cobrar,
+            monto=Decimal("10.00"),
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -454,7 +469,12 @@ def test_conciliar_partida_cliente_inexistente(db_session):
 
     with pytest.raises(ValueError, match="Cliente no encontrado"):
         OtrosMovimientosService.conciliar_partida(
-            db_session, partida.id_cuenta, 999999, cxc.id_cuenta_por_cobrar, monto=Decimal("10.00"), id_usuario=admin.id_usuario
+            db_session,
+            partida.id_cuenta,
+            999999,
+            cxc.id_cuenta_por_cobrar,
+            monto=Decimal("10.00"),
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -488,7 +508,12 @@ def test_conciliar_partida_cxc_inexistente(db_session):
 
     with pytest.raises(ValueError, match="Cuenta por cobrar no encontrada"):
         OtrosMovimientosService.conciliar_partida(
-            db_session, partida.id_cuenta, cliente.id_cliente, 999999, monto=Decimal("10.00"), id_usuario=admin.id_usuario
+            db_session,
+            partida.id_cuenta,
+            cliente.id_cliente,
+            999999,
+            monto=Decimal("10.00"),
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -594,7 +619,9 @@ def test_conciliar_partida_exitosa_no_duplica_movimiento_bancario(db_session):
 def test_listar_partidas_no_conciliadas_estado_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="estado invalido"):
-        OtrosMovimientosService.listar_partidas_no_conciliadas(db_session, estado="no_existe", id_usuario=admin.id_usuario)
+        OtrosMovimientosService.listar_partidas_no_conciliadas(
+            db_session, estado="no_existe", id_usuario=admin.id_usuario
+        )
 
 
 def test_listar_partidas_no_conciliadas_sin_usuario_autorizado_falla(db_session):
@@ -618,3 +645,16 @@ def test_listar_partidas_no_conciliadas_filtra_por_estado(db_session):
 
     assert len(pendientes) == 1
     assert len(conciliadas) == 0
+
+
+# --- CHECK de saldo_pendiente >= 0 como red de seguridad a nivel BD (C18) ----------
+# Mismo espiritu que test_trigger_rechaza_pago_sin_origen_si_se_inserta_sin_pasar_por_el_service
+# en test_pagos.py: el servicio ya valida en Python, pero si algo deja saldo_pendiente en
+# negativo (bug, script, migracion de datos), la base de datos debe rechazarlo igual.
+
+
+def test_check_saldo_pendiente_rechaza_negativo_en_cuenta_cobrar_otro(db_session):
+    cuenta, _cliente, _admin = _crear_cxc_otro(db_session, monto=Decimal("100.00"))
+    cuenta.saldo_pendiente = Decimal("-1.00")
+    with pytest.raises(IntegrityError, match="CK_cuentas_por_cobrar_otros_saldo_no_negativo"):
+        db_session.commit()

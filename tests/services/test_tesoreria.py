@@ -6,7 +6,6 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from tests.factories import crear_banco, crear_caja, crear_cuenta_bancaria, crear_usuario_admin
 
-
 # --- BancoService ---------------------------------------------------------
 
 
@@ -116,7 +115,9 @@ def test_cambiar_estado_cuenta_desactiva(db_session):
     admin = crear_usuario_admin(db_session)
     cuenta = crear_cuenta_bancaria(db_session)
 
-    actualizada = BancoService.cambiar_estado_cuenta(db_session, cuenta.id_cuenta, "INACTIVO", id_usuario=admin.id_usuario)
+    actualizada = BancoService.cambiar_estado_cuenta(
+        db_session, cuenta.id_cuenta, "INACTIVO", id_usuario=admin.id_usuario
+    )
 
     assert actualizada.estado_cuenta == "INACTIVO"
 
@@ -168,10 +169,27 @@ def test_obtener_movimientos_sin_usuario_autorizado_falla(db_session):
 # --- CajaService ------------------------------------------------------------
 
 
+def test_listar_cajas(db_session):
+    admin = crear_usuario_admin(db_session)
+    crear_caja(db_session, nombre_caja="Caja Z")
+    crear_caja(db_session, nombre_caja="Caja A")
+
+    cajas = CajaService.listar_cajas(db_session, id_usuario=admin.id_usuario)
+
+    assert [c.nombre_caja for c in cajas if c.nombre_caja in ("Caja A", "Caja Z")] == ["Caja A", "Caja Z"]
+
+
+def test_listar_cajas_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        CajaService.listar_cajas(db_session)
+
+
 def test_abrir_caja(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    abierta = CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("100.00"))
+    abierta = CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("100.00")
+    )
 
     assert abierta.estado_caja == "ABIERTA"
     assert abierta.saldo_apertura == Decimal("100.00")
@@ -222,10 +240,20 @@ def test_cerrar_caja_calcula_saldo_con_movimientos(db_session):
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("100.00"))
 
     CajaService.registrar_movimiento_manual(
-        db_session, caja.id_caja, tipo="entrada", monto=Decimal("50.00"), descripcion="Ingreso", id_usuario=admin.id_usuario
+        db_session,
+        caja.id_caja,
+        tipo="entrada",
+        monto=Decimal("50.00"),
+        descripcion="Ingreso",
+        id_usuario=admin.id_usuario,
     )
     CajaService.registrar_movimiento_manual(
-        db_session, caja.id_caja, tipo="salida", monto=Decimal("20.00"), descripcion="Egreso", id_usuario=admin.id_usuario
+        db_session,
+        caja.id_caja,
+        tipo="salida",
+        monto=Decimal("20.00"),
+        descripcion="Egreso",
+        id_usuario=admin.id_usuario,
     )
 
     cerrada = CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario)

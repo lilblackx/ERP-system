@@ -25,6 +25,21 @@ SMTP_FROM = os.getenv("SMTP_FROM", "")
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "yes").lower() in ("yes", "true", "1")
 
 
+def validar_configuracion() -> None:
+    """Falla rapido con un mensaje claro si falta configuracion esencial en .env, en vez
+    de dejar que el primer intento de conexion falle mas tarde con un error crudo de
+    pyodbc (C23). SMTP no se valida aca a proposito: ya falla con un RuntimeError claro
+    en email_service.enviar_correo() recien cuando de verdad hace falta mandar un correo
+    (desbloqueo/recuperar clave) -- es una funcionalidad opcional para poder usar el resto
+    de la app, forzarla al arrancar rompe el caso de uso normal de instalar sin SMTP
+    configurado todavia (ver "Pendientes manuales" en docs/CHECKLIST_PRODUCCION.md)."""
+    if DB_TRUSTED_CONNECTION.lower() not in ("yes", "true", "1") and not DB_PASSWORD:
+        raise RuntimeError(
+            "DB_PASSWORD no esta configurado (o esta vacio) en .env. "
+            "Ver README.md, seccion '1. Base de datos (Docker)'."
+        )
+
+
 def get_database_url() -> str:
     if DB_TRUSTED_CONNECTION.lower() in ("yes", "true", "1"):
         auth_part = "Trusted_Connection=yes;"

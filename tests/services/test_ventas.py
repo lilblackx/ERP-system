@@ -7,7 +7,6 @@ from app.db.models import (
     ComisionFactura,
     CuentaPorCobrar,
     FacturaDetalle,
-    FacturaVenta,
     NotaCreditoCliente,
     PagoCobro,
 )
@@ -15,7 +14,14 @@ from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
-from tests.factories import crear_caja, crear_cliente, crear_producto, crear_usuario_admin, crear_vendedor
+from tests.factories import (
+    crear_caja,
+    crear_cliente,
+    crear_precio_producto,
+    crear_producto,
+    crear_usuario_admin,
+    crear_vendedor,
+)
 
 
 def test_emitir_factura_contado_descuenta_stock_y_calcula_total(db_session):
@@ -414,9 +420,155 @@ def test_anular_factura_con_pago_aplicado_genera_nota_de_credito(db_session):
     assert otra.total_venta == Decimal("999.00")
 
 
-def test_anular_factura_con_comision_calculada_bloqueada(db_session):
+def test_anular_factura_con_comision_pendiente_borra_comision_y_anula(db_session):
+    """C14: una comision 'pendiente' (el vendedor todavia no cobro nada) no bloquea la
+    anulacion -- se borra junto con el resto de la reversion."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
+    )
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    id_factura_detalle = detalle.id_factura_detalle  # capturado antes de que anular_factura borre la fila
+    db_session.add(
+        ComisionFactura(
+            id_factura_detalle=id_factura_detalle,
+            id_vendedor=vendedor.id_vendedor,
+            monto_venta_comision=Decimal("40.00"),
+            monto_comision=Decimal("4.00"),
+            estado_pago="pendiente",
+        )
+    )
+    db_session.commit()
+
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga")
+
+    db_session.refresh(factura)
+    db_session.refresh(producto)
+    assert factura.estado_factura == "ANULADA"
+    assert producto.cantidad_unidad == Decimal("50.00")  # stock repuesto
+    assert db_session.query(ComisionFactura).filter_by(id_factura_detalle=id_factura_detalle).first() is None
+
+
+def test_anular_factura_con_comision_pagada_bloqueada(db_session):
+    """Si la comision ya se pago (el vendedor ya cobro ese dinero real), la anulacion
+    sigue bloqueada -- no hay forma de revertir un pago ya hecho."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
+    )
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    db_session.add(
+        ComisionFactura(
+            id_factura_detalle=detalle.id_factura_detalle,
+            id_vendedor=vendedor.id_vendedor,
+            monto_venta_comision=Decimal("40.00"),
+            monto_comision=Decimal("4.00"),
+            estado_pago="pagada",
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="comisiones ya pagadas"):
+        VentaService.anular_factura(
+            db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga"
+        )
+
+    db_session.refresh(factura)
+    db_session.refresh(producto)
+    assert factura.estado_factura != "ANULADA"
+    assert producto.cantidad_unidad == Decimal("48.00")  # stock intacto, no se repuso
+
+
+# --- ComisionService.calcular_comisiones_factura (llamada desde emitir_factura, C14) ---
+
+
+def test_emitir_factura_con_vendedor_calcula_comision_sobre_diferencia(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "1.00")
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "2.00"}],
+    )
+
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
+    assert comision.id_vendedor == vendedor.id_vendedor
+    assert comision.monto_base_comision == Decimal("3.00")  # 1.00 (lista) * 3
+    assert comision.monto_venta_comision == Decimal("6.00")  # 2.00 (real) * 3
+    assert comision.monto_comision == Decimal("3.00")  # diferencia
+    assert comision.estado_pago == "pendiente"
+
+
+def test_emitir_factura_precio_igual_o_menor_al_de_lista_comision_cero(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "5.00")
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
+    )
+
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
+    assert comision.monto_comision == Decimal("0.00")  # nunca negativa
+
+
+def test_emitir_factura_sin_precio_de_lista_no_genera_comision(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)  # sin crear_precio_producto
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    assert db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).first() is None
+
+
+def test_emitir_factura_sin_vendedor_no_genera_comision(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "1.00")
     cliente = crear_cliente(db_session)
 
     factura = VentaService.emitir_factura(
@@ -425,19 +577,11 @@ def test_anular_factura_con_comision_calculada_bloqueada(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=None,
         condicion_pago="contado",
-        items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
+
     detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
-    db_session.add(ComisionFactura(id_factura_detalle=detalle.id_factura_detalle, monto_venta_comision=Decimal("4.00")))
-    db_session.commit()
-
-    with pytest.raises(ValueError, match="comisiones calculadas"):
-        VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga")
-
-    db_session.refresh(factura)
-    db_session.refresh(producto)
-    assert factura.estado_factura != "ANULADA"
-    assert producto.cantidad_unidad == Decimal("48.00")  # stock intacto, no se repuso
+    assert db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).first() is None
 
 
 def test_anular_factura_sin_motivo(db_session):

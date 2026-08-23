@@ -24,9 +24,7 @@ class ProveedorService:
         return session.get(Proveedor, id_proveedor)
 
     @staticmethod
-    def listar(
-        session: Session, texto_busqueda: str | None = None, id_usuario: int | None = None
-    ) -> list[Proveedor]:
+    def listar(session: Session, texto_busqueda: str | None = None, id_usuario: int | None = None) -> list[Proveedor]:
         require_permiso(session, id_usuario, "proveedores", "ver")
         query = session.query(Proveedor)
         if texto_busqueda:

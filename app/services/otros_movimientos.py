@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -86,7 +87,14 @@ class OtrosMovimientosService:
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
 
-        cuenta = session.get(CuentaPorCobrarOtro, id_cuenta)
+        # WITH (UPDLOCK, ROWLOCK): mismo patron que el fix de C1 en ventas.py -- bloquea
+        # la fila hasta el commit para que un segundo abono/conciliacion concurrente sobre
+        # la misma cuenta espere en vez de leer el mismo saldo_pendiente stale (TOCTOU).
+        cuenta = session.execute(
+            select(CuentaPorCobrarOtro)
+            .where(CuentaPorCobrarOtro.id_cuenta == id_cuenta)
+            .with_hint(CuentaPorCobrarOtro, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if cuenta is None:
             raise ValueError("Cuenta por cobrar (otros) no encontrada")
         if cuenta.estado == "pagada":
@@ -236,7 +244,12 @@ class OtrosMovimientosService:
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
 
-        partida = session.get(CuentaPorPagarOtro, id_cuenta)
+        # Ver el comentario de registrar_abono_otro() -- mismo patron de C1.
+        partida = session.execute(
+            select(CuentaPorPagarOtro)
+            .where(CuentaPorPagarOtro.id_cuenta == id_cuenta)
+            .with_hint(CuentaPorPagarOtro, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if partida is None:
             raise ValueError("Partida no conciliada no encontrada")
         if partida.estado == "conciliado":
@@ -252,7 +265,11 @@ class OtrosMovimientosService:
         if cliente.estado_cliente != "ACTIVO":
             raise ValueError(f"El cliente '{cliente.nombre_razon_social}' esta inactivo")
 
-        cxc = session.get(CuentaPorCobrar, id_cuenta_por_cobrar)
+        cxc = session.execute(
+            select(CuentaPorCobrar)
+            .where(CuentaPorCobrar.id_cuenta_por_cobrar == id_cuenta_por_cobrar)
+            .with_hint(CuentaPorCobrar, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if cxc is None:
             raise ValueError("Cuenta por cobrar no encontrada")
         if cxc.factura.id_cliente_factura != id_cliente:

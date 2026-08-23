@@ -77,7 +77,12 @@ def test_guardar_configuracion_logo_sentinel_no_toca_logo(db_session):
     )
 
     actualizado = EmpresaService.guardar_configuracion(
-        db_session, rif=None, razon_social="Nuevo nombre", direccion=None, telefono=None, modificado_por=admin.id_usuario
+        db_session,
+        rif=None,
+        razon_social="Nuevo nombre",
+        direccion=None,
+        telefono=None,
+        modificado_por=admin.id_usuario,
     )
 
     assert actualizado.logotipo_empresa == b"logo-original"

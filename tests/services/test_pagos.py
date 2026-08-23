@@ -396,6 +396,38 @@ def test_registrar_pago_proveedor_cuenta_inexistente(db_session):
         )
 
 
+def test_listar_pagos_proveedor(db_session):
+    cxp, admin = _crear_cxp(db_session, Decimal("80.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    PagoService.registrar_pago_proveedor(
+        db_session,
+        id_cuenta_por_pagar=cxp.id_cuenta,
+        monto=Decimal("20.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    PagoService.registrar_pago_proveedor(
+        db_session,
+        id_cuenta_por_pagar=cxp.id_cuenta,
+        monto=Decimal("30.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    pagos = PagoService.listar_pagos_proveedor(db_session, cxp.id_cuenta, id_usuario=admin.id_usuario)
+    assert len(pagos) == 2
+
+
+def test_listar_pagos_proveedor_sin_usuario_autorizado_falla(db_session):
+    cxp, _admin = _crear_cxp(db_session, Decimal("80.00"))
+    with pytest.raises(PermisoDenegadoError):
+        PagoService.listar_pagos_proveedor(db_session, cxp.id_cuenta)
+
+
 # --- el trigger sigue siendo una red de seguridad a nivel BD ------------------
 
 

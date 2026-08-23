@@ -7,7 +7,6 @@ Diseño moderno integrado en el MainWindow (no como ventana flotante).
 import logging
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -34,15 +33,14 @@ from app.services.clientes import (
 )
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.styles import (
-    BUTTON_DANGER_QSS,
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
+    COLOR_DANGER,
     COLOR_PRIMARY,
     COLOR_SUCCESS,
-    COLOR_DANGER,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
@@ -54,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 # Columnas visibles en la tabla (índice oculto 0 = ID interno)
 COLS_VISIBLES = ["ID", "Nombre Completo", "Identificación", "Email", "Teléfono", "Dirección", "Crédito", "Estado"]
-COL_ID_INTERNO = 0   # oculto
+COL_ID_INTERNO = 0  # oculto
 
 
 class BadgeItem(QWidget):
@@ -67,7 +65,6 @@ class BadgeItem(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         activo = estado.upper() == "ACTIVO"
-        dot_color = COLOR_SUCCESS if activo else COLOR_DANGER
         bg_color = "#DCFCE7" if activo else "#FEF2F2"
         text_color = COLOR_SUCCESS if activo else COLOR_DANGER
 
@@ -150,9 +147,7 @@ class ClientesPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Lista de Clientes")
-        lbl.setStyleSheet(
-            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -169,8 +164,7 @@ class ClientesPanel(QWidget):
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER};"
-            " border-radius: 8px; padding: 4px;"
+            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
         )
         h = QHBoxLayout(w)
         h.setContentsMargins(12, 8, 12, 8)
@@ -217,9 +211,12 @@ class ClientesPanel(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(7, 120)
-        self.tabla.setStyleSheet(TABLE_QSS + f"""
-            QTableWidget {{ alternate-background-color: #F8FAFC; }}
-        """)
+        self.tabla.setStyleSheet(
+            TABLE_QSS
+            + """
+            QTableWidget { alternate-background-color: #F8FAFC; }
+        """
+        )
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)  # ID oculto
         self.tabla.verticalHeader().setDefaultSectionSize(48)
         return self.tabla
@@ -314,8 +311,14 @@ class ClientesPanel(QWidget):
                 self.cargar_clientes()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(self, "Dato duplicado",
-                                "El código o la identificación ya están registrados en otro cliente.")
+            QMessageBox.warning(
+                self, "Dato duplicado", "El código o la identificación ya están registrados en otro cliente."
+            )
+        except ValueError as exc:
+            # Mensaje ya pensado para el usuario final ("codigo_cliente es requerido",
+            # etc.) -- no es un str(exc) tecnico, mismo criterio que C3.
+            session.rollback()
+            QMessageBox.warning(self, "Dato invalido", str(exc))
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear cliente")
@@ -337,8 +340,12 @@ class ClientesPanel(QWidget):
                 self.cargar_clientes()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(self, "Dato duplicado",
-                                "El código o la identificación ya están registrados en otro cliente.")
+            QMessageBox.warning(
+                self, "Dato duplicado", "El código o la identificación ya están registrados en otro cliente."
+            )
+        except ValueError as exc:
+            session.rollback()
+            QMessageBox.warning(self, "Dato invalido", str(exc))
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar cliente")
@@ -358,8 +365,7 @@ class ClientesPanel(QWidget):
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
             respuesta = QMessageBox.question(
-                self, "Confirmar",
-                f"¿Cambiar el estado del cliente '{cliente.nombre_razon_social}' a {nuevo_estado}?"
+                self, "Confirmar", f"¿Cambiar el estado del cliente '{cliente.nombre_razon_social}' a {nuevo_estado}?"
             )
             if respuesta != QMessageBox.StandardButton.Yes:
                 return

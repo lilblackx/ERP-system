@@ -21,6 +21,13 @@ def require_permiso(session: Session, id_usuario: int | None, recurso: str, acci
     (superusuario): el seed de schema_sqlserver.sql no le asigna ninguna fila en
     rol_permisos a proposito, así que sin este bypass ADMIN quedaria bloqueado de todo.
 
+    El chequeo de estado/bloqueo va ANTES del bypass de ADMIN a proposito: un ADMIN
+    inactivo o bloqueado tampoco deberia poder operar. Esto es lo unico que corta el
+    acceso de una sesion de escritorio ya abierta cuando otro ADMIN desactiva/bloquea a
+    ese usuario -- el objeto Usuario autenticado vive en memoria durante toda la sesion
+    (ver app/ui/main_window.py), asi que sin este chequeo aca, cada llamada a un servicio
+    seguiria pasando hasta que la app se cierre (hallazgo C17, auditoria 2026-08-23).
+
     La consulta contra rol_permisos esta duplicada aqui en vez de reusar
     UsuarioService.verificar_permiso() (misma logica, app/services/usuarios.py) a
     proposito: usuarios.py necesita importar require_permiso() para proteger sus propios
@@ -34,6 +41,12 @@ def require_permiso(session: Session, id_usuario: int | None, recurso: str, acci
     usuario = session.get(Usuario, id_usuario)
     if usuario is None:
         raise PermisoDenegadoError(f"Accion no autorizada: usuario {id_usuario} no encontrado")
+
+    if usuario.estado != "ACTIVO":
+        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta inactivo")
+
+    if usuario.bloqueado_desde is not None:
+        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
 
     if usuario.id_rol is None:
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' no tiene rol asignado")
@@ -146,9 +159,7 @@ class RolService:
 
 class PermisoService:
     @staticmethod
-    def listar_permisos(
-        session: Session, recurso: str | None = None, id_usuario: int | None = None
-    ) -> list[Permiso]:
+    def listar_permisos(session: Session, recurso: str | None = None, id_usuario: int | None = None) -> list[Permiso]:
         require_permiso(session, id_usuario, "permisos", "ver")
         query = session.query(Permiso)
         if recurso:
@@ -236,7 +247,10 @@ class PermisoService:
         ids_deseados = set(ids_permisos)
         if ids_deseados:
             encontrados = {
-                id_permiso for (id_permiso,) in session.query(Permiso.id_permiso).filter(Permiso.id_permiso.in_(ids_deseados)).all()
+                id_permiso
+                for (id_permiso,) in session.query(Permiso.id_permiso)
+                .filter(Permiso.id_permiso.in_(ids_deseados))
+                .all()
             }
             faltantes = ids_deseados - encontrados
             if faltantes:
@@ -251,9 +265,9 @@ class PermisoService:
         a_agregar = ids_deseados - actuales
 
         if a_quitar:
-            session.query(RolPermiso).filter(
-                RolPermiso.id_rol == id_rol, RolPermiso.id_permiso.in_(a_quitar)
-            ).delete(synchronize_session=False)
+            session.query(RolPermiso).filter(RolPermiso.id_rol == id_rol, RolPermiso.id_permiso.in_(a_quitar)).delete(
+                synchronize_session=False
+            )
         for id_permiso in a_agregar:
             session.add(RolPermiso(id_rol=id_rol, id_permiso=id_permiso))
 

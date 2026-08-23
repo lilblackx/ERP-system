@@ -87,3 +87,16 @@ python -m app.main   # OJO: no "python app/main.py" (rompe los imports absolutos
 directas. Para una instalacion 100% reproducible (incluye dependencias transitivas), usar
 `requirements-lock.txt` (o `requirements-dev-lock.txt` para correr los tests) en vez de
 los archivos de arriba -- ver el comentario de cada uno para como regenerarlos.
+
+Lint/formato (`ruff`, instalado con `requirements-dev.txt`, config en `pyproject.toml`,
+corre en CI):
+
+```bash
+ruff check .            # lint
+ruff format .           # formatea en el lugar
+ruff format --check .   # solo verifica, no modifica (lo que corre CI)
+```
+
+## 4. Backup y restore
+
+Ver [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md).

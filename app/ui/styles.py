@@ -4,39 +4,39 @@ Centraliza todos los QSS en un solo lugar para facilitar el mantenimiento.
 """
 
 # ── Paleta principal ────────────────────────────────────────────────────────
-COLOR_PRIMARY        = "#0D47A1"   # Azul corporativo principal
-COLOR_PRIMARY_DARK   = "#0A3A83"   # Azul oscuro (hover / pressed)
-COLOR_PRIMARY_LIGHT  = "#1565C0"   # Azul medio (elementos activos)
-COLOR_SIDEBAR_BG     = "#0D47A1"
-COLOR_SIDEBAR_TEXT   = "#FFFFFF"
+COLOR_PRIMARY = "#0D47A1"  # Azul corporativo principal
+COLOR_PRIMARY_DARK = "#0A3A83"  # Azul oscuro (hover / pressed)
+COLOR_PRIMARY_LIGHT = "#1565C0"  # Azul medio (elementos activos)
+COLOR_SIDEBAR_BG = "#0D47A1"
+COLOR_SIDEBAR_TEXT = "#FFFFFF"
 COLOR_SIDEBAR_ACTIVE = "#1565C0"
-COLOR_SIDEBAR_HOVER  = "#0B4F9F"
+COLOR_SIDEBAR_HOVER = "#0B4F9F"
 
-COLOR_TOPBAR_BG      = "#FFFFFF"
-COLOR_TOPBAR_BORDER  = "#E2E8F0"
+COLOR_TOPBAR_BG = "#FFFFFF"
+COLOR_TOPBAR_BORDER = "#E2E8F0"
 
-COLOR_CONTENT_BG     = "#F8FAFC"
-COLOR_CARD_BG        = "#FFFFFF"
-COLOR_BORDER         = "#E2E8F0"
+COLOR_CONTENT_BG = "#F8FAFC"
+COLOR_CARD_BG = "#FFFFFF"
+COLOR_BORDER = "#E2E8F0"
 
-COLOR_TEXT_DARK      = "#1E293B"
-COLOR_TEXT_MUTED     = "#64748B"
-COLOR_TEXT_LIGHT     = "#94A3B8"
+COLOR_TEXT_DARK = "#1E293B"
+COLOR_TEXT_MUTED = "#64748B"
+COLOR_TEXT_LIGHT = "#94A3B8"
 
-COLOR_SUCCESS        = "#16A34A"
-COLOR_WARNING        = "#D97706"
-COLOR_DANGER         = "#DC2626"
-COLOR_INFO           = "#0284C7"
+COLOR_SUCCESS = "#16A34A"
+COLOR_WARNING = "#D97706"
+COLOR_DANGER = "#DC2626"
+COLOR_INFO = "#0284C7"
 
-COLOR_TABLE_HEADER   = "#F1F5F9"
-COLOR_TABLE_ALT_ROW  = "#F8FAFC"
+COLOR_TABLE_HEADER = "#F1F5F9"
+COLOR_TABLE_ALT_ROW = "#F8FAFC"
 COLOR_TABLE_SELECTED = "#DBEAFE"
-COLOR_TABLE_HOVER    = "#EFF6FF"
+COLOR_TABLE_HOVER = "#EFF6FF"
 
 # ── Dimensiones ─────────────────────────────────────────────────────────────
-SIDEBAR_WIDTH  = 230   # expanded width; collapsed = 58 (see sidebar.py)
-TOPBAR_HEIGHT  = 60
-FONT_FAMILY    = "Segoe UI"
+SIDEBAR_WIDTH = 230  # expanded width; collapsed = 58 (see sidebar.py)
+TOPBAR_HEIGHT = 60
+FONT_FAMILY = "Segoe UI"
 
 
 # ── Hojas de estilo (QSS) ───────────────────────────────────────────────────

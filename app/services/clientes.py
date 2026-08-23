@@ -24,9 +24,7 @@ def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | N
 
 def list_clientes(session: Session, texto_busqueda: str | None = None, id_usuario: int | None = None) -> list[Cliente]:
     require_permiso(session, id_usuario, "clientes", "ver")
-    query = session.query(Cliente).options(
-        joinedload(Cliente.vendedor), joinedload(Cliente.categoria)
-    )
+    query = session.query(Cliente).options(joinedload(Cliente.vendedor), joinedload(Cliente.categoria))
     if texto_busqueda:
         like = f"%{texto_busqueda}%"
         query = query.filter(

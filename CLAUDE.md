@@ -45,7 +45,15 @@ large share of the business logic lives in database triggers (see below) and can
 exercised any other way. `tests/conftest.py` creates that database and applies
 `schema_sqlserver.sql` to it on first run.
 
-There is no configured linter/formatter in this repo (no ruff/black/flake8 config) —
+Lint/format: `ruff` (config in `pyproject.toml`), installed via `requirements-dev.txt`,
+enforced in CI (`.github/workflows/tests.yml`).
+
+```bash
+ruff check .            # lint
+ruff format .           # format in place
+ruff format --check .   # verify only, no changes (what CI runs)
+```
+
 `pyrightconfig.json` exists for editor type-checking only, there's no `pyright` CLI
 step in the test/build flow.
 

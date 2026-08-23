@@ -217,6 +217,8 @@ class UsuarioService:
         usuario = session.get(Usuario, id_usuario)
         if usuario is None or usuario.id_rol is None:
             return False
+        if usuario.estado != "ACTIVO" or usuario.bloqueado_desde is not None:
+            return False
 
         existe = (
             session.query(RolPermiso)

@@ -125,16 +125,14 @@ class VendedorService:
             FacturaVenta.estado_factura != "ANULADA",
         )
 
-        total_vendido = session.query(func.coalesce(func.sum(FacturaVenta.total_venta), 0)).filter(
-            *filtros_periodo
-        ).scalar()
+        total_vendido = (
+            session.query(func.coalesce(func.sum(FacturaVenta.total_venta), 0)).filter(*filtros_periodo).scalar()
+        )
 
         cantidad_facturas = session.query(func.count(FacturaVenta.id_factura)).filter(*filtros_periodo).scalar()
 
         total_clientes_asignados = (
-            session.query(func.count(Cliente.id_cliente))
-            .filter(Cliente.vendedor_cliente == id_vendedor)
-            .scalar()
+            session.query(func.count(Cliente.id_cliente)).filter(Cliente.vendedor_cliente == id_vendedor).scalar()
         )
 
         return {

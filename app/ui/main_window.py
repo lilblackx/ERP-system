@@ -14,7 +14,6 @@ que se accede a cada módulo para minimizar el tiempo de arranque.
 
 import logging
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -29,7 +28,7 @@ from app.ui.clientes_panel import ClientesPanel
 from app.ui.config_empresa_panel import ConfigEmpresaPanel
 from app.ui.placeholder_view import PlaceholderView
 from app.ui.sidebar import Sidebar
-from app.ui.styles import GLOBAL_QSS, TOPBAR_HEIGHT
+from app.ui.styles import GLOBAL_QSS
 from app.ui.topbar import TopBar
 
 logger = logging.getLogger(__name__)
@@ -37,19 +36,19 @@ logger = logging.getLogger(__name__)
 # Configuración de cada módulo: (clave, nombre_display, icono, clase_panel|None)
 # Si clase_panel es None → se usa PlaceholderView automáticamente.
 MODULOS_CONFIG = {
-    "clientes":          ("Clientes",               ClientesPanel),
-    "proveedores":       ("Proveedores",             None),
-    "inventario":        ("Inventario",              None),
-    "facturacion":       ("Facturación",             None),
-    "compras":           ("Compras",                 None),
-    "bancos":            ("Bancos",                  None),
-    "cuentas_bancarias": ("Cuentas Bancarias",        None),
-    "cajas":             ("Cajas",                   None),
-    "vendedores":        ("Vendedores",              None),
-    "comisiones":        ("Comisiones",              None),
-    "control_tasas":     ("Control de Tasas",        None),
-    "config_empresa":    ("Configuración de Empresa", ConfigEmpresaPanel),
-    "usuarios":          ("Usuarios",                None),
+    "clientes": ("Clientes", ClientesPanel),
+    "proveedores": ("Proveedores", None),
+    "inventario": ("Inventario", None),
+    "facturacion": ("Facturación", None),
+    "compras": ("Compras", None),
+    "bancos": ("Bancos", None),
+    "cuentas_bancarias": ("Cuentas Bancarias", None),
+    "cajas": ("Cajas", None),
+    "vendedores": ("Vendedores", None),
+    "comisiones": ("Comisiones", None),
+    "control_tasas": ("Control de Tasas", None),
+    "config_empresa": ("Configuración de Empresa", ConfigEmpresaPanel),
+    "usuarios": ("Usuarios", None),
 }
 
 
@@ -57,7 +56,7 @@ class MainWindow(QMainWindow):
     def __init__(self, usuario: Usuario):
         super().__init__()
         self.usuario = usuario
-        self._paneles: dict[str, QWidget] = {}   # cache lazy de paneles
+        self._paneles: dict[str, QWidget] = {}  # cache lazy de paneles
 
         self.setWindowTitle("ERP — Sistema de Gestión Administrativa")
         self.resize(1200, 720)

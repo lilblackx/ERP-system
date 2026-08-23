@@ -55,7 +55,10 @@ def test_listar_vendedores_filtra_por_texto(db_session):
     VendedorService.crear(
         db_session,
         **_datos_vendedor(
-            codigo_vendedor="VEN-002", identificacion_vendedor="V-22222222", nombre_vendedor="Otro", creado_por=admin.id_usuario
+            codigo_vendedor="VEN-002",
+            identificacion_vendedor="V-22222222",
+            nombre_vendedor="Otro",
+            creado_por=admin.id_usuario,
         ),
     )
 
@@ -117,7 +120,9 @@ def test_cambiar_estado_vendedor_desactiva(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
 
-    actualizado = VendedorService.cambiar_estado(db_session, vendedor.id_vendedor, "INACTIVO", id_usuario=admin.id_usuario)
+    actualizado = VendedorService.cambiar_estado(
+        db_session, vendedor.id_vendedor, "INACTIVO", id_usuario=admin.id_usuario
+    )
 
     assert actualizado.estado_vendedor == "INACTIVO"
 
@@ -180,7 +185,9 @@ def test_desempeno_mes_suma_ventas_y_excluye_anuladas(db_session):
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
     )
-    VentaService.anular_factura(db_session, factura_anulada.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga")
+    VentaService.anular_factura(
+        db_session, factura_anulada.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga"
+    )
 
     hoy = date.today()
     resultado = VendedorService.obtener_desempeno_mes(

@@ -47,6 +47,7 @@ TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test")
 # antes de borrar y las reactiva (WITH CHECK CHECK CONSTRAINT ALL) despues.
 TABLES_DELETE_ORDER = [
     "comisiones_factura",
+    "pagos_comisiones",
     "caja_movimientos",
     "banco_movimientos",
     "cuentas_por_pagar_otros",

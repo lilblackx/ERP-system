@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Banco, BancoMovimiento, Caja, CajaMovimiento, CuentaBancaria
@@ -249,7 +249,13 @@ class CajaService:
     @staticmethod
     def abrir_caja(session: Session, id_caja: int, id_usuario: int, saldo_apertura) -> Caja:
         require_permiso(session, id_usuario, "cajas", "editar")
-        caja = session.get(Caja, id_caja)
+        # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18 -- bloquea la fila hasta el
+        # commit para que una segunda apertura/cierre concurrente sobre la misma caja
+        # espere en vez de leer el mismo estado stale y pisar el saldo_apertura ya fijado
+        # (C22).
+        caja = session.execute(
+            select(Caja).where(Caja.id_caja == id_caja).with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if caja is None:
             raise ValueError("Caja no encontrada")
         if caja.fecha_apertura is not None and caja.fecha_cierre is None:
@@ -277,7 +283,10 @@ class CajaService:
     @staticmethod
     def cerrar_caja(session: Session, id_caja: int, id_usuario_cierre: int) -> Caja:
         require_permiso(session, id_usuario_cierre, "cajas", "editar")
-        caja = session.get(Caja, id_caja)
+        # Ver el comentario de abrir_caja() -- mismo patron.
+        caja = session.execute(
+            select(Caja).where(Caja.id_caja == id_caja).with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if caja is None:
             raise ValueError("Caja no encontrada")
         if caja.fecha_apertura is None or caja.fecha_cierre is not None:

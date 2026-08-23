@@ -16,6 +16,7 @@ from app.db.models import (
     CuentaBancaria,
     Inventario,
     Permiso,
+    ProductoPrecio,
     Proveedor,
     Rol,
     RolPermiso,
@@ -56,6 +57,24 @@ def crear_producto(session: Session, cantidad_unidad: Decimal | int = 100, **ove
     session.commit()
     session.refresh(producto)
     return producto
+
+
+def crear_precio_producto(
+    session: Session, producto: Inventario, precio_venta: Decimal | int | str, **overrides
+) -> ProductoPrecio:
+    """Inserta directo (sin pasar por PrecioService) el precio de lista de un producto --
+    tipo_precio fijo en 'UNICO' desde C14 (migrations/0011_consolidar_producto_precios.sql)."""
+    datos = {
+        "id_producto": producto.id_producto,
+        "tipo_precio": "UNICO",
+        "precio_venta": Decimal(str(precio_venta)),
+    }
+    datos.update(overrides)
+    precio = ProductoPrecio(**datos)
+    session.add(precio)
+    session.commit()
+    session.refresh(precio)
+    return precio
 
 
 def crear_cliente(session: Session, limite_credito: Decimal | int = 0, **overrides) -> Cliente:

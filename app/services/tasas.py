@@ -61,9 +61,9 @@ class TasaService:
     @staticmethod
     def obtener_tasa_actual(session: Session, id_usuario: int | None = None) -> dict | None:
         require_permiso(session, id_usuario, "tasas", "ver")
-        actual = session.query(ControlDeTasa).order_by(
-            ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc()
-        ).first()
+        actual = (
+            session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc()).first()
+        )
         if actual is None:
             return None
 

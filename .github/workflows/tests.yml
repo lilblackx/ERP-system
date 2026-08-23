@@ -69,6 +69,14 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements-dev-lock.txt
 
+      # C16: ruff (lint + format), config en pyproject.toml. No requiere la base de datos
+      # -- corre antes que los tests para fallar rapido si hay un problema de estilo.
+      - name: Lint (ruff check)
+        run: ruff check .
+
+      - name: Formato (ruff format --check)
+        run: ruff format --check .
+
       # No hace falta crear la base ni correr schema_sqlserver.sql a mano:
       # tests/conftest.py (fixture test_engine) crea distribuidora_dj_test y aplica el
       # schema + migraciones pendientes automaticamente la primera vez que corren los

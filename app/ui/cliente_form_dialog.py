@@ -38,7 +38,9 @@ class ClienteFormDialog(QDialog):
 
         self.vendedor_combo = QComboBox()
         self.vendedor_combo.addItem("Sin asignar", None)
-        for vendedor in session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor):
+        for vendedor in (
+            session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor)
+        ):
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
 
         self.categoria_combo = QComboBox()
@@ -47,8 +49,8 @@ class ClienteFormDialog(QDialog):
             self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
 
         form = QFormLayout()
-        form.addRow("Codigo:", self.codigo_input)
-        form.addRow("Identificacion:", self.identificacion_input)
+        form.addRow("Codigo:*", self.codigo_input)
+        form.addRow("Identificacion:*", self.identificacion_input)
         form.addRow("Razon social:*", self.nombre_input)
         form.addRow("Telefono:", self.telefono_input)
         form.addRow("Email:", self.email_input)
@@ -87,6 +89,14 @@ class ClienteFormDialog(QDialog):
         self.categoria_combo.setCurrentIndex(idx_categoria if idx_categoria >= 0 else 0)
 
     def _validar_y_aceptar(self):
+        # Mismos 3 campos que exige ClienteService (app/services/clientes.py) -- sin esto
+        # el usuario solo se entera al fallar la escritura, con un mensaje generico (C20).
+        if not self.codigo_input.text().strip():
+            QMessageBox.warning(self, "Dato requerido", "El codigo es obligatorio.")
+            return
+        if not self.identificacion_input.text().strip():
+            QMessageBox.warning(self, "Dato requerido", "La identificacion es obligatoria.")
+            return
         if not self.nombre_input.text().strip():
             QMessageBox.warning(self, "Dato requerido", "La razon social es obligatoria.")
             return
