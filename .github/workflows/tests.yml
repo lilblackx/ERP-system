@@ -42,15 +42,17 @@ jobs:
       - uses: actions/checkout@v4
 
       # pyodbc necesita el driver ODBC instalado en el SO -- no es un paquete pip (ver
-      # README.md, seccion Requisitos). Pasos oficiales de Microsoft para Ubuntu 22.04.
+      # README.md, seccion Requisitos). Metodo oficial de Microsoft para Ubuntu 22.04
+      # (learn.microsoft.com, "Install the Microsoft ODBC driver for SQL Server (Linux)").
+      # Usa /etc/apt/trusted.gpg.d en vez de un keyring con signed-by propio: los runners
+      # ubuntu-22.04 de GitHub ya traen un repo de packages.microsoft.com preconfigurado
+      # (para .NET/PowerShell/Azure CLI) con su propio keyring -- agregar un signed-by
+      # nuevo para la misma URL choca con eso ("Conflicting values set for option
+      # Signed-By") y hace fallar apt-get update. trusted.gpg.d no tiene ese problema.
       - name: Instalar ODBC Driver 18 para SQL Server
         run: |
-          curl -sSL -O https://packages.microsoft.com/keys/microsoft.asc
-          sudo mkdir -p /etc/apt/keyrings
-          cat microsoft.asc | gpg --dearmor | sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
-          curl -sSL -O https://packages.microsoft.com/config/ubuntu/22.04/prod.list
-          sed 's/\[arch=amd64,armhf,arm64\]/[arch=amd64,armhf,arm64 signed-by=\/etc\/apt\/keyrings\/microsoft.gpg]/g' prod.list \
-            | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+          curl -sSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
           sudo apt-get update
           ACCEPT_EULA=Y sudo apt-get install -y msodbcsql18
 
