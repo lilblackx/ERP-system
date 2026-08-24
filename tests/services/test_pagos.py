@@ -23,6 +23,7 @@ from tests.factories import (
     crear_producto,
     crear_proveedor,
     crear_usuario_admin,
+    crear_vendedor,
 )
 
 
@@ -30,13 +31,14 @@ def _crear_cxc(session, saldo: Decimal):
     """Devuelve (cxc, admin): admin es un actor autorizado listo para usar en
     abrir_caja/registrar_pago_cobro en el test que llama esto."""
     admin = crear_usuario_admin(session)
+    vendedor = crear_vendedor(session)
     producto = crear_producto(session, cantidad_unidad=100)
     cliente = crear_cliente(session, limite_credito=saldo * 2)
     factura = VentaService.emitir_factura(
         session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": str(saldo)}],
     )

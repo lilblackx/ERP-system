@@ -44,11 +44,13 @@ class ComisionService:
         transaccion atomica que la venta (el caller ya hizo flush() antes de llamar aca,
         asi que `detalles` trae id_factura_detalle poblado).
 
-        Si la factura no tiene vendedor asignado, no hay a quien acreditarle la comision.
-        Si un producto no tiene precio de lista configurado (ProductoPrecio), esa linea se
-        saltea -- no bloquea la venta, simplemente no genera comision para ese item.
+        El vendedor es obligatorio en toda factura (factura_venta.id_vendedor NOT NULL,
+        migrations/0017_vendedor_obligatorio_factura.sql), asi que siempre hay a quien
+        acreditarle la comision. Si un producto no tiene precio de lista configurado
+        (ProductoPrecio), esa linea se saltea -- no bloquea la venta, simplemente no genera
+        comision para ese item.
         """
-        if factura.id_vendedor is None or not detalles:
+        if not detalles:
             return []
 
         ids_producto = {detalle.id_producto_factura for detalle in detalles}

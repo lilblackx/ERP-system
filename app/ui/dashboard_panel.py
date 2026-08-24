@@ -8,7 +8,7 @@ import logging
 
 import qtawesome as qta
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -317,6 +317,14 @@ class DashboardPanel(QWidget):
         self._build_ui()
         QTimer.singleShot(100, self.cargar_datos)
 
+    def showEvent(self, event: QShowEvent) -> None:
+        # El panel se crea una sola vez y MainWindow lo reutiliza via
+        # QStackedWidget (_obtener_o_crear_panel) -- sin esto, volver a "Panel
+        # General" despues de la carga inicial mostraba datos ya viejos hasta
+        # cerrar y volver a abrir la app.
+        super().showEvent(event)
+        self.cargar_datos()
+
     # ── Construcción de la UI ─────────────────────────────────────────────
 
     def _build_ui(self) -> None:
@@ -469,6 +477,12 @@ class DashboardPanel(QWidget):
     # ── Carga de datos ────────────────────────────────────────────────────
 
     def cargar_datos(self) -> None:
+        # showEvent puede disparar esto antes de que una carga anterior termine
+        # (navegacion rapida entre modulos) -- reasignar self._worker a un QThread
+        # nuevo mientras el viejo sigue corriendo lo destruye a mitad de ejecucion
+        # y Qt aborta el proceso ("QThread: Destroyed while thread is still running").
+        if getattr(self, "_worker", None) is not None and self._worker.isRunning():
+            return
         self._worker = QueryWorker(self.session_factory, _tarea_panel_general, id_usuario=self.usuario.id_usuario)
         self._worker.resultado.connect(self._mostrar_datos)
         self._worker.error.connect(self._mostrar_error)

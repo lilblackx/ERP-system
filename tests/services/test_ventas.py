@@ -10,6 +10,7 @@ from app.db.models import (
     NotaCreditoCliente,
     PagoCobro,
 )
+from app.services.empresa import EmpresaService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
@@ -26,6 +27,7 @@ from tests.factories import (
 
 def test_emitir_factura_contado_descuenta_stock_y_calcula_total(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
 
@@ -33,7 +35,7 @@ def test_emitir_factura_contado_descuenta_stock_y_calcula_total(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
     )
@@ -60,6 +62,7 @@ def test_emitir_factura_sin_usuario_autorizado_falla(db_session):
 
 def test_emitir_factura_contado_no_abre_cuenta_por_cobrar(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
 
@@ -67,7 +70,7 @@ def test_emitir_factura_contado_no_abre_cuenta_por_cobrar(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
@@ -78,6 +81,7 @@ def test_emitir_factura_contado_no_abre_cuenta_por_cobrar(db_session):
 
 def test_emitir_factura_credito_abre_cuenta_por_cobrar(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session, limite_credito=1000)
 
@@ -85,7 +89,7 @@ def test_emitir_factura_credito_abre_cuenta_por_cobrar(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "30.00"}],
     )
@@ -98,6 +102,7 @@ def test_emitir_factura_credito_abre_cuenta_por_cobrar(db_session):
 
 def test_emitir_factura_credito_excede_limite(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session, limite_credito=50)
 
@@ -106,7 +111,7 @@ def test_emitir_factura_credito_excede_limite(db_session):
             db_session,
             id_cliente=cliente.id_cliente,
             id_usuario=admin.id_usuario,
-            id_vendedor=None,
+            id_vendedor=vendedor.id_vendedor,
             condicion_pago="credito",
             items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "30.00"}],
         )
@@ -114,6 +119,7 @@ def test_emitir_factura_credito_excede_limite(db_session):
 
 def test_emitir_factura_credito_acumula_deuda_de_facturas_previas(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session, limite_credito=100)
 
@@ -121,7 +127,7 @@ def test_emitir_factura_credito_acumula_deuda_de_facturas_previas(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "30.00"}],
     )
@@ -131,7 +137,7 @@ def test_emitir_factura_credito_acumula_deuda_de_facturas_previas(db_session):
             db_session,
             id_cliente=cliente.id_cliente,
             id_usuario=admin.id_usuario,
-            id_vendedor=None,
+            id_vendedor=vendedor.id_vendedor,
             condicion_pago="credito",
             items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "30.00"}],
         )
@@ -139,6 +145,7 @@ def test_emitir_factura_credito_acumula_deuda_de_facturas_previas(db_session):
 
 def test_emitir_factura_stock_insuficiente(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=3)
     cliente = crear_cliente(db_session)
 
@@ -147,7 +154,7 @@ def test_emitir_factura_stock_insuficiente(db_session):
             db_session,
             id_cliente=cliente.id_cliente,
             id_usuario=admin.id_usuario,
-            id_vendedor=None,
+            id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
             items=[{"id_producto": producto.id_producto, "cantidad": 10, "precio_unitario": "20.00"}],
         )
@@ -207,6 +214,7 @@ def test_emitir_factura_vendedor_inexistente_falla(db_session):
 
 def test_emitir_factura_producto_inactivo_falla(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50, estado_producto="INACTIVO")
     cliente = crear_cliente(db_session)
 
@@ -215,7 +223,7 @@ def test_emitir_factura_producto_inactivo_falla(db_session):
             db_session,
             id_cliente=cliente.id_cliente,
             id_usuario=admin.id_usuario,
-            id_vendedor=None,
+            id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
             items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
         )
@@ -223,6 +231,7 @@ def test_emitir_factura_producto_inactivo_falla(db_session):
 
 def test_emitir_factura_agrupa_items_repetidos_para_validar_stock(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=5)
     cliente = crear_cliente(db_session)
 
@@ -231,7 +240,7 @@ def test_emitir_factura_agrupa_items_repetidos_para_validar_stock(db_session):
             db_session,
             id_cliente=cliente.id_cliente,
             id_usuario=admin.id_usuario,
-            id_vendedor=None,
+            id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
             items=[
                 {"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "20.00"},
@@ -256,6 +265,7 @@ def test_emitir_factura_sin_items(db_session):
 
 def test_emitir_factura_condicion_pago_invalida(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session)
     cliente = crear_cliente(db_session)
     with pytest.raises(ValueError, match="condicion_pago"):
@@ -263,7 +273,7 @@ def test_emitir_factura_condicion_pago_invalida(db_session):
             db_session,
             id_cliente=cliente.id_cliente,
             id_usuario=admin.id_usuario,
-            id_vendedor=None,
+            id_vendedor=vendedor.id_vendedor,
             condicion_pago="otra",
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
         )
@@ -285,6 +295,7 @@ def test_emitir_factura_cliente_inexistente(db_session):
 
 def test_anular_factura_contado_repone_stock(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
 
@@ -292,7 +303,7 @@ def test_anular_factura_contado_repone_stock(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
     )
@@ -309,13 +320,14 @@ def test_anular_factura_contado_repone_stock(db_session):
 
 def test_anular_factura_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
     factura = VentaService.emitir_factura(
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
     )
@@ -326,6 +338,7 @@ def test_anular_factura_sin_usuario_autorizado_falla(db_session):
 
 def test_anular_factura_credito_repone_stock_y_cierra_cxc(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session, limite_credito=1000)
 
@@ -333,7 +346,7 @@ def test_anular_factura_credito_repone_stock_y_cierra_cxc(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "20.00"}],
     )
@@ -350,7 +363,7 @@ def test_anular_factura_credito_repone_stock_y_cierra_cxc(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "999.00"}],
     )
@@ -359,6 +372,7 @@ def test_anular_factura_credito_repone_stock_y_cierra_cxc(db_session):
 
 def test_anular_factura_con_pago_aplicado_genera_nota_de_credito(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session, limite_credito=1000)
     caja = crear_caja(db_session)
@@ -368,7 +382,7 @@ def test_anular_factura_con_pago_aplicado_genera_nota_de_credito(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
     )
@@ -413,7 +427,7 @@ def test_anular_factura_con_pago_aplicado_genera_nota_de_credito(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "999.00"}],
     )
@@ -525,7 +539,31 @@ def test_emitir_factura_con_vendedor_calcula_comision_sobre_diferencia(db_sessio
     assert comision.estado_pago == "pendiente"
 
 
-def test_emitir_factura_precio_igual_o_menor_al_de_lista_comision_cero(db_session):
+def test_emitir_factura_precio_igual_al_de_lista_comision_cero(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "5.00")
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "5.00"}],
+    )
+
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
+    assert comision.monto_comision == Decimal("0.00")  # nunca negativa
+
+
+def test_emitir_factura_precio_menor_al_de_lista_requiere_autorizacion_y_comision_cero(db_session):
+    """Vender por debajo del precio de lista es un descuento implicito (hallazgo #4/#5
+    del audit de facturacion): requiere motivo + autorizador con permiso
+    'descuentos'/'crear', igual que un monto_descuento explicito."""
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
@@ -539,11 +577,64 @@ def test_emitir_factura_precio_igual_o_menor_al_de_lista_comision_cero(db_sessio
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
+        motivo_descuento="Cliente frecuente",
+        id_autorizador_descuento=admin.id_usuario,
     )
 
+    assert factura.autorizado_por_descuento == admin.id_usuario
+    assert factura.motivo_descuento == "Cliente frecuente"
     detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
     comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
     assert comision.monto_comision == Decimal("0.00")  # nunca negativa
+
+
+def test_emitir_factura_precio_menor_al_de_lista_sin_autorizacion_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "5.00")
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="requiere un motivo"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
+        )
+
+    with pytest.raises(ValueError, match="requiere autorizacion de un supervisor"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
+            motivo_descuento="Cliente frecuente",
+        )
+
+
+def test_emitir_factura_precio_menor_al_de_lista_autorizador_sin_permiso_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "5.00")
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(PermisoDenegadoError):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
+            motivo_descuento="Cliente frecuente",
+            id_autorizador_descuento=999999,
+        )
 
 
 def test_emitir_factura_sin_precio_de_lista_no_genera_comision(db_session):
@@ -565,34 +656,35 @@ def test_emitir_factura_sin_precio_de_lista_no_genera_comision(db_session):
     assert db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).first() is None
 
 
-def test_emitir_factura_sin_vendedor_no_genera_comision(db_session):
+def test_emitir_factura_sin_vendedor_falla(db_session):
+    """El vendedor es obligatorio en toda factura desde
+    migrations/0017_vendedor_obligatorio_factura.sql -- sin el, ComisionService no
+    tendria a quien acreditarle la venta."""
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
-    crear_precio_producto(db_session, producto, "1.00")
     cliente = crear_cliente(db_session)
 
-    factura = VentaService.emitir_factura(
-        db_session,
-        id_cliente=cliente.id_cliente,
-        id_usuario=admin.id_usuario,
-        id_vendedor=None,
-        condicion_pago="contado",
-        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
-    )
-
-    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
-    assert db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).first() is None
+    with pytest.raises(ValueError, match="vendedor es obligatorio"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=None,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        )
 
 
 def test_anular_factura_sin_motivo(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session)
     cliente = crear_cliente(db_session)
     factura = VentaService.emitir_factura(
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
@@ -603,13 +695,14 @@ def test_anular_factura_sin_motivo(db_session):
 
 def test_anular_factura_ya_anulada(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session)
     cliente = crear_cliente(db_session)
     factura = VentaService.emitir_factura(
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
@@ -621,6 +714,7 @@ def test_anular_factura_ya_anulada(db_session):
 
 def test_listar_facturas_filtra_por_cliente(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente_a = crear_cliente(db_session)
     cliente_b = crear_cliente(db_session)
@@ -629,7 +723,7 @@ def test_listar_facturas_filtra_por_cliente(db_session):
         db_session,
         id_cliente=cliente_a.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
@@ -637,7 +731,7 @@ def test_listar_facturas_filtra_por_cliente(db_session):
         db_session,
         id_cliente=cliente_b.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
@@ -655,6 +749,7 @@ def test_listar_facturas_sin_usuario_autorizado_falla(db_session):
 
 def test_listar_facturas_filtra_por_numero_parcial(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
 
@@ -662,7 +757,7 @@ def test_listar_facturas_filtra_por_numero_parcial(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
@@ -677,6 +772,7 @@ def test_listar_facturas_filtra_por_numero_parcial(db_session):
 
 def test_obtener_factura_incluye_detalles(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
 
@@ -684,7 +780,7 @@ def test_obtener_factura_incluye_detalles(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
     )
@@ -707,3 +803,333 @@ def test_obtener_factura_inexistente_falla(db_session):
 def test_obtener_factura_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         VentaService.obtener_factura(db_session, 1)
+
+
+# --- numero_control + IVA (facturacion fiscal, migrations/0018-0019) ------------------
+
+
+def test_emitir_factura_numero_control_correlativo_unico(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    primera = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+    segunda = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    assert primera.numero_control.startswith("00-")
+    assert primera.numero_control != segunda.numero_control
+    assert primera.numero_control == f"00-{primera.id_factura:08d}"
+
+
+def test_emitir_factura_sin_config_empresa_no_calcula_iva(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    assert factura.iva_aplicado is False
+    assert factura.monto_iva == Decimal("0.00")
+
+
+def test_emitir_factura_con_iva_activo_calcula_monto_y_snapshot(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+    )
+
+    assert factura.iva_aplicado is True
+    assert factura.porcentaje_iva_aplicado == Decimal("16.00")
+    assert factura.monto_iva == Decimal("16.00")
+    assert factura.total_venta == Decimal("100.00")  # total_venta sigue siendo el subtotal
+
+
+def test_emitir_factura_con_iva_desactivado_no_calcula_iva_aunque_haya_config(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=False,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+    )
+
+    assert factura.iva_aplicado is False
+    assert factura.monto_iva == Decimal("0.00")
+
+
+def test_emitir_factura_credito_con_iva_suma_iva_a_cuenta_por_cobrar(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=1000)
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+    )
+
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    assert cxc.saldo_pendiente == Decimal("116.00")  # 100 + 16% IVA
+
+
+def test_emitir_factura_credito_con_iva_valida_limite_credito_incluyendo_iva(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    # limite alcanza para el subtotal (100) pero no para subtotal+IVA (116)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("110.00"))
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+
+    with pytest.raises(ValueError, match="limite de credito"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        )
+
+
+# --- monto_descuento de factura (descuento manual, requiere autorizacion) -------------
+
+
+def test_emitir_factura_monto_descuento_sin_autorizacion_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="requiere un motivo"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            monto_descuento="10.00",
+        )
+
+
+def test_emitir_factura_monto_descuento_autorizado_resta_del_total(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        monto_descuento="10.00",
+        motivo_descuento="Cliente frecuente",
+        id_autorizador_descuento=admin.id_usuario,
+    )
+
+    assert factura.monto_descuento == Decimal("10.00")
+    assert factura.autorizado_por_descuento == admin.id_usuario
+    assert factura.total_venta == Decimal("100.00")  # subtotal crudo, sin tocar (triggers)
+
+
+def test_emitir_factura_monto_descuento_mayor_al_subtotal_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="no puede ser mayor al subtotal"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            monto_descuento="150.00",
+            motivo_descuento="x",
+            id_autorizador_descuento=admin.id_usuario,
+        )
+
+
+def test_emitir_factura_monto_descuento_negativo_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="no puede ser negativo"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            monto_descuento="-1.00",
+        )
+
+
+def test_emitir_factura_credito_con_descuento_y_iva_ajusta_cuenta_por_cobrar(db_session):
+    """subtotal 100 - descuento 20 = 80; +16% IVA sobre 80 = 12.80; total a cobrar 92.80."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=1000)
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        monto_descuento="20.00",
+        motivo_descuento="Cliente frecuente",
+        id_autorizador_descuento=admin.id_usuario,
+    )
+
+    assert factura.monto_iva == Decimal("12.80")
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    assert cxc.saldo_pendiente == Decimal("92.80")
+
+
+# --- consultar_limite_disponible (bloqueo visual proactivo en factura_form_dialog) ----
+
+
+def test_consultar_limite_disponible_sin_deuda(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    resultado = VentaService.consultar_limite_disponible(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
+
+    assert resultado["limite_credito"] == Decimal("500.00")
+    assert resultado["deuda_actual"] == Decimal("0.00")
+    assert resultado["disponible"] == Decimal("500.00")
+
+
+def test_consultar_limite_disponible_descuenta_deuda_vigente(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "120.00"}],
+    )
+
+    resultado = VentaService.consultar_limite_disponible(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
+
+    assert resultado["deuda_actual"] == Decimal("120.00")
+    assert resultado["disponible"] == Decimal("380.00")
+
+
+def test_consultar_limite_disponible_cliente_inexistente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="Cliente no encontrado"):
+        VentaService.consultar_limite_disponible(db_session, 999999, id_usuario=admin.id_usuario)
+
+
+def test_consultar_limite_disponible_sin_usuario_autorizado_falla(db_session):
+    cliente = crear_cliente(db_session)
+    with pytest.raises(PermisoDenegadoError):
+        VentaService.consultar_limite_disponible(db_session, cliente.id_cliente)

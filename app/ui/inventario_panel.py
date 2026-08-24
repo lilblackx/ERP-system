@@ -9,6 +9,7 @@ import logging
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -105,6 +106,15 @@ class InventarioPanel(QWidget):
         self._setup_ui()
         QTimer.singleShot(100, self._cargar_categorias_filtro)
         QTimer.singleShot(100, self.cargar_productos)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        # Mismo problema que DashboardPanel/FacturacionPanel/ClientesPanel:
+        # MainWindow cachea el panel y lo reutiliza via QStackedWidget.
+        # _cargar_categorias_filtro preserva la categoria seleccionada al
+        # reconstruir el combo, asi que es seguro repetirla en cada revisita.
+        super().showEvent(event)
+        self._cargar_categorias_filtro()
+        self.cargar_productos()
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 

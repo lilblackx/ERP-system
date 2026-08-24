@@ -3,6 +3,7 @@ import decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -65,7 +66,6 @@ class CategoriaCliente(Base):
 
     id_categoria_cliente: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     nombre: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
-    descuento_porcentaje: Mapped[decimal.Decimal | None] = mapped_column(Numeric(5, 2), server_default="0.00")
     dias_credito_default: Mapped[int | None] = mapped_column(Integer, server_default="0")
 
 
@@ -123,6 +123,16 @@ class ConfiguracionEmpresa(Base):
     razon_social_empresa: Mapped[str | None] = mapped_column(String(255))
     direccion_empresa: Mapped[str | None] = mapped_column(String(255))
     telefono_empresa: Mapped[str | None] = mapped_column(String(255))
+    pie_pagina_empresa: Mapped[str | None] = mapped_column(String(500))
+    # IVA activable por empresa (algunas operan bajo regimenes/rubros exentos) y con
+    # porcentaje ajustable -- VentaService snapshotea ambos en cada factura al emitirla
+    # (FacturaVenta.iva_aplicado/porcentaje_iva_aplicado) para que un cambio posterior de
+    # este porcentaje no altere retroactivamente el IVA ya facturado.
+    iva_activo: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    iva_porcentaje: Mapped[decimal.Decimal] = mapped_column(Numeric(5, 2), nullable=False, server_default="16.00")
+    # Nombre de impresora tal como lo reporta QPrinterInfo -- ver
+    # app/ui/factura_pdf.py::imprimir_factura y migrations/0023.
+    impresora_predeterminada: Mapped[str | None] = mapped_column(String(255))
 
     modificador = relationship("Usuario")
 
@@ -239,16 +249,38 @@ class FacturaVenta(Base):
 
     id_factura: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     numero_factura: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    # Numero de control fiscal (factura digital, sin impresora fiscal certificada):
+    # distinto de numero_factura (referencia de negocio) -- ver
+    # migrations/0019_factura_numero_control_iva.sql. Mismo patron placeholder+flush+
+    # update que numero_factura, ver _numero_control_temporal() en ventas.py.
+    numero_control: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     id_cliente_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id_cliente"), nullable=False)
     id_usuario_factura: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_emision: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     total_venta: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
+    # IVA snapshoteado al emitir (no recalculado si config_empresa cambia despues -- ver
+    # ConfiguracionEmpresa.iva_activo/iva_porcentaje). total_venta sigue siendo el
+    # subtotal puro de las lineas (lo que recalculan los triggers existentes,
+    # trg_factura_total_*); monto_iva es lo que se le suma para el total a cobrar.
+    iva_aplicado: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    porcentaje_iva_aplicado: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, server_default="0.00"
+    )
+    monto_iva: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False, server_default="0.00")
     estado_factura: Mapped[str] = mapped_column(String(20), server_default="EMITIDA")
     id_tasa_factura: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
     condicion_pago: Mapped[str] = mapped_column(String(10), nullable=False)
     fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
     observaciones_factura: Mapped[str | None] = mapped_column(String(255))
-    id_vendedor: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("vendedores.id_vendedor"))
+    id_vendedor: Mapped[int] = mapped_column(BigInteger, ForeignKey("vendedores.id_vendedor"), nullable=False)
+    # Descuento manual de factura completa (no por linea -- el descuento por item se
+    # maneja directamente bajando precio_unitario, ver ComisionService/VentaService).
+    # Igual que precio_unitario < precio de lista, requiere autorizacion de un usuario
+    # con permiso 'ventas'/'autorizar_descuento' -- ver migrations/
+    # 0020_descuentos_autorizacion.sql y VentaService.emitir_factura().
+    monto_descuento: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False, server_default="0.00")
+    motivo_descuento: Mapped[str | None] = mapped_column(String(255))
+    autorizado_por_descuento: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     cliente = relationship("Cliente")
@@ -256,6 +288,7 @@ class FacturaVenta(Base):
     tasa = relationship("ControlDeTasa")
     vendedor = relationship("Vendedor")
     modificador = relationship("Usuario", foreign_keys=[modificado_por])
+    autorizador_descuento = relationship("Usuario", foreign_keys=[autorizado_por_descuento])
 
 
 class FacturaDetalle(Base):

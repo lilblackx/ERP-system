@@ -55,6 +55,13 @@ class TasaTicker(QWidget):
         self._timer_elapsed.timeout.connect(self._actualizar_elapsed)
         self._timer_elapsed.start(60_000)
 
+        # A diferencia de los paneles del QStackedWidget, este widget nunca se
+        # oculta/muestra al navegar (vive fuera del stack, siempre visible), asi
+        # que un hook de showEvent no serviria -- se refresca con timer propio.
+        self._timer_refresh = QTimer(self)
+        self._timer_refresh.timeout.connect(self.cargar_tasa)
+        self._timer_refresh.start(300_000)
+
         QTimer.singleShot(100, self.cargar_tasa)
 
     def _build_ui(self) -> None:
@@ -107,6 +114,12 @@ class TasaTicker(QWidget):
     # ── Carga de datos ────────────────────────────────────────────────────
 
     def cargar_tasa(self) -> None:
+        # El timer periodico (_timer_refresh) puede disparar esto antes de que
+        # una carga anterior termine -- reasignar self._worker a un QThread nuevo
+        # mientras el viejo sigue corriendo lo destruye a mitad de ejecucion y Qt
+        # aborta el proceso ("QThread: Destroyed while thread is still running").
+        if getattr(self, "_worker", None) is not None and self._worker.isRunning():
+            return
         self._worker = QueryWorker(self.session_factory, _tarea_tasa_actual, id_usuario=self.usuario.id_usuario)
         self._worker.resultado.connect(self._mostrar_tasa)
         self._worker.error.connect(self._ocultar_por_error)

@@ -22,7 +22,16 @@ def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | N
         raise ValueError(f"Ya existe un cliente con {campo}='{valor}'")
 
 
-def list_clientes(session: Session, texto_busqueda: str | None = None, id_usuario: int | None = None) -> list[Cliente]:
+def list_clientes(
+    session: Session,
+    texto_busqueda: str | None = None,
+    id_usuario: int | None = None,
+    limite: int | None = None,
+) -> list[Cliente]:
+    """limite: tope opcional de filas (D-01) -- pensado para selectores tipo
+    buscar-mientras-se-escribe (ej. app/ui/factura_form_dialog.py) que no necesitan traer
+    el catalogo completo a memoria en cada tecla. None preserva el comportamiento
+    original (sin limite) para los callers que si necesitan el listado completo."""
     require_permiso(session, id_usuario, "clientes", "ver")
     query = session.query(Cliente).options(joinedload(Cliente.vendedor), joinedload(Cliente.categoria))
     if texto_busqueda:
@@ -32,7 +41,10 @@ def list_clientes(session: Session, texto_busqueda: str | None = None, id_usuari
             | Cliente.identificacion_cliente.ilike(like)
             | Cliente.codigo_cliente.ilike(like)
         )
-    return query.order_by(Cliente.nombre_razon_social).all()
+    query = query.order_by(Cliente.nombre_razon_social)
+    if limite is not None:
+        query = query.limit(limite)
+    return query.all()
 
 
 def create_cliente(session: Session, **datos) -> Cliente:

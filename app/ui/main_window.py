@@ -14,6 +14,7 @@ que se accede a cada módulo para minimizar el tiempo de arranque.
 
 import logging
 
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -35,6 +36,7 @@ from app.ui.sidebar import Sidebar
 from app.ui.styles import GLOBAL_QSS
 from app.ui.tasa_ticker import TasaTicker
 from app.ui.topbar import TopBar
+from app.ui.vendedores_panel import VendedoresPanel
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ MODULOS_CONFIG = {
     "bancos": ("Bancos", None),
     "cuentas_bancarias": ("Cuentas Bancarias", None),
     "cajas": ("Cajas", None),
-    "vendedores": ("Vendedores", None),
+    "vendedores": ("Vendedores", VendedoresPanel),
     "comisiones": ("Comisiones", None),
     "control_tasas": ("Control de Tasas", None),
     "config_empresa": ("Configuración de Empresa", ConfigEmpresaPanel),
@@ -144,6 +146,21 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(panel)
 
         return self._paneles[clave]
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        # DashboardPanel y TasaTicker cargan datos en un QThread aparte
+        # (QueryWorker) que puede seguir corriendo al cerrar la ventana --
+        # destruir esos widgets con el hilo todavia activo aborta el proceso
+        # ("QThread: Destroyed while thread is still running"). quit()+wait()
+        # es un no-op si ya termino; si no, espera a que la consulta actual
+        # cierre su propia sesion antes de dejar avanzar el cierre.
+        candidatos = [*self._paneles.values(), self.ticker_tasas]
+        for widget in candidatos:
+            worker = getattr(widget, "_worker", None)
+            if worker is not None and worker.isRunning():
+                worker.quit()
+                worker.wait(3000)
+        super().closeEvent(event)
 
     def _confirmar_cerrar_sesion(self) -> None:
         respuesta = QMessageBox.question(self, "Cerrar sesión", "¿Cerrar la sesión actual?")

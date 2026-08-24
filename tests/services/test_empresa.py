@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 
 from app.services.empresa import EmpresaService
@@ -121,3 +123,45 @@ def test_guardar_configuracion_registra_modificado_por(db_session):
     )
 
     assert config.modificado_por == admin.id_usuario
+
+
+def test_guardar_configuracion_default_iva_desactivado(db_session):
+    admin = crear_usuario_admin(db_session)
+    config = EmpresaService.guardar_configuracion(
+        db_session, rif=None, razon_social=None, direccion=None, telefono=None, modificado_por=admin.id_usuario
+    )
+
+    assert config.iva_activo is False
+
+
+def test_guardar_configuracion_iva_activo_y_porcentaje_y_pie_pagina(db_session):
+    admin = crear_usuario_admin(db_session)
+    config = EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        pie_pagina="Gracias por su compra",
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+
+    assert config.iva_activo is True
+    assert config.iva_porcentaje == Decimal("16.00")
+    assert config.pie_pagina_empresa == "Gracias por su compra"
+
+
+def test_guardar_configuracion_iva_porcentaje_fuera_de_rango_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="entre 0 y 100"):
+        EmpresaService.guardar_configuracion(
+            db_session,
+            rif=None,
+            razon_social=None,
+            direccion=None,
+            telefono=None,
+            iva_porcentaje="150.00",
+            modificado_por=admin.id_usuario,
+        )

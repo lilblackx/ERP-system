@@ -62,7 +62,23 @@ def validar_password_policy(password: str) -> None:
         raise ValueError("La clave no cumple la politica de seguridad, falta: " + ", ".join(faltantes) + ".")
 
 
-def authenticate(session: Session, nombre_usuario: str, clave: str) -> Usuario | None:
+def authenticate(
+    session: Session,
+    nombre_usuario: str,
+    clave: str,
+    accion_exito: str = "LOGIN",
+    accion_fallo: str = "LOGIN_FALLIDO",
+) -> Usuario | None:
+    """Verifica usuario+clave contra bcrypt, con el mismo conteo de intentos fallidos/
+    bloqueo de cuenta sin importar el motivo de la verificacion.
+
+    accion_exito/accion_fallo permiten reusar esta misma verificacion (y su proteccion
+    de fuerza bruta) para flujos distintos al login principal -- ej. el dialogo de
+    autorizacion de descuentos en facturacion (app/ui/autorizacion_dialog.py) pide
+    usuario+clave de un supervisor sin cerrar la sesion del vendedor, y ese intento
+    tambien debe contar contra el bloqueo de CUENTA del supervisor, pero logueado como
+    'AUTORIZACION_DESCUENTO'/'AUTORIZACION_DESCUENTO_FALLIDA' en vez de 'LOGIN', para no
+    ensuciar la auditoria con inicios de sesion que nunca ocurrieron."""
     usuario = (
         session.query(Usuario)
         .options(joinedload(Usuario.rol))
@@ -80,7 +96,7 @@ def authenticate(session: Session, nombre_usuario: str, clave: str) -> Usuario |
         AuditoriaService.registrar_evento(
             session,
             id_usuario=usuario.id_usuario,
-            accion="LOGIN",
+            accion=accion_exito,
             modulo="AUTH",
             detalle=f"Usuario '{usuario.nombre_usuario}' inicio sesion",
         )
@@ -93,7 +109,7 @@ def authenticate(session: Session, nombre_usuario: str, clave: str) -> Usuario |
     AuditoriaService.registrar_evento(
         session,
         id_usuario=usuario.id_usuario,
-        accion="LOGIN_FALLIDO",
+        accion=accion_fallo,
         modulo="AUTH",
         detalle=f"Intento fallido #{usuario.intentos_fallidos} para '{usuario.nombre_usuario}'",
     )

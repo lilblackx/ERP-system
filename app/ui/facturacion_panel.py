@@ -10,6 +10,7 @@ import logging
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -30,10 +31,13 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.models import FacturaVenta, Usuario
+from app.services.clientes import list_clientes
+from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel
 from app.services.ventas import VentaService
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.factura_form_dialog import FacturaFormDialog
+from app.ui.factura_pdf import imprimir_factura
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -48,12 +52,30 @@ from app.ui.styles import (
     TABLE_QSS,
     color_con_alpha,
 )
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
 COLS_VISIBLES = ["ID", "N° Factura", "Cliente", "Fecha", "Condición", "Total", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
+
+
+def _tarea_imprimir_factura(session, id_factura: int, id_usuario: int | None) -> str | None:
+    """Corre en un QThread aparte (QueryWorker), no en el hilo de GUI: enviar un
+    trabajo a un driver de impresora real via QPrinter.print_() puede tardar varios
+    cientos de ms (a veces mas en el primer trabajo de la sesion, mientras el driver
+    inicializa), y hacerlo de forma sincrona justo despues de "Facturar" era lo que
+    hacia sentir lento todo el flujo -- la ventana quedaba bloqueada hasta que el
+    spooler aceptaba el documento. Devuelve el nombre de la impresora usada, o None si
+    no hay ninguna configurada (no es un error, ver FacturacionPanel._disparar_impresion_automatica)."""
+    config_empresa = EmpresaService.obtener_configuracion(session, id_usuario=id_usuario)
+    if not config_empresa or not config_empresa.impresora_predeterminada:
+        return None
+    datos_factura = VentaService.obtener_factura(session, id_factura, id_usuario=id_usuario)
+    imprimir_factura(datos_factura, config_empresa, config_empresa.impresora_predeterminada)
+    return config_empresa.impresora_predeterminada
+
 
 ESTADOS_FILTRO = [
     ("Todos los estados", None),
@@ -104,6 +126,13 @@ class FacturacionPanel(QWidget):
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_facturas)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        # Mismo problema que DashboardPanel (ver su showEvent): MainWindow
+        # cachea el panel y lo reutiliza via QStackedWidget, asi que sin esto
+        # volver a "Facturacion" desde otro modulo mostraba el listado viejo.
+        super().showEvent(event)
+        self.cargar_facturas()
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 
@@ -170,6 +199,13 @@ class FacturacionPanel(QWidget):
             self.condicion_combo.addItem(etiqueta, valor)
         self.condicion_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
+        self.cliente_combo = QComboBox()
+        self.cliente_combo.setFixedHeight(34)
+        self.cliente_combo.setMinimumWidth(180)
+        self.cliente_combo.addItem("Todos los clientes", None)
+        self.cliente_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
+        self._cargar_clientes_filtro()
+
         self.btn_nueva_factura = QPushButton("Nueva Factura")
         self.btn_nueva_factura.setIcon(qta.icon("fa5s.plus", color="white"))
         self.btn_nueva_factura.setStyleSheet(BUTTON_PRIMARY_QSS)
@@ -183,10 +219,21 @@ class FacturacionPanel(QWidget):
         h.addWidget(self.buscar_input)
         h.addWidget(self.estado_combo)
         h.addWidget(self.condicion_combo)
+        h.addWidget(self.cliente_combo)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nueva_factura)
         h.addWidget(btn_exportar)
         return w
+
+    def _cargar_clientes_filtro(self) -> None:
+        session = self.session_factory()
+        try:
+            for cliente in list_clientes(session, None, id_usuario=self.usuario.id_usuario):
+                self.cliente_combo.addItem(cliente.nombre_razon_social, cliente.id_cliente)
+        except Exception:
+            logger.exception("Fallo al cargar clientes para el filtro de facturacion")
+        finally:
+            session.close()
 
     def _make_table(self) -> QTableWidget:
         self.tabla = QTableWidget(0, len(COLS_VISIBLES))
@@ -285,6 +332,7 @@ class FacturacionPanel(QWidget):
                 numero_factura=self.buscar_input.text().strip() or None,
                 estado=self.estado_combo.currentData(),
                 condicion_pago=self.condicion_combo.currentData(),
+                id_cliente=self.cliente_combo.currentData(),
                 pagina=self.pagina_actual,
                 por_pagina=POR_PAGINA,
                 id_usuario=self.usuario.id_usuario,
@@ -341,6 +389,9 @@ class FacturacionPanel(QWidget):
                 datos = dialogo.get_data()
                 factura = VentaService.emitir_factura(session, id_usuario=self.usuario.id_usuario, **datos)
                 self.cargar_facturas()
+                # La impresion se dispara en segundo plano (no bloquea este mensaje ni
+                # el resto de la UI) -- ver _disparar_impresion_automatica.
+                self._disparar_impresion_automatica(factura.id_factura)
                 QMessageBox.information(self, "Factura emitida", f"Factura {factura.numero_factura} emitida con éxito.")
         except ValueError as exc:
             session.rollback()
@@ -352,6 +403,36 @@ class FacturacionPanel(QWidget):
         finally:
             session.close()
 
+    def _disparar_impresion_automatica(self, id_factura: int) -> None:
+        """Lanza _tarea_imprimir_factura en un QueryWorker (QThread) para que enviar el
+        trabajo al driver de la impresora no bloquee la ventana -- ver el docstring de
+        _tarea_imprimir_factura para el por que. Si ya hay una impresion en curso, esta
+        se omite en vez de pisar el QThread anterior mientras sigue corriendo (mismo
+        riesgo que DashboardPanel/TasaTicker, ver app/ui/workers.py); la factura ya
+        quedo guardada y se puede exportar/imprimir manualmente desde el detalle."""
+        if getattr(self, "_worker", None) is not None and self._worker.isRunning():
+            logger.warning("Se omitio la impresion automatica de la factura %s: ya hay otra en curso", id_factura)
+            return
+        self._worker = QueryWorker(
+            self.session_factory, _tarea_imprimir_factura, id_factura=id_factura, id_usuario=self.usuario.id_usuario
+        )
+        self._worker.resultado.connect(self._on_impresion_automatica_ok)
+        self._worker.error.connect(self._on_impresion_automatica_error)
+        self._worker.start()
+
+    def _on_impresion_automatica_ok(self, nombre_impresora: str | None) -> None:
+        if nombre_impresora:
+            logger.info("Factura enviada automaticamente a la impresora '%s'", nombre_impresora)
+
+    def _on_impresion_automatica_error(self, mensaje: str) -> None:
+        logger.warning("Fallo la impresion automatica de la factura: %s", mensaje)
+        QMessageBox.warning(
+            self,
+            "No se pudo imprimir",
+            "La factura se emitió correctamente, pero no se pudo enviar a la impresora "
+            "predeterminada configurada. Puede exportarla a PDF manualmente desde el detalle.",
+        )
+
     def ver_detalle_factura(self) -> None:
         id_factura = self._fila_seleccionada_id()
         if id_factura is None:
@@ -360,7 +441,7 @@ class FacturacionPanel(QWidget):
         session = self.session_factory()
         try:
             datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.usuario.id_usuario)
-            dialogo = FacturaDetalleDialog(datos, parent=self)
+            dialogo = FacturaDetalleDialog(datos, session, self.usuario.id_usuario, parent=self)
             dialogo.exec()
         except ValueError as exc:
             QMessageBox.warning(self, "No se pudo abrir la factura", str(exc))
@@ -414,6 +495,7 @@ class FacturacionPanel(QWidget):
                 numero_factura=self.buscar_input.text().strip() or None,
                 estado=self.estado_combo.currentData(),
                 condicion_pago=self.condicion_combo.currentData(),
+                id_cliente=self.cliente_combo.currentData(),
                 pagina=1,
                 por_pagina=1_000_000,
                 id_usuario=self.usuario.id_usuario,

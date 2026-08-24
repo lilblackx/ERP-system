@@ -4,10 +4,15 @@ Permite editar los datos de la empresa (RIF, Nombre, Dirección, Teléfono, Logo
 """
 
 import logging
+from decimal import Decimal
 
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtPrintSupport import QPrinterInfo
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -15,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -155,12 +161,84 @@ class ConfigEmpresaPanel(QWidget):
         lbl_telefono = QLabel("Teléfono:")
         lbl_telefono.setStyleSheet(lbl_style)
 
+        self.footer_input = QTextEdit()
+        self.footer_input.setPlaceholderText("Texto libre al pie de cada factura (ej. datos bancarios, garantía)")
+        self.footer_input.setMaximumHeight(70)
+        self.footer_input.setStyleSheet(f"""
+            QTextEdit {{
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 14px;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid {COLOR_PRIMARY};
+            }}
+        """)
+
+        lbl_footer = QLabel("Pie de factura:")
+        lbl_footer.setStyleSheet(lbl_style)
+
         form.addRow(lbl_rif, self.rif_input)
         form.addRow(lbl_nombre, self.nombre_input)
         form.addRow(lbl_direccion, self.direccion_input)
         form.addRow(lbl_telefono, self.telefono_input)
+        form.addRow(lbl_footer, self.footer_input)
 
         card_layout.addLayout(form)
+
+        # IVA: activable por empresa, con porcentaje ajustable -- se snapshotea en cada
+        # factura al emitirla (VentaService.emitir_factura), un cambio aca no altera
+        # retroactivamente facturas ya emitidas.
+        iva_layout = QHBoxLayout()
+        iva_layout.setSpacing(12)
+
+        self.iva_activo_check = QCheckBox("Aplicar IVA en las facturas")
+        self.iva_activo_check.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 14px;")
+
+        self.iva_porcentaje_input = QDoubleSpinBox()
+        self.iva_porcentaje_input.setRange(0, 100)
+        self.iva_porcentaje_input.setDecimals(2)
+        self.iva_porcentaje_input.setSuffix(" %")
+        self.iva_porcentaje_input.setValue(16.00)
+        self.iva_porcentaje_input.setFixedWidth(110)
+        self.iva_porcentaje_input.setMinimumHeight(38)
+
+        iva_layout.addWidget(self.iva_activo_check)
+        iva_layout.addWidget(self.iva_porcentaje_input)
+        iva_layout.addStretch()
+
+        card_layout.addLayout(iva_layout)
+
+        # Impresora predeterminada: a donde se envia la factura digital automaticamente
+        # al presionar "Facturar" (ver FacturacionPanel.nueva_factura /
+        # app/ui/factura_pdf.py::imprimir_factura). Elegir "Microsoft Print to PDF" (u
+        # otra impresora virtual) aca cubre tambien el caso de guardarla automaticamente
+        # sin necesitar una ruta separada.
+        impresora_layout = QHBoxLayout()
+        impresora_layout.setSpacing(12)
+
+        lbl_impresora = QLabel("Impresora predeterminada:")
+        lbl_impresora.setStyleSheet(lbl_style)
+
+        self.impresora_combo = QComboBox()
+        self.impresora_combo.setMinimumHeight(38)
+        self.impresora_combo.setMinimumWidth(260)
+        self.impresora_combo.setStyleSheet(f"""
+            QComboBox {{
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 6px;
+                padding: 0 10px;
+                font-size: 14px;
+            }}
+        """)
+        self._cargar_impresoras_disponibles()
+
+        impresora_layout.addWidget(lbl_impresora)
+        impresora_layout.addWidget(self.impresora_combo)
+        impresora_layout.addStretch()
+
+        card_layout.addLayout(impresora_layout)
 
         # Footer con botón Guardar
         footer_layout = QHBoxLayout()
@@ -180,6 +258,27 @@ class ConfigEmpresaPanel(QWidget):
 
         self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
 
+    def _cargar_impresoras_disponibles(self, seleccionada: str | None = None) -> None:
+        """Puebla el combo con las impresoras que Qt detecta instaladas en el sistema
+        (QPrinterInfo.availablePrinters()). Si `seleccionada` (el valor guardado en BD)
+        ya no esta entre ellas -- se desconecto, se reinstalo con otro nombre -- se
+        agrega igual como opcion (marcada "no disponible") para no perderla de vista ni
+        pisarla con None solo por abrir y guardar esta pantalla sin tocar el combo."""
+        self.impresora_combo.blockSignals(True)
+        self.impresora_combo.clear()
+        self.impresora_combo.addItem("Ninguna (no imprimir automáticamente)", None)
+
+        nombres_disponibles = [p.printerName() for p in QPrinterInfo.availablePrinters()]
+        for nombre in nombres_disponibles:
+            self.impresora_combo.addItem(nombre, nombre)
+
+        if seleccionada and seleccionada not in nombres_disponibles:
+            self.impresora_combo.addItem(f"{seleccionada} (no disponible)", seleccionada)
+
+        idx = self.impresora_combo.findData(seleccionada)
+        self.impresora_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.impresora_combo.blockSignals(False)
+
     def cargar_datos(self) -> None:
         session = self.session_factory()
         try:
@@ -189,6 +288,10 @@ class ConfigEmpresaPanel(QWidget):
                 self.nombre_input.setText(config.razon_social_empresa or "")
                 self.direccion_input.setText(config.direccion_empresa or "")
                 self.telefono_input.setText(config.telefono_empresa or "")
+                self.footer_input.setPlainText(config.pie_pagina_empresa or "")
+                self.iva_activo_check.setChecked(bool(config.iva_activo))
+                self.iva_porcentaje_input.setValue(float(config.iva_porcentaje))
+                self._cargar_impresoras_disponibles(config.impresora_predeterminada)
 
                 if config.logotipo_empresa:
                     self._mostrar_logo(config.logotipo_empresa)
@@ -245,6 +348,10 @@ class ConfigEmpresaPanel(QWidget):
                 direccion=self.direccion_input.text().strip() or None,
                 telefono=self.telefono_input.text().strip() or None,
                 logo_bytes=self.logo_bytes,
+                pie_pagina=self.footer_input.toPlainText().strip() or None,
+                iva_activo=self.iva_activo_check.isChecked(),
+                iva_porcentaje=Decimal(str(self.iva_porcentaje_input.value())),
+                impresora_predeterminada=self.impresora_combo.currentData(),
                 modificado_por=self.usuario.id_usuario,
             )
             QMessageBox.information(self, "Éxito", "Configuración guardada correctamente.")

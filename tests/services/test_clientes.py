@@ -91,6 +91,42 @@ def test_list_clientes_sin_usuario_autorizado_falla(db_session):
         clientes_service.list_clientes(db_session)
 
 
+def test_list_clientes_respeta_limite(db_session):
+    admin = crear_usuario_admin(db_session)
+    for i in range(5):
+        clientes_service.create_cliente(
+            db_session,
+            **_datos_cliente(
+                codigo_cliente=f"CLI-LIM-{i}",
+                identificacion_cliente=f"V-{i:08d}",
+                nombre_razon_social=f"Cliente Limite {i}",
+                creado_por=admin.id_usuario,
+            ),
+        )
+
+    resultado = clientes_service.list_clientes(db_session, id_usuario=admin.id_usuario, limite=3)
+
+    assert len(resultado) == 3
+
+
+def test_list_clientes_sin_limite_devuelve_todos(db_session):
+    admin = crear_usuario_admin(db_session)
+    for i in range(3):
+        clientes_service.create_cliente(
+            db_session,
+            **_datos_cliente(
+                codigo_cliente=f"CLI-SL-{i}",
+                identificacion_cliente=f"V-{i:08d}9",
+                nombre_razon_social=f"Cliente Sin Limite {i}",
+                creado_por=admin.id_usuario,
+            ),
+        )
+
+    resultado = clientes_service.list_clientes(db_session, id_usuario=admin.id_usuario)
+
+    assert len(resultado) >= 3
+
+
 def test_update_cliente(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))

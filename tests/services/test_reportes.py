@@ -9,18 +9,19 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.reportes import ReporteService
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
-from tests.factories import crear_caja, crear_cliente, crear_producto, crear_usuario_admin
+from tests.factories import crear_caja, crear_cliente, crear_producto, crear_usuario_admin, crear_vendedor
 
 # --- aging_cuentas_por_cobrar ------------------------------------------------------
 
 
 def _factura_a_credito(session, admin, cliente, total, fecha_vencimiento):
+    vendedor = crear_vendedor(session)
     producto = crear_producto(session, cantidad_unidad=1000)
     return VentaService.emitir_factura(
         session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": str(total)}],
         fecha_vencimiento=fecha_vencimiento,

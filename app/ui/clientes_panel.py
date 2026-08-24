@@ -8,6 +8,7 @@ import logging
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -153,6 +154,13 @@ class ClientesPanel(QWidget):
         self._setup_ui()
         # Carga inicial diferida para no bloquear el arranque
         QTimer.singleShot(100, self.cargar_clientes)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        # MainWindow cachea el panel y lo reutiliza via QStackedWidget -- sin
+        # esto, volver a "Clientes" desde otro modulo mostraba el listado viejo
+        # (mismo problema que DashboardPanel/FacturacionPanel).
+        super().showEvent(event)
+        self.cargar_clientes()
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 

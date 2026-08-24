@@ -2,15 +2,19 @@
 (cabecera + lineas). Mismo patron visual que cliente_form_dialog.py/
 producto_form_dialog.py (paleta y tipografia de app/ui/styles.py)."""
 
+import logging
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -18,6 +22,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.services.empresa import EmpresaService
+from app.ui.factura_pdf import generar_pdf_factura
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -73,18 +79,37 @@ QPushButton#BtnSecondary:hover {{
     background-color: #E2E8F0;
     color: {COLOR_TEXT_DARK};
 }}
+QPushButton#BtnImprimir {{
+    background-color: #EFF6FF;
+    color: {COLOR_PRIMARY};
+    border: 1px solid #BFDBFE;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: bold;
+}}
+QPushButton#BtnImprimir:hover {{
+    background-color: #DBEAFE;
+}}
 """
+
+logger = logging.getLogger(__name__)
 
 
 class FacturaDetalleDialog(QDialog):
     """Vista de solo lectura de una factura: cabecera + lineas. `datos` es el dict
     devuelto por `VentaService.obtener_factura()` ({"factura": FacturaVenta,
-    "detalles": [FacturaDetalle, ...]})."""
+    "detalles": [FacturaDetalle, ...]}). `session`/`id_usuario` se usan solo para poder
+    exportar la factura digital a PDF (necesita los datos de la empresa, ver
+    EmpresaService.obtener_configuracion)."""
 
-    def __init__(self, datos: dict, parent=None):
+    def __init__(self, datos: dict, session, id_usuario: int | None, parent=None):
         super().__init__(parent)
+        self.datos = datos
         self.factura = datos["factura"]
         self.detalles = datos["detalles"]
+        self.session = session
+        self.id_usuario = id_usuario
         self.setWindowTitle(f"Factura {self.factura.numero_factura}")
         self.setFixedSize(720, 560)
         self.setStyleSheet(DIALOG_STYLE)
@@ -165,13 +190,17 @@ class FacturaDetalleDialog(QDialog):
             self.factura.fecha_vencimiento.strftime("%d/%m/%Y") if self.factura.fecha_vencimiento else "Sin definir"
         )
         condicion = "Contado" if self.factura.condicion_pago == "contado" else "Crédito"
+        tasa = self.factura.tasa
+        tasa_texto = f"{float(tasa.tasa_dolar_bcv):,.2f} Bs/USD" if tasa else "—"
 
         campos = [
+            ("N° de Control", self.factura.numero_control),
             ("Cliente", cliente.nombre_razon_social if cliente else "—"),
             ("Fecha de emisión", fecha),
             ("Condición de pago", condicion),
             ("Vendedor", vendedor.nombre_vendedor if vendedor else "Sin vendedor"),
             ("Vencimiento", vencimiento if self.factura.condicion_pago == "credito" else "N/A"),
+            ("Tasa BCV aplicada", tasa_texto),
             ("Observaciones", self.factura.observaciones_factura or "—"),
         ]
         for i, (etiqueta, valor) in enumerate(campos):
@@ -209,7 +238,10 @@ class FacturaDetalleDialog(QDialog):
             precio = float(detalle.precio_unitario)
             subtotal = cantidad * precio
 
-            tabla.setItem(fila, 0, QTableWidgetItem(nombre))
+            item_nombre = QTableWidgetItem(nombre)
+            if detalle.observaciones_item:
+                item_nombre.setToolTip(detalle.observaciones_item)
+            tabla.setItem(fila, 0, item_nombre)
             item_cant = QTableWidgetItem(f"{cantidad:,.2f}")
             item_cant.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 1, item_cant)
@@ -227,8 +259,20 @@ class FacturaDetalleDialog(QDialog):
         footer.setContentsMargins(0, 4, 0, 0)
         footer.setSpacing(10)
 
-        lbl_total = QLabel(f"Total: ${float(self.factura.total_venta):,.2f}")
+        total_a_pagar = (
+            float(self.factura.total_venta)
+            - float(self.factura.monto_descuento or 0)
+            + float(self.factura.monto_iva or 0)
+        )
+        lbl_total = QLabel(f"Total a pagar: ${total_a_pagar:,.2f}")
         lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+
+        btn_exportar = QPushButton(" Exportar PDF")
+        btn_exportar.setIcon(qta.icon("fa5s.file-pdf", color=COLOR_PRIMARY))
+        btn_exportar.setObjectName("BtnImprimir")
+        btn_exportar.setFixedHeight(36)
+        btn_exportar.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_exportar.clicked.connect(self.exportar_pdf)
 
         btn_cerrar = QPushButton("Cerrar")
         btn_cerrar.setIcon(qta.icon("fa5s.times", color="#475569"))
@@ -239,5 +283,21 @@ class FacturaDetalleDialog(QDialog):
 
         footer.addWidget(lbl_total)
         footer.addStretch()
+        footer.addWidget(btn_exportar)
         footer.addWidget(btn_cerrar)
         return footer
+
+    def exportar_pdf(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar factura", f"{self.factura.numero_factura}.pdf", "PDF (*.pdf)"
+        )
+        if not ruta:
+            return
+
+        try:
+            config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario)
+            generar_pdf_factura(self.datos, config_empresa, ruta)
+            QMessageBox.information(self, "Exportación completa", f"Factura exportada a:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar la factura %s a PDF", self.factura.numero_factura)
+            QMessageBox.critical(self, "Error", "No se pudo exportar la factura a PDF.")

@@ -107,6 +107,41 @@ def test_authenticate_fallido_no_registra_auditoria(db_session):
     assert resultado["total"] == 0
 
 
+def test_authenticate_accion_exito_personalizada(db_session):
+    """AutorizacionDescuentoDialog reusa authenticate() con accion_exito distinta de
+    'LOGIN' para no ensuciar la auditoria con inicios de sesion que nunca ocurrieron
+    (ver app/ui/autorizacion_dialog.py)."""
+    admin = crear_usuario_admin(db_session)
+    _crear_usuario_activo(db_session)
+
+    authenticate(db_session, "jperez", "Secreta123", accion_exito="AUTORIZACION_DESCUENTO")
+
+    sin_login = AuditoriaService.consultar_auditoria(
+        db_session, modulo="AUTH", accion="LOGIN", id_usuario_actor=admin.id_usuario
+    )
+    con_accion_custom = AuditoriaService.consultar_auditoria(
+        db_session, modulo="AUTH", accion="AUTORIZACION_DESCUENTO", id_usuario_actor=admin.id_usuario
+    )
+    assert sin_login["total"] == 0
+    assert con_accion_custom["total"] == 1
+
+
+def test_authenticate_accion_fallo_personalizada(db_session):
+    admin = crear_usuario_admin(db_session)
+    _crear_usuario_activo(db_session)
+
+    authenticate(db_session, "jperez", "ClaveMala", accion_fallo="AUTORIZACION_DESCUENTO_FALLIDA")
+
+    sin_login_fallido = AuditoriaService.consultar_auditoria(
+        db_session, modulo="AUTH", accion="LOGIN_FALLIDO", id_usuario_actor=admin.id_usuario
+    )
+    con_accion_custom = AuditoriaService.consultar_auditoria(
+        db_session, modulo="AUTH", accion="AUTORIZACION_DESCUENTO_FALLIDA", id_usuario_actor=admin.id_usuario
+    )
+    assert sin_login_fallido["total"] == 0
+    assert con_accion_custom["total"] == 1
+
+
 # --- lockout tras intentos fallidos (C7) ----------------------------------------------
 
 

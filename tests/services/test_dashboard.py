@@ -9,13 +9,23 @@ from app.services.dashboard import DashboardService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
-from tests.factories import crear_caja, crear_cliente, crear_producto, crear_proveedor, crear_usuario_admin
+from tests.factories import (
+    crear_caja,
+    crear_cliente,
+    crear_producto,
+    crear_proveedor,
+    crear_usuario_admin,
+    crear_vendedor,
+)
 
 
-def _factura_directa(session, cliente, fecha_emision, total, estado="EMITIDA", numero=None):
+def _factura_directa(session, cliente, fecha_emision, total, estado="EMITIDA", numero=None, vendedor=None):
+    vendedor = vendedor or crear_vendedor(session)
     factura = FacturaVenta(
         numero_factura=numero or f"FV-DIRECT-{fecha_emision.timestamp()}",
+        numero_control=f"C-{numero}" if numero else f"C-{fecha_emision.timestamp():.0f}",
         id_cliente_factura=cliente.id_cliente,
+        id_vendedor=vendedor.id_vendedor,
         fecha_emision=fecha_emision,
         total_venta=Decimal(str(total)),
         estado_factura=estado,
@@ -73,6 +83,7 @@ def test_ventas_hoy_sin_ventas_previas(db_session):
 
 def test_por_cobrar_suma_saldos_abiertos_y_cuenta_vencidas(db_session):
     admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
     cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
 
@@ -80,7 +91,7 @@ def test_por_cobrar_suma_saldos_abiertos_y_cuenta_vencidas(db_session):
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
-        id_vendedor=None,
+        id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "80.00"}],
         fecha_vencimiento=date.today() - timedelta(days=5),
