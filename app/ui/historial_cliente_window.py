@@ -4,7 +4,7 @@ import logging
 
 import qtawesome as qta
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy.orm import Session
 
 from app.db.models import Cliente
 from app.services.exportacion import exportar_excel, exportar_pdf
@@ -30,13 +29,10 @@ from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
     COLOR_BORDER,
     COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_PRIMARY,
     COLOR_SUCCESS,
-    COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
-    COLOR_TEXT_MUTED,
     TABLE_QSS,
 )
 
@@ -96,11 +92,11 @@ class HistorialClienteWindow(QDialog):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl_titulo = QLabel("HISTORIAL DEL CLIENTE : ")
-        lbl_titulo.setStyleSheet(f"font-size: 22px; font-weight: bold; color: white;")
+        lbl_titulo.setStyleSheet("font-size: 22px; font-weight: bold; color: white;")
 
         lbl_cliente = QLabel(self.cliente.nombre_razon_social or "")
         lbl_cliente.setStyleSheet(
-            f"color: white; font-size: 16px; font-weight: 600; font-family: 'Segoe UI', Arial, sans-serif;"
+            "color: white; font-size: 16px; font-weight: 600; font-family: 'Segoe UI', Arial, sans-serif;"
         )
 
         h.addWidget(lbl_titulo)

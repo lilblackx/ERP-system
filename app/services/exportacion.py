@@ -23,9 +23,9 @@ from typing import Any
 from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,21 @@ def exportar_pdf(
         else:
             table_style.add("BACKGROUND", (0, i), (-1, i), colors.white)
     
-    table = Table(data, colWidths=[1.2 * inch, 1.2 * inch, 1.2 * inch, 1.0 * inch, 1.0 * inch, 1.0 * inch, 0.8 * inch, 1.5 * inch, 1.0 * inch, 1.0 * inch])
+    table = Table(
+        data,
+        colWidths=[
+            1.2 * inch,
+            1.2 * inch,
+            1.2 * inch,
+            1.0 * inch,
+            1.0 * inch,
+            1.0 * inch,
+            0.8 * inch,
+            1.5 * inch,
+            1.0 * inch,
+            1.0 * inch,
+        ],
+    )
     table.setStyle(table_style)
     elements.append(table)
     

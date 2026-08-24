@@ -1,6 +1,5 @@
 """Servicio para obtener el historial de facturas y pagos de un cliente."""
 
-from datetime import date
 from decimal import Decimal
 from typing import TypedDict
 
