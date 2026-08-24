@@ -35,6 +35,7 @@ from app.services.clientes import (
 )
 from app.services.exportacion import exportar_excel
 from app.ui.cliente_form_dialog import ClienteFormDialog
+from app.ui.historial_cliente_window import HistorialClienteWindow
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -173,7 +174,7 @@ class ClientesPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        lbl = QLabel("Lista de Clientes")
+        lbl = QLabel("LISTA DE CLIENTES")
         lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
@@ -248,11 +249,15 @@ class ClientesPanel(QWidget):
         self.tabla.setStyleSheet(
             TABLE_QSS
             + """
-            QTableWidget { alternate-background-color: #F8FAFC; }
+            QTableWidget::item { padding: 8px; }
+            QTableWidget::item:alternate { background-color: #F8FAFC; }
+            QTableWidget::item:!alternate { background-color: #E3F2FD; }
+            QTableWidget::item:selected { background-color: #DBEAFE; color: #0D47A1; }
         """
         )
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)  # ID oculto
         self.tabla.verticalHeader().setDefaultSectionSize(48)
+        self.tabla.doubleClicked.connect(self.ver_historial_cliente)
         return self.tabla
 
     def _make_footer(self) -> QWidget:
@@ -264,12 +269,12 @@ class ClientesPanel(QWidget):
         self.lbl_pagina = QLabel("Mostrando todos los registros")
         self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
 
-        btn_editar = QPushButton("Editar seleccionado")
+        btn_editar = QPushButton("EDITAR SELECCIONADO")
         btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_editar.clicked.connect(self.editar_cliente)
 
-        btn_estado = QPushButton("Cambiar estado")
+        btn_estado = QPushButton("CAMBIAR ESTADO")
         btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
         btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_estado.clicked.connect(self.cambiar_estado_cliente_seleccionado)
@@ -383,7 +388,11 @@ class ClientesPanel(QWidget):
         if not filas:
             QMessageBox.information(self, "Selección requerida", "Selecciona un cliente de la lista.")
             return None
-        return int(self.tabla.item(filas[0].row(), 0).text())
+        item = self.tabla.item(filas[0].row(), 0)
+        if item is None:
+            QMessageBox.warning(self, "Error", "No se pudo obtener el ID del cliente seleccionado.")
+            return None
+        return int(item.text())
 
     def nuevo_cliente(self) -> None:
         session = self.session_factory()
@@ -461,5 +470,25 @@ class ClientesPanel(QWidget):
             session.rollback()
             logger.exception("Fallo al cambiar el estado del cliente %s", id_cliente)
             QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del cliente.")
+        finally:
+            session.close()
+
+    def ver_historial_cliente(self) -> None:
+        id_cliente = self._fila_seleccionada_id()
+        if id_cliente is None:
+            return
+
+        session = self.session_factory()
+        try:
+            cliente = session.get(Cliente, id_cliente)
+            if cliente is None:
+                QMessageBox.warning(self, "Cliente no encontrado", "El cliente seleccionado no existe.")
+                return
+
+            dialogo = HistorialClienteWindow(self.session_factory, id_cliente, cliente, parent=self)
+            dialogo.exec()
+        except Exception:
+            logger.exception("Fallo al abrir el historial del cliente %s", id_cliente)
+            QMessageBox.critical(self, "Error", "No se pudo abrir el historial del cliente.")
         finally:
             session.close()
