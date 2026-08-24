@@ -107,8 +107,7 @@ class HistorialClienteWindow(QDialog):
     def _make_saldo_pendiente(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER};"
-            " border-radius: 8px; padding: 12px;"
+            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 12px;"
         )
         h = QHBoxLayout(w)
         h.setContentsMargins(16, 12, 16, 12)
@@ -118,9 +117,7 @@ class HistorialClienteWindow(QDialog):
         lbl_icono.setStyleSheet("background: transparent;")
 
         self.lbl_saldo_pendiente = QLabel("Cargando saldo...")
-        self.lbl_saldo_pendiente.setStyleSheet(
-            f"color: {COLOR_TEXT_DARK}; font-size: 16px; font-weight: bold;"
-        )
+        self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 16px; font-weight: bold;")
 
         h.addWidget(lbl_icono)
         h.addWidget(self.lbl_saldo_pendiente)
@@ -187,19 +184,13 @@ class HistorialClienteWindow(QDialog):
 
             # Cargar saldo total pendiente
             saldo_total = obtener_saldo_total_pendiente(session, self.id_cliente)
-            self.lbl_saldo_pendiente.setText(
-                f"SALDO PENDIENTE : $ {float(saldo_total):,.2f}"
-            )
+            self.lbl_saldo_pendiente.setText(f"SALDO PENDIENTE : $ {float(saldo_total):,.2f}")
 
             # Color del saldo según si está vencido o no
             if saldo_total > 0:
-                self.lbl_saldo_pendiente.setStyleSheet(
-                    f"color: {COLOR_DANGER}; font-size: 16px; font-weight: bold;"
-                )
+                self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 16px; font-weight: bold;")
             else:
-                self.lbl_saldo_pendiente.setStyleSheet(
-                    f"color: {COLOR_SUCCESS}; font-size: 16px; font-weight: bold;"
-                )
+                self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 16px; font-weight: bold;")
 
         except Exception:
             logger.exception("Fallo al cargar el historial del cliente %s", self.id_cliente)
@@ -262,7 +253,7 @@ class HistorialClienteWindow(QDialog):
         session = self.session_factory()
         try:
             historial = obtener_historial_cliente(session, self.id_cliente)
-            
+
             # Preparar filas para exportación
             filas = [
                 [
@@ -279,14 +270,14 @@ class HistorialClienteWindow(QDialog):
                 ]
                 for item in historial
             ]
-            
+
             nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
             ruta, _ = QFileDialog.getSaveFileName(
                 self, "Exportar Historial a Excel", f"{nombre_archivo}.xlsx", "Excel (*.xlsx)"
             )
             if not ruta:
                 return
-            
+
             exportar_excel(ruta, COLS_HISTORIAL, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
         except Exception:
@@ -299,7 +290,7 @@ class HistorialClienteWindow(QDialog):
         session = self.session_factory()
         try:
             historial = obtener_historial_cliente(session, self.id_cliente)
-            
+
             # Preparar filas para exportación
             filas = [
                 [
@@ -316,14 +307,14 @@ class HistorialClienteWindow(QDialog):
                 ]
                 for item in historial
             ]
-            
+
             nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
             ruta, _ = QFileDialog.getSaveFileName(
                 self, "Exportar Historial a PDF", f"{nombre_archivo}.pdf", "PDF (*.pdf)"
             )
             if not ruta:
                 return
-            
+
             exportar_pdf(
                 ruta,
                 "Historial del Cliente",

@@ -10,6 +10,7 @@ from app.db.models import CuentaPorCobrar, FacturaVenta, PagoCobro
 
 class HistorialItem(TypedDict):
     """Representa un item del historial del cliente."""
+
     id_cuenta: int | None
     id_factura: int
     numero_factura: str
@@ -48,20 +49,12 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
 
     for factura in facturas:
         # Obtener cuenta por cobrar de esta factura
-        cxc = (
-            session.query(CuentaPorCobrar)
-            .filter(CuentaPorCobrar.id_factura == factura.id_factura)
-            .first()
-        )
+        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
 
         # Obtener pagos realizados para esta cuenta por cobrar
         pagos: list[PagoCobro] = []
         if cxc:
-            pagos = (
-                session.query(PagoCobro)
-                .filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar)
-                .all()
-            )
+            pagos = session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar).all()
 
         # Calcular total pagado
         total_pagado = Decimal(sum(pago.monto for pago in pagos))
@@ -74,9 +67,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
 
         # Formatear fechas
         fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d") if factura.fecha_emision else ""
-        fecha_vencimiento_str = (
-            factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
-        )
+        fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
 
         # Obtener días de crédito del cliente
         dias_credito = factura.cliente.dias_credito if factura.cliente else None

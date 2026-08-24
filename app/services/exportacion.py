@@ -52,10 +52,10 @@ def exportar_pdf(
 ) -> None:
     """Exporta datos a un archivo PDF con formato de tabla."""
     doc = SimpleDocTemplate(str(ruta), pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
-    
+
     elements = []
     styles = getSampleStyleSheet()
-    
+
     # Título del reporte
     title_style = ParagraphStyle(
         "CustomTitle",
@@ -65,7 +65,7 @@ def exportar_pdf(
         spaceAfter=12,
     )
     elements.append(Paragraph(titulo, title_style))
-    
+
     # Nombre del cliente si se proporciona
     if cliente_nombre:
         cliente_style = ParagraphStyle(
@@ -76,32 +76,34 @@ def exportar_pdf(
             spaceAfter=12,
         )
         elements.append(Paragraph(f"Cliente: {cliente_nombre}", cliente_style))
-    
+
     # Datos de la tabla
     data = [list(encabezados)]
     for fila in filas:
         data.append(list(fila))
-    
+
     # Estilo de la tabla
-    table_style = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D47A1")),  # Header azul
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-        ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
-        ("GRID", (0, 0), (-1, -1), 1, colors.grey),
-        ("FONTSIZE", (0, 1), (-1, -1), 9),
-    ])
-    
+    table_style = TableStyle(
+        [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D47A1")),  # Header azul
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
+            ("GRID", (0, 0), (-1, -1), 1, colors.grey),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+        ]
+    )
+
     # Alternar colores de filas
     for i in range(1, len(data)):
         if i % 2 == 0:
             table_style.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F8FAFC"))
         else:
             table_style.add("BACKGROUND", (0, i), (-1, i), colors.white)
-    
+
     table = Table(
         data,
         colWidths=[
@@ -119,6 +121,6 @@ def exportar_pdf(
     )
     table.setStyle(table_style)
     elements.append(table)
-    
+
     doc.build(elements)
     logger.info("PDF exportado: %s", ruta)
