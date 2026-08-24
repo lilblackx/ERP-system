@@ -54,7 +54,7 @@ from app.ui.styles import (
 logger = logging.getLogger(__name__)
 
 # Columnas visibles en la tabla (índice oculto 0 = ID interno)
-COLS_VISIBLES = ["ID", "Nombre Completo", "Identificación", "Email", "Teléfono", "Dirección", "Crédito", "Estado"]
+COLS_VISIBLES = ["ID", "Nombre Completo", "Identificación", "Email", "Teléfono", "Dirección", "Crédito", "Días", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 
 
@@ -231,8 +231,10 @@ class ClientesPanel(QWidget):
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(7, 120)
+        self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(8, 120)
         self.tabla.setStyleSheet(
             TABLE_QSS
             + """
@@ -297,21 +299,34 @@ class ClientesPanel(QWidget):
     def _poblar_tabla(self, clientes: list[Cliente]) -> None:
         self.tabla.setRowCount(len(clientes))
         for fila, c in enumerate(clientes):
+            # Columna 0: ID (oculta)
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(c.id_cliente)))
+            # Columna 1: Nombre Completo
             self.tabla.setItem(fila, 1, QTableWidgetItem(c.nombre_razon_social or ""))
+            # Columna 2: Identificación
             self.tabla.setItem(fila, 2, QTableWidgetItem(c.identificacion_cliente or ""))
+            # Columna 3: Email
             self.tabla.setItem(fila, 3, QTableWidgetItem(c.email or ""))
+            # Columna 4: Teléfono
             self.tabla.setItem(fila, 4, QTableWidgetItem(c.telefono or ""))
+            # Columna 5: Dirección
             self.tabla.setItem(fila, 5, QTableWidgetItem(c.direccion or ""))
 
+            # Columna 6: Crédito
             cred = f"${float(c.limite_credito):,.2f}" if c.limite_credito else "$0.00"
             item_cred = QTableWidgetItem(cred)
             item_cred.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_cred)
 
-            # Badge de estado
+            # Columna 7: Días de crédito
+            dias = str(c.dias_credito) if c.dias_credito is not None else "0"
+            item_dias = QTableWidgetItem(dias)
+            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 7, item_dias)
+
+            # Columna 8: Badge de estado
             badge = BadgeItem(c.estado_cliente or "ACTIVO")
-            self.tabla.setCellWidget(fila, 7, badge)
+            self.tabla.setCellWidget(fila, 8, badge)
 
         total = len(clientes)
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''}")
@@ -340,6 +355,7 @@ class ClientesPanel(QWidget):
                     c.telefono,
                     c.direccion,
                     float(c.limite_credito) if c.limite_credito else 0,
+                    c.dias_credito if c.dias_credito is not None else 0,
                     c.estado_cliente,
                 ]
                 for c in clientes
