@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     Cliente,
@@ -308,12 +308,13 @@ class VentaService:
         id_cliente: int | None = None,
         condicion_pago: str | None = None,
         estado: str | None = None,
+        numero_factura: str | None = None,
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
     ) -> dict:
         require_permiso(session, id_usuario, "ventas", "ver")
-        query = session.query(FacturaVenta)
+        query = session.query(FacturaVenta).options(joinedload(FacturaVenta.cliente))
         if fecha_desde:
             query = query.filter(FacturaVenta.fecha_emision >= fecha_desde)
         if fecha_hasta:
@@ -324,9 +325,31 @@ class VentaService:
             query = query.filter(FacturaVenta.condicion_pago == condicion_pago)
         if estado:
             query = query.filter(FacturaVenta.estado_factura == estado)
+        if numero_factura:
+            query = query.filter(FacturaVenta.numero_factura.ilike(f"%{numero_factura}%"))
 
         total = query.count()
         facturas = (
             query.order_by(FacturaVenta.fecha_emision.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
         )
         return {"items": facturas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+
+    @staticmethod
+    def obtener_factura(session: Session, id_factura: int, id_usuario: int | None = None) -> dict:
+        require_permiso(session, id_usuario, "ventas", "ver")
+        factura = (
+            session.query(FacturaVenta)
+            .options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor))
+            .filter(FacturaVenta.id_factura == id_factura)
+            .first()
+        )
+        if factura is None:
+            raise ValueError("Factura no encontrada")
+
+        detalles = (
+            session.query(FacturaDetalle)
+            .options(joinedload(FacturaDetalle.producto))
+            .filter(FacturaDetalle.id_factura == id_factura)
+            .all()
+        )
+        return {"factura": factura, "detalles": detalles}

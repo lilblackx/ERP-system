@@ -115,14 +115,24 @@ class ProductoService:
     @staticmethod
     def buscar(
         session: Session,
+        texto: str | None = None,
         codigo: str | None = None,
         nombre: str | None = None,
         id_categoria: int | None = None,
         solo_con_stock: bool = False,
+        pagina: int = 1,
+        por_pagina: int = 20,
         id_usuario: int | None = None,
-    ) -> list[Inventario]:
+    ) -> dict:
+        """D-01: paginado igual que VentaService.listar_facturas() -- el catalogo puede
+        crecer sin cota. `texto` busca por codigo O nombre a la vez (una sola caja de
+        busqueda en la UI); `codigo`/`nombre` quedan aparte para filtros estructurados que
+        SI deban acotar por columna especifica, no se pisan entre si."""
         require_permiso(session, id_usuario, "inventario", "ver")
         query = session.query(Inventario)
+        if texto:
+            like = f"%{texto}%"
+            query = query.filter(Inventario.cod_producto.ilike(like) | Inventario.nombre_producto.ilike(like))
         if codigo:
             query = query.filter(Inventario.cod_producto.ilike(f"%{codigo}%"))
         if nombre:
@@ -131,7 +141,10 @@ class ProductoService:
             query = query.filter(Inventario.id_categoria == id_categoria)
         if solo_con_stock:
             query = query.filter(Inventario.cantidad_unidad > 0)
-        return query.order_by(Inventario.nombre_producto).all()
+
+        total = query.count()
+        productos = query.order_by(Inventario.nombre_producto).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+        return {"items": productos, "total": total, "pagina": pagina, "por_pagina": por_pagina}
 
     @staticmethod
     def obtener_alertas_stock(

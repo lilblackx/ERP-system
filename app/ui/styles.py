@@ -3,6 +3,8 @@ Paleta de colores y hojas de estilo globales para el ERP moderno.
 Centraliza todos los QSS en un solo lugar para facilitar el mantenimiento.
 """
 
+from PySide6.QtGui import QColor
+
 # ── Paleta principal ────────────────────────────────────────────────────────
 COLOR_PRIMARY = "#0D47A1"  # Azul corporativo principal
 COLOR_PRIMARY_DARK = "#0A3A83"  # Azul oscuro (hover / pressed)
@@ -298,3 +300,26 @@ QLabel {{
     font-weight: bold;
 }}
 """
+
+# ── Estados de factura de venta ─────────────────────────────────────────────
+# Compartido entre dashboard_panel.py y facturacion_panel.py para que el mismo
+# estado se pinte igual en toda la app. Fallback gris para cualquier valor no
+# listado aca.
+COLORES_ESTADO_FACTURA = {
+    "EMITIDA": COLOR_INFO,
+    "PAGADA": COLOR_SUCCESS,
+    "PARCIAL": COLOR_WARNING,
+    "VENCIDA": COLOR_DANGER,
+    "ANULADA": COLOR_TEXT_MUTED,
+}
+
+
+def color_con_alpha(color_hex: str, alpha: int = 26) -> str:
+    """Version translucida de `color_hex` para fondos de badges/iconos.
+
+    Qt QSS solo acepta alfa via `rgba()` o el formato `#AARRGGBB` (alfa
+    primero) -- pegar dos digitos hex al final de un `#RRGGBB` (`#RRGGBBAA`)
+    no es un formato valido y Qt lo ignora silenciosamente.
+    """
+    c = QColor(color_hex)
+    return f"rgba({c.red()}, {c.green()}, {c.blue()}, {alpha})"

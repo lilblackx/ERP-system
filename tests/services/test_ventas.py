@@ -651,3 +651,59 @@ def test_listar_facturas_filtra_por_cliente(db_session):
 def test_listar_facturas_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         VentaService.listar_facturas(db_session)
+
+
+def test_listar_facturas_filtra_por_numero_parcial(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=None,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    resultado = VentaService.listar_facturas(
+        db_session, numero_factura=factura.numero_factura[-4:], id_usuario=admin.id_usuario
+    )
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].numero_factura == factura.numero_factura
+
+
+def test_obtener_factura_incluye_detalles(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=None,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
+    )
+
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
+
+    assert resultado["factura"].id_factura == factura.id_factura
+    assert resultado["factura"].cliente.id_cliente == cliente.id_cliente
+    assert len(resultado["detalles"]) == 1
+    assert resultado["detalles"][0].producto.id_producto == producto.id_producto
+    assert resultado["detalles"][0].cantidad_producto == Decimal("2.00")
+
+
+def test_obtener_factura_inexistente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="Factura no encontrada"):
+        VentaService.obtener_factura(db_session, 999999, id_usuario=admin.id_usuario)
+
+
+def test_obtener_factura_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        VentaService.obtener_factura(db_session, 1)

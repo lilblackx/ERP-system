@@ -1,10 +1,11 @@
 """
-TopBar: barra superior del ERP con título de vista activa, búsqueda global,
-notificaciones y perfil de usuario.
+TopBar: barra superior del ERP con breadcrumb del módulo activo, búsqueda global
+y notificaciones. La info del usuario autenticado vive en el pie de la sidebar
+(ver `sidebar.py`), no aquí.
 """
 
 import qtawesome as qta
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -12,20 +13,20 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSpacerItem,
-    QVBoxLayout,
     QWidget,
 )
 
 from app.db.models import Usuario
 from app.ui.styles import (
-    COLOR_PRIMARY,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_MUTED,
     TOPBAR_HEIGHT,
     TOPBAR_QSS,
 )
 
 # Títulos presentables para cada módulo
 TITULOS = {
+    "panel_general": "Panel General",
     "clientes": "Clientes",
     "proveedores": "Proveedores",
     "inventario": "Inventario",
@@ -36,14 +37,14 @@ TITULOS = {
     "cajas": "Cajas",
     "vendedores": "Vendedores",
     "comisiones": "Comisiones",
-    "control_tasas": "Control de Tasas",
+    "control_tasas": "Tasas de Cambio",
     "config_empresa": "Configuración de Empresa",
     "usuarios": "Usuarios",
 }
 
 
 class TopBar(QWidget):
-    """Barra superior con título de módulo, búsqueda, notificaciones y perfil."""
+    """Barra superior con breadcrumb de módulo activo, búsqueda y notificaciones."""
 
     busqueda_global = Signal(str)
 
@@ -60,15 +61,11 @@ class TopBar(QWidget):
         layout.setContentsMargins(20, 0, 20, 0)
         layout.setSpacing(16)
 
-        # Título del módulo activo
-        self.lbl_titulo = QLabel("Panel de Control")
-        self.lbl_titulo.setObjectName("TopBarTitle")
-        self.lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        layout.addWidget(self._make_breadcrumb())
 
-        # Spacer flexible
         spacer = QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        layout.addSpacerItem(spacer)
 
-        # Barra de búsqueda global
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar en el sistema…")
         self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
@@ -76,64 +73,41 @@ class TopBar(QWidget):
         self.buscar_input.setFixedWidth(240)
         self.buscar_input.setFixedHeight(36)
         self.buscar_input.textChanged.connect(self.busqueda_global.emit)
+        layout.addWidget(self.buscar_input)
 
-        # Botón de notificaciones
         btn_notif = QPushButton()
         btn_notif.setIcon(qta.icon("fa5s.bell", color="#64748B"))
         btn_notif.setIconSize(QSize(18, 18))
         btn_notif.setObjectName("TopBarBtn")
         btn_notif.setFixedSize(38, 38)
         btn_notif.setToolTip("Notificaciones")
-
-        # Info de usuario
-        user_widget = self._make_user_widget()
-
-        layout.addWidget(self.lbl_titulo)
-        layout.addSpacerItem(spacer)
-        layout.addWidget(self.buscar_input)
         layout.addWidget(btn_notif)
-        layout.addWidget(user_widget)
 
-    def _make_user_widget(self) -> QWidget:
+    def _make_breadcrumb(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(8)
+        h.setSpacing(6)
 
-        avatar = QLabel()
-        avatar.setPixmap(qta.icon("fa5s.user", color=COLOR_PRIMARY).pixmap(20, 20))
-        avatar.setStyleSheet(
-            "background-color: #EFF6FF;"
-            " border: 2px solid #BFDBFE; border-radius: 18px;"
-            " width: 36px; height: 36px; padding: 2px;"
+        lbl_raiz = QLabel("Módulos")
+        lbl_raiz.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
+
+        lbl_sep = QLabel("›")
+        lbl_sep.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
+
+        self.lbl_titulo = QLabel("Panel General")
+        self.lbl_titulo.setObjectName("TopBarTitle")
+        self.lbl_titulo.setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent;"
         )
-        avatar.setFixedSize(38, 38)
-        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        info_w = QWidget()
-        info_w.setStyleSheet("background: transparent;")
-        info_v = QVBoxLayout(info_w)
-        info_v.setContentsMargins(0, 0, 0, 0)
-        info_v.setSpacing(0)
-
-        nombre = self.usuario.nombre or self.usuario.nombre_usuario
-        rol = self.usuario.rol.nombre if self.usuario.rol else "Usuario"
-
-        lbl_nombre = QLabel(nombre[:20])
-        lbl_nombre.setObjectName("UserLabel")
-
-        lbl_rol = QLabel(rol)
-        lbl_rol.setObjectName("UserRole")
-
-        info_v.addWidget(lbl_nombre)
-        info_v.addWidget(lbl_rol)
-
-        h.addWidget(avatar)
-        h.addWidget(info_w)
+        h.addWidget(lbl_raiz)
+        h.addWidget(lbl_sep)
+        h.addWidget(self.lbl_titulo)
         return w
 
     def actualizar_modulo(self, clave: str) -> None:
-        """Actualiza el título del módulo activo en la topbar."""
+        """Actualiza el título del módulo activo en el breadcrumb."""
         titulo = TITULOS.get(clave, clave.replace("_", " ").title())
         self.lbl_titulo.setText(titulo)

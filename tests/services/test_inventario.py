@@ -182,8 +182,8 @@ def test_buscar_por_codigo(db_session):
 
     resultado = ProductoService.buscar(db_session, codigo="ABC", id_usuario=admin.id_usuario)
 
-    assert len(resultado) == 1
-    assert resultado[0].cod_producto == "ABC-123"
+    assert resultado["total"] == 1
+    assert resultado["items"][0].cod_producto == "ABC-123"
 
 
 def test_buscar_sin_usuario_autorizado_falla(db_session):
@@ -198,8 +198,22 @@ def test_buscar_por_nombre(db_session):
 
     resultado = ProductoService.buscar(db_session, nombre="Cola", id_usuario=admin.id_usuario)
 
-    assert len(resultado) == 1
-    assert resultado[0].nombre_producto == "Refresco Cola"
+    assert resultado["total"] == 1
+    assert resultado["items"][0].nombre_producto == "Refresco Cola"
+
+
+def test_buscar_por_texto_incluye_codigo_o_nombre(db_session):
+    admin = crear_usuario_admin(db_session)
+    crear_producto(db_session, cod_producto="COLA-001", nombre_producto="Refresco Cola")
+    crear_producto(db_session, cod_producto="AGUA-002", nombre_producto="Agua Mineral")
+
+    por_codigo = ProductoService.buscar(db_session, texto="COLA-001", id_usuario=admin.id_usuario)
+    por_nombre = ProductoService.buscar(db_session, texto="Mineral", id_usuario=admin.id_usuario)
+
+    assert por_codigo["total"] == 1
+    assert por_codigo["items"][0].nombre_producto == "Refresco Cola"
+    assert por_nombre["total"] == 1
+    assert por_nombre["items"][0].cod_producto == "AGUA-002"
 
 
 def test_buscar_por_categoria(db_session):
@@ -211,7 +225,7 @@ def test_buscar_por_categoria(db_session):
 
     resultado = ProductoService.buscar(db_session, id_categoria=categoria_a.id_categoria, id_usuario=admin.id_usuario)
 
-    assert len(resultado) == 1
+    assert resultado["total"] == 1
 
 
 def test_buscar_solo_con_stock(db_session):
@@ -221,8 +235,22 @@ def test_buscar_solo_con_stock(db_session):
 
     resultado = ProductoService.buscar(db_session, solo_con_stock=True, id_usuario=admin.id_usuario)
 
-    assert len(resultado) == 1
-    assert resultado[0].cantidad_unidad == Decimal("5.00")
+    assert resultado["total"] == 1
+    assert resultado["items"][0].cantidad_unidad == Decimal("5.00")
+
+
+def test_buscar_pagina_resultados(db_session):
+    admin = crear_usuario_admin(db_session)
+    for i in range(5):
+        crear_producto(db_session, cod_producto=f"PAG-{i:03d}", nombre_producto=f"Producto {i}")
+
+    pagina_1 = ProductoService.buscar(db_session, pagina=1, por_pagina=2, id_usuario=admin.id_usuario)
+    pagina_2 = ProductoService.buscar(db_session, pagina=2, por_pagina=2, id_usuario=admin.id_usuario)
+
+    assert pagina_1["total"] == 5
+    assert len(pagina_1["items"]) == 2
+    assert len(pagina_2["items"]) == 2
+    assert {p.cod_producto for p in pagina_1["items"]}.isdisjoint({p.cod_producto for p in pagina_2["items"]})
 
 
 def test_obtener_alertas_stock_bajo(db_session):
