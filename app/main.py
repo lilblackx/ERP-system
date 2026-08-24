@@ -14,9 +14,9 @@ from app.ui.main_window import MainWindow
 
 
 def main():
+    setup_logging()
     validar_configuracion()
     verificar_migraciones_al_dia()
-    setup_logging()
     app = QApplication(sys.argv)
 
     while True:

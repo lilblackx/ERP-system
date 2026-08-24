@@ -3,6 +3,7 @@ TopBar: barra superior del ERP con título de vista activa, búsqueda global,
 notificaciones y perfil de usuario.
 """
 
+import qtawesome as qta
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -14,7 +15,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-import qtawesome as qta
 
 from app.db.models import Usuario
 from app.ui.styles import (

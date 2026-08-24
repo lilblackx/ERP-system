@@ -24,6 +24,13 @@ poblada (no es idempotente para triggers/constraints, solo para `CREATE TABLE`).
 - Si el cambio toca una tabla con triggers y agrega un trigger nuevo, recordar
   `implicit_returning=False` en `app/db/models.py` (ver nota en `docs/ESTADO_DEL_PROYECTO.md`,
   sección 3).
+- Un archivo que use `ALTER DATABASE` (cambiar opciones de la base, ej.
+  `READ_COMMITTED_SNAPSHOT`) debe ser el **único** statement de ese archivo. SQL Server
+  exige acceso exclusivo a la base para este tipo de cambio y rechaza `ALTER DATABASE`
+  dentro de una transacción abierta (Msg 226) — `app/db/migrar.py` detecta este caso y lo
+  corre aparte, en su propia conexión autocommit, cerrando y reabriendo el resto del pool
+  del engine alrededor. Si se usa `WITH ROLLBACK IMMEDIATE`, aplicar con la app cerrada en
+  todas las máquinas (esa opción desconecta cualquier otra sesión activa en la base).
 
 ## Aplicar migraciones pendientes
 

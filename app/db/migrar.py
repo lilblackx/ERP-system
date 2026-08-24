@@ -25,6 +25,13 @@ END
 """
 
 
+_ALTER_DATABASE_RE = re.compile(r"(?im)^\s*ALTER\s+DATABASE\b")
+
+
+def _contiene_alter_database(contenido_sql: str) -> bool:
+    return bool(_ALTER_DATABASE_RE.search(contenido_sql))
+
+
 def _ejecutar_batches(connection, contenido_sql: str) -> None:
     for batch in re.split(r"(?im)^\s*GO\s*$", contenido_sql):
         batch = batch.strip()
@@ -32,11 +39,30 @@ def _ejecutar_batches(connection, contenido_sql: str) -> None:
             connection.execute(text(batch))
 
 
+def _ejecutar_archivo_alter_database(motor, contenido_sql: str):
+    """ALTER DATABASE (ej. migrations/0015) exige acceso exclusivo a la base -- ninguna
+    otra conexion del engine puede seguir viva mientras corre, ni siquiera esta misma en
+    estado ocioso (con WITH ROLLBACK IMMEDIATE, SQL Server desconecta cualquier otra
+    sesion, incluida la del propio runner si sigue abierta). Ademas SQL Server rechaza
+    ALTER DATABASE dentro de una transaccion abierta (Msg 226) -- la conexion normal del
+    runner esta en modo manual-commit (autobegin de SQLAlchemy).
+    Por eso el archivo se ejecuta solo, en su propia conexion autocommit descartable, con
+    el resto del pool cerrado antes y despues. Convencion: un archivo que use ALTER
+    DATABASE debe ser el UNICO statement de ese archivo (ver migrations/README.md).
+    Devuelve una conexion nueva para que el caller siga con el resto del proceso."""
+    motor.dispose()
+    with motor.connect().execution_options(isolation_level="AUTOCOMMIT") as autocommit_connection:
+        _ejecutar_batches(autocommit_connection, contenido_sql)
+    motor.dispose()
+    return motor.connect()
+
+
 def aplicar_migraciones(motor=None, migrations_dir: Path | None = None) -> None:
     motor = motor if motor is not None else engine
     migrations_dir = migrations_dir if migrations_dir is not None else MIGRATIONS_DIR
 
-    with motor.connect() as connection:
+    connection = motor.connect()
+    try:
         existe_schema_base = connection.execute(text("SELECT OBJECT_ID(N'dbo.usuarios', N'U')")).scalar()
         if existe_schema_base is None:
             raise RuntimeError(
@@ -62,7 +88,14 @@ def aplicar_migraciones(motor=None, migrations_dir: Path | None = None) -> None:
 
         for archivo in pendientes:
             print(f"Aplicando {archivo.name}...")
-            _ejecutar_batches(connection, archivo.read_text(encoding="utf-8"))
+            contenido = archivo.read_text(encoding="utf-8")
+
+            if _contiene_alter_database(contenido):
+                connection.close()
+                connection = _ejecutar_archivo_alter_database(motor, contenido)
+            else:
+                _ejecutar_batches(connection, contenido)
+
             connection.execute(
                 text("INSERT INTO dbo.schema_migrations ([version]) VALUES (:version)"),
                 {"version": archivo.name},
@@ -70,6 +103,8 @@ def aplicar_migraciones(motor=None, migrations_dir: Path | None = None) -> None:
             connection.commit()
 
         print(f"{len(pendientes)} migracion(es) aplicada(s).")
+    finally:
+        connection.close()
 
 
 def verificar_migraciones_al_dia(motor=None, migrations_dir: Path | None = None) -> None:

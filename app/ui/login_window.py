@@ -5,6 +5,7 @@ Diseño: Split-screen (izquierda azul con bienvenida, derecha blanca con formula
 
 import logging
 
+import qtawesome as qta
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
@@ -17,7 +18,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-import qtawesome as qta
 
 from app.db.models import ConfiguracionEmpresa
 from app.db.session import SessionLocal

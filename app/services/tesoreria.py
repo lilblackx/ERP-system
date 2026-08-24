@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models import Banco, BancoMovimiento, Caja, CajaMovimiento, CuentaBancaria
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+
+logger = logging.getLogger(__name__)
 
 TIPOS_MOVIMIENTO_BANCO = {"abono", "cargo", "transferencia", "deposito"}
 TIPOS_MOVIMIENTO_CAJA = {"entrada", "salida"}
@@ -271,6 +274,14 @@ class CajaService:
         session.commit()
         session.refresh(caja)
 
+        logger.info(
+            "Caja %s (id=%s) abierta: saldo_apertura=%s usuario=%s",
+            caja.nombre_caja,
+            caja.id_caja,
+            saldo_apertura,
+            id_usuario,
+        )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
@@ -298,6 +309,14 @@ class CajaService:
 
         session.commit()
         session.refresh(caja)
+
+        logger.info(
+            "Caja %s (id=%s) cerrada: saldo_cierre=%s usuario=%s",
+            caja.nombre_caja,
+            caja.id_caja,
+            caja.saldo_cierre,
+            id_usuario_cierre,
+        )
 
         AuditoriaService.registrar_evento(
             session,
@@ -369,6 +388,14 @@ class CajaService:
         session.add(movimiento)
         session.commit()
         session.refresh(movimiento)
+
+        logger.info(
+            "Movimiento manual de caja %s: tipo=%s monto=%s usuario=%s",
+            id_caja,
+            tipo,
+            movimiento.monto_movimiento,
+            id_usuario,
+        )
 
         AuditoriaService.registrar_evento(
             session,

@@ -97,6 +97,16 @@ ruff format .           # formatea en el lugar
 ruff format --check .   # solo verifica, no modifica (lo que corre CI)
 ```
 
+Para que esto se corra solo antes de cada commit (en vez de enterarse recien cuando falla
+CI despues del push), instalar el hook de pre-commit una vez por clon:
+
+```bash
+pre-commit install
+```
+
+`.pre-commit-config.yaml` corre `ruff check --fix` + `ruff format` en los archivos
+modificados de cada commit -- misma config de `pyproject.toml`, mismo resultado que CI.
+
 ## 4. Backup y restore
 
 Ver [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md).

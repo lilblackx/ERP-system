@@ -114,6 +114,25 @@ def test_verificar_migraciones_al_dia_con_pendiente_lanza(test_engine, tmp_path)
         verificar_migraciones_al_dia(motor=test_engine, migrations_dir=tmp_path)
 
 
+def test_aplica_migracion_con_alter_database_fuera_de_transaccion(test_engine, tmp_path):
+    """ALTER DATABASE no puede correr dentro de una transaccion abierta (Msg 226 de SQL
+    Server) -- la conexion normal del runner esta en modo manual-commit (autobegin de
+    SQLAlchemy), asi que sin la ruta autocommit de _ejecutar_batches este archivo fallaria.
+    AUTO_UPDATE_STATISTICS ON es idempotente (ya es el default), se usa solo para probar el
+    enrutamiento sin dejar la base de test en un estado distinto al que ya tenia."""
+    _limpiar_schema_migrations(test_engine)
+    (tmp_path / "0001_alter_database_de_prueba.sql").write_text(
+        "ALTER DATABASE CURRENT SET AUTO_UPDATE_STATISTICS ON;\nGO\n",
+        encoding="utf-8",
+    )
+
+    aplicar_migraciones(motor=test_engine, migrations_dir=tmp_path)
+
+    with test_engine.connect() as connection:
+        versiones = {fila[0] for fila in connection.execute(text("SELECT [version] FROM dbo.schema_migrations"))}
+    assert versiones == {"0000_baseline", "0001_alter_database_de_prueba.sql"}
+
+
 def test_verificar_migraciones_al_dia_no_modifica_nada(test_engine, tmp_path):
     """A diferencia de aplicar_migraciones(), esta funcion no debe crear
     dbo.schema_migrations ni escribir la fila 0000_baseline -- es de solo lectura."""

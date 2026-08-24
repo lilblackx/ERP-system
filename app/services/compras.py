@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -8,6 +9,8 @@ from app.db.models import Compra, CompraDetalle, CuentaPorPagar, Inventario, Pag
 from app.services.auditoria import AuditoriaService
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
+
+logger = logging.getLogger(__name__)
 
 
 def _generar_numero_compra(session: Session) -> str:
@@ -115,6 +118,15 @@ class CompraService:
         session.commit()
         session.refresh(compra)
 
+        logger.info(
+            "Compra %s registrada: proveedor=%s condicion_pago=%s total=%s usuario=%s",
+            compra.numero_compra,
+            id_proveedor,
+            condicion_pago,
+            compra.total_compra,
+            id_usuario,
+        )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
@@ -180,6 +192,14 @@ class CompraService:
         compra.modificado_por = id_usuario
         session.commit()
         session.refresh(compra)
+
+        logger.info(
+            "Compra %s anulada: motivo=%s monto_revertido_a_nota_credito=%s usuario=%s",
+            compra.numero_compra,
+            motivo,
+            monto_pagado,
+            id_usuario,
+        )
 
         if monto_pagado > 0:
             NotaCreditoService.crear_nota_credito_proveedor(

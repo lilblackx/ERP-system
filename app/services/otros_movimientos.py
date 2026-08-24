@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -16,6 +17,8 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+
+logger = logging.getLogger(__name__)
 
 ESTADOS_CXC_OTRO = ("pendiente", "parcial", "pagada", "vencida")
 
@@ -60,6 +63,14 @@ class OtrosMovimientosService:
         session.add(cuenta)
         session.commit()
         session.refresh(cuenta)
+
+        logger.info(
+            "Cuenta por cobrar (otros) creada: id_cuenta=%s cliente=%s monto_total=%s usuario=%s",
+            cuenta.id_cuenta,
+            id_cliente,
+            cuenta.monto_total,
+            creado_por,
+        )
 
         AuditoriaService.registrar_evento(
             session,
@@ -148,6 +159,14 @@ class OtrosMovimientosService:
         session.commit()
         session.refresh(cuenta)
 
+        logger.info(
+            "Abono a cuenta por cobrar (otros) %s: monto=%s estado_resultante=%s usuario=%s",
+            id_cuenta,
+            monto,
+            cuenta.estado,
+            id_usuario,
+        )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
@@ -221,6 +240,14 @@ class OtrosMovimientosService:
         session.commit()
         session.refresh(partida)
 
+        logger.info(
+            "Partida no conciliada creada: id_cuenta=%s cuenta_bancaria=%s monto=%s usuario=%s",
+            partida.id_cuenta,
+            id_cuenta_bancaria,
+            monto,
+            creado_por,
+        )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=creado_por,
@@ -291,6 +318,15 @@ class OtrosMovimientosService:
         session.commit()
         session.refresh(partida)
         session.refresh(cxc)
+
+        logger.info(
+            "Partida %s conciliada: cliente=%s cuenta_por_cobrar=%s monto=%s usuario=%s",
+            partida.id_cuenta,
+            id_cliente,
+            id_cuenta_por_cobrar,
+            monto,
+            id_usuario,
+        )
 
         AuditoriaService.registrar_evento(
             session,

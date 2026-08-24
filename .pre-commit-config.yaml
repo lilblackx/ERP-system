@@ -1,0 +1,16 @@
+# Corre localmente en cada `git commit` lo mismo que CI corre despues del push (ver
+# .github/workflows/tests.yml) -- para que un problema de lint/formato se detecte antes de
+# empujar, no despues. Instalacion (una sola vez por clon):
+#
+#   pip install -r requirements-dev.txt
+#   pre-commit install
+#
+# rev fijada a la misma version de ruff que requirements-dev.txt (0.16.4) para que el
+# resultado sea identico corras como corras ruff -- si se actualiza uno, actualizar el otro.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format

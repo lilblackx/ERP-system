@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.db.models import CuentaBancaria, CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+
+logger = logging.getLogger(__name__)
 
 # trg_pagos_cobros_io / trg_pagos_proveedores_io (INSTEAD OF INSERT) ya validan
 # "exactamente un origen" y "monto <= saldo_pendiente" en la base de datos, pero lo
@@ -73,6 +76,14 @@ class PagoService:
         session.refresh(pago)
         session.refresh(cuenta)
 
+        logger.info(
+            "Pago de cobro registrado: cuenta_por_cobrar=%s monto=%s estado_resultante=%s usuario=%s",
+            id_cuenta_por_cobrar,
+            pago.monto,
+            cuenta.estado,
+            id_usuario,
+        )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
@@ -139,6 +150,14 @@ class PagoService:
         session.commit()
         session.refresh(pago)
         session.refresh(cuenta)
+
+        logger.info(
+            "Pago a proveedor registrado: cuenta_por_pagar=%s monto=%s estado_resultante=%s usuario=%s",
+            id_cuenta_por_pagar,
+            pago.monto,
+            cuenta.estado,
+            id_usuario,
+        )
 
         AuditoriaService.registrar_evento(
             session,

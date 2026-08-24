@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from app.services.auditoria import AuditoriaService
 from app.services.comisiones import ComisionService
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
+
+logger = logging.getLogger(__name__)
 
 
 def _generar_numero_factura(session: Session) -> str:
@@ -155,6 +158,15 @@ class VentaService:
         session.commit()
         session.refresh(factura)
 
+        logger.info(
+            "Factura %s emitida: cliente=%s condicion_pago=%s total=%s usuario=%s",
+            factura.numero_factura,
+            id_cliente,
+            condicion_pago,
+            factura.total_venta,
+            id_usuario,
+        )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
@@ -256,6 +268,14 @@ class VentaService:
         factura.modificado_por = id_usuario
         session.commit()
         session.refresh(factura)
+
+        logger.info(
+            "Factura %s anulada: motivo=%s monto_revertido_a_nota_credito=%s usuario=%s",
+            factura.numero_factura,
+            motivo,
+            monto_pagado,
+            id_usuario,
+        )
 
         if monto_pagado > 0:
             NotaCreditoService.crear_nota_credito_cliente(

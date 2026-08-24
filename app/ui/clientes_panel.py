@@ -6,9 +6,11 @@ Diseño moderno integrado en el MainWindow (no como ventana flotante).
 
 import logging
 
+import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -22,7 +24,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-import qtawesome as qta
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Cliente, Usuario
@@ -32,6 +33,7 @@ from app.services.clientes import (
     list_clientes,
     update_cliente,
 )
+from app.services.exportacion import exportar_excel
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -76,10 +78,7 @@ class BadgeItem(QWidget):
         icon_lbl.setStyleSheet("background: transparent;")
 
         lbl = QLabel(estado.capitalize())
-        lbl.setStyleSheet(
-            f"background-color: transparent; color: {text_color};"
-            " font-size: 11px; font-weight: bold;"
-        )
+        lbl.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 11px; font-weight: bold;")
 
         container = QWidget()
         container.setStyleSheet(f"background-color: {bg_color}; border-radius: 10px; padding: 2px 8px;")
@@ -211,6 +210,7 @@ class ClientesPanel(QWidget):
         btn_exportar = QPushButton("Exportar")
         btn_exportar.setIcon(qta.icon("fa5s.file-export", color=COLOR_TEXT_DARK))
         btn_exportar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_exportar.clicked.connect(self.exportar_clientes)
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
@@ -316,6 +316,41 @@ class ClientesPanel(QWidget):
         total = len(clientes)
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''}")
         self.lbl_pagina.setText(f"Mostrando {total} registro{'s' if total != 1 else ''}")
+
+    def exportar_clientes(self) -> None:
+        # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
+        # nunca a un temporal, asi que no hay nada que purgar si el usuario cancela.
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar clientes", "clientes.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            clientes = list_clientes(
+                session,
+                self.buscar_input.text().strip() or None,
+                id_usuario=self.usuario.id_usuario,
+            )
+            filas = [
+                [
+                    c.id_cliente,
+                    c.nombre_razon_social,
+                    c.identificacion_cliente,
+                    c.email,
+                    c.telefono,
+                    c.direccion,
+                    float(c.limite_credito) if c.limite_credito else 0,
+                    c.estado_cliente,
+                ]
+                for c in clientes
+            ]
+            exportar_excel(ruta, COLS_VISIBLES, filas)
+            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar la lista de clientes")
+            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
+        finally:
+            session.close()
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()

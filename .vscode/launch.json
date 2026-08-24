@@ -3,7 +3,7 @@
     "configurations": [
         {
             "name": "Python: Ejecutar App",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "app.main",
             "cwd": "${workspaceFolder}"

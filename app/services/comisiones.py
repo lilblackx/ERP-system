@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+
+logger = logging.getLogger(__name__)
 
 # El principio contable de este modulo (C14): el monto de la venta (factura_detalle.
 # precio_unitario, total_venta, cuentas_por_cobrar) nunca se toca -- es el ingreso real.
@@ -199,6 +202,14 @@ class PagoComisionService:
 
         session.commit()
         session.refresh(pago)
+
+        logger.info(
+            "Comisiones pagadas: vendedor=%s monto=%s cantidad_comisiones=%s usuario=%s",
+            id_vendedor,
+            monto_total,
+            len(comisiones_pendientes),
+            id_usuario,
+        )
 
         AuditoriaService.registrar_evento(
             session,

@@ -1,9 +1,9 @@
+import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-import qtawesome as qta
 from sqlalchemy.orm import Session
 
 from app.db.models import CategoriaCliente, Cliente, Vendedor
@@ -147,8 +146,7 @@ class ClienteFormDialog(QDialog):
         fa_icon_name = "fa5s.user-edit" if self.cliente else "fa5s.user-plus"
         icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            f"background-color: #EFF6FF; border: 1.5px solid #BFDBFE;"
-            f" border-radius: 8px; padding: 6px;"
+            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -241,9 +239,7 @@ class ClienteFormDialog(QDialog):
         self.vendedor_combo.setFixedHeight(32)
         self.vendedor_combo.addItem("Sin asignar", None)
         for vendedor in (
-            self.session.query(Vendedor)
-            .filter(Vendedor.estado_vendedor == "ACTIVO")
-            .order_by(Vendedor.nombre_vendedor)
+            self.session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor)
         ):
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
 
@@ -420,9 +416,10 @@ class ClienteFormDialog(QDialog):
 
         if num:
             num_upper = num.upper()
-            if any(num_upper.startswith(f"{p}-") for p in ["J", "G", "V", "E", "P"]):
+            prefijos = ["J", "G", "V", "E", "P"]
+            if any(num_upper.startswith(f"{p}-") for p in prefijos):
                 ident_final = num_upper
-            elif any(num_upper.startswith(p) and len(num_upper) > 1 and num_upper[1].isdigit() for p in ["J", "G", "V", "E", "P"]):
+            elif any(num_upper.startswith(p) and len(num_upper) > 1 and num_upper[1].isdigit() for p in prefijos):
                 ident_final = f"{num_upper[0]}-{num_upper[1:]}"
             else:
                 ident_final = f"{tipo}-{num}"

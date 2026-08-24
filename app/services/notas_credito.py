@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.db.models import NotaCreditoCliente, NotaCreditoProveedor
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+
+logger = logging.getLogger(__name__)
 
 
 def _generar_numero_nota_credito_cliente(session: Session) -> str:
@@ -58,6 +61,15 @@ class NotaCreditoService:
         session.commit()
         session.refresh(nota)
 
+        logger.info(
+            "Nota de credito %s generada: cliente=%s factura_origen=%s monto=%s usuario=%s",
+            nota.numero_nota_credito,
+            id_cliente,
+            id_factura_origen,
+            monto,
+            id_usuario,
+        )
+
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
@@ -97,6 +109,14 @@ class NotaCreditoService:
         session.add(nota)
         session.commit()
         session.refresh(nota)
+
+        logger.info(
+            "Nota de credito de proveedor generada: proveedor=%s compra_origen=%s monto=%s usuario=%s",
+            id_proveedor,
+            id_compra_origen,
+            monto,
+            id_usuario,
+        )
 
         AuditoriaService.registrar_evento(
             session,
