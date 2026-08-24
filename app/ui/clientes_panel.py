@@ -54,7 +54,17 @@ from app.ui.styles import (
 logger = logging.getLogger(__name__)
 
 # Columnas visibles en la tabla (índice oculto 0 = ID interno)
-COLS_VISIBLES = ["ID", "Nombre Completo", "Identificación", "Email", "Teléfono", "Dirección", "Crédito", "Días", "Estado"]
+COLS_VISIBLES = [
+    "ID",
+    "Nombre Completo",
+    "Identificación",
+    "Email",
+    "Teléfono",
+    "Dirección",
+    "Crédito",
+    "Días",
+    "Estado",
+]
 COL_ID_INTERNO = 0  # oculto
 
 
