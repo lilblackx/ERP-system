@@ -56,15 +56,61 @@ backend:
   `total_venta`/`total_compra` a partir de la suma de las líneas.
 - **Apertura de cuentas por cobrar/pagar**: `trg_factura_venta_cxc` y `trg_compras_cxp`
   son triggers `AFTER UPDATE` sobre la cabecera: abren la cuenta por cobrar/pagar cuando
-  el total cambia y la condición de pago es `credito`. Esto tiene una implicación
-  importante para el código de aplicación: **la cabecera debe insertarse con el total en
-  0 (o el valor por defecto) y dejar que el trigger de recálculo, disparado al insertar
-  las líneas, sea el que efectivamente cambie el valor** — si se inserta ya con el total
-  correcto, el trigger no detecta cambio y la cuenta por cobrar/pagar nunca se abre. Los
-  servicios de `ventas.py` y `compras.py` ya están escritos respetando esto.
+  el total cambia. Esto tiene una implicación importante para el código de aplicación:
+  **la cabecera debe insertarse con el total en 0 (o el valor por defecto) y dejar que el
+  trigger de recálculo, disparado al insertar las líneas, sea el que efectivamente cambie
+  el valor** — si se inserta ya con el total correcto, el trigger no detecta cambio y la
+  cuenta por cobrar/pagar nunca se abre. Los servicios de `ventas.py` y `compras.py` ya
+  están escritos respetando esto. Del lado de compras, `trg_compras_cxp` sigue
+  restringido a `condicion_pago = 'credito'`. Del lado de ventas, desde
+  `migrations/0024_pagos_contado_multimetodo.sql` (2026-08-25) `trg_factura_venta_cxc`
+  **ya no** restringe la apertura a `credito` -- ver "Pago de contado al emitir" mas abajo
+  para el porque.
 - **Pagos**: `trg_pagos_cobros_io` y `trg_pagos_proveedores_io` son `INSTEAD OF INSERT`:
   validan el origen del pago (exactamente uno entre caja o cuenta bancaria), validan que
   el monto no exceda el saldo, y generan el movimiento de caja/banco correspondiente.
+  `pagos_cobros` (no `pagos_proveedores`) tiene ademas `moneda` (`USD`/`VES`/`COP`/`USDT`,
+  default `USD`) y `monto_moneda_origen` (el monto tal como se recibio, solo para
+  auditoria) desde la misma migracion -- `monto` sigue siendo siempre el equivalente en
+  USD que se aplica contra `saldo_pendiente`. `PagoService.registrar_pago_cobro()`
+  (Python, no el trigger) exige ademas que, si el origen es una caja, tenga un turno
+  abierto (`fecha_apertura` no nula, `fecha_cierre` nula) -- antes no se validaba.
+
+### Pago de contado al emitir (migrations/0024, 2026-08-25)
+
+Antes, una factura `condicion_pago='contado'` no dejaba ningun rastro de cobro: sin
+`CuentaPorCobrar`, sin `PagoCobro`, sin movimiento de caja/banco. Ahora
+`VentaService.emitir_factura()` acepta un parametro `pagos: list[dict]` -- **obligatorio
+y no vacio si `condicion_pago='contado'`, prohibido si es `'credito'`**. Cada dict trae
+`metodo_pago`, `moneda`, `monto_moneda_origen` y exactamente uno de `id_caja`/
+`id_cuenta_bancaria` (mismo contrato que `PagoService.registrar_pago_cobro`), mas
+`referencia` opcional. Se puede repartir el total entre varias formas de pago y monedas
+distintas en la misma factura (ej. parte en efectivo VES, parte por Zelle en USD).
+
+Flujo dentro de la transaccion (todo o nada, un solo `commit()` al final, igual que
+comisiones ya hacia): se calcula `total_a_cobrar` (subtotal - descuento + IVA) y se
+convierte cada pago a USD con la tasa vigente snapshoteada (`VES`/`COP` dividen por
+`tasa_dolar_bcv`/`tasa_cop`; `USD`/`USDT` son 1:1) **antes** de tocar la sesion -- si la
+suma no cubre el total, se aborta con `ValueError` sin insertar nada. Si pasa la
+validacion, se inserta la factura+lineas (igual que siempre), lo que dispara
+`trg_factura_venta_cxc` (ahora tambien para contado) abriendo una `CuentaPorCobrar`; acto
+seguido se aplica cada pago con `PagoService._aplicar_pago_cobro()` (variante interna sin
+commit propio, para mantener la atomicidad) hasta dejar `saldo_pendiente=0` /
+`estado='pagada'`. Si la suma tendida excede el total (vuelto en efectivo), el excedente
+**no se registra** -- cada pago se recorta al saldo restante y una linea que quede en 0
+se omite; no existe todavia un concepto de "vuelto" en el sistema.
+
+Reusar el mecanismo de CxC para contado significa que `VentaService.anular_factura()` ya
+maneja el caso genericamente: anular una factura de contado ya pagada genera una
+`NotaCreditoCliente` igual que una de credito (ver "Notas de credito automaticas" arriba)
+-- comportamiento nuevo, y deseado.
+
+`app/ui/factura_form_dialog.py` (Nueva Factura) muestra una seccion "Formas de Pago"
+cuando la condicion es contado, con un dialogo por linea (`app/ui/pago_linea_dialog.py`)
+que resuelve el origen (caja abierta o cuenta bancaria activa) segun el metodo elegido; si
+no hay ninguna caja abierta, ofrece un dialogo minimo de apertura de turno
+(`app/ui/caja_apertura_dialog.py`) -- no es una pantalla de Tesoreria completa, solo lo
+necesario para no dejar el flujo de contado en efectivo sin salida.
 - **Saldo bancario**: `trg_banco_movimientos_saldo` actualiza
   `cuentas_bancarias.saldo_total_banco` en cada movimiento.
 - **Cierre de caja**: `trg_cajas_cierre` calcula `saldo_cierre` a partir de

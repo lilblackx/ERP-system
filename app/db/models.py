@@ -574,7 +574,12 @@ class PagoCobro(Base):
     id_caja: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
     id_tasa: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
     metodo_pago: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Moneda del monto tal como se recibio (ver monto_moneda_origen); "monto" (abajo) queda
+    # siempre en USD -- el equivalente que efectivamente se aplica contra saldo_pendiente,
+    # ver migrations/0024_pagos_contado_multimetodo.sql.
+    moneda: Mapped[str] = mapped_column(String(10), nullable=False, server_default="USD")
     monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    monto_moneda_origen: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
     referencia: Mapped[str | None] = mapped_column(String(100))
     fecha_pago: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))

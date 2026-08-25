@@ -7,21 +7,25 @@ from app.db.models import (
     ComisionFactura,
     CuentaPorCobrar,
     FacturaDetalle,
+    FacturaVenta,
     NotaCreditoCliente,
     PagoCobro,
 )
 from app.services.empresa import EmpresaService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
+from app.services.tasas import TasaService
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
 from tests.factories import (
     crear_caja,
     crear_cliente,
+    crear_cuenta_bancaria,
     crear_precio_producto,
     crear_producto,
     crear_usuario_admin,
     crear_vendedor,
+    pago_contado,
 )
 
 
@@ -37,6 +41,7 @@ def test_emitir_factura_contado_descuenta_stock_y_calcula_total(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
     )
 
@@ -56,15 +61,21 @@ def test_emitir_factura_sin_usuario_autorizado_falla(db_session):
             id_usuario=None,
             id_vendedor=None,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
         )
 
 
-def test_emitir_factura_contado_no_abre_cuenta_por_cobrar(db_session):
+def test_emitir_factura_contado_abre_y_liquida_cuenta_por_cobrar_con_un_pago(db_session):
+    """Desde migrations/0024: una factura de contado tambien abre una cuenta por cobrar
+    (igual que credito) pero queda liquidada en la MISMA transaccion con el/los pagos
+    provistos -- termina en estado='pagada', saldo 0, con su PagoCobro real."""
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     factura = VentaService.emitir_factura(
         db_session,
@@ -73,10 +84,160 @@ def test_emitir_factura_contado_no_abre_cuenta_por_cobrar(db_session):
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        pagos=[
+            {
+                "metodo_pago": "efectivo",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("20.00"),
+                "id_caja": caja.id_caja,
+            }
+        ],
     )
 
-    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).first()
-    assert cxc is None
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    assert cxc.saldo_pendiente == Decimal("0.00")
+    assert cxc.estado == "pagada"
+    pago = db_session.query(PagoCobro).filter_by(id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar).one()
+    assert pago.monto == Decimal("20.00")
+    assert pago.moneda == "USD"
+    assert pago.metodo_pago == "efectivo"
+    assert pago.id_caja == caja.id_caja
+
+
+def test_emitir_factura_contado_multiples_formas_de_pago_multimoneda(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+    TasaService.registrar_tasa(db_session, tasa_bcv="40.00", creado_por=admin.id_usuario)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        pagos=[
+            {
+                "metodo_pago": "transferencia",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("60.00"),
+                "id_cuenta_bancaria": cuenta.id_cuenta,
+            },
+            {
+                "metodo_pago": "transferencia",
+                "moneda": "VES",
+                "monto_moneda_origen": Decimal("1600.00"),  # 1600 / 40 = 40 USD
+                "id_cuenta_bancaria": cuenta.id_cuenta,
+            },
+        ],
+    )
+
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    assert cxc.saldo_pendiente == Decimal("0.00")
+    assert cxc.estado == "pagada"
+    pagos = db_session.query(PagoCobro).filter_by(id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar).all()
+    assert len(pagos) == 2
+    assert sum(p.monto for p in pagos) == Decimal("100.00")
+
+
+def test_emitir_factura_contado_pago_insuficiente_falla_y_no_deja_nada(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+
+    with pytest.raises(ValueError, match="no cubren el total"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            pagos=[
+                {
+                    "metodo_pago": "transferencia",
+                    "moneda": "USD",
+                    "monto_moneda_origen": Decimal("50.00"),
+                    "id_cuenta_bancaria": cuenta.id_cuenta,
+                }
+            ],
+        )
+
+    assert db_session.query(FacturaVenta).filter_by(id_cliente_factura=cliente.id_cliente).first() is None
+
+
+def test_emitir_factura_contado_sin_pagos_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="al menos una forma de pago"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        )
+
+
+def test_emitir_factura_contado_pago_con_caja_sin_turno_abierto_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    caja = crear_caja(db_session)  # nunca se abrio
+
+    with pytest.raises(ValueError, match="no tiene un turno abierto"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+            pagos=[
+                {
+                    "metodo_pago": "efectivo",
+                    "moneda": "USD",
+                    "monto_moneda_origen": Decimal("20.00"),
+                    "id_caja": caja.id_caja,
+                }
+            ],
+        )
+
+
+def test_emitir_factura_credito_no_admite_pagos(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=1000)
+    cuenta = crear_cuenta_bancaria(db_session)
+
+    with pytest.raises(ValueError, match="no admite pagos"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+            pagos=[
+                {
+                    "metodo_pago": "transferencia",
+                    "moneda": "USD",
+                    "monto_moneda_origen": Decimal("20.00"),
+                    "id_cuenta_bancaria": cuenta.id_cuenta,
+                }
+            ],
+        )
 
 
 def test_emitir_factura_credito_abre_cuenta_por_cobrar(db_session):
@@ -156,6 +317,7 @@ def test_emitir_factura_stock_insuficiente(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 10, "precio_unitario": "20.00"}],
         )
 
@@ -175,6 +337,7 @@ def test_emitir_factura_cliente_inactivo_falla(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=None,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
         )
 
@@ -192,6 +355,7 @@ def test_emitir_factura_vendedor_inactivo_falla(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
         )
 
@@ -208,6 +372,7 @@ def test_emitir_factura_vendedor_inexistente_falla(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=999999,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
         )
 
@@ -225,6 +390,7 @@ def test_emitir_factura_producto_inactivo_falla(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
         )
 
@@ -242,6 +408,7 @@ def test_emitir_factura_agrupa_items_repetidos_para_validar_stock(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[
                 {"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "20.00"},
                 {"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "20.00"},
@@ -259,6 +426,7 @@ def test_emitir_factura_sin_items(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=None,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[],
         )
 
@@ -289,6 +457,7 @@ def test_emitir_factura_cliente_inexistente(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=None,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
         )
 
@@ -305,6 +474,7 @@ def test_anular_factura_contado_repone_stock(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
     )
 
@@ -329,6 +499,7 @@ def test_anular_factura_sin_usuario_autorizado_falla(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
     )
 
@@ -448,6 +619,7 @@ def test_anular_factura_con_comision_pendiente_borra_comision_y_anula(db_session
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
     )
     detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
@@ -486,6 +658,7 @@ def test_anular_factura_con_comision_pagada_bloqueada(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
     )
     detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
@@ -527,6 +700,7 @@ def test_emitir_factura_con_vendedor_calcula_comision_sobre_diferencia(db_sessio
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "2.00"}],
     )
 
@@ -552,6 +726,7 @@ def test_emitir_factura_precio_igual_al_de_lista_comision_cero(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "5.00"}],
     )
 
@@ -576,6 +751,7 @@ def test_emitir_factura_precio_menor_al_de_lista_requiere_autorizacion_y_comisio
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
         motivo_descuento="Cliente frecuente",
         id_autorizador_descuento=admin.id_usuario,
@@ -602,6 +778,7 @@ def test_emitir_factura_precio_menor_al_de_lista_sin_autorizacion_falla(db_sessi
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
         )
 
@@ -612,6 +789,7 @@ def test_emitir_factura_precio_menor_al_de_lista_sin_autorizacion_falla(db_sessi
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
             motivo_descuento="Cliente frecuente",
         )
@@ -631,6 +809,7 @@ def test_emitir_factura_precio_menor_al_de_lista_autorizador_sin_permiso_falla(d
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "3.00"}],
             motivo_descuento="Cliente frecuente",
             id_autorizador_descuento=999999,
@@ -649,6 +828,7 @@ def test_emitir_factura_sin_precio_de_lista_no_genera_comision(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
 
@@ -671,6 +851,7 @@ def test_emitir_factura_sin_vendedor_falla(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=None,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
         )
 
@@ -686,6 +867,7 @@ def test_anular_factura_sin_motivo(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
 
@@ -704,6 +886,7 @@ def test_anular_factura_ya_anulada(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
     VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Motivo 1")
@@ -725,6 +908,7 @@ def test_listar_facturas_filtra_por_cliente(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
     VentaService.emitir_factura(
@@ -733,6 +917,7 @@ def test_listar_facturas_filtra_por_cliente(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
 
@@ -759,6 +944,7 @@ def test_listar_facturas_filtra_por_numero_parcial(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
 
@@ -782,6 +968,7 @@ def test_obtener_factura_incluye_detalles(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "20.00"}],
     )
 
@@ -820,6 +1007,7 @@ def test_emitir_factura_numero_control_correlativo_unico(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
     segunda = VentaService.emitir_factura(
@@ -828,6 +1016,7 @@ def test_emitir_factura_numero_control_correlativo_unico(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
 
@@ -848,6 +1037,7 @@ def test_emitir_factura_sin_config_empresa_no_calcula_iva(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
     )
 
@@ -877,6 +1067,7 @@ def test_emitir_factura_con_iva_activo_calcula_monto_y_snapshot(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
     )
 
@@ -908,6 +1099,7 @@ def test_emitir_factura_con_iva_desactivado_no_calcula_iva_aunque_haya_config(db
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
     )
 
@@ -988,6 +1180,7 @@ def test_emitir_factura_monto_descuento_sin_autorizacion_falla(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
             monto_descuento="10.00",
         )
@@ -1005,6 +1198,7 @@ def test_emitir_factura_monto_descuento_autorizado_resta_del_total(db_session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
+        pagos=pago_contado(db_session),
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
         monto_descuento="10.00",
         motivo_descuento="Cliente frecuente",
@@ -1029,6 +1223,7 @@ def test_emitir_factura_monto_descuento_mayor_al_subtotal_falla(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
             monto_descuento="150.00",
             motivo_descuento="x",
@@ -1049,6 +1244,7 @@ def test_emitir_factura_monto_descuento_negativo_falla(db_session):
             id_usuario=admin.id_usuario,
             id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
+            pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
             monto_descuento="-1.00",
         )

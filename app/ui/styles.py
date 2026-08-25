@@ -4,6 +4,7 @@ Centraliza todos los QSS en un solo lugar para facilitar el mantenimiento.
 """
 
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 
 # ── Paleta principal ────────────────────────────────────────────────────────
 COLOR_PRIMARY = "#0D47A1"  # Azul corporativo principal
@@ -19,7 +20,16 @@ COLOR_TOPBAR_BORDER = "#E2E8F0"
 
 COLOR_CONTENT_BG = "#F8FAFC"
 COLOR_CARD_BG = "#FFFFFF"
-COLOR_BORDER = "#E2E8F0"
+# Antes #E2E8F0 -- se notaba casi identico a COLOR_CONTENT_BG, los bordes de
+# tarjetas/tablas/inputs desaparecian visualmente. #CBD5E1 es el tono que ya se
+# usaba como literal ad-hoc en varios dialogos (cliente_form_dialog.py,
+# factura_form_dialog.py, etc.) para "un borde un poco mas marcado" -- se
+# promueve aca a la constante real en vez de mantenerlo duplicado.
+COLOR_BORDER = "#CBD5E1"
+# Fondo de "chips" de campo individuales dentro de una tarjeta (ver
+# FieldChip en factura_detalle_dialog.py) -- un escalon entre COLOR_CONTENT_BG
+# y el nuevo COLOR_BORDER.
+COLOR_FIELD_BG = "#F1F5F9"
 
 COLOR_TEXT_DARK = "#1E293B"
 COLOR_TEXT_MUTED = "#64748B"
@@ -30,7 +40,9 @@ COLOR_WARNING = "#D97706"
 COLOR_DANGER = "#DC2626"
 COLOR_INFO = "#0284C7"
 
-COLOR_TABLE_HEADER = "#F1F5F9"
+# Antes #F1F5F9 (identico a COLOR_FIELD_BG) -- se sube un escalon para que el
+# encabezado de tabla se distinga de los chips de campo y del fondo de pagina.
+COLOR_TABLE_HEADER = "#E2E8F0"
 COLOR_TABLE_ALT_ROW = "#F8FAFC"
 COLOR_TABLE_SELECTED = "#DBEAFE"
 COLOR_TABLE_HOVER = "#EFF6FF"
@@ -169,6 +181,7 @@ QTableWidget {{
     gridline-color: {COLOR_BORDER};
     selection-background-color: {COLOR_TABLE_SELECTED};
     selection-color: {COLOR_TEXT_DARK};
+    alternate-background-color: {COLOR_TABLE_ALT_ROW};
     outline: none;
 }}
 QTableWidget::item {{
@@ -184,7 +197,7 @@ QTableWidget::item:hover {{
 }}
 QHeaderView::section {{
     background-color: {COLOR_TABLE_HEADER};
-    color: {COLOR_TEXT_MUTED};
+    color: {COLOR_TEXT_DARK};
     font-weight: bold;
     font-size: 11px;
     letter-spacing: 0.5px;
@@ -323,3 +336,16 @@ def color_con_alpha(color_hex: str, alpha: int = 26) -> str:
     """
     c = QColor(color_hex)
     return f"rgba({c.red()}, {c.green()}, {c.blue()}, {alpha})"
+
+
+def aplicar_sombra(widget: QWidget, blur: int = 18, y_offset: int = 3, alpha: int = 35) -> None:
+    """Sombra sutil de elevacion para tarjetas/tablas (QSS no soporta box-shadow en
+    widgets normales -- esto es QGraphicsDropShadowEffect, nativo de Qt, sin
+    dependencias nuevas). Color fijo tono slate-900 translucido para que la sombra
+    se vea consistente sin importar el color de fondo del widget."""
+    sombra = QGraphicsDropShadowEffect(widget)
+    sombra.setBlurRadius(blur)
+    sombra.setXOffset(0)
+    sombra.setYOffset(y_offset)
+    sombra.setColor(QColor(15, 23, 42, alpha))
+    widget.setGraphicsEffect(sombra)

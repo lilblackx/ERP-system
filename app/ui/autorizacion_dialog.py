@@ -26,11 +26,14 @@ from app.db.models import Usuario
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.permisos import PermisoDenegadoError, require_permiso
 from app.ui.styles import (
+    COLOR_BORDER,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
+    COLOR_FIELD_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
+    COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
@@ -49,7 +52,7 @@ QLabel.FormLabel {{
 }}
 QLineEdit {{
     background-color: #FFFFFF;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 6px 10px;
     font-size: 13px;
@@ -75,16 +78,16 @@ QPushButton#BtnPrimary:pressed {{
     background-color: {COLOR_PRIMARY_DARK};
 }}
 QPushButton#BtnSecondary {{
-    background-color: #F1F5F9;
+    background-color: {COLOR_FIELD_BG};
     color: #475569;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
     font-size: 13px;
     font-weight: 600;
 }}
 QPushButton#BtnSecondary:hover {{
-    background-color: #E2E8F0;
+    background-color: {COLOR_TABLE_HEADER};
 }}
 """
 

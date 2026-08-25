@@ -32,7 +32,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Inventario, ProductoPrecio, Usuario
 from app.services.categorias import CategoriaService
-from app.services.exportacion import exportar_excel
+from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import PrecioService, ProductoService
 from app.ui.producto_form_dialog import ProductoFormDialog
 from app.ui.styles import (
@@ -49,7 +49,9 @@ from app.ui.styles import (
     COLOR_WARNING,
     SEARCH_QSS,
     TABLE_QSS,
+    aplicar_sombra,
 )
+from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 
 logger = logging.getLogger(__name__)
 
@@ -178,29 +180,31 @@ class InventarioPanel(QWidget):
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
 
         self.categoria_filtro_combo = QComboBox()
-        self.categoria_filtro_combo.setFixedHeight(34)
         self.categoria_filtro_combo.addItem("Todas las categorías", None)
         self.categoria_filtro_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         self.solo_stock_check = QCheckBox("Solo con stock")
         self.solo_stock_check.toggled.connect(self._buscar_desde_inicio)
 
+        self.btn_filtrar = BotonFiltros(
+            [
+                ("Categoría", self.categoria_filtro_combo),
+                ("", self.solo_stock_check),
+            ]
+        )
+
         self.btn_nuevo = QPushButton("Nuevo Producto")
         self.btn_nuevo.setIcon(qta.icon("fa5s.plus", color="white"))
         self.btn_nuevo.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_nuevo.clicked.connect(self.nuevo_producto)
 
-        btn_exportar = QPushButton("Exportar")
-        btn_exportar.setIcon(qta.icon("fa5s.file-export", color=COLOR_TEXT_DARK))
-        btn_exportar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_exportar.clicked.connect(self.exportar_productos)
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_productos, on_pdf=self.exportar_pdf_productos)
 
         h.addWidget(self.buscar_input)
-        h.addWidget(self.categoria_filtro_combo)
-        h.addWidget(self.solo_stock_check)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nuevo)
-        h.addWidget(btn_exportar)
+        h.addWidget(self.btn_filtrar)
+        h.addWidget(self.btn_exportar)
         return w
 
     def _make_table(self) -> QTableWidget:
@@ -217,12 +221,8 @@ class InventarioPanel(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(7, 110)
-        self.tabla.setStyleSheet(
-            TABLE_QSS
-            + """
-            QTableWidget { alternate-background-color: #F8FAFC; }
-        """
-        )
+        self.tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)
         self.tabla.verticalHeader().setDefaultSectionSize(48)
         return self.tabla
@@ -475,7 +475,32 @@ class InventarioPanel(QWidget):
         finally:
             session.close()
 
-    def exportar_productos(self) -> None:
+    def _filas_para_exportar(self, session) -> list[list]:
+        resultado = ProductoService.buscar(
+            session,
+            texto=self.buscar_input.text().strip() or None,
+            id_categoria=self.categoria_filtro_combo.currentData(),
+            solo_con_stock=self.solo_stock_check.isChecked(),
+            pagina=1,
+            por_pagina=1_000_000,
+            id_usuario=self.usuario.id_usuario,
+        )
+        precios = self._obtener_precios(session, [p.id_producto for p in resultado["items"]])
+        return [
+            [
+                p.id_producto,
+                p.cod_producto,
+                p.nombre_producto,
+                p.categoria.nombre if p.categoria else None,
+                float(p.cantidad_unidad),
+                float(p.costo_producto),
+                precios.get(p.id_producto),
+                p.estado_producto,
+            ]
+            for p in resultado["items"]
+        ]
+
+    def exportar_excel_productos(self) -> None:
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal.
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", "inventario.xlsx", "Excel (*.xlsx)")
@@ -484,33 +509,27 @@ class InventarioPanel(QWidget):
 
         session = self.session_factory()
         try:
-            resultado = ProductoService.buscar(
-                session,
-                texto=self.buscar_input.text().strip() or None,
-                id_categoria=self.categoria_filtro_combo.currentData(),
-                solo_con_stock=self.solo_stock_check.isChecked(),
-                pagina=1,
-                por_pagina=1_000_000,
-                id_usuario=self.usuario.id_usuario,
-            )
-            precios = self._obtener_precios(session, [p.id_producto for p in resultado["items"]])
-            filas = [
-                [
-                    p.id_producto,
-                    p.cod_producto,
-                    p.nombre_producto,
-                    p.categoria.nombre if p.categoria else None,
-                    float(p.cantidad_unidad),
-                    float(p.costo_producto),
-                    precios.get(p.id_producto),
-                    p.estado_producto,
-                ]
-                for p in resultado["items"]
-            ]
+            filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
         except Exception:
-            logger.exception("Fallo al exportar el catálogo de inventario")
+            logger.exception("Fallo al exportar el catálogo de inventario a Excel")
+            QMessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
+        finally:
+            session.close()
+
+    def exportar_pdf_productos(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", "inventario.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            filas = self._filas_para_exportar(session)
+            exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
+            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar el catálogo de inventario a PDF")
             QMessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
         finally:
             session.close()

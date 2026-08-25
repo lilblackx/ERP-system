@@ -24,7 +24,6 @@ from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 
 logger = logging.getLogger(__name__)
@@ -51,7 +50,15 @@ def exportar_pdf(
     cliente_nombre: str | None = None,
 ) -> None:
     """Exporta datos a un archivo PDF con formato de tabla."""
-    doc = SimpleDocTemplate(str(ruta), pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    margen_horizontal = 30
+    doc = SimpleDocTemplate(
+        str(ruta),
+        pagesize=letter,
+        rightMargin=margen_horizontal,
+        leftMargin=margen_horizontal,
+        topMargin=30,
+        bottomMargin=18,
+    )
 
     elements = []
     styles = getSampleStyleSheet()
@@ -104,21 +111,14 @@ def exportar_pdf(
         else:
             table_style.add("BACKGROUND", (0, i), (-1, i), colors.white)
 
-    table = Table(
-        data,
-        colWidths=[
-            1.2 * inch,
-            1.2 * inch,
-            1.2 * inch,
-            1.0 * inch,
-            1.0 * inch,
-            1.0 * inch,
-            0.8 * inch,
-            1.5 * inch,
-            1.0 * inch,
-            1.0 * inch,
-        ],
-    )
+    # Ancho disponible repartido en partes iguales entre las columnas que de verdad
+    # trae `encabezados` -- antes era una lista fija de 10 anchos pensada solo para el
+    # historial de cliente; cualquier otro llamador con una cantidad distinta de
+    # columnas (ej. el listado de facturas de facturacion_panel.py) quedaba con un
+    # Table() cuyo colWidths no correspondia a sus columnas reales.
+    ancho_disponible = letter[0] - 2 * margen_horizontal
+    ancho_columna = ancho_disponible / len(encabezados)
+    table = Table(data, colWidths=[ancho_columna] * len(encabezados))
     table.setStyle(table_style)
     elements.append(table)
 

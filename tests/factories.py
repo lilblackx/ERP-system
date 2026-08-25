@@ -134,6 +134,24 @@ def crear_cuenta_bancaria(session: Session, saldo_total_banco: Decimal | int = 0
     return cuenta
 
 
+def pago_contado(session: Session, **overrides) -> list[dict]:
+    """Forma de pago 'de sobra' para VentaService.emitir_factura(condicion_pago='contado')
+    en tests que no ejercitan el circuito de pagos en si (comisiones, notas de credito,
+    desempeno de vendedor, etc.): transferencia a una cuenta bancaria nueva por un monto
+    grande en USD, para no tener que calcular el total exacto de cada factura -- el
+    sobrante se recorta silenciosamente (vuelto), no genera error (ver
+    VentaService.emitir_factura)."""
+    cuenta = overrides.pop("cuenta_bancaria", None) or crear_cuenta_bancaria(session)
+    linea = {
+        "metodo_pago": "transferencia",
+        "moneda": "USD",
+        "monto_moneda_origen": Decimal("999999.99"),
+        "id_cuenta_bancaria": cuenta.id_cuenta,
+    }
+    linea.update(overrides)
+    return [linea]
+
+
 def crear_caja(session: Session, **overrides) -> Caja:
     datos = {"nombre_caja": _siguiente("Caja-")}
     datos.update(overrides)

@@ -36,6 +36,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
     COLORES_ESTADO_FACTURA,
+    aplicar_sombra,
     color_con_alpha,
 )
 from app.ui.workers import QueryWorker
@@ -55,6 +56,7 @@ def _card(inner: QWidget) -> QWidget:
     contenedor = QWidget()
     contenedor.setObjectName("Card")
     contenedor.setStyleSheet(CARD_QSS)
+    aplicar_sombra(contenedor)
     layout = QVBoxLayout(contenedor)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(inner)
@@ -68,6 +70,7 @@ class KpiCard(QWidget):
         super().__init__(parent)
         self.setObjectName("Card")
         self.setStyleSheet(CARD_QSS)
+        aplicar_sombra(self)
 
         v = QVBoxLayout(self)
         v.setContentsMargins(18, 16, 18, 16)

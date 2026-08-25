@@ -28,12 +28,16 @@ from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
+    COLOR_DANGER,
+    COLOR_FIELD_BG,
     COLOR_PRIMARY,
+    COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     COLORES_ESTADO_FACTURA,
     FONT_FAMILY,
     TABLE_QSS,
+    aplicar_sombra,
     color_con_alpha,
 )
 
@@ -47,10 +51,15 @@ QWidget#SectionCard {{
     border: 1px solid {COLOR_BORDER};
     border-radius: 10px;
 }}
+QWidget#FieldChip {{
+    background-color: {COLOR_FIELD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 8px;
+}}
 QLabel.FormLabel {{
     font-size: 11px;
     font-weight: 600;
-    color: #64748B;
+    color: {COLOR_TEXT_MUTED};
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }}
@@ -67,29 +76,17 @@ QLabel.SectionTitle {{
     padding-bottom: 2px;
 }}
 QPushButton#BtnSecondary {{
-    background-color: #F1F5F9;
+    background-color: {COLOR_FIELD_BG};
     color: #475569;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
     font-size: 13px;
     font-weight: 600;
 }}
 QPushButton#BtnSecondary:hover {{
-    background-color: #E2E8F0;
+    background-color: {COLOR_TABLE_HEADER};
     color: {COLOR_TEXT_DARK};
-}}
-QPushButton#BtnImprimir {{
-    background-color: #EFF6FF;
-    color: {COLOR_PRIMARY};
-    border: 1px solid #BFDBFE;
-    border-radius: 6px;
-    padding: 8px 18px;
-    font-size: 13px;
-    font-weight: bold;
-}}
-QPushButton#BtnImprimir:hover {{
-    background-color: #DBEAFE;
 }}
 """
 
@@ -160,25 +157,54 @@ class FacturaDetalleDialog(QDialog):
         color_estado = COLORES_ESTADO_FACTURA.get(estado, COLOR_TEXT_MUTED)
         badge = QLabel(estado.capitalize())
         badge.setStyleSheet(
-            f"background-color: {color_con_alpha(color_estado)}; color: {color_estado}; border-radius: 6px;"
+            f"background-color: {color_con_alpha(color_estado, alpha=45)}; color: {color_estado};"
+            f" border: 1px solid {color_estado}; border-radius: 6px;"
             " padding: 4px 12px; font-size: 12px; font-weight: bold;"
         )
         h.addWidget(badge)
         return w
 
+    def _campo_chip(self, etiqueta: str, valor: str) -> QWidget:
+        """Envuelve un par etiqueta/valor en su propia tarjeta chica (fondo
+        COLOR_FIELD_BG + borde) -- antes eran labels sueltos sin fondo ni borde, lo
+        que hacia que "DATOS DE LA FACTURA" se viera como texto plano en vez de
+        celdas delimitadas."""
+        chip = QWidget()
+        chip.setObjectName("FieldChip")
+        layout = QVBoxLayout(chip)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(2)
+
+        lbl_etq = QLabel(etiqueta)
+        lbl_etq.setProperty("class", "FormLabel")
+        lbl_val = QLabel(valor)
+        lbl_val.setProperty("class", "FormValue")
+        lbl_val.setWordWrap(True)
+        layout.addWidget(lbl_etq)
+        layout.addWidget(lbl_val)
+        return chip
+
     def _make_ficha(self) -> QWidget:
         card = QWidget()
         card.setObjectName("SectionCard")
+        aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 12, 16, 14)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
 
+        titulo_row = QHBoxLayout()
+        titulo_row.setSpacing(6)
+        icono_titulo = QLabel()
+        icono_titulo.setPixmap(qta.icon("fa5s.info-circle", color=COLOR_PRIMARY).pixmap(QSize(12, 12)))
         titulo = QLabel("DATOS DE LA FACTURA")
         titulo.setProperty("class", "SectionTitle")
-        layout.addWidget(titulo)
+        titulo_row.addWidget(icono_titulo)
+        titulo_row.addWidget(titulo)
+        titulo_row.addStretch()
+        layout.addLayout(titulo_row)
 
         grid = QGridLayout()
-        grid.setSpacing(6)
+        grid.setSpacing(8)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(2, 1)
@@ -205,16 +231,7 @@ class FacturaDetalleDialog(QDialog):
         ]
         for i, (etiqueta, valor) in enumerate(campos):
             fila, columna = divmod(i, 3)
-            bloque = QVBoxLayout()
-            bloque.setSpacing(1)
-            lbl_etq = QLabel(etiqueta)
-            lbl_etq.setProperty("class", "FormLabel")
-            lbl_val = QLabel(str(valor))
-            lbl_val.setProperty("class", "FormValue")
-            lbl_val.setWordWrap(True)
-            bloque.addWidget(lbl_etq)
-            bloque.addWidget(lbl_val)
-            grid.addLayout(bloque, fila, columna)
+            grid.addWidget(self._campo_chip(etiqueta, valor), fila, columna)
 
         layout.addLayout(grid)
         return card
@@ -231,6 +248,7 @@ class FacturaDetalleDialog(QDialog):
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(tabla)
 
         for fila, detalle in enumerate(self.detalles):
             nombre = detalle.producto.nombre_producto if detalle.producto else "Producto eliminado"
@@ -267,11 +285,12 @@ class FacturaDetalleDialog(QDialog):
         lbl_total = QLabel(f"Total a pagar: ${total_a_pagar:,.2f}")
         lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
-        btn_exportar = QPushButton(" Exportar PDF")
-        btn_exportar.setIcon(qta.icon("fa5s.file-pdf", color=COLOR_PRIMARY))
-        btn_exportar.setObjectName("BtnImprimir")
+        btn_exportar = QPushButton("Exportar PDF")
+        btn_exportar.setIcon(qta.icon("fa5s.file-pdf", color=COLOR_DANGER))
+        btn_exportar.setObjectName("BtnSecondary")
         btn_exportar.setFixedHeight(36)
         btn_exportar.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_exportar.setAutoDefault(False)
         btn_exportar.clicked.connect(self.exportar_pdf)
 
         btn_cerrar = QPushButton("Cerrar")
@@ -279,6 +298,7 @@ class FacturaDetalleDialog(QDialog):
         btn_cerrar.setObjectName("BtnSecondary")
         btn_cerrar.setFixedHeight(36)
         btn_cerrar.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cerrar.setAutoDefault(False)
         btn_cerrar.clicked.connect(self.accept)
 
         footer.addWidget(lbl_total)

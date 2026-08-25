@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.db.models import CuentaBancaria, CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
+from app.db.models import Caja, CuentaBancaria, CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
@@ -19,11 +19,13 @@ logger = logging.getLogger(__name__)
 
 class PagoService:
     @staticmethod
-    def registrar_pago_cobro(
+    def _aplicar_pago_cobro(
         session: Session,
         id_cuenta_por_cobrar: int,
         monto,
         metodo_pago: str,
+        moneda: str = "USD",
+        monto_moneda_origen=None,
         id_cuenta_bancaria: int | None = None,
         id_caja: int | None = None,
         id_tasa: int | None = None,
@@ -31,7 +33,12 @@ class PagoService:
         fecha_pago: date | datetime | None = None,
         id_usuario: int | None = None,
     ) -> PagoCobro:
-        require_permiso(session, id_usuario, "pagos", "crear")
+        """Nucleo de registrar_pago_cobro() sin el require_permiso ni el commit/refresh --
+        extraido para que VentaService.emitir_factura() pueda aplicar varios pagos de
+        contado en la MISMA transaccion atomica que la factura (flush, no commit), igual
+        que ya hace ComisionService.calcular_comisiones_factura ahi mismo. Los callers
+        directos (registrar_pago_cobro) siguen viendo el mismo commit-por-llamada de
+        siempre."""
         if (id_cuenta_bancaria is None) == (id_caja is None):
             raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
 
@@ -52,6 +59,15 @@ class PagoService:
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
 
+        if id_caja is not None:
+            # Mismo criterio que CajaService.registrar_movimiento_manual: un pago en
+            # efectivo/via caja necesita un turno abierto, si no queda sin arqueo posible.
+            caja = session.get(Caja, id_caja)
+            if caja is None:
+                raise ValueError("Caja no encontrada")
+            if caja.fecha_apertura is None or caja.fecha_cierre is not None:
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+
         # Reloj de la app (Python), no el del trigger (GETDATE()): CajaService.abrir_caja/
         # cerrar_caja tambien usan datetime.now() para fecha_apertura/fecha_cierre, y
         # trg_cajas_cierre compara fecha_registro de caja_movimientos contra ese rango. Si
@@ -66,12 +82,49 @@ class PagoService:
             id_caja=id_caja,
             id_tasa=id_tasa,
             metodo_pago=metodo_pago,
+            moneda=moneda,
             monto=monto,
+            monto_moneda_origen=Decimal(str(monto_moneda_origen)) if monto_moneda_origen is not None else None,
             referencia=referencia,
             fecha_pago=fecha_pago,
             creado_por=id_usuario,
         )
         session.add(pago)
+        session.flush()
+        return pago
+
+    @staticmethod
+    def registrar_pago_cobro(
+        session: Session,
+        id_cuenta_por_cobrar: int,
+        monto,
+        metodo_pago: str,
+        moneda: str = "USD",
+        monto_moneda_origen=None,
+        id_cuenta_bancaria: int | None = None,
+        id_caja: int | None = None,
+        id_tasa: int | None = None,
+        referencia: str | None = None,
+        fecha_pago: date | datetime | None = None,
+        id_usuario: int | None = None,
+    ) -> PagoCobro:
+        require_permiso(session, id_usuario, "pagos", "crear")
+        pago = PagoService._aplicar_pago_cobro(
+            session,
+            id_cuenta_por_cobrar=id_cuenta_por_cobrar,
+            monto=monto,
+            metodo_pago=metodo_pago,
+            moneda=moneda,
+            monto_moneda_origen=monto_moneda_origen,
+            id_cuenta_bancaria=id_cuenta_bancaria,
+            id_caja=id_caja,
+            id_tasa=id_tasa,
+            referencia=referencia,
+            fecha_pago=fecha_pago,
+            id_usuario=id_usuario,
+        )
+        cuenta = session.get(CuentaPorCobrar, id_cuenta_por_cobrar)
+        assert cuenta is not None  # ya validada por _aplicar_pago_cobro, no puede ser None aca
         session.commit()
         session.refresh(pago)
         session.refresh(cuenta)

@@ -70,12 +70,14 @@ def test_aging_excluye_cuentas_pagadas_por_completo(db_session):
     factura = _factura_a_credito(db_session, admin, cliente, "40.00", date.today() - timedelta(days=5))
     cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
 
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
     PagoService.registrar_pago_cobro(
         db_session,
         id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
         monto="40.00",
         metodo_pago="efectivo",
-        id_caja=crear_caja(db_session).id_caja,
+        id_caja=caja.id_caja,
         id_usuario=admin.id_usuario,
     )
 

@@ -3,7 +3,7 @@ Panel completo del módulo Facturación / Ventas.
 Mismo patrón visual y de interacción que app/ui/clientes_panel.py e
 app/ui/inventario_panel.py (paleta y tipografía de app/ui/styles.py): barra de
 herramientas, tabla estilizada, paginación (ya provista por
-VentaService.listar_facturas()) y exportación a Excel (R-10).
+VentaService.listar_facturas()) y exportación a Excel/PDF (R-10).
 """
 
 import logging
@@ -14,6 +14,7 @@ from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -30,11 +31,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.db.models import FacturaVenta, Usuario
+from app.db.models import Caja, FacturaVenta, Usuario
 from app.services.clientes import list_clientes
 from app.services.empresa import EmpresaService
-from app.services.exportacion import exportar_excel
+from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.permisos import PermisoDenegadoError
+from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
+from app.ui.caja_apertura_dialog import CajaAperturaDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.factura_form_dialog import FacturaFormDialog
 from app.ui.factura_pdf import imprimir_factura
@@ -44,14 +48,18 @@ from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
+    COLOR_DANGER,
+    COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     COLORES_ESTADO_FACTURA,
     SEARCH_QSS,
     TABLE_QSS,
+    aplicar_sombra,
     color_con_alpha,
 )
+from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
@@ -123,6 +131,7 @@ class FacturacionPanel(QWidget):
         self.usuario = usuario
         self.pagina_actual = 1
         self.total_paginas = 1
+        self._verificando_caja = False
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_facturas)
@@ -133,6 +142,13 @@ class FacturacionPanel(QWidget):
         # volver a "Facturacion" desde otro modulo mostraba el listado viejo.
         super().showEvent(event)
         self.cargar_facturas()
+        # Gate de entrada: sin ninguna caja con turno abierto no se puede emitir
+        # facturas (aunque si se pueden seguir viendo las ya emitidas) -- se ofrece
+        # abrir un turno cada vez que se entra al modulo mientras siga sin haber
+        # ninguna abierta. self._verificando_caja evita reentrancia si showEvent se
+        # dispara mas de una vez mientras el dialogo modal ya esta abierto (el
+        # exec() de un QDialog corre un event loop anidado que si procesa timers).
+        self._verificar_caja_abierta(ofrecer_apertura=True)
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 
@@ -164,8 +180,12 @@ class FacturacionPanel(QWidget):
             " padding: 3px 10px;"
         )
 
+        self.lbl_caja_estado = QLabel()
+        self._actualizar_estado_caja(None)
+
         h.addWidget(lbl)
         h.addWidget(self.lbl_total)
+        h.addWidget(self.lbl_caja_estado)
         h.addStretch()
         return w
 
@@ -188,41 +208,40 @@ class FacturacionPanel(QWidget):
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
 
         self.estado_combo = QComboBox()
-        self.estado_combo.setFixedHeight(34)
         for etiqueta, valor in ESTADOS_FILTRO:
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         self.condicion_combo = QComboBox()
-        self.condicion_combo.setFixedHeight(34)
         for etiqueta, valor in CONDICIONES_FILTRO:
             self.condicion_combo.addItem(etiqueta, valor)
         self.condicion_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         self.cliente_combo = QComboBox()
-        self.cliente_combo.setFixedHeight(34)
-        self.cliente_combo.setMinimumWidth(180)
         self.cliente_combo.addItem("Todos los clientes", None)
         self.cliente_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
         self._cargar_clientes_filtro()
+
+        self.btn_filtrar = BotonFiltros(
+            [
+                ("Estado", self.estado_combo),
+                ("Condición de pago", self.condicion_combo),
+                ("Cliente", self.cliente_combo),
+            ]
+        )
 
         self.btn_nueva_factura = QPushButton("Nueva Factura")
         self.btn_nueva_factura.setIcon(qta.icon("fa5s.plus", color="white"))
         self.btn_nueva_factura.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_nueva_factura.clicked.connect(self.nueva_factura)
 
-        btn_exportar = QPushButton("Exportar")
-        btn_exportar.setIcon(qta.icon("fa5s.file-export", color=COLOR_TEXT_DARK))
-        btn_exportar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_exportar.clicked.connect(self.exportar_facturas)
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_facturas, on_pdf=self.exportar_pdf_facturas)
 
         h.addWidget(self.buscar_input)
-        h.addWidget(self.estado_combo)
-        h.addWidget(self.condicion_combo)
-        h.addWidget(self.cliente_combo)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nueva_factura)
-        h.addWidget(btn_exportar)
+        h.addWidget(self.btn_filtrar)
+        h.addWidget(self.btn_exportar)
         return w
 
     def _cargar_clientes_filtro(self) -> None:
@@ -249,12 +268,8 @@ class FacturacionPanel(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(6, 110)
-        self.tabla.setStyleSheet(
-            TABLE_QSS
-            + """
-            QTableWidget { alternate-background-color: #F8FAFC; }
-        """
-        )
+        self.tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)
         self.tabla.verticalHeader().setDefaultSectionSize(48)
         self.tabla.doubleClicked.connect(self.ver_detalle_factura)
@@ -381,7 +396,62 @@ class FacturacionPanel(QWidget):
             return None
         return int(self.tabla.item(filas[0].row(), 0).text())
 
+    # ── Gate de caja (sin turno abierto no se puede facturar) ─────────────
+
+    def _cajas_con_turno_abierto(self) -> list[Caja]:
+        session = self.session_factory()
+        try:
+            cajas = CajaService.listar_cajas(session, id_usuario=self.usuario.id_usuario)
+        except PermisoDenegadoError:
+            cajas = []
+        finally:
+            session.close()
+        return [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+
+    def _actualizar_estado_caja(self, caja: Caja | None) -> None:
+        if caja is not None:
+            self.lbl_caja_estado.setText(f"Caja abierta: {caja.nombre_caja or caja.id_caja}")
+            self.lbl_caja_estado.setStyleSheet(
+                f"color: {COLOR_SUCCESS}; font-size: 13px; background-color: #DCFCE7;"
+                " border-radius: 10px; padding: 3px 10px;"
+            )
+        else:
+            self.lbl_caja_estado.setText("Sin caja abierta")
+            self.lbl_caja_estado.setStyleSheet(
+                f"color: {COLOR_DANGER}; font-size: 13px; background-color: #FEE2E2;"
+                " border-radius: 10px; padding: 3px 10px;"
+            )
+
+    def _verificar_caja_abierta(self, ofrecer_apertura: bool = False) -> bool:
+        """Sin ninguna caja con turno abierto no se puede facturar -- solo se puede
+        seguir viendo el listado de facturas ya emitidas. Si ofrecer_apertura=True y no
+        hay ninguna abierta, se lanza el gate de identificacion + apertura de turno
+        (CajaAperturaDialog); si el usuario lo completa, se vuelve a verificar."""
+        if self._verificando_caja:
+            return bool(self._cajas_con_turno_abierto())
+        self._verificando_caja = True
+        try:
+            abiertas = self._cajas_con_turno_abierto()
+            if not abiertas and ofrecer_apertura:
+                session = self.session_factory()
+                try:
+                    dialogo = CajaAperturaDialog(session, parent=self)
+                    if dialogo.exec() == QDialog.DialogCode.Accepted and dialogo.caja_abierta is not None:
+                        abiertas = self._cajas_con_turno_abierto()
+                finally:
+                    session.close()
+            self._actualizar_estado_caja(abiertas[0] if abiertas else None)
+            return bool(abiertas)
+        finally:
+            self._verificando_caja = False
+
     def nueva_factura(self) -> None:
+        if not self._verificar_caja_abierta(ofrecer_apertura=True):
+            QMessageBox.information(
+                self, "Caja requerida", "Debe abrir el turno de una caja para poder emitir facturas."
+            )
+            return
+
         session = self.session_factory()
         try:
             dialogo = FacturaFormDialog(session, self.usuario.id_usuario, parent=self)
@@ -481,7 +551,31 @@ class FacturacionPanel(QWidget):
         finally:
             session.close()
 
-    def exportar_facturas(self) -> None:
+    def _filas_para_exportar(self, session) -> list[list]:
+        resultado = VentaService.listar_facturas(
+            session,
+            numero_factura=self.buscar_input.text().strip() or None,
+            estado=self.estado_combo.currentData(),
+            condicion_pago=self.condicion_combo.currentData(),
+            id_cliente=self.cliente_combo.currentData(),
+            pagina=1,
+            por_pagina=1_000_000,
+            id_usuario=self.usuario.id_usuario,
+        )
+        return [
+            [
+                f.id_factura,
+                f.numero_factura,
+                f.cliente.nombre_razon_social if f.cliente else None,
+                f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
+                "Contado" if f.condicion_pago == "contado" else "Crédito",
+                float(f.total_venta),
+                f.estado_factura,
+            ]
+            for f in resultado["items"]
+        ]
+
+    def exportar_excel_facturas(self) -> None:
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal.
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar facturas", "facturas.xlsx", "Excel (*.xlsx)")
@@ -490,32 +584,27 @@ class FacturacionPanel(QWidget):
 
         session = self.session_factory()
         try:
-            resultado = VentaService.listar_facturas(
-                session,
-                numero_factura=self.buscar_input.text().strip() or None,
-                estado=self.estado_combo.currentData(),
-                condicion_pago=self.condicion_combo.currentData(),
-                id_cliente=self.cliente_combo.currentData(),
-                pagina=1,
-                por_pagina=1_000_000,
-                id_usuario=self.usuario.id_usuario,
-            )
-            filas = [
-                [
-                    f.id_factura,
-                    f.numero_factura,
-                    f.cliente.nombre_razon_social if f.cliente else None,
-                    f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
-                    "Contado" if f.condicion_pago == "contado" else "Crédito",
-                    float(f.total_venta),
-                    f.estado_factura,
-                ]
-                for f in resultado["items"]
-            ]
+            filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
         except Exception:
-            logger.exception("Fallo al exportar el listado de facturas")
+            logger.exception("Fallo al exportar el listado de facturas a Excel")
+            QMessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
+        finally:
+            session.close()
+
+    def exportar_pdf_facturas(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar facturas", "facturas.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            filas = self._filas_para_exportar(session)
+            exportar_pdf(ruta, "Facturas de Venta", COLS_VISIBLES, filas)
+            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar el listado de facturas a PDF")
             QMessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
         finally:
             session.close()

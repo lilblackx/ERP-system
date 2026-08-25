@@ -22,6 +22,7 @@ from app.db.models import (
 from app.services.auditoria import AuditoriaService
 from app.services.comisiones import ComisionService
 from app.services.notas_credito import NotaCreditoService
+from app.services.pagos import PagoService
 from app.services.permisos import require_permiso
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,23 @@ def _validar_items(items: list[dict]) -> None:
             raise ValueError("Cada item requiere un precio_unitario mayor a cero")
 
 
+def _convertir_a_usd(monto_moneda_origen: Decimal, moneda: str, tasa: ControlDeTasa | None) -> Decimal:
+    """Equivalente en USD de un monto tendido en `moneda` -- USD/USDT es 1:1 (USDT se
+    trata como stablecoin fijo al dolar, practica estandar), VES/COP se convierten con la
+    tasa vigente snapshoteada en la factura."""
+    if moneda in ("USD", "USDT"):
+        return monto_moneda_origen
+    if tasa is None:
+        raise ValueError(f"No hay tasa de cambio configurada para convertir un pago en {moneda}")
+    if moneda == "VES":
+        return (monto_moneda_origen / tasa.tasa_dolar_bcv).quantize(Decimal("0.01"))
+    if moneda == "COP":
+        if not tasa.tasa_cop:
+            raise ValueError("No hay tasa COP configurada para convertir este pago")
+        return (monto_moneda_origen / tasa.tasa_cop).quantize(Decimal("0.01"))
+    raise ValueError(f"moneda de pago invalida: {moneda}")
+
+
 class VentaService:
     @staticmethod
     def emitir_factura(
@@ -83,6 +101,7 @@ class VentaService:
         monto_descuento: Decimal | int | str = Decimal("0.00"),
         motivo_descuento: str | None = None,
         id_autorizador_descuento: int | None = None,
+        pagos: list[dict] | None = None,
     ) -> FacturaVenta:
         require_permiso(session, id_usuario, "ventas", "crear")
         _validar_items(items)
@@ -107,6 +126,17 @@ class VentaService:
 
         if condicion_pago not in ("contado", "credito"):
             raise ValueError("condicion_pago debe ser 'contado' o 'credito'")
+
+        # Una factura de contado exige registrar como minimo una forma de pago (se abre y
+        # se liquida la cuenta por cobrar en la misma transaccion, ver mas abajo); una de
+        # credito sigue el flujo de siempre y no admite pagos en el momento de emitir.
+        pagos = pagos or []
+        if condicion_pago == "contado" and not pagos:
+            raise ValueError("Una factura de contado requiere al menos una forma de pago")
+        if condicion_pago == "credito" and pagos:
+            raise ValueError("condicion_pago='credito' no admite pagos al emitir la factura")
+        if pagos:
+            require_permiso(session, id_usuario, "pagos", "crear")
 
         if observaciones is not None and len(observaciones) > 255:
             raise ValueError("observaciones no puede superar 255 caracteres")
@@ -201,13 +231,15 @@ class VentaService:
             if iva_activo
             else Decimal("0.00")
         )
+        # Lo que efectivamente se le suma a la cuenta por cobrar (subtotal - descuento +
+        # IVA) -- se usa tanto para el limite de credito (solo credito) como para validar
+        # que la suma de formas de pago cubra la factura (solo contado, ver mas abajo).
+        total_a_cobrar = subtotal_con_descuento + monto_iva
 
-        # --- Validar limite de credito del cliente (deuda + lo que realmente se le suma a
-        # la cuenta por cobrar: subtotal - descuento + IVA) ---
+        # --- Validar limite de credito del cliente ---
         if condicion_pago == "credito":
             deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
             limite_credito = cliente.limite_credito if cliente.limite_credito is not None else Decimal("0.00")
-            total_a_cobrar = subtotal_con_descuento + monto_iva
             if deuda_actual + total_a_cobrar > limite_credito:
                 raise ValueError(
                     f"El cliente excede su limite de credito: deuda actual {deuda_actual} + "
@@ -217,7 +249,9 @@ class VentaService:
         # id_tasa: si no se paso explicitamente, se toma un snapshot de la tasa de cambio
         # vigente al momento de la venta (mismo criterio que ComisionService/
         # NotaCreditoService -- efecto secundario interno de una accion ya autorizada, no
-        # requiere su propio require_permiso de "tasas").
+        # requiere su propio require_permiso de "tasas"). Se resuelve ANTES de validar los
+        # pagos de contado porque hace falta la tasa para convertir montos en VES/COP.
+        tasa_vigente = None
         if id_tasa is None:
             tasa_vigente = (
                 session.query(ControlDeTasa)
@@ -226,6 +260,28 @@ class VentaService:
             )
             if tasa_vigente is not None:
                 id_tasa = tasa_vigente.id_tasa
+        elif condicion_pago == "contado":
+            tasa_vigente = session.get(ControlDeTasa, id_tasa)
+
+        # --- Contado: validar que la suma de las formas de pago (convertidas a USD) cubra
+        # el total ANTES de insertar nada -- si falta, la factura no se emite. Se guarda el
+        # equivalente USD ya calculado por linea para no recalcularlo (ni arriesgar un
+        # resultado distinto si la tasa cambiara) al aplicar los pagos mas abajo.
+        pagos_usd: list[Decimal] = []
+        if condicion_pago == "contado":
+            total_pagado = Decimal("0.00")
+            for pago_linea in pagos:
+                monto_origen = Decimal(str(pago_linea["monto_moneda_origen"]))
+                if monto_origen <= 0:
+                    raise ValueError("Cada forma de pago requiere un monto mayor a cero")
+                monto_usd = _convertir_a_usd(monto_origen, pago_linea["moneda"], tasa_vigente)
+                pagos_usd.append(monto_usd)
+                total_pagado += monto_usd
+            if total_pagado < total_a_cobrar:
+                raise ValueError(
+                    f"Las formas de pago suman ${total_pagado} y no cubren el total de la "
+                    f"factura (${total_a_cobrar}); faltan ${total_a_cobrar - total_pagado}"
+                )
 
         # --- Insercion atomica de cabecera y lineas ---
         # numero_factura/numero_control definitivos se asignan DESPUES del flush -- ver
@@ -284,12 +340,40 @@ class VentaService:
         # El IVA/descuento se le suman/restan a la cuenta por cobrar recien abierta -- el
         # trigger la deja en total_venta (subtotal crudo, sin descuento ni IVA) porque no
         # conoce config_empresa ni monto_descuento, asi que se corrige aca, en la misma
-        # transaccion, antes de comprometer.
+        # transaccion, antes de comprometer. Desde migrations/0024 el trigger abre cuenta
+        # por cobrar tanto para credito como para contado, asi que el ajuste aplica a
+        # ambas condiciones (antes era solo credito).
+        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
         ajuste_cxc = monto_iva - monto_descuento
-        if condicion_pago == "credito" and ajuste_cxc != 0:
-            cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
-            if cxc is not None:
-                cxc.saldo_pendiente += ajuste_cxc
+        if cxc is not None and ajuste_cxc != 0:
+            cxc.saldo_pendiente += ajuste_cxc
+
+        # --- Contado: liquidar la cuenta por cobrar recien abierta con las formas de pago
+        # ya validadas arriba, en la MISMA transaccion (se aplica con _aplicar_pago_cobro,
+        # que hace flush pero no commit -- el commit unico de mas abajo cubre factura +
+        # detalle + comision + cuenta por cobrar + pagos, todo o nada). Si la suma tendida
+        # excede el total (p. ej. efectivo con vuelto), cada linea se recorta al saldo
+        # restante -- el excedente es vuelto fisico, no se registra como movimiento. Una
+        # linea que quede en 0 (ya cubierta por lineas anteriores) se omite.
+        if condicion_pago == "contado" and cxc is not None:
+            for pago_linea, monto_usd in zip(pagos, pagos_usd, strict=True):
+                monto_a_aplicar = min(monto_usd, cxc.saldo_pendiente)
+                if monto_a_aplicar <= 0:
+                    continue
+                PagoService._aplicar_pago_cobro(
+                    session,
+                    id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+                    monto=monto_a_aplicar,
+                    metodo_pago=pago_linea["metodo_pago"],
+                    moneda=pago_linea["moneda"],
+                    monto_moneda_origen=pago_linea["monto_moneda_origen"],
+                    id_cuenta_bancaria=pago_linea.get("id_cuenta_bancaria"),
+                    id_caja=pago_linea.get("id_caja"),
+                    id_tasa=id_tasa,
+                    referencia=pago_linea.get("referencia"),
+                    fecha_pago=factura.fecha_emision,
+                    id_usuario=id_usuario,
+                )
 
         session.commit()
         session.refresh(factura)
@@ -317,6 +401,14 @@ class VentaService:
                 "monto_iva": str(factura.monto_iva),
                 "monto_descuento": str(factura.monto_descuento) if factura.monto_descuento > 0 else None,
                 "autorizado_por_descuento": factura.autorizado_por_descuento,
+                "pagos": (
+                    [
+                        {"metodo_pago": p["metodo_pago"], "moneda": p["moneda"], "monto_usd": str(monto_usd)}
+                        for p, monto_usd in zip(pagos, pagos_usd, strict=True)
+                    ]
+                    if condicion_pago == "contado"
+                    else None
+                ),
             },
         )
         return factura

@@ -42,6 +42,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
+    aplicar_sombra,
 )
 from app.ui.vendedor_form_dialog import VendedorFormDialog
 
@@ -178,12 +179,8 @@ class VendedoresPanel(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(6, 110)
-        self.tabla.setStyleSheet(
-            TABLE_QSS
-            + """
-            QTableWidget { alternate-background-color: #F8FAFC; }
-        """
-        )
+        self.tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)
         self.tabla.verticalHeader().setDefaultSectionSize(48)
         return self.tabla

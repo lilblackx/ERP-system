@@ -6,7 +6,7 @@ import pytest
 from app.services.permisos import PermisoDenegadoError
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
-from tests.factories import crear_cliente, crear_producto, crear_usuario_admin
+from tests.factories import crear_cliente, crear_producto, crear_usuario_admin, pago_contado
 
 
 def _datos_vendedor(**overrides) -> dict:
@@ -176,6 +176,7 @@ def test_desempeno_mes_suma_ventas_y_excluye_anuladas(db_session):
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "10.00"}],
+        pagos=pago_contado(db_session),
     )
     factura_anulada = VentaService.emitir_factura(
         db_session,
@@ -184,6 +185,7 @@ def test_desempeno_mes_suma_ventas_y_excluye_anuladas(db_session):
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        pagos=pago_contado(db_session),
     )
     VentaService.anular_factura(
         db_session, factura_anulada.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga"

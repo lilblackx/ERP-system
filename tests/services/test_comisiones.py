@@ -18,6 +18,7 @@ from tests.factories import (
     crear_producto,
     crear_usuario_admin,
     crear_vendedor,
+    pago_contado,
 )
 
 
@@ -40,6 +41,7 @@ def _crear_comisiones_pendientes(session, vendedor, admin, cantidades_precios: l
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=items,
+        pagos=pago_contado(session),
     )
     ids_detalle = [
         id_factura_detalle
@@ -73,6 +75,7 @@ def test_calcular_comisiones_factura_batch_saltea_producto_sin_precio(db_session
             {"id_producto": con_precio.id_producto, "cantidad": 2, "precio_unitario": "2.00"},
             {"id_producto": sin_precio.id_producto, "cantidad": 1, "precio_unitario": "20.00"},
         ],
+        pagos=pago_contado(db_session),
     )
 
     comisiones = (

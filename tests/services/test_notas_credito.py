@@ -12,7 +12,14 @@ from app.services.compras import CompraService
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.ventas import VentaService
-from tests.factories import crear_cliente, crear_producto, crear_proveedor, crear_usuario_admin, crear_vendedor
+from tests.factories import (
+    crear_cliente,
+    crear_producto,
+    crear_proveedor,
+    crear_usuario_admin,
+    crear_vendedor,
+    pago_contado,
+)
 
 
 def _crear_factura(session):
@@ -27,6 +34,7 @@ def _crear_factura(session):
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "10.00"}],
+        pagos=pago_contado(session),
     )
     return cliente, factura, admin
 

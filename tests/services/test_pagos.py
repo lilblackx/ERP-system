@@ -255,6 +255,76 @@ def test_registrar_pago_cobro_cuenta_inexistente(db_session):
         )
 
 
+def test_registrar_pago_cobro_caja_sin_turno_abierto_falla(db_session):
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    caja = crear_caja(db_session)  # nunca se abrio
+
+    with pytest.raises(ValueError, match="no tiene un turno abierto"):
+        PagoService.registrar_pago_cobro(
+            db_session,
+            id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+            monto=Decimal("40.00"),
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_registrar_pago_cobro_caja_con_turno_ya_cerrado_falla(db_session):
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario)
+
+    with pytest.raises(ValueError, match="no tiene un turno abierto"):
+        PagoService.registrar_pago_cobro(
+            db_session,
+            id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+            monto=Decimal("40.00"),
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_registrar_pago_cobro_guarda_moneda_y_monto_moneda_origen(db_session):
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    cuenta = crear_cuenta_bancaria(db_session)
+
+    pago = PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto=Decimal("40.00"),  # equivalente ya convertido a USD
+        metodo_pago="zelle",
+        moneda="USD",
+        monto_moneda_origen=Decimal("40.00"),
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    assert pago.moneda == "USD"
+    assert pago.monto_moneda_origen == Decimal("40.00")
+    assert pago.metodo_pago == "zelle"
+
+
+def test_registrar_pago_cobro_moneda_por_defecto_es_usd(db_session):
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    pago = PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto=Decimal("40.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    assert pago.moneda == "USD"
+    assert pago.monto_moneda_origen is None
+
+
 def test_listar_pagos_cobro(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)

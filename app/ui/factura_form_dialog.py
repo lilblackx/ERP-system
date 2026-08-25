@@ -6,6 +6,7 @@ porque la tabla del carrito se beneficia de espacio vertical extra."""
 
 import qtawesome as qta
 from PySide6.QtCore import QDate, QSize, Qt, QTimer
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -33,19 +35,27 @@ from app.services.tasas import TasaService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
 from app.ui.autorizacion_dialog import AutorizacionDescuentoDialog
+from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS, PagoLineaDialog
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
+    COLOR_FIELD_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
+    COLOR_SUCCESS,
+    COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     TABLE_QSS,
+    aplicar_sombra,
 )
+
+_ETIQUETAS_METODO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO}
+_ETIQUETAS_MONEDA = {valor: etiqueta for etiqueta, valor in MONEDAS}
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -72,7 +82,7 @@ QLabel.SectionTitle {{
 }}
 QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
     background-color: #FFFFFF;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
     font-size: 13px;
@@ -93,7 +103,7 @@ QComboBox::drop-down, QDateEdit::drop-down {{
 }}
 QComboBox QAbstractItemView {{
     background-color: #FFFFFF;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     selection-background-color: #DBEAFE;
     selection-color: {COLOR_TEXT_DARK};
     padding: 4px;
@@ -114,16 +124,16 @@ QPushButton#BtnPrimary:pressed {{
     background-color: {COLOR_PRIMARY_DARK};
 }}
 QPushButton#BtnSecondary {{
-    background-color: #F1F5F9;
+    background-color: {COLOR_FIELD_BG};
     color: #475569;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
     font-size: 13px;
     font-weight: 600;
 }}
 QPushButton#BtnSecondary:hover {{
-    background-color: #E2E8F0;
+    background-color: {COLOR_TABLE_HEADER};
     color: {COLOR_TEXT_DARK};
 }}
 QPushButton#BtnAgregar {{
@@ -150,6 +160,27 @@ QPushButton#BtnQuitar {{
 QPushButton#BtnQuitar:hover {{
     background-color: #FEE2E2;
 }}
+QTabWidget::pane {{
+    border: none;
+    top: -1px;
+}}
+QTabBar::tab {{
+    background-color: transparent;
+    color: {COLOR_TEXT_MUTED};
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 4px;
+    margin-right: 22px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QTabBar::tab:selected {{
+    color: {COLOR_PRIMARY};
+    border-bottom: 2px solid {COLOR_PRIMARY};
+}}
+QTabBar::tab:disabled {{
+    color: #CBD5E1;
+}}
 """
 
 
@@ -172,9 +203,11 @@ class FacturaFormDialog(QDialog):
         self.session = session
         self.id_usuario = id_usuario
         self.items: list[dict] = []
+        self.pagos: list[dict] = []
         self._precio_lista_actual: float | None = None
         self._id_autorizador_descuento: int | None = None
         self._motivo_descuento: str | None = None
+        self._tasa_vigente: dict | None = None
 
         self.setWindowTitle("Nueva Factura")
         self.resize(920, 700)
@@ -190,6 +223,19 @@ class FacturaFormDialog(QDialog):
         self._cargar_vendedores()
         self._cargar_productos()
         self._cargar_tasa_vigente()
+        # condicion_combo ya tiene sus items al construir el grid, antes de conectar la
+        # senal (ver _make_card_cabecera) -- se llama una vez a mano para que el estado
+        # inicial (Contado, la primera opcion) muestre la tarjeta de formas de pago.
+        self._toggle_credito()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        # El primer pintado de este dialogo (el mas denso de la app: 4 tarjetas con
+        # sombra + 2 tablas) a veces queda con artefactos de tearing en Windows/DWM antes
+        # de que QGraphicsDropShadowEffect termine de componer su cache -- se autocorrige
+        # con cualquier repintado (mover/redimensionar la ventana), asi que se fuerza uno
+        # diferido apenas se muestra, sin esperar a que el usuario lo note.
+        super().showEvent(event)
+        QTimer.singleShot(0, self.update)
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 
@@ -199,9 +245,33 @@ class FacturaFormDialog(QDialog):
         root.setSpacing(12)
 
         root.addWidget(self._make_header())
-        root.addWidget(self._make_card_cabecera())
-        root.addWidget(self._make_card_carrito(), stretch=1)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._make_tab_factura(), "Factura")
+        self._idx_tab_pagos = self.tabs.addTab(self._make_tab_pagos(), "Formas de Pago")
+        self.tabs.currentChanged.connect(self._on_tab_cambiada)
+        root.addWidget(self.tabs, stretch=1)
+
         root.addLayout(self._make_footer())
+
+    def _make_tab_factura(self) -> QWidget:
+        """Cliente/vendedor/condicion + carrito de productos -- se ve el total ANTES de
+        pasar a la pestana de formas de pago, que solo tiene sentido conociendolo."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setSpacing(12)
+        layout.addWidget(self._make_card_cabecera())
+        layout.addWidget(self._make_card_carrito(), stretch=1)
+        return page
+
+    def _make_tab_pagos(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setSpacing(12)
+        layout.addWidget(self._make_card_pagos(), stretch=1)
+        return page
 
     def _make_header(self) -> QWidget:
         w = QWidget()
@@ -233,7 +303,7 @@ class FacturaFormDialog(QDialog):
 
         self.lbl_tasa = QLabel()
         self.lbl_tasa.setStyleSheet(
-            f"color: {COLOR_TEXT_MUTED}; font-size: 12px; background-color: #F1F5F9;"
+            f"color: {COLOR_TEXT_MUTED}; font-size: 12px; background-color: {COLOR_FIELD_BG};"
             " border-radius: 10px; padding: 4px 12px;"
         )
         h.addWidget(self.lbl_tasa)
@@ -255,12 +325,14 @@ class FacturaFormDialog(QDialog):
             self.lbl_tasa.setText("Tasa BCV: no configurada")
             self.lbl_tasa.show()
             return
+        self._tasa_vigente = tasa
         fecha = tasa["fecha_tasa"].strftime("%d/%m/%Y")
         self.lbl_tasa.setText(f"Tasa BCV: {tasa['tasa_bcv']:,.2f} Bs/USD ({fecha})")
 
     def _make_card_cabecera(self) -> QWidget:
         card = QWidget()
         card.setObjectName("SectionCard")
+        aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 12, 16, 14)
         layout.setSpacing(8)
@@ -345,9 +417,132 @@ class FacturaFormDialog(QDialog):
 
         return card
 
+    def _make_card_pagos(self) -> QWidget:
+        """Contenido de la pestana "Formas de Pago" -- solo interactuable cuando la
+        condicion es 'contado' (ver _toggle_credito, que deshabilita la pestana entera
+        para credito). Una factura de contado exige registrar aca la(s) forma(s) de pago
+        ANTES de poder emitirla (VentaService.emitir_factura(pagos=[...])); por eso esta
+        pestana va DESPUES de "Factura" en el orden de tabs -- recien ahi se conoce el
+        total contra el cual tienen que alcanzar los pagos."""
+        self.card_pagos = QWidget()
+        self.card_pagos.setObjectName("SectionCard")
+        aplicar_sombra(self.card_pagos)
+        layout = QVBoxLayout(self.card_pagos)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+
+        fila_titulo = QHBoxLayout()
+        lbl_ayuda = QLabel("Registre una o más formas de pago que cubran el total de la factura.")
+        lbl_ayuda.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        fila_titulo.addWidget(lbl_ayuda)
+        fila_titulo.addStretch()
+
+        btn_agregar_pago = QPushButton(" Agregar forma de pago")
+        btn_agregar_pago.setObjectName("BtnAgregar")
+        btn_agregar_pago.setIcon(qta.icon("fa5s.plus-circle", color=COLOR_PRIMARY))
+        btn_agregar_pago.setFixedHeight(30)
+        btn_agregar_pago.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_agregar_pago.setAutoDefault(False)
+        btn_agregar_pago.clicked.connect(self._agregar_pago)
+        fila_titulo.addWidget(btn_agregar_pago)
+        layout.addLayout(fila_titulo)
+
+        self.tabla_pagos = QTableWidget(0, 5)
+        self.tabla_pagos.setHorizontalHeaderLabels(["Método", "Moneda", "Monto", "Origen / Referencia", ""])
+        self.tabla_pagos.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.tabla_pagos.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabla_pagos.setAlternatingRowColors(True)
+        self.tabla_pagos.setShowGrid(False)
+        self.tabla_pagos.verticalHeader().setVisible(False)
+        self.tabla_pagos.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabla_pagos.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla_pagos.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.tabla_pagos.setColumnWidth(4, 70)
+        self.tabla_pagos.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.tabla_pagos)
+        layout.addWidget(self.tabla_pagos, stretch=1)
+
+        self.lbl_total_pagos = QLabel()
+        self.lbl_total_pagos.setStyleSheet("font-size: 13px; font-weight: 600;")
+        layout.addWidget(self.lbl_total_pagos)
+
+        return self.card_pagos
+
+    def _agregar_pago(self) -> None:
+        dialogo = PagoLineaDialog(self.session, self.id_usuario, parent=self)
+        if dialogo.exec() == QDialog.DialogCode.Accepted:
+            self.pagos.append(dialogo.get_data())
+            self._refrescar_tabla_pagos()
+
+    def _quitar_pago(self, indice: int) -> None:
+        del self.pagos[indice]
+        self._refrescar_tabla_pagos()
+
+    def _convertir_pago_a_usd(self, pago: dict) -> float:
+        moneda = pago["moneda"]
+        monto = pago["monto_moneda_origen"]
+        if moneda in ("USD", "USDT"):
+            return monto
+        if self._tasa_vigente is None:
+            return 0.0
+        if moneda == "VES":
+            return monto / float(self._tasa_vigente["tasa_bcv"])
+        if moneda == "COP":
+            tasa_cop = self._tasa_vigente.get("tasa_cop")
+            return monto / float(tasa_cop) if tasa_cop else 0.0
+        return 0.0
+
+    def _refrescar_tabla_pagos(self) -> None:
+        self.tabla_pagos.setRowCount(len(self.pagos))
+        total_usd = 0.0
+        for fila, pago in enumerate(self.pagos):
+            monto_usd = self._convertir_pago_a_usd(pago)
+            total_usd += monto_usd
+
+            item_metodo = QTableWidgetItem(_ETIQUETAS_METODO.get(pago["metodo_pago"], pago["metodo_pago"]))
+            self.tabla_pagos.setItem(fila, 0, item_metodo)
+            item_moneda = QTableWidgetItem(_ETIQUETAS_MONEDA.get(pago["moneda"], pago["moneda"]))
+            self.tabla_pagos.setItem(fila, 1, item_moneda)
+            texto_monto = f"{pago['monto_moneda_origen']:,.2f}"
+            if pago["moneda"] not in ("USD", "USDT"):
+                texto_monto += f" (${monto_usd:,.2f})"
+            item_monto = QTableWidgetItem(texto_monto)
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla_pagos.setItem(fila, 2, item_monto)
+            origen = pago.get("referencia") or ""
+            item_origen = QTableWidgetItem(origen)
+            self.tabla_pagos.setItem(fila, 3, item_origen)
+
+            btn_quitar = QPushButton()
+            btn_quitar.setObjectName("BtnQuitar")
+            btn_quitar.setIcon(qta.icon("fa5s.trash-alt", color=COLOR_DANGER))
+            btn_quitar.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_quitar.setToolTip("Quitar esta forma de pago")
+            btn_quitar.clicked.connect(lambda checked, i=fila: self._quitar_pago(i))
+            self.tabla_pagos.setCellWidget(fila, 4, btn_quitar)
+
+        total_factura = self._total_factura_actual()
+        falta = total_factura - total_usd
+        if falta > 0.005:
+            self.lbl_total_pagos.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_DANGER};")
+            self.lbl_total_pagos.setText(
+                f"Total factura: ${total_factura:,.2f}  ·  Pagado: ${total_usd:,.2f}  ·  Falta: ${falta:,.2f}"
+            )
+        else:
+            self.lbl_total_pagos.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_SUCCESS};")
+            self.lbl_total_pagos.setText(
+                f"Total factura: ${total_factura:,.2f}  ·  Pagado: ${total_usd:,.2f}  ·  Cubierto"
+            )
+        self._actualizar_alerta_credito()
+
+    def _total_factura_actual(self) -> float:
+        total = sum(it["cantidad"] * it["precio_unitario"] for it in self.items)
+        return max(total - self.descuento_input.value(), 0.0)
+
     def _make_card_carrito(self) -> QWidget:
         card = QWidget()
         card.setObjectName("SectionCard")
+        aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 12, 16, 14)
         layout.setSpacing(8)
@@ -416,6 +611,7 @@ class FacturaFormDialog(QDialog):
         self.tabla_items.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla_items.setColumnWidth(4, 70)
         self.tabla_items.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.tabla_items)
         layout.addWidget(self.tabla_items, stretch=1)
 
         fila_total = QHBoxLayout()
@@ -461,7 +657,7 @@ class FacturaFormDialog(QDialog):
         self.btn_emitir.setFixedHeight(36)
         self.btn_emitir.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_emitir.setAutoDefault(False)
-        self.btn_emitir.clicked.connect(self._validar_y_aceptar)
+        self.btn_emitir.clicked.connect(self._on_click_boton_principal)
 
         footer.addWidget(self.btn_cancelar)
         footer.addWidget(self.btn_emitir)
@@ -511,12 +707,22 @@ class FacturaFormDialog(QDialog):
         el usuario arme todo el carrito y recien se entere del limite de credito al dar
         "Emitir", se avisa apenas el total supera lo disponible. Solo informativo -- el
         backend (VentaService.emitir_factura) vuelve a validar todo, IVA incluido, que
-        aca no se conoce sin llamar al servicio de nuevo."""
+        aca no se conoce sin llamar al servicio de nuevo.
+
+        Tambien es el punto central que habilita/deshabilita btn_emitir: para contado, en
+        la pestana "Formas de Pago" (paso final, boton "Facturar") se exige que las
+        formas de pago cubran el total -- ver _refrescar_tabla_pagos, que llama esta
+        misma funcion. En la pestana "Factura" (paso "Siguiente") no aplica: ese paso
+        solo valida cliente/vendedor/items al hacer click, ver _ir_a_formas_de_pago."""
         es_credito = self.condicion_combo.currentData() == "credito"
+        es_contado = self.condicion_combo.currentData() == "contado"
         id_cliente = self.cliente_combo.currentData()
         if not es_credito or id_cliente is None:
             self.lbl_alerta_credito.hide()
-            self.btn_emitir.setEnabled(True)
+            if es_contado and self.tabs.currentIndex() == self._idx_tab_pagos:
+                self.btn_emitir.setEnabled(self._pagos_cubren_total())
+            else:
+                self.btn_emitir.setEnabled(True)
             return
 
         try:
@@ -539,6 +745,10 @@ class FacturaFormDialog(QDialog):
             self.lbl_alerta_credito.hide()
             self.btn_emitir.setEnabled(True)
 
+    def _pagos_cubren_total(self) -> bool:
+        total_pagado = sum(self._convertir_pago_a_usd(pago) for pago in self.pagos)
+        return total_pagado + 0.005 >= self._total_factura_actual()
+
     # ── Vendedor ───────────────────────────────────────────────────────────
 
     def _cargar_vendedores(self) -> None:
@@ -557,10 +767,18 @@ class FacturaFormDialog(QDialog):
     def _toggle_credito(self) -> None:
         es_credito = self.condicion_combo.currentData() == "credito"
         self.vencimiento_input.setEnabled(es_credito)
+        if es_credito and self.pagos:
+            # credito no admite pagos al emitir (VentaService.emitir_factura los rechaza) --
+            # se descartan las formas de pago que se hayan cargado mientras era contado.
+            self.pagos = []
+        self.tabs.setTabEnabled(self._idx_tab_pagos, not es_credito)
+        if es_credito and self.tabs.currentIndex() == self._idx_tab_pagos:
+            self.tabs.setCurrentIndex(0)  # dispara _on_tab_cambiada, que ya actualiza el boton
+        else:
+            self._actualizar_boton_footer()
+        self._refrescar_tabla_pagos()  # tambien deja btn_emitir en el estado correcto
         if es_credito:
             self._on_cliente_cambiado()
-        else:
-            self._actualizar_alerta_credito()
 
     # ── Producto: busqueda server-side con debounce ─────────────────────────
 
@@ -700,7 +918,11 @@ class FacturaFormDialog(QDialog):
         else:
             self.lbl_total.setText(f"Total: ${total:,.2f}")
 
-        self._actualizar_alerta_credito()
+        # El total de la factura (carrito - descuento) es justo lo que la pestana de
+        # Formas de Pago necesita mostrar como "Total factura" -- sin este refresco
+        # quedaba congelado en $0.00 (el valor al construir el dialogo, antes de agregar
+        # ningun producto).
+        self._refrescar_tabla_pagos()
 
     # ── Validación / datos ────────────────────────────────────────────────
 
@@ -710,15 +932,66 @@ class FacturaFormDialog(QDialog):
         )
         return hay_precio_bajo_lista or self.descuento_input.value() > 0
 
-    def _validar_y_aceptar(self) -> None:
+    def _validar_datos_basicos(self) -> bool:
+        """Cliente/vendedor/carrito -- lo mismo que valida el paso "Siguiente" antes de
+        pasar a formas de pago, y lo primero que vuelve a validar "Facturar" (el carrito
+        pudo cambiar mientras el usuario estaba en la otra pestana)."""
         if self.cliente_combo.currentData() is None:
             QMessageBox.warning(self, "Cliente requerido", "Seleccione un cliente para la factura.")
-            return
+            return False
         if self.vendedor_combo.currentData() is None:
             QMessageBox.warning(self, "Vendedor requerido", "Seleccione el vendedor de esta factura.")
-            return
+            return False
         if not self.items:
             QMessageBox.warning(self, "Factura vacía", "Agregue al menos un producto a la factura.")
+            return False
+        return True
+
+    def _en_paso_siguiente(self) -> bool:
+        """Contado tiene dos pasos (Factura -> Formas de Pago); credito emite directo
+        desde la unica pestana habilitada. Determina si el boton principal debe decir
+        "Siguiente" (solo avanza de pestana) o "Facturar" (emite de verdad)."""
+        es_contado = self.condicion_combo.currentData() == "contado"
+        return es_contado and self.tabs.currentIndex() != self._idx_tab_pagos
+
+    def _actualizar_boton_footer(self) -> None:
+        if self._en_paso_siguiente():
+            self.btn_emitir.setText("Siguiente")
+            self.btn_emitir.setIcon(qta.icon("fa5s.arrow-right", color="#FFFFFF"))
+        else:
+            self.btn_emitir.setText("Facturar")
+            self.btn_emitir.setIcon(qta.icon("fa5s.check", color="#FFFFFF"))
+
+    def _on_tab_cambiada(self, _index: int) -> None:
+        self._actualizar_boton_footer()
+        self._actualizar_alerta_credito()
+
+    def _on_click_boton_principal(self) -> None:
+        if self._en_paso_siguiente():
+            self._ir_a_formas_de_pago()
+        else:
+            self._validar_y_aceptar()
+
+    def _ir_a_formas_de_pago(self) -> None:
+        if not self._validar_datos_basicos():
+            return
+        self.tabs.setCurrentIndex(self._idx_tab_pagos)
+
+    def _validar_y_aceptar(self) -> None:
+        if not self._validar_datos_basicos():
+            return
+        es_contado = self.condicion_combo.currentData() == "contado"
+        if es_contado and not self.pagos:
+            self.tabs.setCurrentIndex(self._idx_tab_pagos)
+            QMessageBox.warning(
+                self, "Forma de pago requerida", "Agregue al menos una forma de pago para facturar de contado."
+            )
+            return
+        if es_contado and not self._pagos_cubren_total():
+            self.tabs.setCurrentIndex(self._idx_tab_pagos)
+            QMessageBox.warning(
+                self, "Pago incompleto", "Las formas de pago agregadas no cubren el total de la factura."
+            )
             return
 
         self._id_autorizador_descuento = None
@@ -747,6 +1020,7 @@ class FacturaFormDialog(QDialog):
             "monto_descuento": self.descuento_input.value(),
             "motivo_descuento": self._motivo_descuento,
             "id_autorizador_descuento": self._id_autorizador_descuento,
+            "pagos": self.pagos if not es_credito else [],
             "items": [
                 {
                     "id_producto": it["id_producto"],

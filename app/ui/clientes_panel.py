@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -34,7 +35,7 @@ from app.services.clientes import (
     list_clientes,
     update_cliente,
 )
-from app.services.exportacion import exportar_excel
+from app.services.exportacion import exportar_excel, exportar_pdf
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.historial_cliente_window import HistorialClienteWindow
 from app.ui.styles import (
@@ -51,7 +52,9 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
+    aplicar_sombra,
 )
+from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,12 @@ COLS_VISIBLES = [
     "Estado",
 ]
 COL_ID_INTERNO = 0  # oculto
+
+ESTADOS_FILTRO = [
+    ("Todos los estados", None),
+    ("Activos", "ACTIVO"),
+    ("Inactivos", "INACTIVO"),
+]
 
 
 class BadgeItem(QWidget):
@@ -222,20 +231,19 @@ class ClientesPanel(QWidget):
         self.btn_nuevo.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_nuevo.clicked.connect(self.nuevo_cliente)
 
-        btn_filtrar = QPushButton("Filtrar")
-        btn_filtrar.setIcon(qta.icon("fa5s.filter", color=COLOR_TEXT_DARK))
-        btn_filtrar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.estado_combo = QComboBox()
+        for etiqueta, valor in ESTADOS_FILTRO:
+            self.estado_combo.addItem(etiqueta, valor)
+        self.estado_combo.currentIndexChanged.connect(self.cargar_clientes)
 
-        btn_exportar = QPushButton("Exportar")
-        btn_exportar.setIcon(qta.icon("fa5s.file-export", color=COLOR_TEXT_DARK))
-        btn_exportar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_exportar.clicked.connect(self.exportar_clientes)
+        self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_clientes, on_pdf=self.exportar_pdf_clientes)
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nuevo)
-        h.addWidget(btn_filtrar)
-        h.addWidget(btn_exportar)
+        h.addWidget(self.btn_filtrar)
+        h.addWidget(self.btn_exportar)
         return w
 
     def _make_table(self) -> QTableWidget:
@@ -263,6 +271,7 @@ class ClientesPanel(QWidget):
             QTableWidget::item:selected { background-color: #DBEAFE; color: #0D47A1; }
         """
         )
+        aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)  # ID oculto
         self.tabla.verticalHeader().setDefaultSectionSize(48)
         self.tabla.doubleClicked.connect(self.ver_historial_cliente)
@@ -311,6 +320,7 @@ class ClientesPanel(QWidget):
                 session,
                 self.buscar_input.text().strip() or None,
                 id_usuario=self.usuario.id_usuario,
+                estado_cliente=self.estado_combo.currentData(),
             )
             self._poblar_tabla(clientes)
         except Exception:
@@ -355,7 +365,29 @@ class ClientesPanel(QWidget):
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''}")
         self.lbl_pagina.setText(f"Mostrando {total} registro{'s' if total != 1 else ''}")
 
-    def exportar_clientes(self) -> None:
+    def _filas_para_exportar(self, session) -> list[list]:
+        clientes = list_clientes(
+            session,
+            self.buscar_input.text().strip() or None,
+            id_usuario=self.usuario.id_usuario,
+            estado_cliente=self.estado_combo.currentData(),
+        )
+        return [
+            [
+                c.id_cliente,
+                c.nombre_razon_social,
+                c.identificacion_cliente,
+                c.email,
+                c.telefono,
+                c.direccion,
+                float(c.limite_credito) if c.limite_credito else 0,
+                c.dias_credito if c.dias_credito is not None else 0,
+                c.estado_cliente,
+            ]
+            for c in clientes
+        ]
+
+    def exportar_excel_clientes(self) -> None:
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal, asi que no hay nada que purgar si el usuario cancela.
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar clientes", "clientes.xlsx", "Excel (*.xlsx)")
@@ -364,29 +396,27 @@ class ClientesPanel(QWidget):
 
         session = self.session_factory()
         try:
-            clientes = list_clientes(
-                session,
-                self.buscar_input.text().strip() or None,
-                id_usuario=self.usuario.id_usuario,
-            )
-            filas = [
-                [
-                    c.id_cliente,
-                    c.nombre_razon_social,
-                    c.identificacion_cliente,
-                    c.email,
-                    c.telefono,
-                    c.direccion,
-                    float(c.limite_credito) if c.limite_credito else 0,
-                    c.dias_credito if c.dias_credito is not None else 0,
-                    c.estado_cliente,
-                ]
-                for c in clientes
-            ]
+            filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
         except Exception:
-            logger.exception("Fallo al exportar la lista de clientes")
+            logger.exception("Fallo al exportar la lista de clientes a Excel")
+            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
+        finally:
+            session.close()
+
+    def exportar_pdf_clientes(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar clientes", "clientes.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            filas = self._filas_para_exportar(session)
+            exportar_pdf(ruta, "Clientes", COLS_VISIBLES, filas)
+            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar la lista de clientes a PDF")
             QMessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
         finally:
             session.close()

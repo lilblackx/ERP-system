@@ -30,12 +30,15 @@ from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
+    COLOR_FIELD_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
+    COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
+    aplicar_sombra,
 )
 
 DIALOG_STYLE = f"""
@@ -63,7 +66,7 @@ QLabel.SectionTitle {{
 }}
 QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
     background-color: #FFFFFF;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
     font-size: 13px;
@@ -84,7 +87,7 @@ QComboBox::drop-down, QDateEdit::drop-down {{
 }}
 QComboBox QAbstractItemView {{
     background-color: #FFFFFF;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     selection-background-color: #DBEAFE;
     selection-color: {COLOR_TEXT_DARK};
     padding: 4px;
@@ -109,16 +112,16 @@ QPushButton#BtnPrimary:pressed {{
     background-color: {COLOR_PRIMARY_DARK};
 }}
 QPushButton#BtnSecondary {{
-    background-color: #F1F5F9;
+    background-color: {COLOR_FIELD_BG};
     color: #475569;
-    border: 1px solid #CBD5E1;
+    border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
     font-size: 13px;
     font-weight: 600;
 }}
 QPushButton#BtnSecondary:hover {{
-    background-color: #E2E8F0;
+    background-color: {COLOR_TABLE_HEADER};
     color: {COLOR_TEXT_DARK};
 }}
 QPushButton#BtnAddCategoria {{
@@ -210,6 +213,7 @@ class ProductoFormDialog(QDialog):
     def _make_columna_datos_generales(self) -> QWidget:
         card = QWidget()
         card.setObjectName("SectionCard")
+        aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 12, 16, 14)
         layout.setSpacing(8)
@@ -294,6 +298,7 @@ class ProductoFormDialog(QDialog):
     def _make_columna_inventario_precio(self) -> QWidget:
         card = QWidget()
         card.setObjectName("SectionCard")
+        aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 12, 16, 14)
         layout.setSpacing(8)
