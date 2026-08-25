@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
@@ -55,6 +55,33 @@ def _deuda_pendiente_cliente(session: Session, id_cliente: int) -> Decimal:
         .scalar()
     )
     return Decimal(str(deuda))
+
+
+def _cxc_vencida(cxc: CuentaPorCobrar, hoy: date) -> bool:
+    return cxc.fecha_vencimiento is not None and cxc.fecha_vencimiento < hoy
+
+
+def _calcular_estado_visual(estado_factura: str, cxc: CuentaPorCobrar | None, hoy: date) -> str:
+    """Estado que se muestra en la UI (Emitida/Pagada/Parcial/Vencida/Anulada) --
+    FacturaVenta.estado_factura en la base solo distingue EMITIDA/ANULADA (ver
+    anular_factura), el resto se deriva de la cuenta por cobrar asociada. 'vencida' nunca
+    se persiste en cuentas_por_cobrar.estado (el CHECK la admite pero ningun trigger la
+    asigna) -- se calcula en el momento con el mismo criterio que
+    DashboardService.CUENTA_ABIERTA / historial_cliente.py / reportes.py: pendiente o
+    parcial con fecha_vencimiento ya pasada (hallazgo N1 de la auditoria de facturacion
+    2026-08-25: antes la UI ofrecia un filtro/badge de 5 estados que nunca podia
+    coincidir con nada porque la columna real es binaria)."""
+    if estado_factura == "ANULADA":
+        return "ANULADA"
+    if cxc is None:
+        return "EMITIDA"
+    if cxc.estado == "pagada":
+        return "PAGADA"
+    if _cxc_vencida(cxc, hoy):
+        return "VENCIDA"
+    if cxc.estado == "parcial":
+        return "PARCIAL"
+    return "EMITIDA"
 
 
 def _validar_items(items: list[dict]) -> None:
@@ -216,7 +243,11 @@ class VentaService:
             cantidad = Decimal(str(item["cantidad"]))
             cantidades_por_producto[id_producto] = cantidades_por_producto.get(id_producto, Decimal("0")) + cantidad
 
-        for id_producto, cantidad_requerida in cantidades_por_producto.items():
+        # sorted() por id_producto: dos facturas concurrentes que comparten productos
+        # pero los cargaron en distinto orden en el carrito adquiririan los locks en
+        # orden cruzado sin esto -> deadlock de SQL Server. Un orden total fijo (el
+        # mismo para cualquier transaccion) elimina la posibilidad de cruce.
+        for id_producto, cantidad_requerida in sorted(cantidades_por_producto.items()):
             # WITH (UPDLOCK, ROWLOCK): bloquea la fila hasta el commit de esta
             # transaccion para que una segunda factura concurrente sobre el mismo
             # producto espere en vez de leer el mismo stock stale (TOCTOU). session.get()
@@ -607,15 +638,64 @@ class VentaService:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if condicion_pago:
             query = query.filter(FacturaVenta.condicion_pago == condicion_pago)
-        if estado:
-            query = query.filter(FacturaVenta.estado_factura == estado)
         if numero_factura:
             query = query.filter(FacturaVenta.numero_factura.ilike(f"%{numero_factura}%"))
+
+        hoy = date.today()
+        if estado:
+            # estado_factura solo es EMITIDA/ANULADA en la base -- PAGADA/PARCIAL/VENCIDA
+            # se derivan de cuentas_por_cobrar (ver _calcular_estado_visual). Se filtra por
+            # subquery de id_factura en vez de un join directo para no arriesgar el
+            # fanout de filas que un join normal produciria junto a los joinedload de
+            # cliente/vendedor de arriba (hallazgo N1 de la auditoria 2026-08-25).
+            if estado == "ANULADA":
+                query = query.filter(FacturaVenta.estado_factura == "ANULADA")
+            elif estado == "PAGADA":
+                subq = session.query(CuentaPorCobrar.id_factura).filter(CuentaPorCobrar.estado == "pagada")
+                query = query.filter(FacturaVenta.id_factura.in_(subq))
+            elif estado == "PARCIAL":
+                subq = session.query(CuentaPorCobrar.id_factura).filter(
+                    CuentaPorCobrar.estado == "parcial",
+                    or_(CuentaPorCobrar.fecha_vencimiento.is_(None), CuentaPorCobrar.fecha_vencimiento >= hoy),
+                )
+                query = query.filter(FacturaVenta.id_factura.in_(subq))
+            elif estado == "VENCIDA":
+                subq = session.query(CuentaPorCobrar.id_factura).filter(
+                    CuentaPorCobrar.estado.in_(("pendiente", "parcial")),
+                    CuentaPorCobrar.fecha_vencimiento < hoy,
+                )
+                query = query.filter(FacturaVenta.id_factura.in_(subq))
+            elif estado == "EMITIDA":
+                subq_abierta_no_vencida = session.query(CuentaPorCobrar.id_factura).filter(
+                    CuentaPorCobrar.estado == "pendiente",
+                    or_(CuentaPorCobrar.fecha_vencimiento.is_(None), CuentaPorCobrar.fecha_vencimiento >= hoy),
+                )
+                subq_con_cxc = session.query(CuentaPorCobrar.id_factura)
+                query = query.filter(
+                    FacturaVenta.estado_factura == "EMITIDA",
+                    or_(
+                        FacturaVenta.id_factura.notin_(subq_con_cxc),
+                        FacturaVenta.id_factura.in_(subq_abierta_no_vencida),
+                    ),
+                )
 
         total = query.count()
         facturas = (
             query.order_by(FacturaVenta.fecha_emision.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
         )
+
+        # estado_visual: atributo Python plano (no mapeado), calculado en un solo batch
+        # para toda la pagina en vez de N+1 -- ver _calcular_estado_visual.
+        ids_pagina = [f.id_factura for f in facturas]
+        cxc_por_factura = {}
+        if ids_pagina:
+            cxc_por_factura = {
+                c.id_factura: c
+                for c in session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_(ids_pagina)).all()
+            }
+        for f in facturas:
+            f.estado_visual = _calcular_estado_visual(f.estado_factura, cxc_por_factura.get(f.id_factura), hoy)
+
         return {"items": facturas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
 
     @staticmethod
@@ -629,6 +709,9 @@ class VentaService:
         )
         if factura is None:
             raise ValueError("Factura no encontrada")
+
+        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
+        factura.estado_visual = _calcular_estado_visual(factura.estado_factura, cxc, date.today())
 
         detalles = (
             session.query(FacturaDetalle)

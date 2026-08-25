@@ -400,7 +400,7 @@ class FacturacionPanel(QWidget):
             item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_total)
 
-            badge = EstadoFacturaBadge(f.estado_factura or "EMITIDA")
+            badge = EstadoFacturaBadge(f.estado_visual)
             self.tabla.setCellWidget(fila, 7, badge)
 
         total = resultado["total"]
@@ -595,7 +595,7 @@ class FacturacionPanel(QWidget):
                 f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
                 "Contado" if f.condicion_pago == "contado" else "Crédito",
                 float(f.total_venta),
-                f.estado_factura,
+                f.estado_visual,
             ]
             for f in resultado["items"]
         ]

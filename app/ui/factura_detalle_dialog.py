@@ -154,7 +154,7 @@ class FacturaDetalleDialog(QDialog):
         h.addLayout(titulos)
         h.addStretch()
 
-        estado = self.factura.estado_factura or "EMITIDA"
+        estado = self.factura.estado_visual
         color_estado = COLORES_ESTADO_FACTURA.get(estado, COLOR_TEXT_MUTED)
         badge = QLabel(estado.capitalize())
         badge.setStyleSheet(

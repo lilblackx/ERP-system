@@ -992,6 +992,68 @@ def test_listar_facturas_filtra_por_numero_parcial(db_session):
     assert resultado["items"][0].numero_factura == factura.numero_factura
 
 
+def test_listar_facturas_filtra_por_estado_vencida(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+
+    factura_vencida = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        fecha_vencimiento=date.today() - timedelta(days=5),
+    )
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        fecha_vencimiento=date.today() + timedelta(days=30),
+    )
+
+    resultado = VentaService.listar_facturas(db_session, estado="VENCIDA", id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].id_factura == factura_vencida.id_factura
+    assert resultado["items"][0].estado_visual == "VENCIDA"
+
+
+def test_listar_facturas_filtra_por_estado_pagada(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+
+    factura_pagada = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    resultado = VentaService.listar_facturas(db_session, estado="PAGADA", id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].id_factura == factura_pagada.id_factura
+
+
 def test_obtener_factura_incluye_detalles(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
@@ -1015,6 +1077,103 @@ def test_obtener_factura_incluye_detalles(db_session):
     assert len(resultado["detalles"]) == 1
     assert resultado["detalles"][0].producto.id_producto == producto.id_producto
     assert resultado["detalles"][0].cantidad_producto == Decimal("2.00")
+    assert resultado["factura"].estado_visual == "PAGADA"
+
+
+def test_obtener_factura_credito_recien_emitida_estado_visual_emitida(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        fecha_vencimiento=date.today() + timedelta(days=30),
+    )
+
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
+
+    assert resultado["factura"].estado_visual == "EMITIDA"
+
+
+def test_obtener_factura_credito_pago_parcial_estado_visual_parcial(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        fecha_vencimiento=date.today() + timedelta(days=30),
+    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto=Decimal("40.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
+
+    assert resultado["factura"].estado_visual == "PARCIAL"
+
+
+def test_obtener_factura_credito_vencida_estado_visual_vencida(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        fecha_vencimiento=date.today() - timedelta(days=5),
+    )
+
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
+
+    assert resultado["factura"].estado_visual == "VENCIDA"
+
+
+def test_obtener_factura_anulada_estado_visual_anulada(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Motivo")
+
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
+
+    assert resultado["factura"].estado_visual == "ANULADA"
 
 
 def test_obtener_factura_inexistente_falla(db_session):

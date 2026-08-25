@@ -532,6 +532,32 @@ de servicio.
     riesgo de introducir un problema de orden de locks (ahora hay dos: `Inventario` para
     stock y `Cliente` para el límite de crédito) superaba el beneficio marginal frente al
     resto de los cambios de esta auditoría.
+- **Segunda auditoría del módulo de Facturación 2026-08-25 (N1/N2)**: sin regresiones
+  sobre la auditoría anterior. Dos hallazgos nuevos, ambos resueltos el mismo día:
+  - **N1 (Alto) — `estado_factura` binario vs. filtro/badge de 5 estados en la UI**:
+    `factura_venta.estado_factura` solo vale `EMITIDA`/`ANULADA` en toda la base de
+    código, pero `FacturacionPanel` ofrecía un filtro con `PAGADA`/`PARCIAL`/`VENCIDA`
+    que nunca podía coincidir con nada (0 filas siempre), y los badges de color para esos
+    tres estados nunca se usaban. Se agregó `VentaService._calcular_estado_visual()`
+    (`app/services/ventas.py`), que deriva el estado real desde `CuentaPorCobrar` con el
+    mismo criterio ya usado en `DashboardService.CUENTA_ABIERTA`/`historial_cliente.py`/
+    `reportes.py` (pendiente/parcial + `fecha_vencimiento` pasada = vencida — nunca se
+    persiste como tal, el `CHECK` la admite pero ningún trigger la asigna).
+    `listar_facturas()`/`obtener_factura()` adjuntan el resultado como atributo Python
+    `estado_visual` en cada `FacturaVenta` (no mapeado, calculado en un solo batch por
+    página para evitar N+1); `listar_facturas()` también traduce el filtro `estado` a un
+    subquery contra `cuentas_por_cobrar` en vez de comparar directo contra la columna. La
+    UI (`facturacion_panel.py`, `factura_detalle_dialog.py`) ahora lee `estado_visual` en
+    vez de `estado_factura` crudo. `factura_pdf.py` no se tocó — ahí la comparación contra
+    `"ANULADA"` (para la marca de agua) es un chequeo binario legítimo.
+  - **N2 (Medio) — deadlock potencial en el lock de stock**: el `WITH (UPDLOCK, ROWLOCK)`
+    de disponibilidad se adquiría iterando `cantidades_por_producto.items()` en el orden
+    de aparición en el carrito (decidido por el usuario), sin normalizar por
+    `id_producto` — dos facturas concurrentes con los mismos productos en carritos
+    armados en distinto orden podían adquirir los locks en orden cruzado y producir un
+    deadlock de SQL Server. Fix de una línea: `sorted(cantidades_por_producto.items())`
+    antes del loop (`app/services/ventas.py`), mismo orden total para cualquier
+    transacción.
 - Cobertura de pruebas automatizadas: hecha para los 18 módulos de servicio más el
   runner de migraciones. Hay un harness de pytest (`tests/`) contra una base de datos
   SQL Server de prueba dedicada (real, no mock — necesario para validar los triggers),
