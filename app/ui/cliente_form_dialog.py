@@ -327,6 +327,7 @@ class ClienteFormDialog(QDialog):
         self.dias_credito_input.setRange(0, 365)
         self.dias_credito_input.setSuffix(" días")
         self.dias_credito_input.setFixedHeight(32)
+        self.dias_credito_input.setToolTip("0 = cliente de contado, no podrá facturarse a crédito")
         grid2.addWidget(lbl_dias, 4, 1)
         grid2.addWidget(self.dias_credito_input, 5, 1)
 

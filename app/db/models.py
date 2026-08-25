@@ -276,11 +276,19 @@ class FacturaVenta(Base):
     # Descuento manual de factura completa (no por linea -- el descuento por item se
     # maneja directamente bajando precio_unitario, ver ComisionService/VentaService).
     # Igual que precio_unitario < precio de lista, requiere autorizacion de un usuario
-    # con permiso 'ventas'/'autorizar_descuento' -- ver migrations/
-    # 0020_descuentos_autorizacion.sql y VentaService.emitir_factura().
+    # con permiso 'descuentos'/'crear' -- ver migrations/0020_descuentos_autorizacion.sql,
+    # migrations/0021_permiso_autorizar_descuento.sql y VentaService.emitir_factura().
     monto_descuento: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False, server_default="0.00")
     motivo_descuento: Mapped[str | None] = mapped_column(String(255))
     autorizado_por_descuento: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    # Dias de credito efectivamente aplicados a esta factura (configurados en el cliente, o
+    # personalizados con autorizacion) -- ver migrations/0025_autorizacion_dias_credito.sql
+    # y VentaService.emitir_factura(). NULL en facturas de contado. motivo_dias_credito/
+    # autorizado_por_dias_credito solo se pueblan cuando el valor difiere del configurado en
+    # Cliente.dias_credito (requiere permiso 'creditos'/'crear').
+    dias_credito_aplicados: Mapped[int | None] = mapped_column(Integer)
+    motivo_dias_credito: Mapped[str | None] = mapped_column(String(255))
+    autorizado_por_dias_credito: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     cliente = relationship("Cliente")
@@ -289,6 +297,7 @@ class FacturaVenta(Base):
     vendedor = relationship("Vendedor")
     modificador = relationship("Usuario", foreign_keys=[modificado_por])
     autorizador_descuento = relationship("Usuario", foreign_keys=[autorizado_por_descuento])
+    autorizador_dias_credito = relationship("Usuario", foreign_keys=[autorizado_por_dias_credito])
 
 
 class FacturaDetalle(Base):

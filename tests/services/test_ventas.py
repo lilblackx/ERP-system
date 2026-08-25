@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -395,6 +396,23 @@ def test_emitir_factura_producto_inactivo_falla(db_session):
         )
 
 
+def test_emitir_factura_producto_inexistente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="no encontrado"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            pagos=pago_contado(db_session),
+            items=[{"id_producto": 999999, "cantidad": 1, "precio_unitario": "20.00"}],
+        )
+
+
 def test_emitir_factura_agrupa_items_repetidos_para_validar_stock(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
@@ -428,6 +446,24 @@ def test_emitir_factura_sin_items(db_session):
             condicion_pago="contado",
             pagos=pago_contado(db_session),
             items=[],
+        )
+
+
+def test_emitir_factura_observaciones_supera_255_caracteres_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    with pytest.raises(ValueError, match="observaciones no puede superar 255 caracteres"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            pagos=pago_contado(db_session),
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+            observaciones="x" * 256,
         )
 
 
@@ -1284,6 +1320,130 @@ def test_emitir_factura_credito_con_descuento_y_iva_ajusta_cuenta_por_cobrar(db_
     assert cxc.saldo_pendiente == Decimal("92.80")
 
 
+# --- dias_credito por cliente (bloqueo si no configurado + override autorizado) -------
+
+
+def test_emitir_factura_credito_cliente_sin_dias_credito_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, dias_credito=0)
+
+    with pytest.raises(ValueError, match="no tiene dias de credito configurados"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        )
+
+    assert db_session.query(FacturaVenta).count() == 0
+
+
+def test_emitir_factura_credito_usa_dias_configurados_por_defecto(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=1000, dias_credito=15)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+    )
+
+    assert factura.dias_credito_aplicados == 15
+    assert factura.fecha_vencimiento == date.today() + timedelta(days=15)
+    assert factura.motivo_dias_credito is None
+    assert factura.autorizado_por_dias_credito is None
+
+
+def test_emitir_factura_credito_dias_personalizados_sin_autorizacion_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=1000, dias_credito=15)
+
+    with pytest.raises(ValueError, match="requiere un motivo"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            dias_credito_personalizados=45,
+        )
+
+
+def test_emitir_factura_credito_dias_personalizados_autorizado_ok(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=1000, dias_credito=15)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        dias_credito_personalizados=45,
+        motivo_dias_credito="Cliente VIP",
+        id_autorizador_dias_credito=admin.id_usuario,
+    )
+
+    assert factura.dias_credito_aplicados == 45
+    assert factura.fecha_vencimiento == date.today() + timedelta(days=45)
+    assert factura.motivo_dias_credito == "Cliente VIP"
+    assert factura.autorizado_por_dias_credito == admin.id_usuario
+
+
+def test_emitir_factura_credito_dias_personalizados_sin_permiso_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, limite_credito=1000, dias_credito=15)
+
+    with pytest.raises(PermisoDenegadoError):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            dias_credito_personalizados=45,
+            motivo_dias_credito="Cliente VIP",
+            id_autorizador_dias_credito=999999,
+        )
+
+
+def test_emitir_factura_contado_no_admite_dias_credito_personalizados(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="solo aplica a condicion_pago='credito'"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            pagos=pago_contado(db_session),
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            dias_credito_personalizados=30,
+        )
+
+
 # --- consultar_limite_disponible (bloqueo visual proactivo en factura_form_dialog) ----
 
 
@@ -1296,6 +1456,7 @@ def test_consultar_limite_disponible_sin_deuda(db_session):
     assert resultado["limite_credito"] == Decimal("500.00")
     assert resultado["deuda_actual"] == Decimal("0.00")
     assert resultado["disponible"] == Decimal("500.00")
+    assert resultado["elegible_credito"] is True
 
 
 def test_consultar_limite_disponible_descuenta_deuda_vigente(db_session):
@@ -1317,6 +1478,19 @@ def test_consultar_limite_disponible_descuenta_deuda_vigente(db_session):
 
     assert resultado["deuda_actual"] == Decimal("120.00")
     assert resultado["disponible"] == Decimal("380.00")
+
+
+def test_consultar_limite_disponible_cliente_sin_dias_credito_no_es_elegible(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"), dias_credito=0)
+
+    resultado = VentaService.consultar_limite_disponible(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
+
+    # El limite y el disponible siguen calculandose tal cual (son datos reales del
+    # cliente), pero elegible_credito=False deja claro que ese disponible no tiene
+    # ningun efecto: el cliente no puede facturarse a credito por ningun monto.
+    assert resultado["disponible"] == Decimal("500.00")
+    assert resultado["elegible_credito"] is False
 
 
 def test_consultar_limite_disponible_cliente_inexistente_falla(db_session):

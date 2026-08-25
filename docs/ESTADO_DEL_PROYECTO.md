@@ -417,6 +417,15 @@ de servicio.
   el `Usuario` directo contra el modelo (no pasa por `UsuarioService.crear_usuario()`),
   igual que `tests/factories.py::crear_usuario_admin()` — evita el problema de "necesito
   un ADMIN para crear el primer ADMIN".
+- **Abrir/cerrar turno de caja se restringe a ADMIN, no al RBAC genérico** (2026-08-25):
+  `CajaService.abrir_caja()`/`cerrar_caja()` (`app/services/tesoreria.py`) usaban
+  `require_permiso(..., "cajas", "editar")` — cualquier rol con ese permiso otorgado podía
+  abrir/cerrar turnos. Fijar el saldo inicial/final de una caja es más sensible que
+  "editar" un registro cualquiera, así que ahora usan un helper dedicado
+  `_require_admin()` que exige `rol.nombre == "ADMIN"` directamente en vez de consultar
+  `rol_permisos` — ningún otro rol califica sin importar qué permisos tenga asignados.
+  `app/ui/caja_apertura_dialog.py` no necesitó cambios: ya capturaba
+  `PermisoDenegadoError` de `abrir_caja()` y lo mostraba en pantalla.
 
 ## 8. Validaciones de negocio destacadas
 
@@ -427,6 +436,23 @@ de servicio.
 - **Stock y crédito en ventas**: `emitir_factura()` valida disponibilidad de stock
   (agrupando ítems repetidos) y, si la condición es `credito`, que la deuda actual del
   cliente más la nueva factura no supere `limite_credito`.
+- **Crédito exige `Cliente.dias_credito` configurado (2026-08-25)**: antes cualquier
+  cliente podía facturarse a crédito sin importar `dias_credito` (columna
+  `NOT NULL DEFAULT 0`) — un cliente nuevo sin configurar terminaba con vencimiento
+  inmediato (0 días) sin ningún aviso. Ahora `emitir_factura()` rechaza
+  `condicion_pago='credito'` si `cliente.dias_credito <= 0` (gate de elegibilidad, aplica
+  incluso si se pasa `fecha_vencimiento` explícita para datos backdateados). Para un
+  cliente que sí califica, se puede dar una cantidad de días distinta a la configurada
+  para una factura puntual vía `dias_credito_personalizados`, pero requiere autorización
+  de un supervisor (`motivo_dias_credito` + `id_autorizador_dias_credito`, permiso
+  `'creditos'/'crear'`, migración `migrations/0025_autorizacion_dias_credito.sql`) —
+  mismo mecanismo que ya existía para descuentos (`'descuentos'/'crear'`), generalizado en
+  un único `app/ui/autorizacion_dialog.py::AutorizacionDialog(recurso, accion, ...)`
+  reutilizable. `FacturaVenta.dias_credito_aplicados` guarda el snapshot de los días
+  efectivamente usados (configurados u override) para cada factura de crédito.
+  `app/ui/factura_form_dialog.py` refleja esto con un checkbox "Usar días de crédito
+  configurados del cliente" — `vencimiento_input` pasó a ser siempre un valor derivado
+  (ya no editable a mano libremente sin autorización).
 - **Clientes, proveedores, vendedores, productos, bancos y cuentas bancarias nunca se
   borran físicamente** (resuelto 2026-08-22, ver el hallazgo "deletes sin guarda" en la
   sección 9): `delete_cliente()`/`ProveedorService.eliminar()`/`VendedorService.eliminar()`/
@@ -476,6 +502,36 @@ de servicio.
   `tests/services/test_pagos.py::test_borrar_pago_cobro_con_turno_de_caja_ya_cerrado_recalcula_saldo_cierre`.
 - ~~Sin migraciones formales del schema~~ — resuelto (2026-08-22). Ver nota al final de
   la sección 3.
+- **Flujo de "vuelto" en pagos de contado**: cuando la suma de formas de pago excede el
+  total de la factura (pago en efectivo con vuelto), hoy el excedente simplemente no se
+  registra — cada pago se recorta al saldo restante y una línea que quede en 0 se omite
+  (ver "Pagos de contado multi-método" en la sección 3). No existe todavía un concepto de
+  "vuelto" en el sistema: ni como movimiento de caja de salida, ni como dato mostrado/
+  impreso en la factura o el recibo. Pendiente decidir si se registra como un
+  `caja_movimientos` tipo 'salida' automático al emitir, y si debe reflejarse en el PDF de
+  la factura. Desarrollo aparte.
+- **Auditoría del módulo de Facturación 2026-08-25**: hallazgos Crítico/Alto (IVA no
+  reflejado en el total de "Nueva Factura", condición de carrera en el límite de crédito,
+  pérdida de datos si `emitir_factura` falla) y la mayoría de los Medio/Bajo (caja
+  re-solicitada en cada entrada, sin validación proactiva de stock, filtro de cliente sin
+  límite, sin feedback visual durante la emisión, comentario desactualizado,
+  `consultar_limite_disponible` sin reflejar elegibilidad de crédito, columna Vendedor en
+  el listado, cobertura de tests) — todos resueltos el mismo día. Quedaron dos hallazgos
+  Bajo deliberadamente sin aplicar, por desproporcionados frente al resto del batch:
+  - **Filtro de facturas por rango de fechas**: `VentaService.listar_facturas()` ya acepta
+    `fecha_desde`/`fecha_hasta`, pero exponerlo en la UI (`BotonFiltros`) requeriría
+    extender `toolbar_popups.py` para soportar `QDateEdit` (hoy solo maneja
+    `QComboBox`/`QCheckBox` para detectar "filtros activos" y limpiarlos) — un cambio de
+    arquitectura del componente compartido, no un ajuste puntual de este módulo.
+  - **Editar una línea del carrito/formas de pago en "Nueva Factura"**: hoy solo se puede
+    agregar/quitar, en ambas tablas — es el mismo patrón en toda la app (`clientes_panel`,
+    `inventario_panel`, etc.), no algo específico de facturación; cambiarlo ahí sin
+    tocarlo en el resto dejaría la app inconsistente.
+  - Tampoco se tocó el hallazgo Bajo de reordenar/acortar la duración de los locks de
+    stock (`WITH (UPDLOCK, ROWLOCK)` se piden antes de validar descuento/tasa/pagos): el
+    riesgo de introducir un problema de orden de locks (ahora hay dos: `Inventario` para
+    stock y `Cliente` para el límite de crédito) superaba el beneficio marginal frente al
+    resto de los cambios de esta auditoría.
 - Cobertura de pruebas automatizadas: hecha para los 18 módulos de servicio más el
   runner de migraciones. Hay un harness de pytest (`tests/`) contra una base de datos
   SQL Server de prueba dedicada (real, no mock — necesario para validar los triggers),

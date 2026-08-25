@@ -3,8 +3,9 @@ Paleta de colores y hojas de estilo globales para el ERP moderno.
 Centraliza todos los QSS en un solo lugar para facilitar el mantenimiento.
 """
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QTableWidget, QWidget
 
 # ── Paleta principal ────────────────────────────────────────────────────────
 COLOR_PRIMARY = "#0D47A1"  # Azul corporativo principal
@@ -187,6 +188,7 @@ QTableWidget {{
 QTableWidget::item {{
     padding: 8px 12px;
     border-bottom: 1px solid {COLOR_BORDER};
+    color: {COLOR_TEXT_DARK};
 }}
 QTableWidget::item:selected {{
     background-color: {COLOR_TABLE_SELECTED};
@@ -349,3 +351,15 @@ def aplicar_sombra(widget: QWidget, blur: int = 18, y_offset: int = 3, alpha: in
     sombra.setYOffset(y_offset)
     sombra.setColor(QColor(15, 23, 42, alpha))
     widget.setGraphicsEffect(sombra)
+
+
+def alinear_encabezados(tabla: QTableWidget, alineaciones: dict[int, Qt.AlignmentFlag]) -> None:
+    """QHeaderView centra el texto de sus secciones por defecto, mientras que
+    QTableWidgetItem se alinea a la izquierda por defecto -- sin esto, el encabezado de
+    cada columna de texto queda corrido respecto a sus datos (ver GUIA_ESTILO_UI.md §5).
+    `alineaciones` mapea indice de columna -> la misma alineacion que ya usan los
+    QTableWidgetItem de esa columna (columnas no listadas quedan con el default de Qt)."""
+    for columna, alineacion in alineaciones.items():
+        item = tabla.horizontalHeaderItem(columna)
+        if item is not None:
+            item.setTextAlignment(int(alineacion | Qt.AlignmentFlag.AlignVCenter))

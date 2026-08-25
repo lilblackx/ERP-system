@@ -16,6 +16,22 @@ class EmpresaService:
         return session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
 
     @staticmethod
+    def obtener_iva_vigente(session: Session) -> tuple[bool, Decimal]:
+        """(iva_activo, iva_porcentaje) sin gate de permiso, a proposito: el IVA es una
+        regla de negocio global que necesita cualquier usuario que pueda facturar (no
+        solo quien tiene 'empresa'/'ver', que protege el resto de la configuracion --
+        RIF, direccion, logo, etc.). Mismo criterio que ya usa VentaService.emitir_factura(),
+        que lee ConfiguracionEmpresa directo sin gate para calcular el IVA real de cada
+        venta -- dejar que la UI necesite un permiso aparte solo para *mostrar* ese mismo
+        numero es lo que causaba que el total mostrado en factura_form_dialog.py quedara
+        mal para cualquier rol sin 'empresa'/'ver' (hallazgo #1 de la auditoria de
+        facturacion)."""
+        config = session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
+        if config is None or not config.iva_activo:
+            return False, Decimal("0")
+        return True, config.iva_porcentaje or Decimal("0")
+
+    @staticmethod
     def guardar_configuracion(
         session: Session,
         rif: str | None,

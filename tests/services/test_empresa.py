@@ -165,3 +165,44 @@ def test_guardar_configuracion_iva_porcentaje_fuera_de_rango_falla(db_session):
             iva_porcentaje="150.00",
             modificado_por=admin.id_usuario,
         )
+
+
+# --- obtener_iva_vigente (sin gate de permiso, ver docstring en empresa.py) -----------
+
+
+def test_obtener_iva_vigente_sin_configuracion(db_session):
+    assert EmpresaService.obtener_iva_vigente(db_session) == (False, Decimal("0"))
+
+
+def test_obtener_iva_vigente_sin_usuario_autorizado_no_falla(db_session):
+    """A diferencia de obtener_configuracion(), esta consulta no exige 'empresa'/'ver' --
+    es la regla de negocio que necesita cualquier usuario que pueda facturar."""
+    admin = crear_usuario_admin(db_session)
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+
+    assert EmpresaService.obtener_iva_vigente(db_session) == (True, Decimal("16.00"))
+
+
+def test_obtener_iva_vigente_desactivado_devuelve_cero(db_session):
+    admin = crear_usuario_admin(db_session)
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=False,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+
+    assert EmpresaService.obtener_iva_vigente(db_session) == (False, Decimal("0"))

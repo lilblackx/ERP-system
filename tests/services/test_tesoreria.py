@@ -2,9 +2,17 @@ from decimal import Decimal
 
 import pytest
 
-from app.services.permisos import PermisoDenegadoError
+from app.services.permisos import PermisoDenegadoError, PermisoService
 from app.services.tesoreria import BancoService, CajaService
-from tests.factories import crear_banco, crear_caja, crear_cuenta_bancaria, crear_usuario_admin
+from tests.factories import (
+    crear_banco,
+    crear_caja,
+    crear_cuenta_bancaria,
+    crear_permiso,
+    crear_rol,
+    crear_usuario,
+    crear_usuario_admin,
+)
 
 # --- BancoService ---------------------------------------------------------
 
@@ -216,6 +224,35 @@ def test_abrir_caja_ya_abierta(db_session):
 
     with pytest.raises(ValueError, match="ya esta abierta"):
         CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+
+def test_abrir_caja_usuario_no_admin_falla(db_session):
+    """Abrir/cerrar turno se restringe a ADMIN especificamente -- ni siquiera un rol con
+    el permiso 'cajas'/'editar' explicitamente otorgado alcanza (ver _require_admin en
+    app/services/tesoreria.py). Es justamente el caso que demuestra que ya no basta con
+    el RBAC generico."""
+    admin = crear_usuario_admin(db_session)
+    rol = crear_rol(db_session)
+    permiso = crear_permiso(db_session, recurso="cajas", accion="editar")
+    PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+    caja = crear_caja(db_session)
+
+    with pytest.raises(PermisoDenegadoError, match="administrador"):
+        CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=usuario.id_usuario, saldo_apertura=0)
+
+
+def test_cerrar_caja_usuario_no_admin_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    rol = crear_rol(db_session)
+    permiso = crear_permiso(db_session, recurso="cajas", accion="editar")
+    PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    with pytest.raises(PermisoDenegadoError, match="administrador"):
+        CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=usuario.id_usuario)
 
 
 def test_cerrar_caja_sin_turno_abierto(db_session):

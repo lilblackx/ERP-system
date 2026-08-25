@@ -126,7 +126,7 @@ class PagoLineaDialog(QDialog):
     (pagos=[...]): metodo_pago, moneda, monto_moneda_origen, id_cuenta_bancaria/id_caja
     (exactamente uno), referencia."""
 
-    def __init__(self, session: Session, id_usuario: int | None, parent=None):
+    def __init__(self, session: Session, id_usuario: int | None, monto_sugerido: float | None = None, parent=None):
         super().__init__(parent)
         self.session = session
         self.id_usuario = id_usuario
@@ -142,6 +142,16 @@ class PagoLineaDialog(QDialog):
         self._build_ui()
         self._cargar_origenes()
         self._toggle_origen()
+
+        # Precarga el saldo pendiente de la factura (auditoria UX de facturacion,
+        # cajero): sin esto, el caso mas comun -- un solo pago en efectivo por el total
+        # exacto -- igual obligaba a recordar y tipear el monto a mano. Preseleccionado
+        # (selectAll) para poder sobreescribirlo de un tiro si el cajero va a repartir el
+        # pago entre varias formas/monedas.
+        if monto_sugerido is not None and monto_sugerido > 0:
+            self.monto_input.setValue(monto_sugerido)
+            self.monto_input.setFocus()
+            self.monto_input.selectAll()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -201,6 +211,11 @@ class PagoLineaDialog(QDialog):
         self.monto_input.setRange(0.01, 999999999.99)
         self.monto_input.setDecimals(2)
         self.monto_input.setFixedHeight(32)
+        # Con el monto ya precargado (ver __init__/monto_sugerido) y seleccionado, Enter
+        # aca confirma de una -- para el caso comun (efectivo, monto sugerido correcto)
+        # el flujo completo queda en "Agregar forma de pago" + Enter, sin mouse
+        # (auditoria UX de facturacion, cajero).
+        self.monto_input.lineEdit().returnPressed.connect(self._validar_y_aceptar)
         col_monto.addWidget(lbl_monto)
         col_monto.addWidget(self.monto_input)
 

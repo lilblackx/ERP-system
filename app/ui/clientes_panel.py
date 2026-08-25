@@ -52,6 +52,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
+    alinear_encabezados,
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
@@ -249,6 +250,19 @@ class ClientesPanel(QWidget):
     def _make_table(self) -> QTableWidget:
         self.tabla = QTableWidget(0, len(COLS_VISIBLES))
         self.tabla.setHorizontalHeaderLabels(COLS_VISIBLES)
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignCenter,
+                8: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

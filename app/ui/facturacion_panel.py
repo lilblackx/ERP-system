@@ -56,6 +56,7 @@ from app.ui.styles import (
     COLORES_ESTADO_FACTURA,
     SEARCH_QSS,
     TABLE_QSS,
+    alinear_encabezados,
     aplicar_sombra,
     color_con_alpha,
 )
@@ -64,9 +65,14 @@ from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "N° Factura", "Cliente", "Fecha", "Condición", "Total", "Estado"]
+COLS_VISIBLES = ["ID", "N° Factura", "Cliente", "Vendedor", "Fecha", "Condición", "Total", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
+# Tope del combo "Cliente" del filtro (hallazgo #6 de la auditoria de facturacion): antes
+# cargaba el catalogo completo sin limite -- a diferencia de otros selectores de la app
+# (D-01), este es un QComboBox sin busqueda-mientras-se-escribe, asi que el tope es mas
+# generoso que el usado ahi (50) para que siga siendo util sin buscador.
+LIMITE_CLIENTES_FILTRO = 200
 
 
 def _tarea_imprimir_factura(session, id_factura: int, id_usuario: int | None) -> str | None:
@@ -142,13 +148,16 @@ class FacturacionPanel(QWidget):
         # volver a "Facturacion" desde otro modulo mostraba el listado viejo.
         super().showEvent(event)
         self.cargar_facturas()
-        # Gate de entrada: sin ninguna caja con turno abierto no se puede emitir
-        # facturas (aunque si se pueden seguir viendo las ya emitidas) -- se ofrece
-        # abrir un turno cada vez que se entra al modulo mientras siga sin haber
-        # ninguna abierta. self._verificando_caja evita reentrancia si showEvent se
-        # dispara mas de una vez mientras el dialogo modal ya esta abierto (el
-        # exec() de un QDialog corre un event loop anidado que si procesa timers).
-        self._verificar_caja_abierta(ofrecer_apertura=True)
+        # Solo actualiza el badge "Caja abierta"/"Sin caja abierta" -- NO ofrece abrir
+        # turno aca (ofrecer_apertura=False). Antes se lanzaba CajaAperturaDialog cada
+        # vez que se entraba al modulo mientras no hubiera ninguna caja abierta: un
+        # cajero sin rol ADMIN (que ya no puede abrir turnos, ver CajaService.
+        # _require_admin) quedaba interrumpido por ese modal cada vez que volvia a la
+        # pestana sin poder resolverlo el mismo -- solo cancelarlo (hallazgo #4 de la
+        # auditoria de facturacion). El gate real sigue intacto: nueva_factura() pide
+        # la apertura explicitamente (ofrecer_apertura=True) recien cuando hace falta
+        # de verdad, no solo por navegar al modulo.
+        self._verificar_caja_abierta(ofrecer_apertura=False)
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 
@@ -247,7 +256,8 @@ class FacturacionPanel(QWidget):
     def _cargar_clientes_filtro(self) -> None:
         session = self.session_factory()
         try:
-            for cliente in list_clientes(session, None, id_usuario=self.usuario.id_usuario):
+            clientes = list_clientes(session, None, id_usuario=self.usuario.id_usuario, limite=LIMITE_CLIENTES_FILTRO)
+            for cliente in clientes:
                 self.cliente_combo.addItem(cliente.nombre_razon_social, cliente.id_cliente)
         except Exception:
             logger.exception("Fallo al cargar clientes para el filtro de facturacion")
@@ -257,6 +267,18 @@ class FacturacionPanel(QWidget):
     def _make_table(self) -> QTableWidget:
         self.tabla = QTableWidget(0, len(COLS_VISIBLES))
         self.tabla.setHorizontalHeaderLabels(COLS_VISIBLES)
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -266,8 +288,8 @@ class FacturacionPanel(QWidget):
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(6, 110)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(7, 110)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)
@@ -366,19 +388,20 @@ class FacturacionPanel(QWidget):
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(f.id_factura)))
             self.tabla.setItem(fila, 1, QTableWidgetItem(f.numero_factura))
             self.tabla.setItem(fila, 2, QTableWidgetItem(f.cliente.nombre_razon_social if f.cliente else ""))
+            self.tabla.setItem(fila, 3, QTableWidgetItem(f.vendedor.nombre_vendedor if f.vendedor else ""))
 
             fecha = f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else ""
-            self.tabla.setItem(fila, 3, QTableWidgetItem(fecha))
+            self.tabla.setItem(fila, 4, QTableWidgetItem(fecha))
 
             condicion = "Contado" if f.condicion_pago == "contado" else "Crédito"
-            self.tabla.setItem(fila, 4, QTableWidgetItem(condicion))
+            self.tabla.setItem(fila, 5, QTableWidgetItem(condicion))
 
             item_total = QTableWidgetItem(f"${float(f.total_venta):,.2f}")
             item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 5, item_total)
+            self.tabla.setItem(fila, 6, item_total)
 
             badge = EstadoFacturaBadge(f.estado_factura or "EMITIDA")
-            self.tabla.setCellWidget(fila, 6, badge)
+            self.tabla.setCellWidget(fila, 7, badge)
 
         total = resultado["total"]
         self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math
@@ -454,21 +477,22 @@ class FacturacionPanel(QWidget):
 
         session = self.session_factory()
         try:
+            # FacturaFormDialog emite la factura el mismo adentro (ver
+            # FacturaFormDialog._validar_y_aceptar/self.factura_emitida) -- si
+            # VentaService.emitir_factura falla server-side, el dialogo se queda abierto
+            # con el error mostrado y el carrito/formas de pago intactos, en vez de
+            # cerrarse y perder todo lo cargado (hallazgo #3 de la auditoria de
+            # facturacion). Aca solo queda reaccionar a un exec() exitoso.
             dialogo = FacturaFormDialog(session, self.usuario.id_usuario, parent=self)
-            if dialogo.exec():
-                datos = dialogo.get_data()
-                factura = VentaService.emitir_factura(session, id_usuario=self.usuario.id_usuario, **datos)
+            if dialogo.exec() and dialogo.factura_emitida is not None:
+                factura = dialogo.factura_emitida
                 self.cargar_facturas()
                 # La impresion se dispara en segundo plano (no bloquea este mensaje ni
                 # el resto de la UI) -- ver _disparar_impresion_automatica.
                 self._disparar_impresion_automatica(factura.id_factura)
                 QMessageBox.information(self, "Factura emitida", f"Factura {factura.numero_factura} emitida con éxito.")
-        except ValueError as exc:
-            session.rollback()
-            QMessageBox.warning(self, "No se pudo emitir la factura", str(exc))
         except Exception:
-            session.rollback()
-            logger.exception("Fallo al emitir factura")
+            logger.exception("Fallo al procesar la emision de la factura")
             QMessageBox.critical(self, "Error", "No se pudo emitir la factura.")
         finally:
             session.close()
@@ -567,6 +591,7 @@ class FacturacionPanel(QWidget):
                 f.id_factura,
                 f.numero_factura,
                 f.cliente.nombre_razon_social if f.cliente else None,
+                f.vendedor.nombre_vendedor if f.vendedor else None,
                 f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
                 "Contado" if f.condicion_pago == "contado" else "Crédito",
                 float(f.total_venta),

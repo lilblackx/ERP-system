@@ -41,6 +41,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     TABLE_QSS,
+    alinear_encabezados,
     aplicar_sombra,
 )
 
@@ -177,6 +178,20 @@ class HistorialClienteWindow(QDialog):
     def _make_table(self) -> QTableWidget:
         self.tabla = QTableWidget(0, len(COLS_HISTORIAL))
         self.tabla.setHorizontalHeaderLabels(COLS_HISTORIAL)
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignCenter,
+                7: Qt.AlignmentFlag.AlignLeft,
+                8: Qt.AlignmentFlag.AlignRight,
+                9: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

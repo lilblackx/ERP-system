@@ -29,15 +29,13 @@ from app.ui.styles import (
     COLOR_CARD_BG,
     COLOR_DANGER,
     COLOR_PRIMARY,
+    COLOR_PRIMARY_DARK,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
 )
 
 logger = logging.getLogger(__name__)
-
-# Color azul claro similar al de la imagen de referencia
-COLOR_LEFT_BG = "#7A96EA"
 
 
 class LoginWindow(QDialog):
@@ -77,7 +75,7 @@ class LoginWindow(QDialog):
         left_panel.setFixedWidth(400)
         left_panel.setStyleSheet(f"""
             QWidget#LeftPanel {{
-                background-color: {COLOR_LEFT_BG};
+                background-color: {COLOR_PRIMARY};
                 border-top-right-radius: 60px;
                 border-bottom-right-radius: 60px;
             }}
@@ -173,7 +171,7 @@ class LoginWindow(QDialog):
         self.btn_login.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.btn_login.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLOR_LEFT_BG};
+                background-color: {COLOR_PRIMARY};
                 color: white;
                 border: none;
                 border-radius: 8px;
@@ -181,7 +179,7 @@ class LoginWindow(QDialog):
                 font-weight: bold;
             }}
             QPushButton:hover {{
-                background-color: #6382DA;
+                background-color: {COLOR_PRIMARY_DARK};
             }}
         """)
         self.btn_login.clicked.connect(self.intentar_login)
@@ -205,7 +203,7 @@ class LoginWindow(QDialog):
                 color: {COLOR_TEXT_DARK};
             }}
             QLineEdit:focus {{
-                border-bottom: 2px solid {COLOR_LEFT_BG};
+                border-bottom: 2px solid {COLOR_PRIMARY};
             }}
         """
 

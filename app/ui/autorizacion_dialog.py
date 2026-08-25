@@ -1,8 +1,9 @@
-"""Dialogo de autorizacion de descuentos: se abre cuando una factura tiene un item
-vendido por debajo de su precio de lista y/o un descuento manual de factura. Pide
-usuario+clave de un supervisor SIN cerrar la sesion de quien esta facturando -- valida
-contra bcrypt (mismo mecanismo que el login, app/services/auth.py) y ademas que ese
-usuario tenga el permiso 'descuentos'/'crear' (app/services/permisos.py).
+"""Dialogo de autorizacion generico: se abre cuando una accion sensible dentro de una
+factura (descuento manual/venta bajo precio de lista, o dias de credito distintos a los
+configurados en el cliente) necesita el visto bueno de un supervisor. Pide usuario+clave
+SIN cerrar la sesion de quien esta facturando -- valida contra bcrypt (mismo mecanismo
+que el login, app/services/auth.py) y ademas que ese usuario tenga el permiso
+`recurso`/`accion` indicado (app/services/permisos.py).
 
 No asume que quien abre este dialogo no tiene el permiso el mismo: FacturaFormDialog
 solo lo abre cuando hace falta autorizacion, sin importar quien esta logueado -- si el
@@ -92,23 +93,37 @@ QPushButton#BtnSecondary:hover {{
 """
 
 
-class AutorizacionDescuentoDialog(QDialog):
-    """Tras exec() == Accepted, `usuario_autorizador` y `motivo` quedan poblados."""
+class AutorizacionDialog(QDialog):
+    """Tras exec() == Accepted, `usuario_autorizador` y `motivo` quedan poblados.
 
-    def __init__(self, session: Session, mensaje: str, parent=None):
+    `recurso`/`accion` son el permiso (app/services/permisos.py) que debe tener el
+    supervisor que autoriza -- p. ej. ("descuentos", "crear") o ("creditos", "crear")."""
+
+    def __init__(
+        self,
+        session: Session,
+        recurso: str,
+        accion: str,
+        mensaje: str,
+        titulo: str = "Autorización requerida",
+        motivo_label: str = "Motivo",
+        parent=None,
+    ):
         super().__init__(parent)
         self.session = session
+        self.recurso = recurso
+        self.accion = accion
         self.usuario_autorizador: Usuario | None = None
         self.motivo: str = ""
 
-        self.setWindowTitle("Autorizacion de descuento requerida")
+        self.setWindowTitle(titulo)
         self.setFixedSize(420, 320)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
-        self._build_ui(mensaje)
+        self._build_ui(mensaje, motivo_label)
 
-    def _build_ui(self, mensaje: str) -> None:
+    def _build_ui(self, mensaje: str, motivo_label: str) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
@@ -118,7 +133,7 @@ class AutorizacionDescuentoDialog(QDialog):
         icon_lbl.setPixmap(qta.icon("fa5s.user-shield", color=COLOR_DANGER).pixmap(22, 22))
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
-        lbl_titulo = QLabel("Autorizacion requerida")
+        lbl_titulo = QLabel(self.windowTitle())
         lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         lbl_subtitulo = QLabel(mensaje)
         lbl_subtitulo.setWordWrap(True)
@@ -129,10 +144,10 @@ class AutorizacionDescuentoDialog(QDialog):
         header.addLayout(titulos, stretch=1)
         root.addLayout(header)
 
-        lbl_motivo = QLabel("Motivo del descuento <span style='color: #DC2626;'>*</span>")
+        lbl_motivo = QLabel(f"{motivo_label} <span style='color: #DC2626;'>*</span>")
         lbl_motivo.setProperty("class", "FormLabel")
         self.motivo_input = QLineEdit()
-        self.motivo_input.setPlaceholderText("Ej. cliente frecuente, mercancia con detalle…")
+        self.motivo_input.setPlaceholderText("Ej. cliente frecuente…")
         root.addWidget(lbl_motivo)
         root.addWidget(self.motivo_input)
 
@@ -172,7 +187,7 @@ class AutorizacionDescuentoDialog(QDialog):
         clave = self.clave_input.text()
 
         if not motivo:
-            QMessageBox.warning(self, "Motivo requerido", "Ingrese el motivo del descuento.")
+            QMessageBox.warning(self, "Motivo requerido", "Ingrese el motivo.")
             return
         if not nombre_usuario or not clave:
             QMessageBox.warning(self, "Credenciales requeridas", "Ingrese usuario y clave del supervisor.")
@@ -183,8 +198,8 @@ class AutorizacionDescuentoDialog(QDialog):
                 self.session,
                 nombre_usuario,
                 clave,
-                accion_exito="AUTORIZACION_DESCUENTO",
-                accion_fallo="AUTORIZACION_DESCUENTO_FALLIDA",
+                accion_exito=f"AUTORIZACION_{self.recurso.upper()}",
+                accion_fallo=f"AUTORIZACION_{self.recurso.upper()}_FALLIDA",
             )
         except CuentaBloqueadaError as exc:
             QMessageBox.critical(self, "Cuenta bloqueada", str(exc))
@@ -195,10 +210,10 @@ class AutorizacionDescuentoDialog(QDialog):
             return
 
         try:
-            require_permiso(self.session, usuario.id_usuario, "descuentos", "crear")
+            require_permiso(self.session, usuario.id_usuario, self.recurso, self.accion)
         except PermisoDenegadoError:
             QMessageBox.warning(
-                self, "Sin permiso", f"'{usuario.nombre_usuario}' no tiene permiso para autorizar descuentos."
+                self, "Sin permiso", f"'{usuario.nombre_usuario}' no tiene permiso para autorizar esta acción."
             )
             return
 

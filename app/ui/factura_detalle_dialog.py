@@ -37,6 +37,7 @@ from app.ui.styles import (
     COLORES_ESTADO_FACTURA,
     FONT_FAMILY,
     TABLE_QSS,
+    alinear_encabezados,
     aplicar_sombra,
     color_con_alpha,
 )
@@ -240,6 +241,15 @@ class FacturaDetalleDialog(QDialog):
         columnas = ["Producto", "Cantidad", "Precio Unitario", "Subtotal"]
         tabla = QTableWidget(len(self.detalles), len(columnas))
         tabla.setHorizontalHeaderLabels(columnas)
+        alinear_encabezados(
+            tabla,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         tabla.setAlternatingRowColors(True)

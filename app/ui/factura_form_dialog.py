@@ -4,11 +4,16 @@ Mismo patron visual que cliente_form_dialog.py/producto_form_dialog.py (paleta y
 tipografia de app/ui/styles.py); a diferencia de esos dos, permite redimensionar
 porque la tabla del carrito se beneficia de espacio vertical extra."""
 
+import logging
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QDate, QSize, Qt, QTimer
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -20,6 +25,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -28,13 +34,15 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
+from app.db.models import FacturaVenta, Usuario
 from app.services.clientes import list_clientes
+from app.services.empresa import EmpresaService
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
-from app.ui.autorizacion_dialog import AutorizacionDescuentoDialog
+from app.ui.autorizacion_dialog import AutorizacionDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS, PagoLineaDialog
 from app.ui.styles import (
     COLOR_BORDER,
@@ -51,8 +59,11 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     TABLE_QSS,
+    alinear_encabezados,
     aplicar_sombra,
 )
+
+logger = logging.getLogger(__name__)
 
 _ETIQUETAS_METODO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO}
 _ETIQUETAS_MONEDA = {valor: etiqueta for etiqueta, valor in MONEDAS}
@@ -80,7 +91,7 @@ QLabel.SectionTitle {{
     letter-spacing: 0.8px;
     padding-bottom: 2px;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
+QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QDateEdit {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -89,7 +100,7 @@ QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
+QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus, QDateEdit:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
     background-color: #FFFFFF;
 }}
@@ -204,14 +215,25 @@ class FacturaFormDialog(QDialog):
         self.id_usuario = id_usuario
         self.items: list[dict] = []
         self.pagos: list[dict] = []
+        # Poblado por _validar_y_aceptar() al emitir con exito -- VentaService.
+        # emitir_factura() se llama desde ADENTRO del dialogo (no despues, en el
+        # caller) justo para que un fallo server-side (stock que cambio, limite de
+        # credito, etc.) pueda mostrar el error y dejar el dialogo abierto con el
+        # carrito/formas de pago intactos, en vez de cerrarse y perder todo lo cargado
+        # (hallazgo #3 de la auditoria de facturacion).
+        self.factura_emitida: FacturaVenta | None = None
         self._precio_lista_actual: float | None = None
         self._id_autorizador_descuento: int | None = None
         self._motivo_descuento: str | None = None
+        self._id_autorizador_dias_credito: int | None = None
+        self._motivo_dias_credito: str | None = None
         self._tasa_vigente: dict | None = None
+        self._iva_activo: bool = False
+        self._iva_porcentaje: Decimal = Decimal("0")
 
         self.setWindowTitle("Nueva Factura")
-        self.resize(920, 700)
-        self.setMinimumSize(820, 600)
+        self.resize(920, 740)
+        self.setMinimumSize(820, 640)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -223,6 +245,7 @@ class FacturaFormDialog(QDialog):
         self._cargar_vendedores()
         self._cargar_productos()
         self._cargar_tasa_vigente()
+        self._cargar_iva_config()
         # condicion_combo ya tiene sus items al construir el grid, antes de conectar la
         # senal (ver _make_card_cabecera) -- se llama una vez a mano para que el estado
         # inicial (Contado, la primera opcion) muestre la tarjeta de formas de pago.
@@ -329,6 +352,27 @@ class FacturaFormDialog(QDialog):
         fecha = tasa["fecha_tasa"].strftime("%d/%m/%Y")
         self.lbl_tasa.setText(f"Tasa BCV: {tasa['tasa_bcv']:,.2f} Bs/USD ({fecha})")
 
+    def _cargar_iva_config(self) -> None:
+        """El total que este dialogo muestra/valida (ver _total_factura_actual) debe
+        coincidir con lo que VentaService.emitir_factura() realmente exige (subtotal -
+        descuento + IVA) -- antes este dialogo no conocia el IVA en absoluto, el total
+        mostrado quedaba por debajo del real, y una factura de contado con IVA activo
+        podia parecer "Cubierta" en Formas de Pago y ser rechazada igual al Facturar
+        (hallazgo #1 de la auditoria de facturacion).
+
+        EmpresaService.obtener_iva_vigente() no exige permiso 'empresa'/'ver' a proposito
+        (ver su docstring): el IVA es una regla de negocio global que necesita cualquier
+        usuario que pueda facturar, no solo quien administra el resto de la configuracion
+        de la empresa."""
+        self._iva_activo, self._iva_porcentaje = EmpresaService.obtener_iva_vigente(self.session)
+
+    def _calcular_iva(self, subtotal_con_descuento: float) -> float:
+        """Misma formula que VentaService.emitir_factura(): IVA sobre el subtotal YA
+        descontado, redondeado a 2 decimales."""
+        if not self._iva_activo:
+            return 0.0
+        return round(subtotal_con_descuento * float(self._iva_porcentaje) / 100, 2)
+
     def _make_card_cabecera(self) -> QWidget:
         card = QWidget()
         card.setObjectName("SectionCard")
@@ -353,6 +397,10 @@ class FacturaFormDialog(QDialog):
         self.cliente_buscar_input.setPlaceholderText("Buscar cliente por nombre o identificación…")
         self.cliente_buscar_input.setFixedHeight(30)
         self.cliente_buscar_input.textChanged.connect(self._filtrar_clientes)
+        # Mismo criterio que producto_buscar_input: Enter fuerza la busqueda (sin
+        # esperar el debounce) y salta a Buscar producto para seguir sin mouse
+        # (auditoria UX de facturacion, cajero).
+        self.cliente_buscar_input.returnPressed.connect(self._on_cliente_buscar_return_pressed)
 
         self.cliente_combo = QComboBox()
         self.cliente_combo.setFixedHeight(32)
@@ -404,6 +452,41 @@ class FacturaFormDialog(QDialog):
         grid.addWidget(lbl_obs, 3, 2)
         grid.addWidget(self.observaciones_input, 4, 2)
 
+        # Dias de credito (solo credito): por defecto usa los configurados en el cliente
+        # (self.chk_dias_configurados marcado); desmarcarlo revela un spinbox para dar
+        # otros dias a esta factura puntual, lo que exige autorizacion de un supervisor
+        # al aceptar (ver _validar_y_aceptar) -- vencimiento_input es siempre un valor
+        # derivado de esto, nunca editado a mano.
+        self.dias_credito_widget = QWidget()
+        fila_dias = QHBoxLayout(self.dias_credito_widget)
+        fila_dias.setContentsMargins(0, 4, 0, 0)
+        fila_dias.setSpacing(8)
+        self.chk_dias_configurados = QCheckBox("Usar días de crédito configurados del cliente")
+        # Estilo inline explicito -- el texto no pintaba (aunque .text()/.isVisible()
+        # eran correctos) al depender del cascade de DIALOG_STYLE, mismo sintoma que el
+        # boton "Cerrar" de historial_cliente_window.py resuelto antes en esta sesion.
+        self.chk_dias_configurados.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 13px;")
+        self.chk_dias_configurados.setChecked(True)
+        self.chk_dias_configurados.toggled.connect(self._on_toggle_dias_configurados)
+        self.lbl_dias_configurados = QLabel()
+        self.lbl_dias_configurados.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
+        self.dias_credito_custom_input = QSpinBox()
+        self.dias_credito_custom_input.setRange(1, 365)
+        self.dias_credito_custom_input.setSuffix(" días")
+        self.dias_credito_custom_input.setFixedHeight(32)
+        self.dias_credito_custom_input.valueChanged.connect(self._actualizar_vencimiento_calculado)
+        self.dias_credito_custom_input.hide()
+        self.lbl_autorizacion_dias = QLabel("Requiere autorización de un supervisor")
+        self.lbl_autorizacion_dias.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 11px; font-style: italic;")
+        self.lbl_autorizacion_dias.hide()
+        fila_dias.addWidget(self.chk_dias_configurados)
+        fila_dias.addWidget(self.lbl_dias_configurados)
+        fila_dias.addWidget(self.dias_credito_custom_input)
+        fila_dias.addWidget(self.lbl_autorizacion_dias)
+        fila_dias.addStretch()
+        self.dias_credito_widget.hide()
+        grid.addWidget(self.dias_credito_widget, 5, 0, 1, 3)
+
         layout.addLayout(grid)
 
         self.lbl_alerta_credito = QLabel()
@@ -449,6 +532,15 @@ class FacturaFormDialog(QDialog):
 
         self.tabla_pagos = QTableWidget(0, 5)
         self.tabla_pagos.setHorizontalHeaderLabels(["Método", "Moneda", "Monto", "Origen / Referencia", ""])
+        alinear_encabezados(
+            self.tabla_pagos,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         self.tabla_pagos.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.tabla_pagos.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabla_pagos.setAlternatingRowColors(True)
@@ -469,7 +561,9 @@ class FacturaFormDialog(QDialog):
         return self.card_pagos
 
     def _agregar_pago(self) -> None:
-        dialogo = PagoLineaDialog(self.session, self.id_usuario, parent=self)
+        total_pagado = sum(self._convertir_pago_a_usd(pago) for pago in self.pagos)
+        saldo_pendiente = max(self._total_factura_actual() - total_pagado, 0.0)
+        dialogo = PagoLineaDialog(self.session, self.id_usuario, monto_sugerido=saldo_pendiente, parent=self)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.pagos.append(dialogo.get_data())
             self._refrescar_tabla_pagos()
@@ -537,7 +631,8 @@ class FacturaFormDialog(QDialog):
 
     def _total_factura_actual(self) -> float:
         total = sum(it["cantidad"] * it["precio_unitario"] for it in self.items)
-        return max(total - self.descuento_input.value(), 0.0)
+        subtotal_con_descuento = max(total - self.descuento_input.value(), 0.0)
+        return subtotal_con_descuento + self._calcular_iva(subtotal_con_descuento)
 
     def _make_card_carrito(self) -> QWidget:
         card = QWidget()
@@ -558,6 +653,11 @@ class FacturaFormDialog(QDialog):
         self.producto_buscar_input.setPlaceholderText("Buscar producto…")
         self.producto_buscar_input.setFixedHeight(32)
         self.producto_buscar_input.textChanged.connect(self._filtrar_productos)
+        # Enter (ej. un lector de codigo de barras, que escanea + manda Enter solo) fuerza
+        # la busqueda de una vez -- sin esto el Enter no hacia nada y quedaba a merced del
+        # debounce -- y salta directo a Cantidad en vez de necesitar el mouse (auditoria
+        # UX de facturacion, cajero).
+        self.producto_buscar_input.returnPressed.connect(self._on_producto_buscar_return_pressed)
 
         self.producto_combo = QComboBox()
         self.producto_combo.setFixedHeight(32)
@@ -570,6 +670,10 @@ class FacturaFormDialog(QDialog):
         self.cantidad_input.setValue(1)
         self.cantidad_input.setFixedHeight(32)
         self.cantidad_input.setFixedWidth(100)
+        # Enter en Cantidad o Precio agrega directo -- ya se vio/confirmo el producto en
+        # el combo antes de llegar aca, cerrando el ciclo escaneo/tipeo -> agregar sin
+        # tocar el mouse (auditoria UX de facturacion, cajero).
+        self.cantidad_input.lineEdit().returnPressed.connect(self._agregar_item)
 
         self.precio_input = QDoubleSpinBox()
         self.precio_input.setRange(0.01, 999999999.99)
@@ -577,6 +681,7 @@ class FacturaFormDialog(QDialog):
         self.precio_input.setPrefix("$ ")
         self.precio_input.setFixedHeight(32)
         self.precio_input.setFixedWidth(130)
+        self.precio_input.lineEdit().returnPressed.connect(self._agregar_item)
 
         btn_agregar = QPushButton(" Agregar")
         btn_agregar.setObjectName("BtnAgregar")
@@ -597,10 +702,20 @@ class FacturaFormDialog(QDialog):
         self.nota_item_input.setPlaceholderText("Nota para este item (opcional)…")
         self.nota_item_input.setMaxLength(255)
         self.nota_item_input.setFixedHeight(28)
+        self.nota_item_input.returnPressed.connect(self._agregar_item)
         layout.addWidget(self.nota_item_input)
 
         self.tabla_items = QTableWidget(0, 5)
         self.tabla_items.setHorizontalHeaderLabels(["Producto", "Cantidad", "Precio Unit.", "Subtotal", ""])
+        alinear_encabezados(
+            self.tabla_items,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         self.tabla_items.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.tabla_items.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabla_items.setAlternatingRowColors(True)
@@ -611,6 +726,11 @@ class FacturaFormDialog(QDialog):
         self.tabla_items.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla_items.setColumnWidth(4, 70)
         self.tabla_items.setStyleSheet(TABLE_QSS)
+        # La fila de dias de credito (card cabecera) puede aparecer/desaparecer segun el
+        # cliente/condicion -- sin este minimo, esta tabla (stretch=1) es la que absorbe
+        # esa diferencia de alto y sus filas quedan aplastadas/ilegibles cuando la fila de
+        # arriba se muestra.
+        self.tabla_items.setMinimumHeight(110)
         aplicar_sombra(self.tabla_items)
         layout.addWidget(self.tabla_items, stretch=1)
 
@@ -694,20 +814,62 @@ class FacturaFormDialog(QDialog):
             )
         self._timer_busqueda_cliente.start(DEBOUNCE_BUSQUEDA_MS)
 
+    def _on_cliente_buscar_return_pressed(self) -> None:
+        if hasattr(self, "_timer_busqueda_cliente"):
+            self._timer_busqueda_cliente.stop()
+        self._buscar_clientes(self.cliente_buscar_input.text().strip() or None)
+        if self.cliente_combo.currentData() is not None:
+            self.producto_buscar_input.setFocus()
+
+    def _cliente_seleccionado(self):
+        id_cliente = self.cliente_combo.currentData()
+        return next((c for c in self._clientes if c.id_cliente == id_cliente), None)
+
     def _on_cliente_cambiado(self) -> None:
-        if self.condicion_combo.currentData() == "credito":
-            id_cliente = self.cliente_combo.currentData()
-            cliente = next((c for c in self._clientes if c.id_cliente == id_cliente), None)
-            dias_credito = (cliente.dias_credito if cliente else None) or 30
-            self.vencimiento_input.setDate(QDate.currentDate().addDays(dias_credito))
+        es_credito = self.condicion_combo.currentData() == "credito"
+        cliente = self._cliente_seleccionado()
+        cliente_tiene_credito = cliente is not None and (cliente.dias_credito or 0) > 0
+        self.dias_credito_widget.setVisible(es_credito and cliente_tiene_credito)
+        if es_credito and cliente_tiene_credito:
+            # Cada vez que cambia el cliente se vuelve a partir de "usar los
+            # configurados" -- no se arrastra un override de un cliente anterior.
+            self.lbl_dias_configurados.setText(f"({cliente.dias_credito} días)")
+            self.chk_dias_configurados.blockSignals(True)
+            self.chk_dias_configurados.setChecked(True)
+            self.chk_dias_configurados.blockSignals(False)
+            self.dias_credito_custom_input.hide()
+            self.lbl_autorizacion_dias.hide()
+            self._actualizar_vencimiento_calculado()
         self._actualizar_alerta_credito()
+
+    def _on_toggle_dias_configurados(self, checked: bool) -> None:
+        self.dias_credito_custom_input.setVisible(not checked)
+        self.lbl_autorizacion_dias.setVisible(not checked)
+        if not checked:
+            cliente = self._cliente_seleccionado()
+            self.dias_credito_custom_input.blockSignals(True)
+            self.dias_credito_custom_input.setValue(cliente.dias_credito if cliente else 30)
+            self.dias_credito_custom_input.blockSignals(False)
+        self._actualizar_vencimiento_calculado()
+
+    def _actualizar_vencimiento_calculado(self) -> None:
+        """`vencimiento_input` es siempre un valor derivado (nunca editado a mano, ver
+        `_make_card_cabecera`) -- refleja lo que `VentaService.emitir_factura` calculará
+        server-side a partir de `cliente.dias_credito` o del override del spinbox."""
+        if self.chk_dias_configurados.isChecked():
+            cliente = self._cliente_seleccionado()
+            dias = cliente.dias_credito if cliente else 0
+        else:
+            dias = self.dias_credito_custom_input.value()
+        self.vencimiento_input.setDate(QDate.currentDate().addDays(dias))
 
     def _actualizar_alerta_credito(self) -> None:
         """Bloqueo visual proactivo (hallazgo #12 del audit de facturacion): antes de que
         el usuario arme todo el carrito y recien se entere del limite de credito al dar
         "Emitir", se avisa apenas el total supera lo disponible. Solo informativo -- el
-        backend (VentaService.emitir_factura) vuelve a validar todo, IVA incluido, que
-        aca no se conoce sin llamar al servicio de nuevo.
+        backend (VentaService.emitir_factura) vuelve a validar todo de nuevo, pero el
+        total usado aca ya incluye IVA (via _total_factura_actual/_calcular_iva, ver
+        _cargar_iva_config) para no subestimar cuanto le queda disponible al cliente.
 
         Tambien es el punto central que habilita/deshabilita btn_emitir: para contado, en
         la pestana "Formas de Pago" (paso final, boton "Facturar") se exige que las
@@ -725,6 +887,16 @@ class FacturaFormDialog(QDialog):
                 self.btn_emitir.setEnabled(True)
             return
 
+        cliente = self._cliente_seleccionado()
+        if cliente is not None and (cliente.dias_credito or 0) <= 0:
+            self.lbl_alerta_credito.setText(
+                f"'{cliente.nombre_razon_social}' no tiene días de crédito configurados: "
+                "solo puede facturarse de contado."
+            )
+            self.lbl_alerta_credito.show()
+            self.btn_emitir.setEnabled(False)
+            return
+
         try:
             info = VentaService.consultar_limite_disponible(self.session, id_cliente, id_usuario=self.id_usuario)
         except (ValueError, PermisoDenegadoError):
@@ -732,8 +904,7 @@ class FacturaFormDialog(QDialog):
             self.btn_emitir.setEnabled(True)
             return
 
-        total_carrito = sum(it["cantidad"] * it["precio_unitario"] for it in self.items)
-        total_carrito -= self.descuento_input.value()
+        total_carrito = self._total_factura_actual()
         if total_carrito > float(info["disponible"]):
             self.lbl_alerta_credito.setText(
                 f"Este cliente tiene ${float(info['disponible']):,.2f} disponibles de credito y la "
@@ -762,11 +933,22 @@ class FacturaFormDialog(QDialog):
         for vendedor in vendedores:
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
 
+        # Precarga el vendedor si quien esta logueado tiene un vinculo directo con uno
+        # (Usuario.id_vendedor_usuario, solo se asigna para usuarios con rol VENDEDOR --
+        # ver UsuarioService._resolver_vinculo_vendedor): el caso mas comun es que quien
+        # factura sea el propio vendedor, y antes tenia que elegirse a mano en cada
+        # factura (auditoria UX de facturacion, cajero). No pisa la seleccion si ese
+        # vendedor no esta en la lista (inactivo, o el usuario no tiene vinculo).
+        usuario_actual = self.session.get(Usuario, self.id_usuario) if self.id_usuario is not None else None
+        if usuario_actual is not None and usuario_actual.id_vendedor_usuario is not None:
+            indice = self.vendedor_combo.findData(usuario_actual.id_vendedor_usuario)
+            if indice >= 0:
+                self.vendedor_combo.setCurrentIndex(indice)
+
     # ── Condicion de pago ──────────────────────────────────────────────────
 
     def _toggle_credito(self) -> None:
         es_credito = self.condicion_combo.currentData() == "credito"
-        self.vencimiento_input.setEnabled(es_credito)
         if es_credito and self.pagos:
             # credito no admite pagos al emitir (VentaService.emitir_factura los rechaza) --
             # se descartan las formas de pago que se hayan cargado mientras era contado.
@@ -777,8 +959,7 @@ class FacturaFormDialog(QDialog):
         else:
             self._actualizar_boton_footer()
         self._refrescar_tabla_pagos()  # tambien deja btn_emitir en el estado correcto
-        if es_credito:
-            self._on_cliente_cambiado()
+        self._on_cliente_cambiado()  # tambien recalcula vencimiento_input y la alerta
 
     # ── Producto: busqueda server-side con debounce ─────────────────────────
 
@@ -813,6 +994,14 @@ class FacturaFormDialog(QDialog):
             )
         self._timer_busqueda_producto.start(DEBOUNCE_BUSQUEDA_MS)
 
+    def _on_producto_buscar_return_pressed(self) -> None:
+        if hasattr(self, "_timer_busqueda_producto"):
+            self._timer_busqueda_producto.stop()
+        self._buscar_productos(self.producto_buscar_input.text().strip() or None)
+        if self.producto_combo.currentData() is not None:
+            self.cantidad_input.setFocus()
+            self.cantidad_input.selectAll()
+
     def _on_producto_cambiado(self) -> None:
         id_producto = self.producto_combo.currentData()
         self.cantidad_input.setValue(1)
@@ -839,6 +1028,26 @@ class FacturaFormDialog(QDialog):
         if precio <= 0:
             QMessageBox.warning(self, "Precio inválido", "El precio unitario debe ser mayor a cero.")
             return
+
+        # Bloqueo proactivo de stock (hallazgo #5 de la auditoria de facturacion): el
+        # stock ya se mostraba en el combo pero no se validaba hasta el submit final --
+        # ahora se avisa apenas se intenta agregar mas de lo disponible, sumando lo que
+        # ya este en el carrito para el mismo producto (varias lineas del mismo item
+        # cuentan juntas). Solo informativo si el producto no esta en self._productos
+        # (busqueda vieja/stale) -- el backend (VentaService.emitir_factura) vuelve a
+        # validar todo con lock real, esto no lo reemplaza.
+        producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
+        if producto_seleccionado is not None:
+            cantidad_en_carrito = sum(it["cantidad"] for it in self.items if it["id_producto"] == id_producto)
+            stock_disponible = float(producto_seleccionado.cantidad_unidad)
+            if cantidad_en_carrito + cantidad > stock_disponible:
+                QMessageBox.warning(
+                    self,
+                    "Stock insuficiente",
+                    f"Stock disponible de '{producto_seleccionado.nombre_producto}': {stock_disponible:,.2f}."
+                    + (f" Ya tiene {cantidad_en_carrito:,.2f} en el carrito." if cantidad_en_carrito > 0 else ""),
+                )
+                return
 
         nombre_producto = self.producto_combo.currentText()
         nota = self.nota_item_input.text().strip() or None
@@ -874,6 +1083,10 @@ class FacturaFormDialog(QDialog):
         self._refrescar_tabla_items()
         self.producto_buscar_input.clear()
         self.nota_item_input.clear()
+        # Vuelve el foco a la busqueda para el siguiente item sin tocar el mouse --
+        # cierra el ciclo escaneo/tipeo -> agregar -> escaneo/tipeo (auditoria UX de
+        # facturacion, cajero).
+        self.producto_buscar_input.setFocus()
 
     def _quitar_item(self, indice: int) -> None:
         del self.items[indice]
@@ -913,12 +1126,19 @@ class FacturaFormDialog(QDialog):
             self.tabla_items.setCellWidget(fila, 4, btn_quitar)
 
         descuento = self.descuento_input.value()
-        if descuento > 0:
-            self.lbl_total.setText(f"Total: ${total:,.2f} − ${descuento:,.2f} = ${max(total - descuento, 0):,.2f}")
+        subtotal_con_descuento = max(total - descuento, 0.0)
+        monto_iva = self._calcular_iva(subtotal_con_descuento)
+        if descuento > 0 or monto_iva > 0:
+            partes = [f"Total: ${total:,.2f}"]
+            if descuento > 0:
+                partes.append(f"− ${descuento:,.2f}")
+            if monto_iva > 0:
+                partes.append(f"+ ${monto_iva:,.2f} IVA")
+            self.lbl_total.setText(" ".join(partes) + f" = ${subtotal_con_descuento + monto_iva:,.2f}")
         else:
             self.lbl_total.setText(f"Total: ${total:,.2f}")
 
-        # El total de la factura (carrito - descuento) es justo lo que la pestana de
+        # El total de la factura (carrito - descuento + IVA) es justo lo que la pestana de
         # Formas de Pago necesita mostrar como "Total factura" -- sin este refresco
         # quedaba congelado en $0.00 (el valor al construir el dialogo, antes de agregar
         # ningun producto).
@@ -981,6 +1201,7 @@ class FacturaFormDialog(QDialog):
         if not self._validar_datos_basicos():
             return
         es_contado = self.condicion_combo.currentData() == "contado"
+        es_credito = self.condicion_combo.currentData() == "credito"
         if es_contado and not self.pagos:
             self.tabs.setCurrentIndex(self._idx_tab_pagos)
             QMessageBox.warning(
@@ -1001,25 +1222,90 @@ class FacturaFormDialog(QDialog):
                 "Esta factura tiene un item por debajo del precio de lista y/o un "
                 "descuento manual. Un supervisor debe autorizarla."
             )
-            dialogo = AutorizacionDescuentoDialog(self.session, mensaje, parent=self)
+            dialogo = AutorizacionDialog(
+                self.session,
+                recurso="descuentos",
+                accion="crear",
+                mensaje=mensaje,
+                titulo="Autorización de descuento requerida",
+                motivo_label="Motivo del descuento",
+                parent=self,
+            )
             if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
                 return
             self._id_autorizador_descuento = dialogo.usuario_autorizador.id_usuario
             self._motivo_descuento = dialogo.motivo
 
+        self._id_autorizador_dias_credito = None
+        self._motivo_dias_credito = None
+        if es_credito and not self.chk_dias_configurados.isChecked():
+            mensaje = (
+                "Esta factura usa días de crédito distintos a los configurados para el "
+                "cliente. Un supervisor debe autorizarla."
+            )
+            dialogo = AutorizacionDialog(
+                self.session,
+                recurso="creditos",
+                accion="crear",
+                mensaje=mensaje,
+                titulo="Autorización de días de crédito requerida",
+                motivo_label="Motivo del cambio de días de crédito",
+                parent=self,
+            )
+            if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
+                return
+            self._id_autorizador_dias_credito = dialogo.usuario_autorizador.id_usuario
+            self._motivo_dias_credito = dialogo.motivo
+
+        # Se emite ACA, no en el caller (ver self.factura_emitida) -- si emitir_factura
+        # falla (una condicion cambio mientras se armaba la factura: stock consumido por
+        # otra venta, limite de credito ya copado, etc.) el dialogo se queda abierto con
+        # todo lo cargado intacto en vez de perderse. setEnabled(False) evita un segundo
+        # click mientras la llamada esta en curso; setOverrideCursor dan feedback visual
+        # de que algo esta pasando durante la llamada sincrona a la base de datos
+        # (hallazgo #7 de la auditoria de facturacion) -- no reemplaza un QThread real
+        # (el resto de la ventana sigue sin responder), pero evita que parezca colgada.
+        self.btn_emitir.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.factura_emitida = VentaService.emitir_factura(
+                self.session, id_usuario=self.id_usuario, **self.get_data()
+            )
+        except ValueError as exc:
+            self.session.rollback()
+            QMessageBox.warning(self, "No se pudo emitir la factura", str(exc))
+            return
+        except Exception:
+            self.session.rollback()
+            logger.exception("Fallo al emitir factura")
+            QMessageBox.critical(self, "Error", "No se pudo emitir la factura.")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.btn_emitir.setEnabled(True)
+
         self.accept()
 
     def get_data(self) -> dict:
         es_credito = self.condicion_combo.currentData() == "credito"
+        usar_dias_configurados = self.chk_dias_configurados.isChecked()
         return {
             "id_cliente": self.cliente_combo.currentData(),
             "id_vendedor": self.vendedor_combo.currentData(),
             "condicion_pago": self.condicion_combo.currentData(),
-            "fecha_vencimiento": self.vencimiento_input.date().toPython() if es_credito else None,
+            # fecha_vencimiento queda en None: VentaService.emitir_factura() la calcula a
+            # partir de dias_credito_personalizados/cliente.dias_credito -- es la unica
+            # fuente de verdad, evita divergencias de fecha entre UI y servidor.
+            "fecha_vencimiento": None,
             "observaciones": self.observaciones_input.text().strip() or None,
             "monto_descuento": self.descuento_input.value(),
             "motivo_descuento": self._motivo_descuento,
             "id_autorizador_descuento": self._id_autorizador_descuento,
+            "dias_credito_personalizados": (
+                self.dias_credito_custom_input.value() if es_credito and not usar_dias_configurados else None
+            ),
+            "motivo_dias_credito": self._motivo_dias_credito,
+            "id_autorizador_dias_credito": self._id_autorizador_dias_credito,
             "pagos": self.pagos if not es_credito else [],
             "items": [
                 {

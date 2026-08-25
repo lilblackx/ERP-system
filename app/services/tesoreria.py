@@ -5,15 +5,38 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import Banco, BancoMovimiento, Caja, CajaMovimiento, CuentaBancaria
+from app.db.models import Banco, BancoMovimiento, Caja, CajaMovimiento, CuentaBancaria, Rol, Usuario
 from app.services.auditoria import AuditoriaService
-from app.services.permisos import require_permiso
+from app.services.permisos import PermisoDenegadoError, require_permiso
 
 logger = logging.getLogger(__name__)
 
 TIPOS_MOVIMIENTO_BANCO = {"abono", "cargo", "transferencia", "deposito"}
 TIPOS_MOVIMIENTO_CAJA = {"entrada", "salida"}
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
+
+
+def _require_admin(session: Session, id_usuario: int | None) -> Usuario:
+    """Abrir/cerrar un turno de caja fija el saldo inicial/final de esa caja -- mas
+    sensible que "editar" un registro cualquiera, asi que se restringe especificamente a
+    ADMIN en vez del RBAC generico de 'cajas'/'editar' (un rol podria tener ese permiso
+    para otras operaciones de caja sin que eso deba habilitar abrir/cerrar turnos).
+    Repite las mismas validaciones de estado/bloqueo que require_permiso() (ver
+    app/services/permisos.py) porque no hay bypass de ADMIN que reusar aca -- ADMIN es
+    justamente el unico rol permitido."""
+    if id_usuario is None:
+        raise PermisoDenegadoError("Abrir/cerrar caja requiere un usuario autenticado")
+    usuario = session.get(Usuario, id_usuario)
+    if usuario is None:
+        raise PermisoDenegadoError(f"Usuario {id_usuario} no encontrado")
+    if usuario.estado != "ACTIVO":
+        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta inactivo")
+    if usuario.bloqueado_desde is not None:
+        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
+    rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
+    if rol is None or rol.nombre != "ADMIN":
+        raise PermisoDenegadoError("Solo un administrador puede abrir/cerrar turnos de caja")
+    return usuario
 
 
 def _enmascarar_numero_cuenta(numero_cuenta: str | None) -> str | None:
@@ -251,7 +274,7 @@ class CajaService:
 
     @staticmethod
     def abrir_caja(session: Session, id_caja: int, id_usuario: int, saldo_apertura) -> Caja:
-        require_permiso(session, id_usuario, "cajas", "editar")
+        _require_admin(session, id_usuario)
         # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18 -- bloquea la fila hasta el
         # commit para que una segunda apertura/cierre concurrente sobre la misma caja
         # espere en vez de leer el mismo estado stale y pisar el saldo_apertura ya fijado
@@ -293,7 +316,7 @@ class CajaService:
 
     @staticmethod
     def cerrar_caja(session: Session, id_caja: int, id_usuario_cierre: int) -> Caja:
-        require_permiso(session, id_usuario_cierre, "cajas", "editar")
+        _require_admin(session, id_usuario_cierre)
         # Ver el comentario de abrir_caja() -- mismo patron.
         caja = session.execute(
             select(Caja).where(Caja.id_caja == id_caja).with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")

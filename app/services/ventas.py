@@ -102,6 +102,9 @@ class VentaService:
         motivo_descuento: str | None = None,
         id_autorizador_descuento: int | None = None,
         pagos: list[dict] | None = None,
+        dias_credito_personalizados: int | None = None,
+        motivo_dias_credito: str | None = None,
+        id_autorizador_dias_credito: int | None = None,
     ) -> FacturaVenta:
         require_permiso(session, id_usuario, "ventas", "crear")
         _validar_items(items)
@@ -141,15 +144,41 @@ class VentaService:
         if observaciones is not None and len(observaciones) > 255:
             raise ValueError("observaciones no puede superar 255 caracteres")
 
-        # fecha_vencimiento: si no se paso explicitamente en una venta a credito, se
-        # calcula con los dias_credito del cliente (mismo default que ya aplicaba la UI
-        # en factura_form_dialog.py) -- antes quedaba en NULL si el caller no la mandaba,
-        # dejando la cuenta por cobrar sin fecha de vencimiento coherente. No se rechazan
-        # fechas pasadas explicitas: una venta a credito puede cargarse ya vencida (dato
-        # historico/backdateado), ver test_por_cobrar_suma_saldos_abiertos_y_cuenta_vencidas.
-        if condicion_pago == "credito" and fecha_vencimiento is None:
-            dias_credito = cliente.dias_credito if cliente.dias_credito is not None else 30
-            fecha_vencimiento = date.today() + timedelta(days=dias_credito)
+        # Credito exige que el cliente tenga dias_credito configurados (>0) -- un cliente
+        # nuevo sin configurar queda forzado a contado, ver docs/ESTADO_DEL_PROYECTO.md.
+        # dias_credito_personalizados permite dar una cantidad distinta a la configurada
+        # para esta factura puntual, pero requiere autorizacion de un supervisor con
+        # permiso 'creditos'/'crear' (motivo_dias_credito + id_autorizador_dias_credito),
+        # simetrico al mecanismo ya existente para descuentos mas abajo. Este gate aplica
+        # siempre que condicion_pago == 'credito', incluso si el caller pasa
+        # fecha_vencimiento explicita -- es un gate de elegibilidad del cliente, no de
+        # calculo de fecha (una venta a credito puede seguir cargandose con una fecha ya
+        # vencida/backdateada, ver test_por_cobrar_suma_saldos_abiertos_y_cuenta_vencidas,
+        # pero el cliente igual debe calificar para credito).
+        dias_credito_aplicados = None
+        hubo_override_dias_credito = False
+        if condicion_pago == "credito":
+            dias_credito_cliente = cliente.dias_credito or 0
+            if dias_credito_cliente <= 0:
+                raise ValueError(
+                    f"El cliente '{cliente.nombre_razon_social}' no tiene dias de credito "
+                    "configurados y no puede facturarse a credito"
+                )
+            dias_credito_aplicados = dias_credito_cliente
+            if dias_credito_personalizados is not None and dias_credito_personalizados != dias_credito_cliente:
+                if dias_credito_personalizados <= 0:
+                    raise ValueError("dias_credito_personalizados debe ser mayor a 0")
+                if not motivo_dias_credito:
+                    raise ValueError("El cambio de dias de credito requiere un motivo")
+                if id_autorizador_dias_credito is None:
+                    raise ValueError("El cambio de dias de credito requiere autorizacion de un supervisor")
+                require_permiso(session, id_autorizador_dias_credito, "creditos", "crear")
+                dias_credito_aplicados = dias_credito_personalizados
+                hubo_override_dias_credito = True
+            if fecha_vencimiento is None:
+                fecha_vencimiento = date.today() + timedelta(days=dias_credito_aplicados)
+        elif dias_credito_personalizados is not None:
+            raise ValueError("dias_credito_personalizados solo aplica a condicion_pago='credito'")
 
         if id_tasa is not None and session.get(ControlDeTasa, id_tasa) is None:
             raise ValueError("Tasa de cambio no encontrada")
@@ -238,6 +267,20 @@ class VentaService:
 
         # --- Validar limite de credito del cliente ---
         if condicion_pago == "credito":
+            # WITH (UPDLOCK, ROWLOCK): mismo patron que el stock mas arriba (hallazgo #2
+            # de la auditoria de facturacion) -- sin esto, dos ventas a credito
+            # concurrentes al MISMO cliente pueden ambas leer la misma deuda_actual antes
+            # de que ninguna haya commiteado su propia CuentaPorCobrar, pasar la
+            # validacion cada una por separado, y juntas superar limite_credito. Bloquea
+            # la fila del cliente hasta el commit/rollback de esta transaccion -- la
+            # segunda venta concurrente espera aca y, gracias a READ_COMMITTED_SNAPSHOT
+            # (migrations/0015), su propia lectura de deuda_actual despues de obtener el
+            # lock ya ve la CuentaPorCobrar que la primera transaccion dejo commiteada.
+            session.execute(
+                select(Cliente)
+                .where(Cliente.id_cliente == id_cliente)
+                .with_hint(Cliente, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one()
             deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
             limite_credito = cliente.limite_credito if cliente.limite_credito is not None else Decimal("0.00")
             if deuda_actual + total_a_cobrar > limite_credito:
@@ -309,6 +352,9 @@ class VentaService:
             monto_descuento=monto_descuento,
             motivo_descuento=motivo_descuento if requiere_autorizacion_descuento else None,
             autorizado_por_descuento=id_autorizador_descuento if requiere_autorizacion_descuento else None,
+            dias_credito_aplicados=dias_credito_aplicados,
+            motivo_dias_credito=motivo_dias_credito if hubo_override_dias_credito else None,
+            autorizado_por_dias_credito=id_autorizador_dias_credito if hubo_override_dias_credito else None,
         )
         session.add(factura)
         session.flush()
@@ -401,6 +447,8 @@ class VentaService:
                 "monto_iva": str(factura.monto_iva),
                 "monto_descuento": str(factura.monto_descuento) if factura.monto_descuento > 0 else None,
                 "autorizado_por_descuento": factura.autorizado_por_descuento,
+                "dias_credito_aplicados": factura.dias_credito_aplicados,
+                "autorizado_por_dias_credito": factura.autorizado_por_dias_credito,
                 "pagos": (
                     [
                         {"metodo_pago": p["metodo_pago"], "moneda": p["moneda"], "monto_usd": str(monto_usd)}
@@ -547,7 +595,10 @@ class VentaService:
         id_usuario: int | None = None,
     ) -> dict:
         require_permiso(session, id_usuario, "ventas", "ver")
-        query = session.query(FacturaVenta).options(joinedload(FacturaVenta.cliente))
+        # joinedload(vendedor): FacturacionPanel muestra el vendedor en el listado
+        # (hallazgo #12 de la auditoria de facturacion) -- sin esto cada fila dispara su
+        # propio SELECT lazy al acceder a factura.vendedor.nombre_vendedor (N+1).
+        query = session.query(FacturaVenta).options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor))
         if fecha_desde:
             query = query.filter(FacturaVenta.fecha_emision >= fecha_desde)
         if fecha_hasta:
@@ -592,7 +643,13 @@ class VentaService:
         """Para bloqueo visual proactivo en la UI (factura_form_dialog.py): cuanto puede
         cargarsele todavia a este cliente ANTES de armar/emitir la factura, sin duplicar
         la logica real de emitir_factura (misma consulta via _deuda_pendiente_cliente).
-        Es solo informativo -- emitir_factura vuelve a validar todo server-side."""
+        Es solo informativo -- emitir_factura vuelve a validar todo server-side.
+
+        elegible_credito refleja el mismo gate que emitir_factura() aplica (cliente.
+        dias_credito > 0) -- sin esto, un cliente sin dias de credito configurados
+        mostraba igual un "disponible" positivo (si limite_credito > 0) que no tiene
+        ningun efecto real: no puede facturarse a credito por ningun monto (hallazgo #9
+        de la auditoria de facturacion)."""
         require_permiso(session, id_usuario, "ventas", "ver")
         cliente = session.get(Cliente, id_cliente)
         if cliente is None:
@@ -604,4 +661,5 @@ class VentaService:
             "limite_credito": limite_credito,
             "deuda_actual": deuda_actual,
             "disponible": limite_credito - deuda_actual,
+            "elegible_credito": (cliente.dias_credito or 0) > 0,
         }

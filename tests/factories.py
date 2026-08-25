@@ -77,12 +77,18 @@ def crear_precio_producto(
     return precio
 
 
-def crear_cliente(session: Session, limite_credito: Decimal | int = 0, **overrides) -> Cliente:
+def crear_cliente(session: Session, limite_credito: Decimal | int = 0, dias_credito: int = 30, **overrides) -> Cliente:
+    """dias_credito default 30 (no 0, el default real de la columna): la mayoria de los
+    tests de credito de la suite no les interesa este valor en si, solo necesitan un
+    cliente que SI califique para credito (VentaService.emitir_factura exige
+    dias_credito>0, ver migrations/0025_autorizacion_dias_credito.sql) -- los tests que
+    prueban especificamente el bloqueo pasan dias_credito=0 explicito."""
     datos = {
         "codigo_cliente": _siguiente("CLI-"),
         "identificacion_cliente": _siguiente("V-"),
         "nombre_razon_social": "Cliente de prueba",
         "limite_credito": Decimal(str(limite_credito)),
+        "dias_credito": dias_credito,
     }
     datos.update(overrides)
     cliente = Cliente(**datos)

@@ -73,8 +73,14 @@ def _fila_item(detalle: FacturaDetalle) -> str:
 
 def _filas_totales(factura: FacturaVenta) -> tuple[str, float]:
     subtotal = float(factura.total_venta)
-    td_lbl = f'style="padding:3pt 6pt;text-align:right;color:{_MUTED};"'
-    td_val = 'style="padding:3pt 6pt;text-align:right;width:120pt;"'
+    # padding:7pt (antes 3pt) -- con solo el margin-top de la tabla contenedora (ver
+    # _bloque_totales_html) el bloque de totales quedaba pegado visualmente contra la
+    # ultima fila de items: QTextDocument (el motor HTML/CSS de Qt, no un navegador
+    # real) respeta el margin-top de una <table> de forma inconsistente/insuficiente
+    # cuando sigue inmediatamente a otra tabla, asi que el espacio real hay que
+    # garantizarlo tambien con padding dentro de la propia fila.
+    td_lbl = f'style="padding:7pt 6pt;text-align:right;color:{_MUTED};"'
+    td_val = 'style="padding:7pt 6pt;text-align:right;width:120pt;"'
     filas = f"<tr><td {td_lbl}>Subtotal:</td><td {td_val}>{_money(subtotal)}</td></tr>"
 
     descuento = float(factura.monto_descuento or 0)
@@ -87,9 +93,9 @@ def _filas_totales(factura: FacturaVenta) -> tuple[str, float]:
         filas += f"<tr><td {td_lbl}>IVA ({pct:g}%):</td><td {td_val}>{_money(monto_iva)}</td></tr>"
 
     total = subtotal - descuento + monto_iva
-    td_lbl_total = f'style="padding:6pt 6pt;text-align:right;font-weight:bold;border-top:2pt solid {_PRIMARY};"'
+    td_lbl_total = f'style="padding:8pt 6pt;text-align:right;font-weight:bold;border-top:2pt solid {_PRIMARY};"'
     td_val_total = (
-        f'style="padding:6pt 6pt 6pt 16pt;text-align:right;font-weight:bold;font-size:14pt;'
+        f'style="padding:8pt 6pt 8pt 16pt;text-align:right;font-weight:bold;font-size:14pt;'
         f'color:{_PRIMARY};border-top:2pt solid {_PRIMARY};"'
     )
     filas += f"<tr><td {td_lbl_total}>Total a pagar:</td><td {td_val_total}>{_money(total)}</td></tr>"
@@ -262,6 +268,7 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
             </tr>
             {filas_items}
         </table>
+        <p style="margin:10pt 0 0 0;line-height:1pt;font-size:1pt;">&nbsp;</p>
         {bloque_totales}
         <div style="clear:both;"></div>
         {observaciones_html}
