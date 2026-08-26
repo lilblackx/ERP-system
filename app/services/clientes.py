@@ -42,9 +42,7 @@ def list_clientes(
     if texto_busqueda:
         like = f"%{texto_busqueda}%"
         query = query.filter(
-            Cliente.nombre_razon_social.ilike(like)
-            | Cliente.id_legal.ilike(like)
-            | Cliente.codigo_cliente.ilike(like)
+            Cliente.nombre_razon_social.ilike(like) | Cliente.id_legal.ilike(like) | Cliente.codigo_cliente.ilike(like)
         )
     if estado_cliente:
         query = query.filter(Cliente.estado_cliente == estado_cliente)

@@ -644,6 +644,7 @@ class VentaService:
         if nombre_cliente:
             # Usar subquery para filtrar por nombre de cliente sin afectar los joinedloads
             from app.db.models import Cliente
+
             subq_cliente = session.query(Cliente.id_cliente).filter(
                 Cliente.nombre_razon_social.ilike(f"%{nombre_cliente}%")
             )
@@ -701,7 +702,7 @@ class VentaService:
                 c.id_factura: c
                 for c in session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_(ids_pagina)).all()
             }
-        
+
         # Obtener métodos de pago para ventas de contado
         pagos_por_cxc = {}
         if cxc_por_factura:
@@ -711,10 +712,10 @@ class VentaService:
                     p.id_cuenta_por_cobrar: p
                     for p in session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar.in_(ids_cxc)).all()
                 }
-        
+
         for f in facturas:
             f.estado_visual = _calcular_estado_visual(f.estado_factura, cxc_por_factura.get(f.id_factura), hoy)
-            
+
             # Agregar método de pago para ventas de contado
             if f.condicion_pago == "contado":
                 cxc = cxc_por_factura.get(f.id_factura)

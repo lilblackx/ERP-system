@@ -245,9 +245,7 @@ class ClientesPanel(QWidget):
         session = self.session_factory()
         try:
             vendedores = (
-                session.query(Vendedor)
-                .filter(Vendedor.estado_vendedor == "ACTIVO")
-                .order_by(Vendedor.nombre_vendedor)
+                session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor)
             )
             for vendedor in vendedores:
                 self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)

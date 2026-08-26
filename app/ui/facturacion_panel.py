@@ -257,7 +257,6 @@ class FacturacionPanel(QWidget):
         h.addWidget(self.btn_exportar)
         return w
 
-
     def _make_table(self) -> QTableWidget:
         self.tabla = QTableWidget(0, len(COLS_VISIBLES))
         self.tabla.setHorizontalHeaderLabels(COLS_VISIBLES)
@@ -426,7 +425,6 @@ class FacturacionPanel(QWidget):
             QMessageBox.warning(self, "Error", "No se pudo obtener el ID de la factura seleccionada.")
             return None
         return int(item.text())
- 
 
     # ── Gate de caja (sin turno abierto no se puede facturar) ─────────────
 

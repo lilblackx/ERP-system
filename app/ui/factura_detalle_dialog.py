@@ -220,7 +220,7 @@ class FacturaDetalleDialog(QDialog):
         condicion = "Contado" if self.factura.condicion_pago == "contado" else "Crédito"
         tasa = self.factura.tasa
         tasa_texto = f"{float(tasa.tasa_dolar_bcv):,.2f} Bs/USD" if tasa else "—"
-        
+
         # Método de pago para ventas de contado
         metodo_pago_texto = self.metodo_pago if self.metodo_pago else "—"
         if self.factura.condicion_pago != "contado":
