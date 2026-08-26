@@ -102,9 +102,7 @@ class HistorialClienteWindow(QDialog):
         self.setMinimumSize(1400, 700)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(
-            self.windowFlags()
-            | Qt.WindowType.WindowCloseButtonHint
-            & ~Qt.WindowType.WindowContextHelpButtonHint
+            self.windowFlags() | Qt.WindowType.WindowCloseButtonHint & ~Qt.WindowType.WindowContextHelpButtonHint
         )
         self._setup_ui()
         self.cargar_historial()
