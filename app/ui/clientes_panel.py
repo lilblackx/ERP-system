@@ -537,7 +537,13 @@ class ClientesPanel(QWidget):
                 QMessageBox.warning(self, "Cliente no encontrado", "El cliente seleccionado no existe.")
                 return
 
-            dialogo = HistorialClienteWindow(self.session_factory, id_cliente, cliente, self.usuario.id_usuario, parent=self)
+            dialogo = HistorialClienteWindow(
+                self.session_factory,
+                id_cliente,
+                cliente,
+                self.usuario.id_usuario,
+                parent=self,
+            )
             dialogo.exec()
         except Exception:
             logger.exception("Fallo al abrir el historial del cliente %s", id_cliente)
