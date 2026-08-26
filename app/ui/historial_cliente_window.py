@@ -82,6 +82,7 @@ COLS_HISTORIAL = [
     "Total Venta",
     "Estado Factura",
     "Condición Pago",
+    "Método Pago",
     "Días Crédito",
     "Observaciones",
     "Pagos",
@@ -191,10 +192,12 @@ class HistorialClienteWindow(QDialog):
                 3: Qt.AlignmentFlag.AlignRight,
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignCenter,
-                7: Qt.AlignmentFlag.AlignLeft,
-                8: Qt.AlignmentFlag.AlignRight,
-                9: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignCenter,
+                8: Qt.AlignmentFlag.AlignCenter,
+                9: Qt.AlignmentFlag.AlignLeft,
+                10: Qt.AlignmentFlag.AlignRight,
+                11: Qt.AlignmentFlag.AlignRight,
             },
         )
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -212,8 +215,9 @@ class HistorialClienteWindow(QDialog):
         self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(45)
@@ -320,13 +324,18 @@ class HistorialClienteWindow(QDialog):
             self.tabla.setItem(fila, 4, QTableWidgetItem(item["estado_factura"]))
             # Condición Pago
             self.tabla.setItem(fila, 5, QTableWidgetItem(item["condicion_pago"]))
+            # Método Pago
+            metodo_pago = item["metodo_pago"] or "—"
+            item_metodo = QTableWidgetItem(metodo_pago)
+            item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 6, item_metodo)
             # Días Crédito
             dias = str(item["dias_credito"]) if item["dias_credito"] is not None else "0"
             item_dias = QTableWidgetItem(dias)
             item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 6, item_dias)
+            self.tabla.setItem(fila, 7, item_dias)
             # Observaciones
-            self.tabla.setItem(fila, 7, QTableWidgetItem(item["observaciones_factura"] or ""))
+            self.tabla.setItem(fila, 8, QTableWidgetItem(item["observaciones_factura"] or ""))
 
             # Pagos (Abonos)
             pagado = f"${float(item['total_pagado']):,.2f}"
@@ -336,7 +345,7 @@ class HistorialClienteWindow(QDialog):
             font = item_pagado.font()
             font.setBold(True)
             item_pagado.setFont(font)
-            self.tabla.setItem(fila, 8, item_pagado)
+            self.tabla.setItem(fila, 9, item_pagado)
 
             # Saldo Pendiente
             saldo_pendiente = f"${float(item['saldo_pendiente']):,.2f}"
@@ -349,7 +358,7 @@ class HistorialClienteWindow(QDialog):
             font = item_saldo.font()
             font.setBold(True)
             item_saldo.setFont(font)
-            self.tabla.setItem(fila, 9, item_saldo)
+            self.tabla.setItem(fila, 10, item_saldo)
 
     def exportar_excel(self) -> None:
         session = self.session_factory()
@@ -365,6 +374,7 @@ class HistorialClienteWindow(QDialog):
                     str(item["total_venta"]),
                     item["estado_factura"],
                     item["condicion_pago"],
+                    item["metodo_pago"] or "—",
                     str(item["dias_credito"] or 0),
                     item["observaciones_factura"] or "",
                     str(item["total_pagado"]),
@@ -402,6 +412,7 @@ class HistorialClienteWindow(QDialog):
                     str(item["total_venta"]),
                     item["estado_factura"],
                     item["condicion_pago"],
+                    item["metodo_pago"] or "—",
                     str(item["dias_credito"] or 0),
                     item["observaciones_factura"] or "",
                     str(item["total_pagado"]),

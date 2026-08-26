@@ -23,6 +23,7 @@ class HistorialItem(TypedDict):
     observaciones_factura: str | None
     total_pagado: Decimal
     saldo_pendiente: Decimal
+    metodo_pago: str | None
 
 
 def obtener_historial_cliente(session: Session, id_cliente: int) -> list[HistorialItem]:
@@ -72,6 +73,11 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         # Obtener días de crédito del cliente
         dias_credito = factura.cliente.dias_credito if factura.cliente else None
 
+        # Obtener método de pago (para ventas de contado)
+        metodo_pago = None
+        if factura.condicion_pago == "contado" and pagos:
+            metodo_pago = pagos[0].metodo_pago
+
         item: HistorialItem = {
             "id_cuenta": cxc.id_cuenta_por_cobrar if cxc else None,
             "id_factura": factura.id_factura,
@@ -85,6 +91,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "observaciones_factura": factura.observaciones_factura,
             "total_pagado": total_pagado,
             "saldo_pendiente": saldo_pendiente,
+            "metodo_pago": metodo_pago,
         }
 
         historial.append(item)

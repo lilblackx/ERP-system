@@ -106,6 +106,7 @@ class FacturaDetalleDialog(QDialog):
         self.datos = datos
         self.factura = datos["factura"]
         self.detalles = datos["detalles"]
+        self.metodo_pago = datos.get("metodo_pago")
         self.session = session
         self.id_usuario = id_usuario
         self.setWindowTitle(f"Factura {self.factura.numero_factura}")
@@ -219,12 +220,18 @@ class FacturaDetalleDialog(QDialog):
         condicion = "Contado" if self.factura.condicion_pago == "contado" else "Crédito"
         tasa = self.factura.tasa
         tasa_texto = f"{float(tasa.tasa_dolar_bcv):,.2f} Bs/USD" if tasa else "—"
+        
+        # Método de pago para ventas de contado
+        metodo_pago_texto = self.metodo_pago if self.metodo_pago else "—"
+        if self.factura.condicion_pago != "contado":
+            metodo_pago_texto = "N/A"
 
         campos = [
             ("N° de Control", self.factura.numero_control),
             ("Cliente", cliente.nombre_razon_social if cliente else "—"),
             ("Fecha de emisión", fecha),
             ("Condición de pago", condicion),
+            ("Método de pago", metodo_pago_texto),
             ("Vendedor", vendedor.nombre_vendedor if vendedor else "Sin vendedor"),
             ("Vencimiento", vencimiento if self.factura.condicion_pago == "credito" else "N/A"),
             ("Tasa BCV aplicada", tasa_texto),

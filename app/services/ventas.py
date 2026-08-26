@@ -713,13 +713,20 @@ class VentaService:
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
         factura.estado_visual = _calcular_estado_visual(factura.estado_factura, cxc, date.today())
 
+        # Obtener método de pago para ventas de contado
+        metodo_pago = None
+        if factura.condicion_pago == "contado" and cxc:
+            pago = session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar).first()
+            if pago:
+                metodo_pago = pago.metodo_pago
+
         detalles = (
             session.query(FacturaDetalle)
             .options(joinedload(FacturaDetalle.producto))
             .filter(FacturaDetalle.id_factura == id_factura)
             .all()
         )
-        return {"factura": factura, "detalles": detalles}
+        return {"factura": factura, "detalles": detalles, "metodo_pago": metodo_pago}
 
     @staticmethod
     def consultar_limite_disponible(session: Session, id_cliente: int, id_usuario: int | None = None) -> dict:
