@@ -6,9 +6,9 @@ Primera pantalla que ve el usuario tras iniciar sesión.
 
 import logging
 import socket
+from datetime import datetime
 
 import qtawesome as qta
-from datetime import datetime
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QShowEvent
 from PySide6.QtWidgets import (
