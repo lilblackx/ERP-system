@@ -218,7 +218,9 @@ class FacturacionPanel(QWidget):
 
         self.buscar_cliente_input = QLineEdit()
         self.buscar_cliente_input.setPlaceholderText("Buscar por cliente…")
-        self.buscar_cliente_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_cliente_input.addAction(
+            qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.buscar_cliente_input.setObjectName("SearchInput")
         self.buscar_cliente_input.setStyleSheet(SEARCH_QSS)
         self.buscar_cliente_input.setFixedWidth(200)
@@ -420,7 +422,12 @@ class FacturacionPanel(QWidget):
         if not filas:
             QMessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
             return None
-        return int(self.tabla.item(filas[0].row(), 0).text())
+        item = self.tabla.item(filas[0].row(), 0)
+        if item is None:
+            QMessageBox.warning(self, "Error", "No se pudo obtener el ID de la factura seleccionada.")
+            return None
+        return int(item.text())
+ 
 
     # ── Gate de caja (sin turno abierto no se puede facturar) ─────────────
 
