@@ -644,7 +644,9 @@ class VentaService:
         if nombre_cliente:
             # Usar subquery para filtrar por nombre de cliente sin afectar los joinedloads
             from app.db.models import Cliente
-            subq_cliente = session.query(Cliente.id_cliente).filter(Cliente.nombre_razon_social.ilike(f"%{nombre_cliente}%"))
+            subq_cliente = session.query(Cliente.id_cliente).filter(
+                Cliente.nombre_razon_social.ilike(f"%{nombre_cliente}%")
+            )
             query = query.filter(FacturaVenta.id_cliente_factura.in_(subq_cliente))
 
         hoy = date.today()
