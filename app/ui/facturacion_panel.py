@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.models import Caja, FacturaVenta, Usuario
-from app.services.clientes import list_clientes
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
