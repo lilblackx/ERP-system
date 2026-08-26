@@ -28,6 +28,8 @@ from app.services.historial_cliente import (
     obtener_historial_cliente,
     obtener_saldo_total_pendiente,
 )
+from app.services.ventas import VentaService
+from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -90,15 +92,20 @@ COLS_HISTORIAL = [
 class HistorialClienteWindow(QDialog):
     """Ventana que muestra el historial de facturas y pagos de un cliente."""
 
-    def __init__(self, session_factory, id_cliente: int, cliente: Cliente, parent=None):
+    def __init__(self, session_factory, id_cliente: int, cliente: Cliente, id_usuario: int | None = None, parent=None):
         super().__init__(parent)
         self.session_factory = session_factory
         self.id_cliente = id_cliente
         self.cliente = cliente
+        self.id_usuario = id_usuario
         self.setWindowTitle(f"Historial - {cliente.nombre_razon_social}")
         self.setMinimumSize(1400, 700)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() 
+            | Qt.WindowType.WindowCloseButtonHint 
+            & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
         self._setup_ui()
         self.cargar_historial()
 
@@ -199,6 +206,7 @@ class HistorialClienteWindow(QDialog):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabla.doubleClicked.connect(self.ver_detalle_factura)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -218,6 +226,13 @@ class HistorialClienteWindow(QDialog):
         h.setContentsMargins(0, 4, 0, 0)
         h.setSpacing(10)
         h.addStretch()
+
+        btn_detalle = QPushButton("Ver detalle")
+        btn_detalle.setIcon(qta.icon("fa5s.eye", color=COLOR_TEXT_DARK))
+        btn_detalle.setObjectName("BtnSecondary")
+        btn_detalle.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_detalle.setAutoDefault(False)
+        btn_detalle.clicked.connect(self.ver_detalle_factura)
 
         btn_exportar_excel = QPushButton("Exportar Excel")
         btn_exportar_excel.setIcon(qta.icon("fa5s.file-excel", color=COLOR_SUCCESS))
@@ -258,6 +273,7 @@ class HistorialClienteWindow(QDialog):
         """)
         btn_cerrar.clicked.connect(self.accept)
 
+        h.addWidget(btn_detalle)
         h.addWidget(btn_exportar_excel)
         h.addWidget(btn_exportar_pdf)
         h.addWidget(btn_cerrar)
@@ -414,5 +430,42 @@ class HistorialClienteWindow(QDialog):
         except Exception:
             logger.exception("Fallo al exportar historial a PDF")
             QMessageBox.critical(self, "Error", "No se pudo exportar el historial a PDF.")
+        finally:
+            session.close()
+
+    def _fila_seleccionada_id_factura(self) -> int | None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            QMessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
+            return None
+        # El ID de factura está en la columna 1 (N° Factura) pero necesitamos el ID interno
+        # Lo obtenemos del historial cargado usando el índice de la fila
+        session = self.session_factory()
+        try:
+            historial = obtener_historial_cliente(session, self.id_cliente)
+            fila = filas[0].row()
+            if fila < len(historial):
+                return historial[fila]["id_factura"]
+        except Exception:
+            logger.exception("Fallo al obtener el ID de factura de la fila seleccionada")
+        finally:
+            session.close()
+        return None
+
+    def ver_detalle_factura(self) -> None:
+        id_factura = self._fila_seleccionada_id_factura()
+        if id_factura is None:
+            return
+
+        session = self.session_factory()
+        try:
+            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.id_usuario)
+            dialogo = FacturaDetalleDialog(datos, session, self.id_usuario, parent=self)
+            dialogo.exec()
+        except ValueError as exc:
+            QMessageBox.warning(self, "No se pudo abrir la factura", str(exc))
+        except Exception:
+            logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
+            QMessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
             session.close()
