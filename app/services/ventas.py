@@ -621,6 +621,7 @@ class VentaService:
         condicion_pago: str | None = None,
         estado: str | None = None,
         numero_factura: str | None = None,
+        nombre_cliente: str | None = None,
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
@@ -640,6 +641,11 @@ class VentaService:
             query = query.filter(FacturaVenta.condicion_pago == condicion_pago)
         if numero_factura:
             query = query.filter(FacturaVenta.numero_factura.ilike(f"%{numero_factura}%"))
+        if nombre_cliente:
+            # Usar subquery para filtrar por nombre de cliente sin afectar los joinedloads
+            from app.db.models import Cliente
+            subq_cliente = session.query(Cliente.id_cliente).filter(Cliente.nombre_razon_social.ilike(f"%{nombre_cliente}%"))
+            query = query.filter(FacturaVenta.id_cliente_factura.in_(subq_cliente))
 
         hoy = date.today()
         if estado:
@@ -693,8 +699,30 @@ class VentaService:
                 c.id_factura: c
                 for c in session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_(ids_pagina)).all()
             }
+        
+        # Obtener métodos de pago para ventas de contado
+        pagos_por_cxc = {}
+        if cxc_por_factura:
+            ids_cxc = [c.id_cuenta_por_cobrar for c in cxc_por_factura.values()]
+            if ids_cxc:
+                pagos_por_cxc = {
+                    p.id_cuenta_por_cobrar: p
+                    for p in session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar.in_(ids_cxc)).all()
+                }
+        
         for f in facturas:
             f.estado_visual = _calcular_estado_visual(f.estado_factura, cxc_por_factura.get(f.id_factura), hoy)
+            
+            # Agregar método de pago para ventas de contado
+            if f.condicion_pago == "contado":
+                cxc = cxc_por_factura.get(f.id_factura)
+                if cxc:
+                    pago = pagos_por_cxc.get(cxc.id_cuenta_por_cobrar)
+                    f.metodo_pago = pago.metodo_pago if pago else None
+                else:
+                    f.metodo_pago = None
+            else:
+                f.metodo_pago = None
 
         return {"items": facturas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
 

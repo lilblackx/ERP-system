@@ -65,7 +65,7 @@ from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "N° Factura", "Cliente", "Vendedor", "Fecha", "Condición", "Total", "Estado"]
+COLS_VISIBLES = ["ID", "N° Factura", "Cliente", "Vendedor", "Fecha", "Condición", "Método Pago", "Total", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 # Tope del combo "Cliente" del filtro (hallazgo #6 de la auditoria de facturacion): antes
@@ -216,6 +216,14 @@ class FacturacionPanel(QWidget):
         self.buscar_input.returnPressed.connect(self._buscar_desde_inicio)
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
 
+        self.buscar_cliente_input = QLineEdit()
+        self.buscar_cliente_input.setPlaceholderText("Buscar por cliente…")
+        self.buscar_cliente_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_cliente_input.setObjectName("SearchInput")
+        self.buscar_cliente_input.setStyleSheet(SEARCH_QSS)
+        self.buscar_cliente_input.setFixedWidth(200)
+        self.buscar_cliente_input.returnPressed.connect(self._buscar_desde_inicio)
+
         self.estado_combo = QComboBox()
         for etiqueta, valor in ESTADOS_FILTRO:
             self.estado_combo.addItem(etiqueta, valor)
@@ -226,16 +234,10 @@ class FacturacionPanel(QWidget):
             self.condicion_combo.addItem(etiqueta, valor)
         self.condicion_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
-        self.cliente_combo = QComboBox()
-        self.cliente_combo.addItem("Todos los clientes", None)
-        self.cliente_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
-        self._cargar_clientes_filtro()
-
         self.btn_filtrar = BotonFiltros(
             [
                 ("Estado", self.estado_combo),
                 ("Condición de pago", self.condicion_combo),
-                ("Cliente", self.cliente_combo),
             ]
         )
 
@@ -247,22 +249,13 @@ class FacturacionPanel(QWidget):
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_facturas, on_pdf=self.exportar_pdf_facturas)
 
         h.addWidget(self.buscar_input)
+        h.addWidget(self.buscar_cliente_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nueva_factura)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
 
-    def _cargar_clientes_filtro(self) -> None:
-        session = self.session_factory()
-        try:
-            clientes = list_clientes(session, None, id_usuario=self.usuario.id_usuario, limite=LIMITE_CLIENTES_FILTRO)
-            for cliente in clientes:
-                self.cliente_combo.addItem(cliente.nombre_razon_social, cliente.id_cliente)
-        except Exception:
-            logger.exception("Fallo al cargar clientes para el filtro de facturacion")
-        finally:
-            session.close()
 
     def _make_table(self) -> QTableWidget:
         self.tabla = QTableWidget(0, len(COLS_VISIBLES))
@@ -275,8 +268,9 @@ class FacturacionPanel(QWidget):
                 3: Qt.AlignmentFlag.AlignLeft,
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignRight,
-                7: Qt.AlignmentFlag.AlignCenter,
+                6: Qt.AlignmentFlag.AlignCenter,
+                7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignCenter,
             },
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -288,8 +282,9 @@ class FacturacionPanel(QWidget):
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(7, 110)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(8, 110)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)
@@ -367,9 +362,9 @@ class FacturacionPanel(QWidget):
             resultado = VentaService.listar_facturas(
                 session,
                 numero_factura=self.buscar_input.text().strip() or None,
+                nombre_cliente=self.buscar_cliente_input.text().strip() or None,
                 estado=self.estado_combo.currentData(),
                 condicion_pago=self.condicion_combo.currentData(),
-                id_cliente=self.cliente_combo.currentData(),
                 pagina=self.pagina_actual,
                 por_pagina=POR_PAGINA,
                 id_usuario=self.usuario.id_usuario,
@@ -396,12 +391,20 @@ class FacturacionPanel(QWidget):
             condicion = "Contado" if f.condicion_pago == "contado" else "Crédito"
             self.tabla.setItem(fila, 5, QTableWidgetItem(condicion))
 
+            # Método de pago
+            metodo_pago = getattr(f, "metodo_pago", None) or "—"
+            if f.condicion_pago != "contado":
+                metodo_pago = "N/A"
+            item_metodo = QTableWidgetItem(metodo_pago)
+            item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 6, item_metodo)
+
             item_total = QTableWidgetItem(f"${float(f.total_venta):,.2f}")
             item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 6, item_total)
+            self.tabla.setItem(fila, 7, item_total)
 
             badge = EstadoFacturaBadge(f.estado_visual)
-            self.tabla.setCellWidget(fila, 7, badge)
+            self.tabla.setCellWidget(fila, 8, badge)
 
         total = resultado["total"]
         self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math
@@ -579,9 +582,9 @@ class FacturacionPanel(QWidget):
         resultado = VentaService.listar_facturas(
             session,
             numero_factura=self.buscar_input.text().strip() or None,
+            nombre_cliente=self.buscar_cliente_input.text().strip() or None,
             estado=self.estado_combo.currentData(),
             condicion_pago=self.condicion_combo.currentData(),
-            id_cliente=self.cliente_combo.currentData(),
             pagina=1,
             por_pagina=1_000_000,
             id_usuario=self.usuario.id_usuario,
@@ -594,6 +597,7 @@ class FacturacionPanel(QWidget):
                 f.vendedor.nombre_vendedor if f.vendedor else None,
                 f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
                 "Contado" if f.condicion_pago == "contado" else "Crédito",
+                getattr(f, "metodo_pago", None) or "—" if f.condicion_pago == "contado" else "N/A",
                 float(f.total_venta),
                 f.estado_visual,
             ]
