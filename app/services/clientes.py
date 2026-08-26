@@ -32,6 +32,7 @@ def list_clientes(
     estado_cliente: str | None = None,
     id_vendedor: int | None = None,
     id_categoria: int | None = None,
+    identificacion: str | None = None,
 ) -> list[Cliente]:
     """limite: tope opcional de filas (D-01) -- pensado para selectores tipo
     buscar-mientras-se-escribe (ej. app/ui/factura_form_dialog.py) que no necesitan traer
@@ -44,6 +45,9 @@ def list_clientes(
         query = query.filter(
             Cliente.nombre_razon_social.ilike(like) | Cliente.id_legal.ilike(like) | Cliente.codigo_cliente.ilike(like)
         )
+    if identificacion:
+        like = f"%{identificacion}%"
+        query = query.filter(Cliente.identificacion_cliente.ilike(like))
     if estado_cliente:
         query = query.filter(Cliente.estado_cliente == estado_cliente)
     if id_vendedor:

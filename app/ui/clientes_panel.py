@@ -217,15 +217,25 @@ class ClientesPanel(QWidget):
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)
 
-        # Buscar
+        # Buscar por nombre
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText("Buscar cliente…")
+        self.buscar_input.setPlaceholderText("Buscar por nombre…")
         self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
         self.buscar_input.setFixedWidth(220)
         self.buscar_input.returnPressed.connect(self.cargar_clientes)
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
+
+        # Buscar por identificación
+        self.buscar_identificacion_input = QLineEdit()
+        self.buscar_identificacion_input.setPlaceholderText("Buscar por identificación…")
+        self.buscar_identificacion_input.addAction(qta.icon("fa5s.id-card", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_identificacion_input.setObjectName("SearchInput")
+        self.buscar_identificacion_input.setStyleSheet(SEARCH_QSS)
+        self.buscar_identificacion_input.setFixedWidth(220)
+        self.buscar_identificacion_input.returnPressed.connect(self.cargar_clientes)
+        self.buscar_identificacion_input.textChanged.connect(self._busqueda_dinamica)
 
         # Botones primarios
         self.btn_nuevo = QPushButton("Nuevo Cliente")
@@ -274,6 +284,7 @@ class ClientesPanel(QWidget):
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_clientes, on_pdf=self.exportar_pdf_clientes)
 
         h.addWidget(self.buscar_input)
+        h.addWidget(self.buscar_identificacion_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
@@ -371,6 +382,7 @@ class ClientesPanel(QWidget):
                 estado_cliente=self.estado_combo.currentData(),
                 id_vendedor=self.vendedor_combo.currentData(),
                 id_categoria=self.categoria_combo.currentData(),
+                identificacion=self.buscar_identificacion_input.text().strip() or None,
             )
             self._poblar_tabla(clientes)
         except Exception:
@@ -431,6 +443,7 @@ class ClientesPanel(QWidget):
             estado_cliente=self.estado_combo.currentData(),
             id_vendedor=self.vendedor_combo.currentData(),
             id_categoria=self.categoria_combo.currentData(),
+            identificacion=self.buscar_identificacion_input.text().strip() or None,
         )
         return [
             [
