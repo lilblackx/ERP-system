@@ -230,7 +230,9 @@ class ClientesPanel(QWidget):
         # Buscar por identificación
         self.buscar_identificacion_input = QLineEdit()
         self.buscar_identificacion_input.setPlaceholderText("Buscar por identificación…")
-        self.buscar_identificacion_input.addAction(qta.icon("fa5s.id-card", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_identificacion_input.addAction(
+            qta.icon("fa5s.id-card", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.buscar_identificacion_input.setObjectName("SearchInput")
         self.buscar_identificacion_input.setStyleSheet(SEARCH_QSS)
         self.buscar_identificacion_input.setFixedWidth(220)
