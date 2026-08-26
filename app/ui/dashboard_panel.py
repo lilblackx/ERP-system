@@ -5,8 +5,10 @@ Primera pantalla que ve el usuario tras iniciar sesión.
 """
 
 import logging
+import socket
 
 import qtawesome as qta
+from datetime import datetime
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QShowEvent
 from PySide6.QtWidgets import (
@@ -318,6 +320,7 @@ class DashboardPanel(QWidget):
         self.usuario = usuario
         self.setObjectName("ContentArea")
         self._build_ui()
+        self._setup_reloj()
         QTimer.singleShot(100, self.cargar_datos)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -358,12 +361,28 @@ class DashboardPanel(QWidget):
         info.addWidget(lbl_titulo)
         info.addWidget(lbl_subtitulo)
 
+        # System info (hostname, date, time)
+        sistema_info = QVBoxLayout()
+        sistema_info.setSpacing(2)
+        sistema_info.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.lbl_hostname = QLabel()
+        self.lbl_hostname.setStyleSheet(
+            f"font-size: 11px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
+        )
+        self.lbl_fecha_hora = QLabel()
+        self.lbl_fecha_hora.setStyleSheet(
+            f"font-size: 11px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
+        )
+        sistema_info.addWidget(self.lbl_hostname)
+        sistema_info.addWidget(self.lbl_fecha_hora)
+
         btn_nueva_factura = QPushButton(" Nueva factura")
         btn_nueva_factura.setIcon(qta.icon("fa5s.plus", color="white"))
         btn_nueva_factura.setStyleSheet(BUTTON_PRIMARY_QSS)
         btn_nueva_factura.clicked.connect(self.nueva_factura_solicitada.emit)
 
         h.addLayout(info)
+        h.addLayout(sistema_info)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(btn_nueva_factura)
         return w
@@ -372,6 +391,26 @@ class DashboardPanel(QWidget):
         rol = self.usuario.rol.nombre if self.usuario.rol else "Usuario"
         nombre = self.usuario.nombre or self.usuario.nombre_usuario
         return f"{nombre} ({rol})"
+
+    def _setup_reloj(self) -> None:
+        """Configura el reloj que muestra hostname, fecha y hora del sistema."""
+        try:
+            hostname = socket.gethostname()
+        except Exception:
+            hostname = "Desconocido"
+        self.lbl_hostname.setText(f"Equipo: {hostname}")
+
+        self._actualizar_fecha_hora()
+        self.timer_reloj = QTimer(self)
+        self.timer_reloj.timeout.connect(self._actualizar_fecha_hora)
+        self.timer_reloj.start(1000)  # Actualizar cada segundo
+
+    def _actualizar_fecha_hora(self) -> None:
+        """Actualiza la etiqueta de fecha y hora."""
+        ahora = datetime.now()
+        fecha = ahora.strftime("%d/%m/%Y")
+        hora = ahora.strftime("%H:%M:%S")
+        self.lbl_fecha_hora.setText(f"{fecha} · {hora}")
 
     def _make_fila_kpis(self) -> QWidget:
         w = QWidget()
