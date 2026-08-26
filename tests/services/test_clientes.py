@@ -8,7 +8,8 @@ from tests.factories import crear_usuario_admin
 def _datos_cliente(**overrides) -> dict:
     datos = {
         "codigo_cliente": "CLI-001",
-        "identificacion_cliente": "V-12345678",
+        "id_legal": "V",
+        "identificacion_cliente": "12345678",
         "nombre_razon_social": "Cliente de Prueba",
     }
     datos.update(overrides)
@@ -22,7 +23,8 @@ def test_create_cliente(db_session):
 
     assert cliente.id_cliente is not None
     assert cliente.codigo_cliente == "CLI-001"
-    assert cliente.identificacion_cliente == "V-12345678"
+    assert cliente.id_legal == "V"
+    assert cliente.identificacion_cliente == "12345678"
 
 
 def test_create_cliente_sin_usuario_autorizado_falla(db_session):
@@ -53,7 +55,7 @@ def test_create_cliente_codigo_duplicado(db_session):
     with pytest.raises(ValueError):
         clientes_service.create_cliente(
             db_session,
-            **_datos_cliente(identificacion_cliente="V-99999999", creado_por=admin.id_usuario),
+            **_datos_cliente(identificacion_cliente="99999999", creado_por=admin.id_usuario),
         )
 
 
@@ -74,7 +76,7 @@ def test_list_clientes_filtra_por_texto(db_session):
         db_session,
         **_datos_cliente(
             codigo_cliente="CLI-002",
-            identificacion_cliente="V-87654321",
+            identificacion_cliente="87654321",
             nombre_razon_social="Otro",
             creado_por=admin.id_usuario,
         ),
@@ -98,7 +100,7 @@ def test_list_clientes_respeta_limite(db_session):
             db_session,
             **_datos_cliente(
                 codigo_cliente=f"CLI-LIM-{i}",
-                identificacion_cliente=f"V-{i:08d}",
+                identificacion_cliente=f"{i:08d}",
                 nombre_razon_social=f"Cliente Limite {i}",
                 creado_por=admin.id_usuario,
             ),
@@ -116,7 +118,7 @@ def test_list_clientes_sin_limite_devuelve_todos(db_session):
             db_session,
             **_datos_cliente(
                 codigo_cliente=f"CLI-SL-{i}",
-                identificacion_cliente=f"V-{i:08d}9",
+                identificacion_cliente=f"{i:08d}9",
                 nombre_razon_social=f"Cliente Sin Limite {i}",
                 creado_por=admin.id_usuario,
             ),

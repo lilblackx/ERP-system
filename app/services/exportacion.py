@@ -17,6 +17,7 @@ acotados.
 
 import logging
 from collections.abc import Iterable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,8 +49,20 @@ def exportar_pdf(
     encabezados: Sequence[str],
     filas: Iterable[Sequence[Any]],
     cliente_nombre: str | None = None,
+    filtros: dict[str, Any] | None = None,
+    col_widths: Sequence[float] | None = None,
 ) -> None:
-    """Exporta datos a un archivo PDF con formato de tabla."""
+    """Exporta datos a un archivo PDF con formato de tabla.
+
+    Args:
+        ruta: Ruta del archivo PDF a generar.
+        titulo: Título principal del reporte.
+        encabezados: Lista de nombres de columnas.
+        filas: Filas de datos a exportar.
+        cliente_nombre: Nombre del cliente (opcional, para reportes específicos).
+        filtros: Diccionario con los filtros aplicados (opcional).
+        col_widths: Anchos específicos para cada columna (opcional).
+    """
     margen_horizontal = 30
     doc = SimpleDocTemplate(
         str(ruta),
@@ -63,15 +76,34 @@ def exportar_pdf(
     elements = []
     styles = getSampleStyleSheet()
 
-    # Título del reporte
+    # Título del reporte con fecha y hora
+    fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    titulo_completo = f"{titulo} - {fecha_hora}"
     title_style = ParagraphStyle(
         "CustomTitle",
         parent=styles["Heading1"],
-        fontSize=18,
+        fontSize=16,
         textColor=colors.HexColor("#0D47A1"),
         spaceAfter=12,
     )
-    elements.append(Paragraph(titulo, title_style))
+    elements.append(Paragraph(titulo_completo, title_style))
+
+    # Información de filtros aplicados
+    if filtros:
+        filtro_parts = []
+        for key, value in filtros.items():
+            if value:
+                filtro_parts.append(f"{key}: {value}")
+        if filtro_parts:
+            filtro_texto = " | ".join(filtro_parts)
+            filtro_style = ParagraphStyle(
+                "Filtros",
+                parent=styles["Normal"],
+                fontSize=10,
+                textColor=colors.HexColor("#64748B"),
+                spaceAfter=12,
+            )
+            elements.append(Paragraph(f"Filtros: {filtro_texto}", filtro_style))
 
     # Nombre del cliente si se proporciona
     if cliente_nombre:
@@ -96,11 +128,16 @@ def exportar_pdf(
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 10),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+            ("TOPPADDING", (0, 0), (-1, 0), 8),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
-            ("GRID", (0, 0), (-1, -1), 1, colors.grey),
-            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("WORDWRAP", (0, 0), (-1, -1), "CJK"),  # Permite mejor ajuste de texto largo
         ]
     )
 
@@ -111,14 +148,17 @@ def exportar_pdf(
         else:
             table_style.add("BACKGROUND", (0, i), (-1, i), colors.white)
 
-    # Ancho disponible repartido en partes iguales entre las columnas que de verdad
-    # trae `encabezados` -- antes era una lista fija de 10 anchos pensada solo para el
-    # historial de cliente; cualquier otro llamador con una cantidad distinta de
-    # columnas (ej. el listado de facturas de facturacion_panel.py) quedaba con un
-    # Table() cuyo colWidths no correspondia a sus columnas reales.
+    # Ancho de columnas: usar anchos específicos si se proporcionan,
+    # de lo contrario repartir equitativamente
     ancho_disponible = letter[0] - 2 * margen_horizontal
-    ancho_columna = ancho_disponible / len(encabezados)
-    table = Table(data, colWidths=[ancho_columna] * len(encabezados))
+    if col_widths:
+        # Normalizar anchos para que sumen el ancho disponible
+        total_ancho = sum(col_widths)
+        col_widths_normalizados = [w * ancho_disponible / total_ancho for w in col_widths]
+        table = Table(data, colWidths=col_widths_normalizados)
+    else:
+        ancho_columna = ancho_disponible / len(encabezados)
+        table = Table(data, colWidths=[ancho_columna] * len(encabezados))
     table.setStyle(table_style)
     elements.append(table)
 

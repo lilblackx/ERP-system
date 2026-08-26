@@ -10,8 +10,10 @@ ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 def _validar_requeridos(datos: dict) -> None:
     if not datos.get("codigo_cliente"):
         raise ValueError("codigo_cliente es requerido")
+    if not datos.get("id_legal"):
+        raise ValueError("id_legal (tipo de identificación) es requerido")
     if not datos.get("identificacion_cliente"):
-        raise ValueError("identificacion_cliente es requerido")
+        raise ValueError("identificacion_cliente (número) es requerido")
 
 
 def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | None = None) -> None:
@@ -28,6 +30,8 @@ def list_clientes(
     id_usuario: int | None = None,
     limite: int | None = None,
     estado_cliente: str | None = None,
+    id_vendedor: int | None = None,
+    id_categoria: int | None = None,
 ) -> list[Cliente]:
     """limite: tope opcional de filas (D-01) -- pensado para selectores tipo
     buscar-mientras-se-escribe (ej. app/ui/factura_form_dialog.py) que no necesitan traer
@@ -39,11 +43,15 @@ def list_clientes(
         like = f"%{texto_busqueda}%"
         query = query.filter(
             Cliente.nombre_razon_social.ilike(like)
-            | Cliente.identificacion_cliente.ilike(like)
+            | Cliente.id_legal.ilike(like)
             | Cliente.codigo_cliente.ilike(like)
         )
     if estado_cliente:
         query = query.filter(Cliente.estado_cliente == estado_cliente)
+    if id_vendedor:
+        query = query.filter(Cliente.vendedor_cliente == id_vendedor)
+    if id_categoria:
+        query = query.filter(Cliente.id_categoria_cliente == id_categoria)
     query = query.order_by(Cliente.nombre_razon_social)
     if limite is not None:
         query = query.limit(limite)
@@ -78,8 +86,10 @@ def update_cliente(session: Session, id_cliente: int, id_usuario: int | None = N
 
     if "codigo_cliente" in datos and not datos["codigo_cliente"]:
         raise ValueError("codigo_cliente es requerido")
+    if "id_legal" in datos and not datos["id_legal"]:
+        raise ValueError("id_legal (tipo de identificación) es requerido")
     if "identificacion_cliente" in datos and not datos["identificacion_cliente"]:
-        raise ValueError("identificacion_cliente es requerido")
+        raise ValueError("identificacion_cliente (número) es requerido")
 
     nuevo_codigo = datos.get("codigo_cliente")
     if nuevo_codigo and nuevo_codigo != cliente.codigo_cliente:

@@ -368,20 +368,10 @@ class ClienteFormDialog(QDialog):
     def _precargar(self, cliente: Cliente):
         self.codigo_input.setText(cliente.codigo_cliente or "")
 
-        # Extraer prefijo fiscal (J, G, V, E, P) y número
-        ident = (cliente.identificacion_cliente or "").strip().upper()
-        prefix = "V"
-        numero = ident
-        if ident:
-            for p in ["J", "G", "V", "E", "P"]:
-                if ident.startswith(f"{p}-"):
-                    prefix = p
-                    numero = ident[2:]
-                    break
-                elif ident.startswith(p) and len(ident) > 1 and (ident[1].isdigit() or ident[1] == "-"):
-                    prefix = p
-                    numero = ident[1:].lstrip("-")
-                    break
+        # id_legal contiene solo la letra (V, J, G, E, P)
+        # identificacion_cliente contiene solo el número
+        prefix = (cliente.id_legal or "").strip().upper() or "V"
+        numero = cliente.identificacion_cliente or ""
 
         idx_pref = self.tipo_id_combo.findText(prefix)
         if idx_pref >= 0:
@@ -420,21 +410,10 @@ class ClienteFormDialog(QDialog):
         tipo = self.tipo_id_combo.currentText().strip()
         num = self.identificacion_input.text().strip()
 
-        if num:
-            num_upper = num.upper()
-            prefijos = ["J", "G", "V", "E", "P"]
-            if any(num_upper.startswith(f"{p}-") for p in prefijos):
-                ident_final = num_upper
-            elif any(num_upper.startswith(p) and len(num_upper) > 1 and num_upper[1].isdigit() for p in prefijos):
-                ident_final = f"{num_upper[0]}-{num_upper[1:]}"
-            else:
-                ident_final = f"{tipo}-{num}"
-        else:
-            ident_final = None
-
         return {
             "codigo_cliente": self.codigo_input.text().strip() or None,
-            "identificacion_cliente": ident_final,
+            "id_legal": tipo if tipo else None,
+            "identificacion_cliente": num if num else None,
             "nombre_razon_social": self.nombre_input.text().strip(),
             "telefono": self.telefono_input.text().strip() or None,
             "email": self.email_input.text().strip() or None,

@@ -85,7 +85,8 @@ def crear_cliente(session: Session, limite_credito: Decimal | int = 0, dias_cred
     prueban especificamente el bloqueo pasan dias_credito=0 explicito."""
     datos = {
         "codigo_cliente": _siguiente("CLI-"),
-        "identificacion_cliente": _siguiente("V-"),
+        "id_legal": "V",
+        "identificacion_cliente": _siguiente(""),
         "nombre_razon_social": "Cliente de prueba",
         "limite_credito": Decimal(str(limite_credito)),
         "dias_credito": dias_credito,

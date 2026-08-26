@@ -799,7 +799,11 @@ class FacturaFormDialog(QDialog):
         if not clientes:
             self.cliente_combo.addItem("Sin resultados", None)
         for cliente in clientes:
-            etiqueta = f"{cliente.nombre_razon_social} ({cliente.identificacion_cliente or 's/i'})"
+            if cliente.id_legal and cliente.identificacion_cliente:
+                identificacion = f"{cliente.id_legal}-{cliente.identificacion_cliente}"
+            else:
+                identificacion = cliente.id_legal or cliente.identificacion_cliente or "s/i"
+            etiqueta = f"{cliente.nombre_razon_social} ({identificacion})"
             self.cliente_combo.addItem(etiqueta, cliente.id_cliente)
         self.cliente_combo.blockSignals(False)
         self.cliente_combo.setEnabled(bool(clientes))

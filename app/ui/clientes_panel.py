@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import Cliente, Usuario
+from app.db.models import CategoriaCliente, Cliente, Usuario, Vendedor
 from app.services.clientes import (
     cambiar_estado_cliente,
     create_cliente,
@@ -67,6 +67,7 @@ COLS_VISIBLES = [
     "Email",
     "Teléfono",
     "Dirección",
+    "Vendedor",
     "Crédito",
     "Días",
     "Estado",
@@ -232,12 +233,46 @@ class ClientesPanel(QWidget):
         self.btn_nuevo.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_nuevo.clicked.connect(self.nuevo_cliente)
 
+        # Filtro de estado
         self.estado_combo = QComboBox()
         for etiqueta, valor in ESTADOS_FILTRO:
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self.cargar_clientes)
 
-        self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
+        # Filtro de vendedor
+        self.vendedor_combo = QComboBox()
+        self.vendedor_combo.addItem("Todos los vendedores", None)
+        session = self.session_factory()
+        try:
+            vendedores = (
+                session.query(Vendedor)
+                .filter(Vendedor.estado_vendedor == "ACTIVO")
+                .order_by(Vendedor.nombre_vendedor)
+            )
+            for vendedor in vendedores:
+                self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
+        finally:
+            session.close()
+        self.vendedor_combo.currentIndexChanged.connect(self.cargar_clientes)
+
+        # Filtro de categoría
+        self.categoria_combo = QComboBox()
+        self.categoria_combo.addItem("Todas las categorías", None)
+        session = self.session_factory()
+        try:
+            for categoria in session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):
+                self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
+        finally:
+            session.close()
+        self.categoria_combo.currentIndexChanged.connect(self.cargar_clientes)
+
+        self.btn_filtrar = BotonFiltros(
+            [
+                ("Estado", self.estado_combo),
+                ("Vendedor", self.vendedor_combo),
+                ("Categoría", self.categoria_combo),
+            ]
+        )
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_clientes, on_pdf=self.exportar_pdf_clientes)
 
         h.addWidget(self.buscar_input)
@@ -258,9 +293,10 @@ class ClientesPanel(QWidget):
                 3: Qt.AlignmentFlag.AlignLeft,
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignRight,
-                7: Qt.AlignmentFlag.AlignCenter,
+                6: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignRight,
                 8: Qt.AlignmentFlag.AlignCenter,
+                9: Qt.AlignmentFlag.AlignCenter,
             },
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -272,10 +308,10 @@ class ClientesPanel(QWidget):
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(8, 120)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(9, 120)
         self.tabla.setStyleSheet(
             TABLE_QSS
             + """
@@ -335,6 +371,8 @@ class ClientesPanel(QWidget):
                 self.buscar_input.text().strip() or None,
                 id_usuario=self.usuario.id_usuario,
                 estado_cliente=self.estado_combo.currentData(),
+                id_vendedor=self.vendedor_combo.currentData(),
+                id_categoria=self.categoria_combo.currentData(),
             )
             self._poblar_tabla(clientes)
         except Exception:
@@ -351,7 +389,11 @@ class ClientesPanel(QWidget):
             # Columna 1: Nombre Completo
             self.tabla.setItem(fila, 1, QTableWidgetItem(c.nombre_razon_social or ""))
             # Columna 2: Identificación
-            self.tabla.setItem(fila, 2, QTableWidgetItem(c.identificacion_cliente or ""))
+            if c.id_legal and c.identificacion_cliente:
+                identificacion = f"{c.id_legal}-{c.identificacion_cliente}"
+            else:
+                identificacion = c.id_legal or c.identificacion_cliente or ""
+            self.tabla.setItem(fila, 2, QTableWidgetItem(identificacion))
             # Columna 3: Email
             self.tabla.setItem(fila, 3, QTableWidgetItem(c.email or ""))
             # Columna 4: Teléfono
@@ -359,21 +401,25 @@ class ClientesPanel(QWidget):
             # Columna 5: Dirección
             self.tabla.setItem(fila, 5, QTableWidgetItem(c.direccion or ""))
 
-            # Columna 6: Crédito
+            # Columna 6: Vendedor
+            nombre_vendedor = c.vendedor.nombre_vendedor if c.vendedor else ""
+            self.tabla.setItem(fila, 6, QTableWidgetItem(nombre_vendedor))
+
+            # Columna 7: Crédito
             cred = f"${float(c.limite_credito):,.2f}" if c.limite_credito else "$0.00"
             item_cred = QTableWidgetItem(cred)
             item_cred.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 6, item_cred)
+            self.tabla.setItem(fila, 7, item_cred)
 
-            # Columna 7: Días de crédito
+            # Columna 8: Días de crédito
             dias = str(c.dias_credito) if c.dias_credito is not None else "0"
             item_dias = QTableWidgetItem(dias)
             item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 7, item_dias)
+            self.tabla.setItem(fila, 8, item_dias)
 
-            # Columna 8: Badge de estado
+            # Columna 9: Badge de estado
             badge = BadgeItem(c.estado_cliente or "ACTIVO")
-            self.tabla.setCellWidget(fila, 8, badge)
+            self.tabla.setCellWidget(fila, 9, badge)
 
         total = len(clientes)
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''}")
@@ -385,15 +431,20 @@ class ClientesPanel(QWidget):
             self.buscar_input.text().strip() or None,
             id_usuario=self.usuario.id_usuario,
             estado_cliente=self.estado_combo.currentData(),
+            id_vendedor=self.vendedor_combo.currentData(),
+            id_categoria=self.categoria_combo.currentData(),
         )
         return [
             [
                 c.id_cliente,
                 c.nombre_razon_social,
-                c.identificacion_cliente,
+                f"{c.id_legal}-{c.identificacion_cliente}"
+                if c.id_legal and c.identificacion_cliente
+                else (c.id_legal or c.identificacion_cliente or ""),
                 c.email,
                 c.telefono,
                 c.direccion,
+                c.vendedor.nombre_vendedor if c.vendedor else "",
                 float(c.limite_credito) if c.limite_credito else 0,
                 c.dias_credito if c.dias_credito is not None else 0,
                 c.estado_cliente,
@@ -427,7 +478,33 @@ class ClientesPanel(QWidget):
         session = self.session_factory()
         try:
             filas = self._filas_para_exportar(session)
-            exportar_pdf(ruta, "Clientes", COLS_VISIBLES, filas)
+
+            # Construir diccionario de filtros aplicados (siempre mostrar todos)
+            filtros = {}
+            texto_busqueda = self.buscar_input.text().strip()
+            filtros["Búsqueda"] = texto_busqueda if texto_busqueda else "Todos"
+
+            estado = self.estado_combo.currentText()
+            filtros["Estado"] = estado
+
+            vendedor = self.vendedor_combo.currentText()
+            filtros["Vendedor"] = vendedor
+
+            categoria = self.categoria_combo.currentText()
+            filtros["Categoría"] = categoria
+
+            # Anchos de columnas optimizados para mejor legibilidad
+            # ID: pequeño, Nombre: grande, Identificación: medio, Email: grande, etc.
+            col_widths = [0.5, 2.5, 1.2, 2.0, 1.2, 1.5, 1.5, 1.0, 0.8, 1.0]
+
+            exportar_pdf(
+                ruta,
+                "Reporte de Clientes",
+                COLS_VISIBLES,
+                filas,
+                filtros=filtros,
+                col_widths=col_widths,
+            )
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
         except Exception:
             logger.exception("Fallo al exportar la lista de clientes a PDF")

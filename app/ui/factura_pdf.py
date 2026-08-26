@@ -209,7 +209,10 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
     codigo_cliente = (cliente.codigo_cliente if cliente else None) or (f"{cliente.id_cliente:06d}" if cliente else "—")
     nombre_cliente = cliente.nombre_razon_social if cliente else "—"
-    identificacion_cliente = cliente.identificacion_cliente if cliente else "—"
+    if cliente and cliente.id_legal and cliente.identificacion_cliente:
+        identificacion_cliente = f"{cliente.id_legal}-{cliente.identificacion_cliente}"
+    else:
+        identificacion_cliente = cliente.id_legal or cliente.identificacion_cliente if cliente else "—"
     telefono_cliente = (cliente.telefono if cliente else None) or "—"
     email_cliente = (cliente.email if cliente else None) or "—"
     direccion_cliente = (cliente.direccion if cliente else None) or "—"
