@@ -494,9 +494,7 @@ peleaba contra su propio color de fondo y lo hacía parecer invisible.
 ```python
 # ✅ BIEN -- objectName + selector, igual que TOPBAR_QSS (`QWidget#TopBar {...}`)
 self.setObjectName("TasaTicker")
-self.setStyleSheet(
-    f"QWidget#TasaTicker {{ background-color: white; border-bottom: 1px solid {COLOR_BORDER}; }}"
-)
+self.setStyleSheet(f"QWidget#TasaTicker {{ background-color: white; border-bottom: 1px solid {COLOR_BORDER}; }}")
 ```
 
 **Regla práctica**: todo contenedor que defina `background`/`border` propios usa
