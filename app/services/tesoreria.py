@@ -265,6 +265,67 @@ class BancoService:
 
         return query.order_by(BancoMovimiento.fecha_movimiento.desc()).all()
 
+    @staticmethod
+    def _registrar_egreso_vuelto(
+        session: Session,
+        id_cuenta: int,
+        monto: Decimal,
+        descripcion: str,
+        referencia: str,
+        id_usuario: int | None,
+        fecha: datetime,
+    ) -> BancoMovimiento:
+        """Inserta el BancoMovimiento tipo 'cargo' del vuelto bancario (pago movil o
+        transferencia) de una factura de contado -- SIN commit ni require_permiso propio: el
+        permiso/autorizacion de vuelto ya se resuelve en VentaService.emitir_factura, este
+        helper vive DENTRO de esa misma transaccion atomica, igual que
+        PagoService._aplicar_pago_cobro. tipo_movimiento='cargo' es el mismo valor que ya usa
+        trg_pagos_proveedores_io para egresos a proveedores -- trg_banco_movimientos_saldo ya
+        resta saldo_total_banco para 'cargo' automaticamente."""
+        movimiento = BancoMovimiento(
+            id_cuenta=id_cuenta,
+            tipo_movimiento="cargo",
+            monto_movimiento=monto,
+            fecha_movimiento=fecha,
+            referencia_movimiento=referencia,
+            descripcion_movimiento=descripcion,
+            creado_por=id_usuario,
+            fecha_creacion=datetime.now(),
+        )
+        session.add(movimiento)
+        session.flush()
+        return movimiento
+
+    @staticmethod
+    def _registrar_ingreso_excedente(
+        session: Session,
+        id_cuenta: int,
+        monto: Decimal,
+        descripcion: str,
+        id_usuario: int | None,
+        fecha: datetime,
+    ) -> BancoMovimiento:
+        """Cuando una forma de pago bancaria tiende mas de lo que _aplicar_pago_cobro
+        aplica a la cuenta por cobrar (capado a su saldo_pendiente -- ver VentaService.
+        emitir_factura), el 'abono' que crea trg_pagos_cobros_io solo cubre el monto
+        aplicado, no el monto realmente recibido en la cuenta. Sin este ingreso adicional
+        por la diferencia, el egreso del vuelto (_registrar_egreso_vuelto) restaria dos
+        veces ese excedente: una vez porque nunca se abono, y otra al registrarse como
+        salida. tipo_movimiento='abono' -- mismo valor que ya usa trg_pagos_cobros_io para
+        cobros a cliente; trg_banco_movimientos_saldo lo suma automaticamente."""
+        movimiento = BancoMovimiento(
+            id_cuenta=id_cuenta,
+            tipo_movimiento="abono",
+            monto_movimiento=monto,
+            fecha_movimiento=fecha,
+            descripcion_movimiento=descripcion,
+            creado_por=id_usuario,
+            fecha_creacion=datetime.now(),
+        )
+        session.add(movimiento)
+        session.flush()
+        return movimiento
+
 
 class CajaService:
     @staticmethod
@@ -432,4 +493,94 @@ class CajaService:
                 "descripcion": descripcion,
             },
         )
+        return movimiento
+
+    @staticmethod
+    def calcular_saldo_actual(session: Session, id_caja: int) -> Decimal:
+        """Saldo EN VIVO (antes del cierre) de una caja con turno abierto -- equivalente
+        Python de trg_cajas_cierre (schema_sqlserver.sql): saldo_apertura + SUM(entrada) -
+        SUM(salida) de caja_movimientos con fecha_registro >= fecha_apertura, sin esperar a
+        un UPDATE de cierre. No toma su propio lock: si el caller necesita evitar una carrera
+        sobre el saldo (ej. VentaService.emitir_factura al validar un vuelto en efectivo),
+        debe tomar su propio WITH (UPDLOCK, ROWLOCK) sobre Caja ANTES de llamar a este
+        helper, igual que ya hacen abrir_caja/cerrar_caja."""
+        caja = session.get(Caja, id_caja)
+        if caja is None:
+            raise ValueError("Caja no encontrada")
+        if caja.fecha_apertura is None or caja.fecha_cierre is not None:
+            raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+
+        entradas = (
+            session.query(func.coalesce(func.sum(CajaMovimiento.monto_movimiento), 0))
+            .filter(
+                CajaMovimiento.id_caja == id_caja,
+                CajaMovimiento.tipo_movimiento == "entrada",
+                CajaMovimiento.fecha_registro >= caja.fecha_apertura,
+            )
+            .scalar()
+        )
+        salidas = (
+            session.query(func.coalesce(func.sum(CajaMovimiento.monto_movimiento), 0))
+            .filter(
+                CajaMovimiento.id_caja == id_caja,
+                CajaMovimiento.tipo_movimiento == "salida",
+                CajaMovimiento.fecha_registro >= caja.fecha_apertura,
+            )
+            .scalar()
+        )
+        saldo_apertura = caja.saldo_apertura if caja.saldo_apertura is not None else Decimal("0.00")
+        return saldo_apertura + Decimal(str(entradas)) - Decimal(str(salidas))
+
+    @staticmethod
+    def _registrar_egreso_vuelto(
+        session: Session,
+        id_caja: int,
+        monto: Decimal,
+        descripcion: str,
+        id_usuario: int | None,
+        fecha: datetime,
+    ) -> CajaMovimiento:
+        """Inserta el CajaMovimiento tipo 'salida' del vuelto en efectivo de una factura de
+        contado -- SIN commit ni require_permiso propio (el permiso/autorizacion de vuelto ya
+        se resuelve en VentaService.emitir_factura; este helper vive DENTRO de esa misma
+        transaccion atomica, igual que PagoService._aplicar_pago_cobro). No hay trigger sobre
+        caja_movimientos: el saldo_cierre se refleja solo en el proximo cierre de turno
+        (trg_cajas_cierre) o en caliente via calcular_saldo_actual()."""
+        movimiento = CajaMovimiento(
+            id_caja=id_caja,
+            tipo_movimiento="salida",
+            descripcion_movimiento=descripcion,
+            monto_movimiento=monto,
+            fecha_registro=fecha,
+            creado_por=id_usuario,
+        )
+        session.add(movimiento)
+        session.flush()
+        return movimiento
+
+    @staticmethod
+    def _registrar_ingreso_excedente(
+        session: Session,
+        id_caja: int,
+        monto: Decimal,
+        descripcion: str,
+        id_usuario: int | None,
+        fecha: datetime,
+    ) -> CajaMovimiento:
+        """Ver BancoService._registrar_ingreso_excedente: mismo motivo, version caja. Una
+        forma de pago en efectivo que tiende mas de lo que _aplicar_pago_cobro aplica a la
+        cuenta por cobrar (capado a su saldo_pendiente) solo deja una 'entrada' por el monto
+        aplicado -- el resto del efectivo SI entro fisicamente a esta caja, y sin esta
+        entrada adicional por la diferencia, _registrar_egreso_vuelto restaria ese mismo
+        excedente una segunda vez al dar el vuelto."""
+        movimiento = CajaMovimiento(
+            id_caja=id_caja,
+            tipo_movimiento="entrada",
+            descripcion_movimiento=descripcion,
+            monto_movimiento=monto,
+            fecha_registro=fecha,
+            creado_por=id_usuario,
+        )
+        session.add(movimiento)
+        session.flush()
         return movimiento

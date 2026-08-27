@@ -8,14 +8,22 @@ from decimal import Decimal
 
 import pytest
 
+from app.db.models import BancoMovimiento, CajaMovimiento, CuentaPorCobrar
 from app.services.compras import CompraService
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
+from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
 from tests.factories import (
+    asignar_permiso,
+    crear_caja,
     crear_cliente,
+    crear_cuenta_bancaria,
+    crear_permiso,
     crear_producto,
     crear_proveedor,
+    crear_rol,
+    crear_usuario,
     crear_usuario_admin,
     crear_vendedor,
     pago_contado,
@@ -186,6 +194,414 @@ def test_listar_notas_credito_clientes_reporte_filtra_por_cliente_y_pagina(db_se
 def test_listar_notas_credito_clientes_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         NotaCreditoService.listar_notas_credito_clientes(db_session)
+
+
+# --- aplicar_nota_credito_cliente -------------------------------------------------
+
+
+def _crear_factura_credito(session, cliente, monto="80.00"):
+    admin = crear_usuario_admin(session)
+    vendedor = crear_vendedor(session)
+    producto = crear_producto(session, cantidad_unidad=10)
+    return VentaService.emitir_factura(
+        session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": monto}],
+    )
+
+
+def test_aplicar_nota_credito_cliente_ok(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    # limite_credito por defecto de crear_cliente() es 0 -- no califica para credito.
+    cliente.limite_credito = Decimal("1000.00")
+    db_session.commit()
+    factura_destino = _crear_factura_credito(db_session, cliente, monto="80.00")
+
+    nota_actualizada = NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session,
+        id_nota_credito=nota.id_nota_credito,
+        id_factura_destino=factura_destino.id_factura,
+        monto=Decimal("50.00"),
+        id_usuario=admin.id_usuario,
+    )
+
+    assert nota_actualizada.saldo_disponible == Decimal("0.00")
+    assert nota_actualizada.estado == "aplicada"
+
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura_destino.id_factura).one()
+    assert cxc.saldo_pendiente == Decimal("30.00")
+    assert cxc.estado == "parcial"
+
+
+def test_aplicar_nota_credito_cliente_parcial_deja_saldo_disponible(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    cliente.limite_credito = Decimal("1000.00")
+    db_session.commit()
+    factura_destino = _crear_factura_credito(db_session, cliente, monto="80.00")
+
+    nota_actualizada = NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session,
+        id_nota_credito=nota.id_nota_credito,
+        id_factura_destino=factura_destino.id_factura,
+        monto=Decimal("20.00"),
+        id_usuario=admin.id_usuario,
+    )
+
+    assert nota_actualizada.saldo_disponible == Decimal("30.00")
+    assert nota_actualizada.estado == "disponible"
+
+
+def test_aplicar_nota_credito_cliente_excede_saldo_disponible_falla(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("20.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    cliente.limite_credito = Decimal("1000.00")
+    db_session.commit()
+    factura_destino = _crear_factura_credito(db_session, cliente, monto="80.00")
+
+    with pytest.raises(ValueError, match="excede el saldo disponible"):
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            id_factura_destino=factura_destino.id_factura,
+            monto=Decimal("50.00"),
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_aplicar_nota_credito_cliente_excede_saldo_pendiente_factura_falla(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("100.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    cliente.limite_credito = Decimal("1000.00")
+    db_session.commit()
+    factura_destino = _crear_factura_credito(db_session, cliente, monto="30.00")
+
+    with pytest.raises(ValueError, match="excede el saldo pendiente"):
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            id_factura_destino=factura_destino.id_factura,
+            monto=Decimal("50.00"),
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_aplicar_nota_credito_cliente_de_otro_cliente_falla(db_session):
+    cliente_a, factura_origen_a, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente_a.id_cliente,
+        id_factura_origen=factura_origen_a.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    cliente_b = crear_cliente(db_session, limite_credito=Decimal("1000.00"), dias_credito=30)
+    factura_destino_b = _crear_factura_credito(db_session, cliente_b, monto="80.00")
+
+    with pytest.raises(ValueError, match="otro cliente"):
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            id_factura_destino=factura_destino_b.id_factura,
+            monto=Decimal("50.00"),
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_aplicar_nota_credito_cliente_ya_aplicada_falla(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    cliente.limite_credito = Decimal("1000.00")
+    db_session.commit()
+    factura_destino_1 = _crear_factura_credito(db_session, cliente, monto="50.00")
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session,
+        id_nota_credito=nota.id_nota_credito,
+        id_factura_destino=factura_destino_1.id_factura,
+        monto=Decimal("50.00"),
+        id_usuario=admin.id_usuario,
+    )
+    factura_destino_2 = _crear_factura_credito(db_session, cliente, monto="10.00")
+
+    with pytest.raises(ValueError, match="no esta disponible"):
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            id_factura_destino=factura_destino_2.id_factura,
+            monto=Decimal("5.00"),
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_aplicar_nota_credito_cliente_sin_usuario_autorizado_falla(db_session):
+    cliente, factura_origen, _ = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    cliente.limite_credito = Decimal("1000.00")
+    db_session.commit()
+    factura_destino = _crear_factura_credito(db_session, cliente, monto="80.00")
+
+    with pytest.raises(PermisoDenegadoError):
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            id_factura_destino=factura_destino.id_factura,
+            monto=Decimal("50.00"),
+            id_usuario=None,
+        )
+
+
+# --- devolver_nota_credito_cliente ------------------------------------------------
+
+
+def test_devolver_nota_credito_cliente_efectivo_ok(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+
+    nota_actualizada = NotaCreditoService.devolver_nota_credito_cliente(
+        db_session,
+        id_nota_credito=nota.id_nota_credito,
+        monto=Decimal("50.00"),
+        metodo_devolucion="efectivo",
+        id_caja=caja.id_caja,
+        id_autorizador=admin.id_usuario,
+        id_usuario=admin.id_usuario,
+    )
+
+    assert nota_actualizada.saldo_disponible == Decimal("0.00")
+    assert nota_actualizada.estado == "devuelta"
+
+    salida = (
+        db_session.query(CajaMovimiento)
+        .filter(CajaMovimiento.id_caja == caja.id_caja, CajaMovimiento.tipo_movimiento == "salida")
+        .first()
+    )
+    assert salida is not None
+    assert salida.monto_movimiento == Decimal("50.00")
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("450.00")
+
+
+def test_devolver_nota_credito_cliente_bancario_ok(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("1000.00"))
+
+    nota_actualizada = NotaCreditoService.devolver_nota_credito_cliente(
+        db_session,
+        id_nota_credito=nota.id_nota_credito,
+        monto=Decimal("30.00"),
+        metodo_devolucion="transferencia",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        referencia="REF9999",
+        id_autorizador=admin.id_usuario,
+        id_usuario=admin.id_usuario,
+    )
+
+    assert nota_actualizada.saldo_disponible == Decimal("20.00")
+    assert nota_actualizada.estado == "disponible"
+
+    cargo = (
+        db_session.query(BancoMovimiento)
+        .filter(BancoMovimiento.id_cuenta == cuenta.id_cuenta, BancoMovimiento.tipo_movimiento == "cargo")
+        .first()
+    )
+    assert cargo is not None
+    assert cargo.monto_movimiento == Decimal("30.00")
+    assert cargo.referencia_movimiento == "REF9999"
+
+
+def test_devolver_nota_credito_cliente_sin_autorizador_falla(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+
+    with pytest.raises(ValueError, match="autorizacion de un supervisor"):
+        NotaCreditoService.devolver_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            monto=Decimal("50.00"),
+            metodo_devolucion="efectivo",
+            id_caja=caja.id_caja,
+            id_autorizador=None,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_devolver_nota_credito_cliente_autorizador_sin_permiso_editar_falla(db_session):
+    """El autorizador necesita 'notas_credito'/'editar', no solo 'crear' (que ya tiene
+    cualquiera que pueda iniciar la devolucion) -- ver docstring del metodo para el
+    porque de esta separacion de permisos."""
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+
+    rol = crear_rol(db_session)
+    permiso_crear = crear_permiso(db_session, recurso="notas_credito", accion="crear")
+    asignar_permiso(db_session, rol, permiso_crear)
+    autorizador_sin_editar = crear_usuario(db_session, id_rol=rol.id_rol)
+
+    with pytest.raises(PermisoDenegadoError):
+        NotaCreditoService.devolver_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            monto=Decimal("50.00"),
+            metodo_devolucion="efectivo",
+            id_caja=caja.id_caja,
+            id_autorizador=autorizador_sin_editar.id_usuario,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_devolver_nota_credito_cliente_efectivo_saldo_insuficiente_falla(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("0.00"))
+
+    with pytest.raises(ValueError, match="no tiene saldo suficiente"):
+        NotaCreditoService.devolver_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            monto=Decimal("50.00"),
+            metodo_devolucion="efectivo",
+            id_caja=caja.id_caja,
+            id_autorizador=admin.id_usuario,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_devolver_nota_credito_cliente_bancario_sin_referencia_falla(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("50.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("1000.00"))
+
+    with pytest.raises(ValueError, match="referencia bancaria"):
+        NotaCreditoService.devolver_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            monto=Decimal("30.00"),
+            metodo_devolucion="transferencia",
+            id_cuenta_bancaria=cuenta.id_cuenta,
+            id_autorizador=admin.id_usuario,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_devolver_nota_credito_cliente_excede_saldo_disponible_falla(db_session):
+    cliente, factura_origen, admin = _crear_factura(db_session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal("20.00"),
+        motivo="x",
+        id_usuario=None,
+    )
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+
+    with pytest.raises(ValueError, match="excede el saldo disponible"):
+        NotaCreditoService.devolver_nota_credito_cliente(
+            db_session,
+            id_nota_credito=nota.id_nota_credito,
+            monto=Decimal("50.00"),
+            metodo_devolucion="efectivo",
+            id_caja=caja.id_caja,
+            id_autorizador=admin.id_usuario,
+            id_usuario=admin.id_usuario,
+        )
 
 
 # --- crear_nota_credito_proveedor -------------------------------------------------

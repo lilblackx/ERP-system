@@ -190,6 +190,21 @@ class CompraService:
 
         compra.estado_compra = "ANULADA"
         compra.modificado_por = id_usuario
+
+        # Mismo fix que VentaService.anular_factura(): la nota de credito se crea AHORA,
+        # con el nucleo interno sin commit propio, en la MISMA transaccion que la
+        # anulacion -- antes comiteaban por separado y una falla en la segunda insercion
+        # dejaba la anulacion comprometida sin su compensacion.
+        if monto_pagado > 0:
+            NotaCreditoService._crear_nota_credito_proveedor(
+                session,
+                id_proveedor=compra.id_proveedor,
+                id_compra_origen=id_compra,
+                monto=monto_pagado,
+                motivo=motivo,
+                id_usuario=id_usuario,
+            )
+
         session.commit()
         session.refresh(compra)
 
@@ -200,16 +215,6 @@ class CompraService:
             monto_pagado,
             id_usuario,
         )
-
-        if monto_pagado > 0:
-            NotaCreditoService.crear_nota_credito_proveedor(
-                session,
-                id_proveedor=compra.id_proveedor,
-                id_compra_origen=id_compra,
-                monto=monto_pagado,
-                motivo=motivo,
-                id_usuario=id_usuario,
-            )
 
         AuditoriaService.registrar_evento(
             session,

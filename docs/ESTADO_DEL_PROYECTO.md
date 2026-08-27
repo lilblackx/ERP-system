@@ -96,9 +96,53 @@ validacion, se inserta la factura+lineas (igual que siempre), lo que dispara
 `trg_factura_venta_cxc` (ahora tambien para contado) abriendo una `CuentaPorCobrar`; acto
 seguido se aplica cada pago con `PagoService._aplicar_pago_cobro()` (variante interna sin
 commit propio, para mantener la atomicidad) hasta dejar `saldo_pendiente=0` /
-`estado='pagada'`. Si la suma tendida excede el total (vuelto en efectivo), el excedente
-**no se registra** -- cada pago se recorta al saldo restante y una linea que quede en 0
-se omite; no existe todavia un concepto de "vuelto" en el sistema.
+`estado='pagada'`. Si la suma tendida excede el total, cada pago se recorta al saldo
+restante (`min(monto_usd, cxc.saldo_pendiente)`) y una linea que quede en 0 se omite --
+pero a diferencia de antes, el excedente ya no se pierde: es el "vuelto" (ver mas abajo).
+
+**Vuelto** (`migrations/0027_vuelto_factura.sql`, agregado 2026-08-26): `monto_vuelto =
+total_pagado - total_a_cobrar`, calculado y validado en la MISMA transaccion, antes de
+insertar nada. Reglas condicionales por `metodo_vuelto`:
+- `'efectivo'`: libre (sin autorizacion), pero exige `id_caja_vuelto` y valida saldo
+  suficiente contra `CajaService.calcular_saldo_actual()` (equivalente Python de
+  `trg_cajas_cierre`, calculable con la caja todavia abierta) usando el mismo lock `WITH
+  (UPDLOCK, ROWLOCK)` sobre `Caja` que ya usan `abrir_caja`/`cerrar_caja`. La comparacion
+  de saldo se hace DESPUES de aplicar los pagos de contado (no antes): el caso comun es
+  que el propio efectivo tendido en esa misma factura financie su propio vuelto.
+- `'pago_movil'`/`'transferencia'`: exige `referencia_vuelto` (4-50 caracteres) e
+  `id_autorizador_vuelto` con el permiso `'vueltos_bancarios'/'crear'` (mismo mecanismo de
+  permiso dedicado que `'descuentos'/'crear'` y `'creditos'/'crear'` -- sin rol SUPERVISOR
+  nuevo, ADMIN bypassa siempre, cualquier otro rol necesita que un ADMIN se lo otorgue).
+  La UI (`app/ui/factura_form_dialog.py`) reusa `AutorizacionDialog` tal cual (el campo
+  generico "motivo" se reetiqueta como "Numero de referencia bancaria" via
+  `motivo_label`), sin crear un dialogo nuevo.
+- No existe "saldo a favor" como metodo de vuelto (decision de alcance): el excedente
+  siempre se entrega al cliente.
+
+El vuelto se persiste en `FacturaVenta` (`monto_vuelto`/`metodo_vuelto`/
+`referencia_vuelto`/`autorizado_por_vuelto`/`fecha_autorizacion_vuelto`, estos dos ultimos
+`NULL` si es efectivo) y se registra como egreso real: `CajaMovimiento` tipo `'salida'`
+(efectivo) o `BancoMovimiento` tipo `'cargo'` (bancario, mismo valor que ya usa
+`trg_pagos_proveedores_io`) -- ambas insertadas directamente (sin trigger de por medio,
+`CajaService`/`BancoService._registrar_egreso_vuelto()`, sin commit propio).
+
+Detalle no obvio: `_aplicar_pago_cobro()` capa el `monto` aplicado al `saldo_pendiente` de
+la CxC (constraint `CHECK` de no-negativo, migrations/0010), asi que la `entrada` que crea
+`trg_pagos_cobros_io` para una linea de pago que exceda el total queda corta respecto al
+efectivo/banco realmente recibido -- sin corregir esto, el egreso del vuelto restaria ese
+mismo excedente una segunda vez (detectado escribiendo los tests de este flujo). Se
+corrige registrando el excedente no aplicado como un ingreso adicional en el ORIGEN de esa
+misma linea de pago (`CajaService`/`BancoService._registrar_ingreso_excedente()`, tipo
+`'entrada'`/`'abono'`) antes del egreso del vuelto, para que el neto por cuenta cuadre con
+lo fisicamente recibido y entregado.
+
+Si el caller no indica `metodo_vuelto` explicito pero las formas de pago usaron una unica
+caja (efectivo), `VentaService.emitir_factura()` infiere `metodo_vuelto='efectivo'` contra
+esa misma caja (nunca se infiere un metodo bancario) -- mismo criterio que un cajero real
+("el cambio sale del mismo cajon de donde entro el efectivo"). Esto es tambien lo que
+mantiene funcionando `tests/factories.py::pago_contado()` (usado por comisiones/notas de
+credito/vendedores para pagar de mas sin calcular el total exacto) sin que esos tests
+tengan que declarar nada de vuelto.
 
 Reusar el mecanismo de CxC para contado significa que `VentaService.anular_factura()` ya
 maneja el caso genericamente: anular una factura de contado ya pagada genera una
@@ -195,8 +239,13 @@ necesario para no dejar el flujo de contado en efectivo sin salida.
   - Catalogo de permisos nuevo modulo `comisiones` (ver/crear/editar/eliminar), distinto
     del `reportes_comisiones` preexistente (solo lectura, ya asignado a VENDEDOR en el seed
     original).
-  - Sin UI todavia (no existe ninguna UI real de ventas/inventario, solo login/clientes) --
-    `sidebar.py` ya tenia la entrada "Comisiones" apuntando a `PlaceholderView`.
+  - Sin UI propia todavia -- `sidebar.py`/`main_window.py` (`MODULOS_CONFIG`) siguen
+    resolviendo la entrada "Comisiones" a `PlaceholderView` (`clase_panel=None`). Nota
+    corregida en la auditoria de facturacion 2026-08-25 (N5): cuando se escribio esto
+    ("no existe ninguna UI real de ventas/inventario, solo login/clientes") todavia era
+    cierto, pero quedo obsoleta desde que se implementaron `facturacion_panel.py`
+    (2026-08-24) e `inventario_panel.py` (2026-08-23) -- la falta de UI de esta seccion es
+    especifica de Comisiones, no generalizada al resto de los modulos.
 
   **Correlativo fiscal** (`migrations/0003_correlativo_notas_credito_clientes.sql`,
   2026-08-22): `NotaCreditoCliente` es un documento que la empresa emite (reduce lo que
@@ -487,10 +536,35 @@ de servicio.
   sección 3. ~~Reversión de comisiones~~ — resuelto (2026-08-23), ver "Comisiones de
   vendedor" más abajo.
 - Notas de crédito (`notas_credito.py`): ~~sin correlativo fiscal~~ — resuelto
-  (2026-08-22), ver sección 3. Sigue faltando el flujo para consumirlas — aplicar una
-  nota disponible como abono a una venta/compra futura, o devolverla como un movimiento
-  de caja/banco nuevo (fechado en el momento real de la devolución, no retroactivo). Es
-  un desarrollo aparte.
+  (2026-08-22), ver sección 3. ~~Sigue faltando el flujo para consumirlas~~ — resuelto
+  del lado cliente (2026-08-27): `aplicar_nota_credito_cliente()` (abono a otra factura
+  del mismo cliente, transferencia contable interna, sin autorización) y
+  `devolver_nota_credito_cliente()` (egreso real de efectivo/banco, fechado hoy —
+  no retroactivo — con autorización de supervisor SIEMPRE obligatoria vía el permiso
+  dedicado `'notas_credito'/'editar'`, distinto de `'notas_credito'/'crear'` que ya
+  tiene cualquiera que pueda iniciar la operación; reusa
+  `CajaService`/`BancoService._registrar_egreso_vuelto()` tal cual, mismo mecanismo que
+  el vuelto de facturación). UI: `HistorialClienteWindow` gana los botones "Aplicar
+  Nota de Crédito"/"Devolver Nota de Crédito" (`aplicar_nota_credito_dialog.py`/
+  `devolver_nota_credito_dialog.py`) y un indicador de saldo disponible. El lado
+  proveedor (`NotaCreditoProveedor`) sigue sin flujo de consumo — desarrollo aparte,
+  pendiente si el negocio lo necesita.
+
+  UX de seguimiento (2026-08-27): el proceso contable de 2 pasos (anular = reversión
+  fiscal del documento, devolver = operación de tesorería aparte con su propia
+  autorización) es el estándar del sector (SAP B1, QuickBooks, Odoo) y no se
+  simplifica — pero antes obligaba a navegar a otro módulo (Clientes > Historial)
+  para completar el segundo paso, sin ningún aviso de que hacía falta.
+  `FacturacionPanel.anular_factura_seleccionada()` ahora ofrece un seguimiento
+  inmediato: si la anulación generó una nota de crédito con saldo disponible,
+  pregunta "¿Deseas devolver el dinero al cliente ahora?" y abre
+  `DevolverNotaCreditoDialog` ahí mismo si se confirma. `FacturaDetalleDialog`
+  también gana un atajo simétrico ("Devolver esta nota") cuando la factura que se
+  está viendo generó una nota con saldo disponible — sin este dato ya persistido
+  (`VentaService.obtener_factura()` ahora expone `nota_credito` en su dict de
+  retorno), había que ir a buscarla al historial del cliente sin ninguna pista de
+  que existía. Ninguno de los dos ahorra el paso de autorización — solo evitan la
+  navegación innecesaria.
 - ~~Riesgo de *clock skew*~~ — resuelto (2026-08-23). `registrar_pago_cobro()`/
   `registrar_pago_proveedor()` (`app/services/pagos.py`) ahora fijan `fecha_pago =
   datetime.now()` en Python cuando no se recibe explícito, en vez de dejar que
@@ -502,14 +576,65 @@ de servicio.
   `tests/services/test_pagos.py::test_borrar_pago_cobro_con_turno_de_caja_ya_cerrado_recalcula_saldo_cierre`.
 - ~~Sin migraciones formales del schema~~ — resuelto (2026-08-22). Ver nota al final de
   la sección 3.
-- **Flujo de "vuelto" en pagos de contado**: cuando la suma de formas de pago excede el
-  total de la factura (pago en efectivo con vuelto), hoy el excedente simplemente no se
-  registra — cada pago se recorta al saldo restante y una línea que quede en 0 se omite
-  (ver "Pagos de contado multi-método" en la sección 3). No existe todavía un concepto de
-  "vuelto" en el sistema: ni como movimiento de caja de salida, ni como dato mostrado/
-  impreso en la factura o el recibo. Pendiente decidir si se registra como un
-  `caja_movimientos` tipo 'salida' automático al emitir, y si debe reflejarse en el PDF de
-  la factura. Desarrollo aparte.
+- ~~Flujo de "vuelto" en pagos de contado~~ — resuelto (2026-08-26,
+  `migrations/0027_vuelto_factura.sql`). Ver "Vuelto" en la sección 3 para el detalle
+  completo: efectivo libre con validación de saldo de caja real; pago móvil/transferencia
+  con referencia bancaria obligatoria + autorización de supervisor (permiso dedicado
+  `'vueltos_bancarios'/'crear'`, reusa `AutorizacionDialog` existente); egreso real
+  (`CajaMovimiento`/`BancoMovimiento`) en la misma transacción atómica de la factura.
+  Pendiente aparte, no incluido en ese desarrollo: reflejar el vuelto en el PDF de la
+  factura/recibo impreso -- resuelto mas abajo, ver "Auditoría integral de Facturación
+  2026-08-26".
+- **Auditoría integral de Facturación 2026-08-26** (posterior al desarrollo de vuelto):
+  hallazgos Crítico (2), Alto (4) y Medio (2) -- todos resueltos el mismo día salvo uno
+  diferido a propósito:
+  - **[Crítico] `anular_factura`/`anular_compra` no eran atómicas con su nota de
+    crédito compensatoria**: cada una comiteaba en una transacción separada de
+    `NotaCreditoService.crear_nota_credito_cliente`/`crear_nota_credito_proveedor` --
+    si esa segunda inserción fallaba, la anulación ya había quedado comprometida sin
+    su compensación (el dinero que el cliente ya pagó desaparecía contablemente sin
+    dejar rastro ni forma de revertir). Se agregaron núcleos internos sin commit propio
+    (`_crear_nota_credito_cliente`/`_crear_nota_credito_proveedor`,
+    `app/services/notas_credito.py`) y ambas anulaciones ahora crean la nota ANTES de
+    su único `commit()`. De paso, la generación de `numero_nota_credito` (que leía
+    `MAX(id)+1` sin lock, vulnerable a la misma carrera que ya se había corregido para
+    `numero_factura`) pasó a usar el mismo patrón placeholder+flush+rename que
+    `VentaService._numero_factura_temporal()`.
+  - **[Crítico] Vuelto y pagos mixtos invisibles/incorrectos en toda la UI de
+    consulta**: `listar_facturas()`/`obtener_factura()` (`ventas.py`) y
+    `obtener_historial_cliente()` (`historial_cliente.py`) usaban un `dict`/`.first()`
+    que se quedaba con UNA sola línea de pago arbitraria cuando había más de una (pago
+    mixto, ver `PagoLineaDialog`) -- ahora agrupan todas las líneas y devuelven un
+    sentinel `"mixto"` cuando el método difiere entre ellas, que la UI traduce en vez
+    de mostrar crudo. `factura_detalle_dialog.py` ganó una tarjeta "Formas de pago" con
+    el desglose línea por línea y el vuelto (monto/método/referencia/autorizador), que
+    hasta entonces estaba persistido pero no se mostraba en ningún lado de la app.
+  - **[Alto] `factura_pdf.py` no imprimía método de pago ni vuelto**: agregados a la
+    caja de datos de la factura (del vuelto solo monto+método -- la referencia
+    bancaria y quién autorizó quedan como información de auditoría interna, mismo
+    criterio ya usado para el motivo/autorizador de un descuento).
+  - **[Alto] `HistorialClienteWindow` fallaba en silencio**: un error de conexión al
+    cargar el historial se veía igual que "cliente sin historial" (tabla vacía, sin
+    ningún aviso). Ahora usa `QMessageBox.critical`, mismo patrón que
+    `facturacion_panel.py`.
+  - **[Alto] Sin UI para cerrar un turno de caja -- diferido a propósito (decisión del
+    usuario, 2026-08-26)**: `CajaService.cerrar_caja()` existe y funciona, pero el
+    módulo "Cajas" cae en `PlaceholderView` (`main_window.py`, `MODULOS_CONFIG`) --
+    solo hay apertura (`caja_apertura_dialog.py`, embebida en el gate de entrada a
+    Facturación). Falta una pantalla propia (listado de movimientos del turno, cuadre,
+    cierre): no es un ajuste puntual de Facturación, es un desarrollo aparte pendiente.
+  - **[Medio] Faltaba lock `WITH (UPDLOCK, ROWLOCK)` sobre `ComisionFactura` en
+    `anular_factura`**: agregado, mismo patrón que
+    `PagoComisionService.pagar_comisiones_vendedor` -- sin esto, un pago de comisiones
+    concurrente podía marcar una fila 'pagada' justo después de que la anulación la
+    leyera como 'pendiente' pero antes de borrarla, rompiendo la trazabilidad entre
+    `PagoComision.monto` y las líneas que lo componen.
+  - **[Medio] `FacturaDetalleDialog` no desglosaba Subtotal/Descuento/IVA**: agregada
+    una línea de resumen sobre el total (mismo criterio que
+    `factura_pdf.py::_filas_totales`) -- antes había que exportar a PDF para verlo.
+  - El vuelto también se agregó a `HistorialClienteWindow` (columna "Vuelto" +
+    exportación) -- mismo fix que el hallazgo de vuelto invisible, aplicado a esa
+    tercera superficie de UI.
 - **Auditoría del módulo de Facturación 2026-08-25**: hallazgos Crítico/Alto (IVA no
   reflejado en el total de "Nueva Factura", condición de carrera en el límite de crédito,
   pérdida de datos si `emitir_factura` falla) y la mayoría de los Medio/Bajo (caja
@@ -558,15 +683,41 @@ de servicio.
     deadlock de SQL Server. Fix de una línea: `sorted(cantidades_por_producto.items())`
     antes del loop (`app/services/ventas.py`), mismo orden total para cualquier
     transacción.
+  - **N3 (cobertura, Medio) — sin test de concurrencia real**: todo el código defensivo
+    `WITH (UPDLOCK, ROWLOCK)` (stock, límite de crédito, comisiones) estaba validado solo
+    por lectura, nunca ejercitado con dos conexiones reales compitiendo. Se agregó
+    `test_emitir_factura_bloquea_stock_con_updlock_rowlock_concurrente`
+    (`tests/services/test_ventas.py`): abre una segunda `Session` real sobre
+    `test_engine` (no se puede compartir `db_session` entre threads), sostiene el lock
+    manualmente sobre la fila de `Inventario` y comprueba con un `threading.Thread` que
+    `emitir_factura()` sobre el MISMO producto se queda bloqueada esperando (assert
+    `hilo.is_alive()` con `timeout=1.5`) hasta que la primera transacción libera el lock
+    — no es un test de timing/probabilístico, verifica el bloqueo real de SQL Server.
+  - **N4 (cobertura, Bajo) — sin test del gate `pagos/crear` en contado**: se agregó
+    `test_emitir_factura_contado_sin_permiso_pagos_falla`: un usuario con `ventas/crear`
+    pero sin `pagos/crear` no puede facturar de contado (`ventas.py`, `if pagos:
+    require_permiso(...)`), aunque sí podría de crédito.
+- **CI ya corría pytest automáticamente (N5 lo confirma)**: `.github/workflows/tests.yml`
+  ya disparaba la suite completa en cada push a `main` y cada pull request desde
+  "Resuelve C1-C10 del checklist de producción" — no había nada que arreglar en el
+  workflow en sí. Lo que estaba roto era la nota más abajo en este mismo documento
+  ("Pendiente: correr la suite en CI... hoy es manual"), escrita antes de que el workflow
+  existiera y nunca actualizada después. Corregida.
 - Cobertura de pruebas automatizadas: hecha para los 18 módulos de servicio más el
   runner de migraciones. Hay un harness de pytest (`tests/`) contra una base de datos
   SQL Server de prueba dedicada (real, no mock — necesario para validar los triggers),
-  con 383 tests. Ver `tests/conftest.py` para la estrategia de aislamiento entre tests
+  con 557 tests (2026-08-25). Ver `tests/conftest.py` para la estrategia de aislamiento entre tests
   (limpieza por `DELETE` en orden trigger-safe, no rollback, porque los servicios hacen
   su propio `commit()`) y `tests/factories.py` para los helpers de datos base.
   `tests/test_migrar.py` corre contra la base de datos de test real (no una copia
   aislada) para probar el bootstrap de `dbo.schema_migrations`; tiene un fixture
   (`_preservar_schema_migrations_real`, agregado 2026-08-22 tras encontrar el bug) que
   respalda y restaura esa tabla para no borrar el registro de migraciones ya aplicadas.
-  Pendiente: correr la suite en CI (hoy es manual, `pytest` requiere Docker/SQL Server
-  arriba).
+  CI (`.github/workflows/tests.yml`, agregado en "Resuelve C1-C10 del checklist de
+  produccion") ya corre la suite automaticamente en cada push a `main` y en cada pull
+  request, contra un contenedor `sqlserver` efimero del propio workflow (con health
+  check antes de instalar el driver ODBC 18 y correr `pytest -q`) -- no requiere Docker
+  ni nada manual del lado del desarrollador. Nota corregida en la auditoria de
+  facturacion 2026-08-25 (N5): esta linea decia "Pendiente: correr la suite en CI (hoy es
+  manual...)" desde antes de que el workflow existiera, y quedo asi sin actualizar
+  despues de agregarlo.

@@ -40,6 +40,7 @@ from app.services.empresa import EmpresaService
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
+from app.services.tesoreria import BancoService, CajaService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
 from app.ui.autorizacion_dialog import AutorizacionDialog
@@ -59,6 +60,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     TABLE_QSS,
+    ComboBoxSinScroll,
     alinear_encabezados,
     aplicar_sombra,
 )
@@ -67,6 +69,24 @@ logger = logging.getLogger(__name__)
 
 _ETIQUETAS_METODO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO}
 _ETIQUETAS_MONEDA = {valor: etiqueta for etiqueta, valor in MONEDAS}
+
+# Metodo de vuelto (cambio) de una factura de contado: distinto de METODOS_PAGO (formas de
+# pago del cliente) -- efectivo es libre, pago_movil/transferencia exigen referencia
+# bancaria + autorizacion de supervisor (recurso 'vueltos_bancarios', ver
+# VentaService.emitir_factura y migrations/0027_vuelto_factura.sql).
+METODOS_VUELTO = [
+    ("Efectivo", "efectivo"),
+    ("Pago Móvil", "pago_movil"),
+    ("Transferencia", "transferencia"),
+]
+
+
+def _enmascarar(numero: str | None) -> str:
+    if not numero:
+        return "s/n"
+    visibles = numero[-4:]
+    return "*" * max(len(numero) - len(visibles), 0) + visibles
+
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -227,6 +247,10 @@ class FacturaFormDialog(QDialog):
         self._motivo_descuento: str | None = None
         self._id_autorizador_dias_credito: int | None = None
         self._motivo_dias_credito: str | None = None
+        self._id_autorizador_vuelto: int | None = None
+        self._referencia_vuelto: str | None = None
+        self._cajas_abiertas_vuelto: list = []
+        self._cuentas_activas_vuelto: list = []
         self._tasa_vigente: dict | None = None
         self._iva_activo: bool = False
         self._iva_porcentaje: Decimal = Decimal("0")
@@ -246,6 +270,8 @@ class FacturaFormDialog(QDialog):
         self._cargar_productos()
         self._cargar_tasa_vigente()
         self._cargar_iva_config()
+        self._cargar_origenes_vuelto()
+        self._toggle_origen_vuelto()
         # condicion_combo ya tiene sus items al construir el grid, antes de conectar la
         # senal (ver _make_card_cabecera) -- se llama una vez a mano para que el estado
         # inicial (Contado, la primera opcion) muestre la tarjeta de formas de pago.
@@ -372,6 +398,22 @@ class FacturaFormDialog(QDialog):
         if not self._iva_activo:
             return 0.0
         return round(subtotal_con_descuento * float(self._iva_porcentaje) / 100, 2)
+
+    def _cargar_origenes_vuelto(self) -> None:
+        """Mismo patron que PagoLineaDialog._cargar_origenes: cajas con turno abierto (para
+        vuelto en efectivo) y cuentas bancarias activas (para vuelto por pago movil/
+        transferencia) -- ver _make_card_pagos/_toggle_origen_vuelto."""
+        try:
+            cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cajas = []
+        self._cajas_abiertas_vuelto = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+
+        try:
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cuentas = []
+        self._cuentas_activas_vuelto = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
 
     def _make_card_cabecera(self) -> QWidget:
         card = QWidget()
@@ -558,7 +600,82 @@ class FacturaFormDialog(QDialog):
         self.lbl_total_pagos.setStyleSheet("font-size: 13px; font-weight: 600;")
         layout.addWidget(self.lbl_total_pagos)
 
+        # Vuelto (cambio): solo visible cuando las formas de pago cargadas exceden el
+        # total (ver _refrescar_tabla_pagos) -- efectivo es libre, pago movil/
+        # transferencia exigen referencia bancaria + autorizacion de supervisor al
+        # aceptar (ver _validar_y_aceptar, reusa AutorizacionDialog).
+        self.vuelto_widget = QWidget()
+        vuelto_layout = QVBoxLayout(self.vuelto_widget)
+        vuelto_layout.setContentsMargins(0, 8, 0, 0)
+        vuelto_layout.setSpacing(6)
+
+        self.lbl_vuelto_monto = QLabel()
+        self.lbl_vuelto_monto.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};")
+        vuelto_layout.addWidget(self.lbl_vuelto_monto)
+
+        fila_vuelto = QHBoxLayout()
+        fila_vuelto.setSpacing(8)
+
+        col_metodo_vuelto = QVBoxLayout()
+        lbl_metodo_vuelto = QLabel("Método de vuelto")
+        lbl_metodo_vuelto.setProperty("class", "FormLabel")
+        self.metodo_vuelto_combo = ComboBoxSinScroll()
+        self.metodo_vuelto_combo.setFixedHeight(32)
+        for etiqueta, valor in METODOS_VUELTO:
+            self.metodo_vuelto_combo.addItem(etiqueta, valor)
+        self.metodo_vuelto_combo.currentIndexChanged.connect(self._toggle_origen_vuelto)
+        col_metodo_vuelto.addWidget(lbl_metodo_vuelto)
+        col_metodo_vuelto.addWidget(self.metodo_vuelto_combo)
+
+        col_origen_vuelto = QVBoxLayout()
+        lbl_origen_vuelto = QLabel("Origen del vuelto")
+        lbl_origen_vuelto.setProperty("class", "FormLabel")
+        self.origen_vuelto_combo = ComboBoxSinScroll()
+        self.origen_vuelto_combo.setFixedHeight(32)
+        col_origen_vuelto.addWidget(lbl_origen_vuelto)
+        col_origen_vuelto.addWidget(self.origen_vuelto_combo)
+
+        fila_vuelto.addLayout(col_metodo_vuelto, stretch=1)
+        fila_vuelto.addLayout(col_origen_vuelto, stretch=1)
+        vuelto_layout.addLayout(fila_vuelto)
+
+        self.lbl_aviso_vuelto_bancario = QLabel(
+            "Requiere referencia bancaria y autorización de un supervisor al facturar"
+        )
+        self.lbl_aviso_vuelto_bancario.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 11px; font-style: italic;")
+        self.lbl_aviso_vuelto_bancario.hide()
+        vuelto_layout.addWidget(self.lbl_aviso_vuelto_bancario)
+
+        self.vuelto_widget.hide()
+        layout.addWidget(self.vuelto_widget)
+
         return self.card_pagos
+
+    def _toggle_origen_vuelto(self) -> None:
+        metodo = self.metodo_vuelto_combo.currentData()
+        es_efectivo = metodo == "efectivo"
+        self.origen_vuelto_combo.blockSignals(True)
+        self.origen_vuelto_combo.clear()
+        if es_efectivo:
+            if not self._cajas_abiertas_vuelto:
+                self.origen_vuelto_combo.addItem("Sin cajas abiertas", None)
+                self.origen_vuelto_combo.setEnabled(False)
+            else:
+                self.origen_vuelto_combo.setEnabled(True)
+                for caja in self._cajas_abiertas_vuelto:
+                    self.origen_vuelto_combo.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", ("caja", caja.id_caja))
+        else:
+            if not self._cuentas_activas_vuelto:
+                self.origen_vuelto_combo.addItem("Sin cuentas bancarias activas", None)
+                self.origen_vuelto_combo.setEnabled(False)
+            else:
+                self.origen_vuelto_combo.setEnabled(True)
+                for cuenta in self._cuentas_activas_vuelto:
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
+                    etiqueta = f"{nombre_banco} - {_enmascarar(cuenta.numero_cuenta)}"
+                    self.origen_vuelto_combo.addItem(etiqueta, ("banco", cuenta.id_cuenta))
+        self.origen_vuelto_combo.blockSignals(False)
+        self.lbl_aviso_vuelto_bancario.setVisible(not es_efectivo)
 
     def _agregar_pago(self) -> None:
         total_pagado = sum(self._convertir_pago_a_usd(pago) for pago in self.pagos)
@@ -627,6 +744,12 @@ class FacturaFormDialog(QDialog):
             self.lbl_total_pagos.setText(
                 f"Total factura: ${total_factura:,.2f}  ·  Pagado: ${total_usd:,.2f}  ·  Cubierto"
             )
+
+        monto_vuelto = max(total_usd - total_factura, 0.0)
+        self.vuelto_widget.setVisible(monto_vuelto > 0.005)
+        if monto_vuelto > 0.005:
+            self.lbl_vuelto_monto.setText(f"Vuelto a entregar: ${monto_vuelto:,.2f}")
+
         self._actualizar_alerta_credito()
 
     def _total_factura_actual(self) -> float:
@@ -957,6 +1080,10 @@ class FacturaFormDialog(QDialog):
             # credito no admite pagos al emitir (VentaService.emitir_factura los rechaza) --
             # se descartan las formas de pago que se hayan cargado mientras era contado.
             self.pagos = []
+        if es_credito:
+            self._id_autorizador_vuelto = None
+            self._referencia_vuelto = None
+            self.metodo_vuelto_combo.setCurrentIndex(0)
         self.tabs.setTabEnabled(self._idx_tab_pagos, not es_credito)
         if es_credito and self.tabs.currentIndex() == self._idx_tab_pagos:
             self.tabs.setCurrentIndex(0)  # dispara _on_tab_cambiada, que ya actualiza el boton
@@ -1261,6 +1388,43 @@ class FacturaFormDialog(QDialog):
             self._id_autorizador_dias_credito = dialogo.usuario_autorizador.id_usuario
             self._motivo_dias_credito = dialogo.motivo
 
+        self._id_autorizador_vuelto = None
+        self._referencia_vuelto = None
+        if es_contado:
+            monto_vuelto = max(
+                sum(self._convertir_pago_a_usd(p) for p in self.pagos) - self._total_factura_actual(), 0.0
+            )
+            if monto_vuelto > 0.005:
+                metodo_vuelto = self.metodo_vuelto_combo.currentData()
+                origen_vuelto = self.origen_vuelto_combo.currentData()
+                if origen_vuelto is None:
+                    self.tabs.setCurrentIndex(self._idx_tab_pagos)
+                    QMessageBox.warning(
+                        self,
+                        "Origen de vuelto requerido",
+                        "No hay caja abierta ni cuenta bancaria activa disponible para el vuelto.",
+                    )
+                    return
+                if metodo_vuelto != "efectivo":
+                    mensaje = (
+                        f"Esta factura tiene un vuelto de ${monto_vuelto:,.2f} por "
+                        f"{'pago móvil' if metodo_vuelto == 'pago_movil' else 'transferencia'}. "
+                        "Un supervisor debe autorizarlo e indicar la referencia bancaria."
+                    )
+                    dialogo = AutorizacionDialog(
+                        self.session,
+                        recurso="vueltos_bancarios",
+                        accion="crear",
+                        mensaje=mensaje,
+                        titulo="Autorización de vuelto bancario requerida",
+                        motivo_label="Número de referencia bancaria",
+                        parent=self,
+                    )
+                    if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
+                        return
+                    self._id_autorizador_vuelto = dialogo.usuario_autorizador.id_usuario
+                    self._referencia_vuelto = dialogo.motivo
+
         # Se emite ACA, no en el caller (ver self.factura_emitida) -- si emitir_factura
         # falla (una condicion cambio mientras se armaba la factura: stock consumido por
         # otra venta, limite de credito ya copado, etc.) el dialogo se queda abierto con
@@ -1293,6 +1457,18 @@ class FacturaFormDialog(QDialog):
     def get_data(self) -> dict:
         es_credito = self.condicion_combo.currentData() == "credito"
         usar_dias_configurados = self.chk_dias_configurados.isChecked()
+        # El vuelto solo aplica a contado y solo cuando efectivamente sobra algo --
+        # VentaService.emitir_factura() rechaza metodo_vuelto si monto_vuelto es 0 (ver
+        # migrations/0026_vuelto_factura.sql / _validar_y_aceptar), asi que estas claves
+        # deben quedar todas en None para el caso comun (pago exacto, sin vuelto).
+        monto_vuelto = (
+            max(sum(self._convertir_pago_a_usd(p) for p in self.pagos) - self._total_factura_actual(), 0.0)
+            if not es_credito
+            else 0.0
+        )
+        hay_vuelto = monto_vuelto > 0.005
+        metodo_vuelto = self.metodo_vuelto_combo.currentData() if hay_vuelto else None
+        origen_vuelto = self.origen_vuelto_combo.currentData() if hay_vuelto else None
         return {
             "id_cliente": self.cliente_combo.currentData(),
             "id_vendedor": self.vendedor_combo.currentData(),
@@ -1310,6 +1486,11 @@ class FacturaFormDialog(QDialog):
             ),
             "motivo_dias_credito": self._motivo_dias_credito,
             "id_autorizador_dias_credito": self._id_autorizador_dias_credito,
+            "metodo_vuelto": metodo_vuelto,
+            "id_caja_vuelto": origen_vuelto[1] if origen_vuelto and metodo_vuelto == "efectivo" else None,
+            "id_cuenta_bancaria_vuelto": origen_vuelto[1] if origen_vuelto and metodo_vuelto != "efectivo" else None,
+            "referencia_vuelto": self._referencia_vuelto if hay_vuelto else None,
+            "id_autorizador_vuelto": self._id_autorizador_vuelto if hay_vuelto else None,
             "pagos": self.pagos if not es_credito else [],
             "items": [
                 {

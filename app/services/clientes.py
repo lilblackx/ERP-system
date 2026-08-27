@@ -41,9 +41,19 @@ def list_clientes(
     require_permiso(session, id_usuario, "clientes", "ver")
     query = session.query(Cliente).options(joinedload(Cliente.vendedor), joinedload(Cliente.categoria))
     if texto_busqueda:
+        # Barra de busqueda unica del listado (ClientesPanel): matchea CUALQUIERA de los
+        # datos que se muestran en pantalla -- nombre, identificacion, codigo, email o
+        # telefono -- en vez de exigir que el usuario sepa en cual de dos cajas separadas
+        # escribir. `identificacion` (abajo) se mantiene aparte para uso programatico/
+        # selectores que si necesiten un filtro AND preciso solo por ese campo.
         like = f"%{texto_busqueda}%"
         query = query.filter(
-            Cliente.nombre_razon_social.ilike(like) | Cliente.id_legal.ilike(like) | Cliente.codigo_cliente.ilike(like)
+            Cliente.nombre_razon_social.ilike(like)
+            | Cliente.id_legal.ilike(like)
+            | Cliente.codigo_cliente.ilike(like)
+            | Cliente.identificacion_cliente.ilike(like)
+            | Cliente.email.ilike(like)
+            | Cliente.telefono.ilike(like)
         )
     if identificacion:
         like = f"%{identificacion}%"

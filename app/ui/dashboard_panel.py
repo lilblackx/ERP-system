@@ -142,7 +142,7 @@ class VentasSemanaChart(QWidget):
             painter.end()
             return
 
-        margen_izq, margen_der, margen_arriba, margen_abajo = 16, 16, 12, 26
+        margen_izq, margen_der, margen_arriba, margen_abajo = 16, 16, 12, 8
         plot = QRectF(
             rect.left() + margen_izq,
             rect.top() + margen_arriba,
@@ -191,16 +191,63 @@ class VentasSemanaChart(QWidget):
         for x, y in puntos_xy:
             painter.drawEllipse(QRectF(x - 3.5, y - 3.5, 7, 7))
 
-        # Etiquetas del eje X
-        painter.setPen(QColor(COLOR_TEXT_MUTED))
-        fuente = painter.font()
-        fuente.setPointSize(8)
-        painter.setFont(fuente)
-        for i, (x, _y) in enumerate(puntos_xy):
-            etiqueta = DIAS_SEMANA[self._puntos[i]["fecha"].weekday()]
-            painter.drawText(QRectF(x - 18, plot.bottom() + 6, 36, 16), Qt.AlignmentFlag.AlignCenter, etiqueta)
-
         painter.end()
+
+
+class EtiquetasDiasSemana(QWidget):
+    """Fila de "Lun".."Dom" bajo VentasSemanaChart, como QLabel reales en vez de texto
+    pintado a mano dentro de paintEvent -- el intento anterior (drawText posicionado a
+    mano relativo a plot.bottom()) seguia sin verse en pantalla despues de dos rondas de
+    ajuste de margenes/manejo de excepciones, asi que se delega el renderizado del texto
+    a QLabel, que lo resuelve solo de forma confiable.
+
+    El posicionamiento NO usa un QHBoxLayout con stretch: eso centra cada etiqueta en 7
+    columnas de igual ancho, mientras que los puntos del grafico van de borde a borde
+    (el punto 0 pegado al margen izquierdo, el punto 6 pegado al derecho -- ver
+    VentasSemanaChart.paintEvent, `x = plot.left() + paso_x * i`). Con columnas iguales
+    las etiquetas de los extremos quedan corridas hacia adentro y ya no coinciden con el
+    pico real del grafico. Por eso aqui se replica exactamente la misma formula via
+    setGeometry en un resizeEvent propio, usando los mismos margenes (16, 16)."""
+
+    MARGEN_IZQ = 16
+    MARGEN_DER = 16
+    _ANCHO_ETIQUETA = 36
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._labels: list[QLabel] = []
+        self.setContentsMargins(0, 0, 0, 4)
+        self.setFixedHeight(18)
+        for _ in range(7):
+            lbl = QLabel("", self)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(f"font-size: 10px; color: {COLOR_TEXT_MUTED}; background: transparent; border: none;")
+            self._labels.append(lbl)
+        self._reposicionar()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._reposicionar()
+
+    def _reposicionar(self) -> None:
+        n = len(self._labels)
+        ancho_disponible = self.width() - self.MARGEN_IZQ - self.MARGEN_DER
+        paso_x = ancho_disponible / (n - 1) if n > 1 and ancho_disponible > 0 else 0.0
+        alto = max(self.height(), 1)
+        for i, lbl in enumerate(self._labels):
+            centro_x = self.MARGEN_IZQ + paso_x * i
+            lbl.setGeometry(round(centro_x - self._ANCHO_ETIQUETA / 2), 0, self._ANCHO_ETIQUETA, alto)
+
+    def set_datos(self, puntos: list[dict]) -> None:
+        for i, lbl in enumerate(self._labels):
+            texto = ""
+            if i < len(puntos):
+                try:
+                    texto = DIAS_SEMANA[puntos[i]["fecha"].weekday()]
+                except Exception:
+                    logger.exception("No se pudo calcular la etiqueta de dia para el punto %s del grafico semanal", i)
+            lbl.setText(texto)
+        self._reposicionar()
 
 
 class ListaVaciaLabel(QLabel):
@@ -320,7 +367,8 @@ class DashboardPanel(QWidget):
         self.usuario = usuario
         self.setObjectName("ContentArea")
         self._build_ui()
-        self._setup_reloj()
+        # self._setup_reloj()  -- desactivado junto con el bloque de equipo/fecha/hora
+        # del header, ver _make_header().
         QTimer.singleShot(100, self.cargar_datos)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -350,7 +398,7 @@ class DashboardPanel(QWidget):
         w.setStyleSheet("background: transparent;")
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(4)
+        h.setSpacing(28)
 
         info = QVBoxLayout()
         info.setSpacing(2)
@@ -358,31 +406,43 @@ class DashboardPanel(QWidget):
         lbl_titulo.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         lbl_subtitulo = QLabel(f"Resumen de la operación · {self._nombre_empresa()}")
         lbl_subtitulo.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_MUTED};")
+        lbl_subtitulo.setWordWrap(False)
         info.addWidget(lbl_titulo)
         info.addWidget(lbl_subtitulo)
 
-        # System info (hostname, date, time)
-        sistema_info = QVBoxLayout()
-        sistema_info.setSpacing(2)
-        sistema_info.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.lbl_hostname = QLabel()
-        self.lbl_hostname.setStyleSheet(
-            f"font-size: 11px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
-        )
-        self.lbl_fecha_hora = QLabel()
-        self.lbl_fecha_hora.setStyleSheet(
-            f"font-size: 11px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
-        )
-        sistema_info.addWidget(self.lbl_hostname)
-        sistema_info.addWidget(self.lbl_fecha_hora)
+        # Bloque de equipo/fecha/hora desactivado a pedido del usuario (2026-08-27,
+        # "no me gusta como se ve") -- comentado, no borrado, por si se quiere retomar
+        # mas adelante con otro diseño. _setup_reloj()/_actualizar_fecha_hora() (mas
+        # abajo) quedan intactos pero sin invocarse.
+        # sistema_info = QVBoxLayout()
+        # sistema_info.setSpacing(2)
+        # self.lbl_hostname = QLabel()
+        # self.lbl_hostname.setStyleSheet(
+        #     f"font-size: 11px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
+        # )
+        # self.lbl_fecha_hora = QLabel()
+        # self.lbl_fecha_hora.setStyleSheet(
+        #     f"font-size: 11px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
+        # )
+        # sistema_info.addWidget(self.lbl_hostname)
+        # sistema_info.addWidget(self.lbl_fecha_hora)
 
         btn_nueva_factura = QPushButton(" Nueva factura")
         btn_nueva_factura.setIcon(qta.icon("fa5s.plus", color="white"))
         btn_nueva_factura.setStyleSheet(BUTTON_PRIMARY_QSS)
         btn_nueva_factura.clicked.connect(self.nueva_factura_solicitada.emit)
 
+        # h.setAlignment(layout, ...) en vez de dejar el default: sin esto, "info" (sin
+        # alineacion propia) se estira para llenar el alto completo de la fila mientras
+        # "sistema_info" (que SI tenia alignment seteado) se queda en su alto natural --
+        # esa asimetria hacia que las dos columnas no quedaran alineadas verticalmente
+        # entre si (reportado por el usuario: el bloque de equipo/fecha/hora aparecia
+        # descolocado respecto al titulo/subtitulo). Ambas columnas ahora se comportan
+        # igual: alto natural, centradas verticalmente en la fila.
         h.addLayout(info)
-        h.addLayout(sistema_info)
+        h.setAlignment(info, Qt.AlignmentFlag.AlignVCenter)
+        # h.addLayout(sistema_info)
+        # h.setAlignment(sistema_info, Qt.AlignmentFlag.AlignVCenter)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(btn_nueva_factura)
         return w
@@ -445,9 +505,11 @@ class DashboardPanel(QWidget):
         lbl_subtitulo = QLabel("Total facturado por día, últimos 7 días")
         lbl_subtitulo.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
         self.grafico_ventas = VentasSemanaChart()
+        self.etiquetas_dias = EtiquetasDiasSemana()
         gv.addWidget(lbl_titulo)
         gv.addWidget(lbl_subtitulo)
         gv.addWidget(self.grafico_ventas, stretch=1)
+        gv.addWidget(self.etiquetas_dias)
 
         cajas_inner = QWidget()
         cajas_inner.setStyleSheet("background: transparent; border: none;")
@@ -553,6 +615,7 @@ class DashboardPanel(QWidget):
         self.kpi_productos_alerta.set_detalle("Bajo el mínimo", COLOR_WARNING)
 
         self.grafico_ventas.set_datos(datos["grafico_semanal"])
+        self.etiquetas_dias.set_datos(datos["grafico_semanal"])
 
         self._poblar_lista(self.cajas_lista, datos["cajas_activas"], FilaCaja, "Ninguna caja abierta hoy")
         self._poblar_lista(self.facturas_lista, datos["facturas_recientes"], FilaFactura, "Sin facturas registradas")

@@ -19,6 +19,19 @@ from PySide6.QtGui import QPageLayout, QPageSize, QTextDocument
 from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
 from app.db.models import ConfiguracionEmpresa, FacturaDetalle, FacturaVenta
+from app.ui.pago_linea_dialog import METODOS_PAGO
+
+# Etiquetas de metodo de pago (venta) -- "mixto" es el sentinel que VentaService.
+# obtener_factura() usa cuando hubo mas de una forma de pago con metodo distinto (ver
+# tambien factura_detalle_dialog.py/facturacion_panel.py, mismo criterio). Metodo de
+# VUELTO es un catalogo aparte (efectivo/pago_movil/transferencia, ver METODOS_VUELTO en
+# factura_form_dialog.py) -- duplicado aca a proposito, 3 valores fijos.
+_ETIQUETAS_METODO_PAGO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO} | {"mixto": "Mixto"}
+_ETIQUETAS_METODO_VUELTO = {
+    "efectivo": "Efectivo",
+    "pago_movil": "Pago Móvil",
+    "transferencia": "Transferencia",
+}
 
 _PRIMARY = "#0D47A1"
 _MUTED = "#64748B"
@@ -171,6 +184,29 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
         vencimiento = factura.fecha_vencimiento.strftime("%d/%m/%Y")
         vencimiento_row = f"<tr><td {_INFO_LBL}>Fecha de Vencimiento:</td><td {_INFO_VAL}>{vencimiento}</td></tr>"
 
+    # Metodo de pago solo aplica a contado. Antes no se imprimia en absoluto (hallazgo de
+    # la auditoria de facturacion: el dato ya llegaba en `datos["metodo_pago"]` pero
+    # _armar_html() nunca lo usaba).
+    metodo_pago_row = ""
+    if factura.condicion_pago == "contado":
+        metodo_pago = datos.get("metodo_pago")
+        etiqueta_metodo_pago = _ETIQUETAS_METODO_PAGO.get(metodo_pago, metodo_pago or "—")
+        metodo_pago_row = (
+            f"<tr><td {_INFO_LBL}>Método de Pago:</td><td {_INFO_VAL}>{_esc(etiqueta_metodo_pago)}</td></tr>"
+        )
+
+    # Vuelto (cambio) entregado -- solo monto+metodo, igual criterio que el motivo/
+    # autorizador de descuento (ver comentario mas abajo): la referencia bancaria y quien
+    # autorizo son informacion de auditoria interna, no pertenecen al documento del
+    # cliente.
+    vuelto_row = ""
+    if factura.monto_vuelto and float(factura.monto_vuelto) > 0:
+        etiqueta_metodo_vuelto = _ETIQUETAS_METODO_VUELTO.get(factura.metodo_vuelto, factura.metodo_vuelto)
+        vuelto_row = (
+            f"<tr><td {_INFO_LBL}>Vuelto Entregado:</td>"
+            f"<td {_INFO_VAL}>{_money(float(factura.monto_vuelto))} ({_esc(etiqueta_metodo_vuelto)})</td></tr>"
+        )
+
     filas_items = "".join(_fila_item(det) for det in detalles)
     filas_totales, total_usd = _filas_totales(factura)
     bloque_bs = _bloque_bolivares_html(tasa, total_usd)
@@ -235,8 +271,10 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
                     <tr><td {_INFO_LBL}>Hora de Emisión:</td><td {_INFO_VAL}>{hora}</td></tr>
                     <tr><td {_INFO_LBL}>N° de Control:</td><td {_INFO_VAL}>{_esc(factura.numero_control)}</td></tr>
                     <tr><td {_INFO_LBL}>Condición de Pago:</td><td {_INFO_VAL}>{condicion}</td></tr>
+                    {metodo_pago_row}
                     {vencimiento_row}
                     <tr><td {_INFO_LBL}>Moneda:</td><td {_INFO_VAL}>$ (USD)</td></tr>
+                    {vuelto_row}
                 </table>
             </td>
         </tr></table>

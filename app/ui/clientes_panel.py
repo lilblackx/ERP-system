@@ -217,27 +217,18 @@ class ClientesPanel(QWidget):
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)
 
-        # Buscar por nombre
+        # Barra de busqueda unica: matchea nombre, identificacion, codigo, email o
+        # telefono (ver ClienteService.list_clientes) -- antes eran dos cajas separadas
+        # (nombre / identificacion) que se combinaban con AND, obligando a saber en cual
+        # escribir cada dato.
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText("Buscar por nombre…")
+        self.buscar_input.setPlaceholderText("Buscar por nombre, identificación, email o teléfono…")
         self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
-        self.buscar_input.setFixedWidth(220)
+        self.buscar_input.setFixedWidth(320)
         self.buscar_input.returnPressed.connect(self.cargar_clientes)
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
-
-        # Buscar por identificación
-        self.buscar_identificacion_input = QLineEdit()
-        self.buscar_identificacion_input.setPlaceholderText("Buscar por identificación…")
-        self.buscar_identificacion_input.addAction(
-            qta.icon("fa5s.id-card", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition
-        )
-        self.buscar_identificacion_input.setObjectName("SearchInput")
-        self.buscar_identificacion_input.setStyleSheet(SEARCH_QSS)
-        self.buscar_identificacion_input.setFixedWidth(220)
-        self.buscar_identificacion_input.returnPressed.connect(self.cargar_clientes)
-        self.buscar_identificacion_input.textChanged.connect(self._busqueda_dinamica)
 
         # Botones primarios
         self.btn_nuevo = QPushButton("Nuevo Cliente")
@@ -286,7 +277,6 @@ class ClientesPanel(QWidget):
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_clientes, on_pdf=self.exportar_pdf_clientes)
 
         h.addWidget(self.buscar_input)
-        h.addWidget(self.buscar_identificacion_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
@@ -357,10 +347,19 @@ class ClientesPanel(QWidget):
         btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_estado.clicked.connect(self.cambiar_estado_cliente_seleccionado)
 
+        # Antes solo se llegaba al historial con doble clic en la fila -- sin ningun
+        # boton visible que lo indicara (hallazgo de UX). ver_historial_cliente() ya
+        # existia, este boton solo lo hace descubrible.
+        btn_historial = QPushButton("VER HISTORIAL")
+        btn_historial.setIcon(qta.icon("fa5s.history", color=COLOR_TEXT_DARK))
+        btn_historial.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_historial.clicked.connect(self.ver_historial_cliente)
+
         h.addWidget(self.lbl_pagina)
         h.addStretch()
         h.addWidget(btn_editar)
         h.addWidget(btn_estado)
+        h.addWidget(btn_historial)
         return w
 
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
@@ -384,7 +383,6 @@ class ClientesPanel(QWidget):
                 estado_cliente=self.estado_combo.currentData(),
                 id_vendedor=self.vendedor_combo.currentData(),
                 id_categoria=self.categoria_combo.currentData(),
-                identificacion=self.buscar_identificacion_input.text().strip() or None,
             )
             self._poblar_tabla(clientes)
         except Exception:
@@ -445,7 +443,6 @@ class ClientesPanel(QWidget):
             estado_cliente=self.estado_combo.currentData(),
             id_vendedor=self.vendedor_combo.currentData(),
             id_categoria=self.categoria_combo.currentData(),
-            identificacion=self.buscar_identificacion_input.text().strip() or None,
         )
         return [
             [

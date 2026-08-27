@@ -28,7 +28,11 @@ from app.services.historial_cliente import (
     obtener_historial_cliente,
     obtener_saldo_total_pendiente,
 )
+from app.services.notas_credito import NotaCreditoService
+from app.services.permisos import PermisoDenegadoError
 from app.services.ventas import VentaService
+from app.ui.aplicar_nota_credito_dialog import AplicarNotaCreditoDialog
+from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.styles import (
     COLOR_BORDER,
@@ -48,6 +52,31 @@ from app.ui.styles import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _etiqueta_metodo_pago(valor: str | None) -> str:
+    """ "mixto" es el sentinel que obtener_historial_cliente() usa cuando una factura tuvo
+    mas de una forma de pago con metodo distinto -- se traduce aca para no mostrar el
+    valor crudo en la tabla/exportacion (mismo criterio que facturacion_panel.py)."""
+    return "Mixto" if valor == "mixto" else (valor or "—")
+
+
+# Metodo de VUELTO (cambio), catalogo distinto de metodo de pago -- ver METODOS_VUELTO en
+# factura_form_dialog.py y _ETIQUETAS_METODO_VUELTO en factura_detalle_dialog.py.
+# Duplicado aca a proposito (3 valores fijos).
+_ETIQUETAS_METODO_VUELTO = {
+    "efectivo": "Efectivo",
+    "pago_movil": "Pago Móvil",
+    "transferencia": "Transferencia",
+}
+
+
+def _texto_vuelto(item: dict) -> str:
+    if not item["monto_vuelto"] or float(item["monto_vuelto"]) <= 0:
+        return "—"
+    etiqueta = _ETIQUETAS_METODO_VUELTO.get(item["metodo_vuelto"], item["metodo_vuelto"])
+    return f"${float(item['monto_vuelto']):,.2f} ({etiqueta})"
+
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -86,6 +115,7 @@ COLS_HISTORIAL = [
     "Días Crédito",
     "Observaciones",
     "Pagos",
+    "Vuelto",
     "Saldo Pendiente",
 ]
 
@@ -99,6 +129,12 @@ class HistorialClienteWindow(QDialog):
         self.id_cliente = id_cliente
         self.cliente = cliente
         self.id_usuario = id_usuario
+        # Notas de credito disponibles del cliente y facturas con saldo pendiente --
+        # pobladas en cargar_historial(), usadas para habilitar los botones de aplicar/
+        # devolver y para armar las listas de AplicarNotaCreditoDialog/
+        # DevolverNotaCreditoDialog (ver NotaCreditoService).
+        self._notas_disponibles: list = []
+        self._facturas_pendientes: list[dict] = []
         self.setWindowTitle(f"Historial - {cliente.nombre_razon_social}")
         self.setMinimumSize(1400, 700)
         self.setStyleSheet(DIALOG_STYLE)
@@ -176,8 +212,17 @@ class HistorialClienteWindow(QDialog):
         self.lbl_saldo_pendiente = QLabel("Cargando saldo...")
         self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 15px; font-weight: bold;")
 
+        # Notas de credito disponibles -- solo visible si el cliente tiene alguna (ver
+        # cargar_historial). Antes no habia ningun indicio en la app de que un cliente
+        # tuviera saldo a favor sin consumir.
+        self.lbl_notas_credito = QLabel()
+        self.lbl_notas_credito.setStyleSheet(f"color: {COLOR_PRIMARY}; font-size: 12px; font-weight: 600;")
+        self.lbl_notas_credito.hide()
+
         h.addWidget(lbl_icono)
         h.addWidget(self.lbl_saldo_pendiente)
+        h.addSpacing(16)
+        h.addWidget(self.lbl_notas_credito)
         h.addStretch()
         return card
 
@@ -218,6 +263,10 @@ class HistorialClienteWindow(QDialog):
         self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.ResizeToContents)
+        # 11 = "Saldo Pendiente" (antes 10, antes de insertar la columna "Vuelto") -- sin
+        # este override quedaba en el Stretch por defecto de la linea de arriba, la unica
+        # columna de monto de la tabla que se estiraba en vez de ajustarse al contenido.
+        self.tabla.horizontalHeader().setSectionResizeMode(11, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(45)
@@ -250,6 +299,25 @@ class HistorialClienteWindow(QDialog):
         btn_exportar_pdf.setAutoDefault(False)
         btn_exportar_pdf.clicked.connect(self.exportar_pdf)
 
+        # Deshabilitados hasta que cargar_historial() confirme que hay notas
+        # disponibles/facturas con saldo pendiente (ver _actualizar_notas_credito) -- sin
+        # eso no hay nada que aplicar ni devolver.
+        self.btn_aplicar_nota = QPushButton("Aplicar Nota de Crédito")
+        self.btn_aplicar_nota.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY))
+        self.btn_aplicar_nota.setObjectName("BtnSecondary")
+        self.btn_aplicar_nota.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_aplicar_nota.setAutoDefault(False)
+        self.btn_aplicar_nota.setEnabled(False)
+        self.btn_aplicar_nota.clicked.connect(self.aplicar_nota_credito)
+
+        self.btn_devolver_nota = QPushButton("Devolver Nota de Crédito")
+        self.btn_devolver_nota.setIcon(qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY))
+        self.btn_devolver_nota.setObjectName("BtnSecondary")
+        self.btn_devolver_nota.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_devolver_nota.setAutoDefault(False)
+        self.btn_devolver_nota.setEnabled(False)
+        self.btn_devolver_nota.clicked.connect(self.devolver_nota_credito)
+
         # Estilo propio (no #BtnPrimary del DIALOG_STYLE de la ventana): con el boton
         # dentro de un QHBoxLayout agregado directo al layout raiz (sin envolverlo en un
         # QWidget contenedor), la regla en cascada #BtnPrimary no pintaba su
@@ -276,6 +344,8 @@ class HistorialClienteWindow(QDialog):
         btn_cerrar.clicked.connect(self.accept)
 
         h.addWidget(btn_detalle)
+        h.addWidget(self.btn_aplicar_nota)
+        h.addWidget(self.btn_devolver_nota)
         h.addWidget(btn_exportar_excel)
         h.addWidget(btn_exportar_pdf)
         h.addWidget(btn_cerrar)
@@ -298,8 +368,73 @@ class HistorialClienteWindow(QDialog):
             else:
                 self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 16px; font-weight: bold;")
 
+            self._actualizar_notas_credito(session, historial)
+
         except Exception:
             logger.exception("Fallo al cargar el historial del cliente %s", self.id_cliente)
+            # Antes fallaba en silencio: la tabla quedaba vacia y "Cargando saldo..."
+            # congelado, indistinguible de un cliente sin historial real -- un error de
+            # conexion no debe verse igual que "sin facturas" (mismo criterio que
+            # facturacion_panel.py: QMessageBox.critical en cada carga que puede fallar).
+            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el historial del cliente.")
+        finally:
+            session.close()
+
+    def _actualizar_notas_credito(self, session, historial: list) -> None:
+        """Notas de credito disponibles del cliente + facturas del historial con saldo
+        pendiente -- habilita los botones de aplicar/devolver y arma las listas que
+        consumen AplicarNotaCreditoDialog/DevolverNotaCreditoDialog. PermisoDenegadoError
+        se trata como "sin notas" (mismo criterio que PagoLineaDialog._cargar_origenes):
+        un usuario sin 'notas_credito'/'ver' simplemente no ve la funcionalidad, no un
+        error."""
+        try:
+            notas = NotaCreditoService.listar_notas_credito_cliente(
+                session, self.id_cliente, id_usuario=self.id_usuario
+            )
+        except PermisoDenegadoError:
+            notas = []
+        self._notas_disponibles = [n for n in notas if n.estado == "disponible" and n.saldo_disponible > 0]
+
+        self._facturas_pendientes = [
+            {
+                "id_factura": item["id_factura"],
+                "numero_factura": item["numero_factura"],
+                "saldo_pendiente": item["saldo_pendiente"],
+            }
+            for item in historial
+            if item["saldo_pendiente"] > 0 and item["estado_factura"] != "ANULADA"
+        ]
+
+        hay_notas = bool(self._notas_disponibles)
+        self.btn_devolver_nota.setEnabled(hay_notas)
+        self.btn_aplicar_nota.setEnabled(hay_notas and bool(self._facturas_pendientes))
+
+        if hay_notas:
+            total_disponible = sum(float(n.saldo_disponible) for n in self._notas_disponibles)
+            self.lbl_notas_credito.setText(f"Notas de crédito disponibles: ${total_disponible:,.2f}")
+            self.lbl_notas_credito.show()
+        else:
+            self.lbl_notas_credito.hide()
+
+    def aplicar_nota_credito(self) -> None:
+        session = self.session_factory()
+        try:
+            dialogo = AplicarNotaCreditoDialog(
+                session, self.id_usuario, self._notas_disponibles, self._facturas_pendientes, parent=self
+            )
+            if dialogo.exec() == QDialog.DialogCode.Accepted:
+                QMessageBox.information(self, "Nota de crédito aplicada", "La nota de crédito se aplicó con éxito.")
+                self.cargar_historial()
+        finally:
+            session.close()
+
+    def devolver_nota_credito(self) -> None:
+        session = self.session_factory()
+        try:
+            dialogo = DevolverNotaCreditoDialog(session, self.id_usuario, self._notas_disponibles, parent=self)
+            if dialogo.exec() == QDialog.DialogCode.Accepted:
+                QMessageBox.information(self, "Nota de crédito devuelta", "La devolución se registró con éxito.")
+                self.cargar_historial()
         finally:
             session.close()
 
@@ -325,7 +460,7 @@ class HistorialClienteWindow(QDialog):
             # Condición Pago
             self.tabla.setItem(fila, 5, QTableWidgetItem(item["condicion_pago"]))
             # Método Pago
-            metodo_pago = item["metodo_pago"] or "—"
+            metodo_pago = _etiqueta_metodo_pago(item["metodo_pago"])
             item_metodo = QTableWidgetItem(metodo_pago)
             item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_metodo)
@@ -347,6 +482,12 @@ class HistorialClienteWindow(QDialog):
             item_pagado.setFont(font)
             self.tabla.setItem(fila, 9, item_pagado)
 
+            # Vuelto -- antes invisible en toda la app aunque ya estaba persistido (ver
+            # FacturaVenta.monto_vuelto/metodo_vuelto, migrations/0027_vuelto_factura.sql).
+            item_vuelto = QTableWidgetItem(_texto_vuelto(item))
+            item_vuelto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 10, item_vuelto)
+
             # Saldo Pendiente
             saldo_pendiente = f"${float(item['saldo_pendiente']):,.2f}"
             item_saldo = QTableWidgetItem(saldo_pendiente)
@@ -358,7 +499,7 @@ class HistorialClienteWindow(QDialog):
             font = item_saldo.font()
             font.setBold(True)
             item_saldo.setFont(font)
-            self.tabla.setItem(fila, 10, item_saldo)
+            self.tabla.setItem(fila, 11, item_saldo)
 
     def exportar_excel(self) -> None:
         session = self.session_factory()
@@ -374,10 +515,11 @@ class HistorialClienteWindow(QDialog):
                     str(item["total_venta"]),
                     item["estado_factura"],
                     item["condicion_pago"],
-                    item["metodo_pago"] or "—",
+                    _etiqueta_metodo_pago(item["metodo_pago"]),
                     str(item["dias_credito"] or 0),
                     item["observaciones_factura"] or "",
                     str(item["total_pagado"]),
+                    _texto_vuelto(item),
                     str(item["saldo_pendiente"]),
                 ]
                 for item in historial
@@ -412,10 +554,11 @@ class HistorialClienteWindow(QDialog):
                     str(item["total_venta"]),
                     item["estado_factura"],
                     item["condicion_pago"],
-                    item["metodo_pago"] or "—",
+                    _etiqueta_metodo_pago(item["metodo_pago"]),
                     str(item["dias_credito"] or 0),
                     item["observaciones_factura"] or "",
                     str(item["total_pagado"]),
+                    _texto_vuelto(item),
                     str(item["saldo_pendiente"]),
                 ]
                 for item in historial

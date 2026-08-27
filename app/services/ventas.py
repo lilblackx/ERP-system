@@ -7,14 +7,17 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    Caja,
     Cliente,
     ComisionFactura,
     ConfiguracionEmpresa,
     ControlDeTasa,
+    CuentaBancaria,
     CuentaPorCobrar,
     FacturaDetalle,
     FacturaVenta,
     Inventario,
+    NotaCreditoCliente,
     PagoCobro,
     ProductoPrecio,
     Vendedor,
@@ -24,6 +27,7 @@ from app.services.comisiones import ComisionService
 from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import require_permiso
+from app.services.tesoreria import BancoService, CajaService
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +136,11 @@ class VentaService:
         dias_credito_personalizados: int | None = None,
         motivo_dias_credito: str | None = None,
         id_autorizador_dias_credito: int | None = None,
+        metodo_vuelto: str | None = None,
+        id_caja_vuelto: int | None = None,
+        id_cuenta_bancaria_vuelto: int | None = None,
+        referencia_vuelto: str | None = None,
+        id_autorizador_vuelto: int | None = None,
     ) -> FacturaVenta:
         require_permiso(session, id_usuario, "ventas", "crear")
         _validar_items(items)
@@ -342,8 +351,8 @@ class VentaService:
         # equivalente USD ya calculado por linea para no recalcularlo (ni arriesgar un
         # resultado distinto si la tasa cambiara) al aplicar los pagos mas abajo.
         pagos_usd: list[Decimal] = []
+        total_pagado = Decimal("0.00")
         if condicion_pago == "contado":
-            total_pagado = Decimal("0.00")
             for pago_linea in pagos:
                 monto_origen = Decimal(str(pago_linea["monto_moneda_origen"]))
                 if monto_origen <= 0:
@@ -356,6 +365,84 @@ class VentaService:
                     f"Las formas de pago suman ${total_pagado} y no cubren el total de la "
                     f"factura (${total_a_cobrar}); faltan ${total_a_cobrar - total_pagado}"
                 )
+
+        # --- Vuelto (cambio): el excedente de pagos sobre total_a_cobrar SIEMPRE se
+        # entrega al cliente (no existe "saldo a favor" como metodo de vuelto, decision de
+        # alcance) -- ver migrations/0027_vuelto_factura.sql. Efectivo es libre y se
+        # registra como egreso real de caja (mas abajo, DESPUES de aplicar los pagos de
+        # contado -- ver el comentario en ese bloque sobre por que el saldo se valida ahi y
+        # no aca); pago_movil/transferencia exige referencia bancaria + autorizacion de un
+        # usuario con permiso 'vueltos_bancarios'/'crear' (mismo mecanismo que 'descuentos'/
+        # 'creditos' -- ADMIN bypassa siempre, ningun rol lo tiene por default).
+        monto_vuelto = Decimal("0.00")
+        if condicion_pago == "contado":
+            monto_vuelto = (total_pagado - total_a_cobrar).quantize(Decimal("0.01"))
+        elif metodo_vuelto is not None:
+            raise ValueError("metodo_vuelto solo aplica a facturas de contado")
+
+        # Si hay vuelto y el caller no indico un metodo explicito, pero las formas de pago
+        # usaron una unica caja (efectivo), el vuelto se infiere de esa misma caja -- mismo
+        # criterio que un cajero real (el cambio sale del mismo cajon de donde entro el
+        # efectivo), sin obligar a declarar lo obvio. Solo se infiere efectivo: pago_movil/
+        # transferencia siempre requieren seleccion explicita + autorizacion, nunca se
+        # infieren (y si hay mas de una caja involucrada o ninguna, no hay una unica
+        # respuesta obvia -- se exige explicitar mas abajo).
+        if monto_vuelto > 0 and metodo_vuelto is None and id_caja_vuelto is None and id_cuenta_bancaria_vuelto is None:
+            cajas_usadas = {p.get("id_caja") for p in pagos if p.get("id_caja") is not None}
+            if len(cajas_usadas) == 1:
+                metodo_vuelto = "efectivo"
+                (id_caja_vuelto,) = cajas_usadas
+
+        caja_vuelto = None
+        if monto_vuelto > 0:
+            if metodo_vuelto not in ("efectivo", "pago_movil", "transferencia"):
+                raise ValueError(
+                    "Esta factura tiene vuelto: indique metodo_vuelto ('efectivo', 'pago_movil' o 'transferencia')"
+                )
+            if metodo_vuelto == "efectivo":
+                if id_caja_vuelto is None:
+                    raise ValueError("El vuelto en efectivo requiere indicar la caja de origen")
+                if id_cuenta_bancaria_vuelto is not None:
+                    raise ValueError("El vuelto en efectivo no admite cuenta bancaria de origen")
+                # WITH (UPDLOCK, ROWLOCK): mismo patron que Inventario/Cliente mas arriba --
+                # bloquea la fila hasta el commit para que dos vueltos concurrentes de la
+                # misma caja no lean el mismo saldo stale (C1). Solo se valida aca que la
+                # caja exista y tenga turno abierto; el saldo en si se compara MAS ABAJO,
+                # despues de aplicar los pagos de contado -- un vuelto en efectivo suele
+                # financiarse con el propio efectivo que el cliente acaba de entregar en
+                # esta misma factura, que todavia no se aplico en este punto.
+                caja_vuelto = session.execute(
+                    select(Caja)
+                    .where(Caja.id_caja == id_caja_vuelto)
+                    .with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+                ).scalar_one_or_none()
+                if caja_vuelto is None:
+                    raise ValueError("Caja de vuelto no encontrada")
+                if caja_vuelto.fecha_apertura is None or caja_vuelto.fecha_cierre is not None:
+                    raise ValueError(f"La caja '{caja_vuelto.nombre_caja}' no tiene un turno abierto")
+            else:
+                if id_cuenta_bancaria_vuelto is None:
+                    raise ValueError("El vuelto por pago movil/transferencia requiere una cuenta bancaria de origen")
+                if id_caja_vuelto is not None:
+                    raise ValueError("El vuelto por pago movil/transferencia no admite caja de origen")
+                cuenta_vuelto = session.get(CuentaBancaria, id_cuenta_bancaria_vuelto)
+                if cuenta_vuelto is None:
+                    raise ValueError("Cuenta bancaria de vuelto no encontrada")
+                if cuenta_vuelto.estado_cuenta != "ACTIVO":
+                    raise ValueError(f"La cuenta bancaria '{cuenta_vuelto.numero_cuenta}' esta inactiva")
+                referencia_vuelto = (referencia_vuelto or "").strip()
+                if len(referencia_vuelto) < 4:
+                    raise ValueError(
+                        "El vuelto por pago movil/transferencia requiere una referencia "
+                        "bancaria de al menos 4 caracteres"
+                    )
+                if len(referencia_vuelto) > 50:
+                    raise ValueError("La referencia bancaria del vuelto no puede superar 50 caracteres")
+                if id_autorizador_vuelto is None:
+                    raise ValueError("El vuelto por pago movil/transferencia requiere autorizacion de un supervisor")
+                require_permiso(session, id_autorizador_vuelto, "vueltos_bancarios", "crear")
+        elif metodo_vuelto is not None:
+            raise ValueError("metodo_vuelto solo aplica si hay vuelto a favor del cliente")
 
         # --- Insercion atomica de cabecera y lineas ---
         # numero_factura/numero_control definitivos se asignan DESPUES del flush -- ver
@@ -428,29 +515,101 @@ class VentaService:
         # --- Contado: liquidar la cuenta por cobrar recien abierta con las formas de pago
         # ya validadas arriba, en la MISMA transaccion (se aplica con _aplicar_pago_cobro,
         # que hace flush pero no commit -- el commit unico de mas abajo cubre factura +
-        # detalle + comision + cuenta por cobrar + pagos, todo o nada). Si la suma tendida
-        # excede el total (p. ej. efectivo con vuelto), cada linea se recorta al saldo
-        # restante -- el excedente es vuelto fisico, no se registra como movimiento. Una
-        # linea que quede en 0 (ya cubierta por lineas anteriores) se omite.
+        # detalle + comision + cuenta por cobrar + pagos + vuelto, todo o nada). Si la suma
+        # tendida excede el total (p. ej. efectivo con vuelto), cada linea se recorta al
+        # saldo restante -- el excedente es el vuelto ya validado/calculado mas arriba
+        # (monto_vuelto). Una linea que quede en 0 (ya cubierta por lineas anteriores) no
+        # aplica nada a la cuenta por cobrar, pero su excedente igual se registra como
+        # ingreso en el origen de ESA linea (ver mas abajo) -- sin esto, el efectivo/banco
+        # que si entro fisicamente mas alla de lo que necesitaba la factura quedaria sin
+        # asiento, y el egreso del vuelto (mas abajo, unico y contra el origen elegido por
+        # el cajero) lo restaria una segunda vez.
         if condicion_pago == "contado" and cxc is not None:
             for pago_linea, monto_usd in zip(pagos, pagos_usd, strict=True):
                 monto_a_aplicar = min(monto_usd, cxc.saldo_pendiente)
-                if monto_a_aplicar <= 0:
-                    continue
-                PagoService._aplicar_pago_cobro(
+                if monto_a_aplicar > 0:
+                    PagoService._aplicar_pago_cobro(
+                        session,
+                        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+                        monto=monto_a_aplicar,
+                        metodo_pago=pago_linea["metodo_pago"],
+                        moneda=pago_linea["moneda"],
+                        monto_moneda_origen=pago_linea["monto_moneda_origen"],
+                        id_cuenta_bancaria=pago_linea.get("id_cuenta_bancaria"),
+                        id_caja=pago_linea.get("id_caja"),
+                        id_tasa=id_tasa,
+                        referencia=pago_linea.get("referencia"),
+                        fecha_pago=factura.fecha_emision,
+                        id_usuario=id_usuario,
+                    )
+
+                excedente_linea = (monto_usd - monto_a_aplicar).quantize(Decimal("0.01"))
+                if excedente_linea > 0:
+                    descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
+                    id_caja_linea = pago_linea.get("id_caja")
+                    id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
+                    if id_caja_linea is not None:
+                        CajaService._registrar_ingreso_excedente(
+                            session,
+                            id_caja=id_caja_linea,
+                            monto=excedente_linea,
+                            descripcion=descripcion_excedente,
+                            id_usuario=id_usuario,
+                            fecha=factura.fecha_emision,
+                        )
+                    elif id_cuenta_linea is not None:
+                        BancoService._registrar_ingreso_excedente(
+                            session,
+                            id_cuenta=id_cuenta_linea,
+                            monto=excedente_linea,
+                            descripcion=descripcion_excedente,
+                            id_usuario=id_usuario,
+                            fecha=factura.fecha_emision,
+                        )
+
+        if monto_vuelto > 0:
+            descripcion_vuelto = f"Vuelto factura {factura.numero_factura}"
+            fecha_vuelto: datetime = factura.fecha_emision
+            if metodo_vuelto == "efectivo":
+                # id_caja_vuelto/caja_vuelto ya se validaron como no-None mas arriba (unico
+                # camino para llegar aca con metodo_vuelto == "efectivo").
+                assert id_caja_vuelto is not None and caja_vuelto is not None
+                # Recien aca, con los pagos de contado ya aplicados (el efectivo entregado
+                # por el cliente en ESTA factura ya se sumo al saldo de caja via
+                # _aplicar_pago_cobro -> trg_pagos_cobros_io), se compara el saldo real.
+                saldo_actual_caja = CajaService.calcular_saldo_actual(session, id_caja_vuelto)
+                if saldo_actual_caja < monto_vuelto:
+                    raise ValueError(
+                        f"La caja '{caja_vuelto.nombre_caja}' no tiene saldo suficiente para el "
+                        f"vuelto: disponible ${saldo_actual_caja}, requerido ${monto_vuelto}"
+                    )
+                CajaService._registrar_egreso_vuelto(
                     session,
-                    id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
-                    monto=monto_a_aplicar,
-                    metodo_pago=pago_linea["metodo_pago"],
-                    moneda=pago_linea["moneda"],
-                    monto_moneda_origen=pago_linea["monto_moneda_origen"],
-                    id_cuenta_bancaria=pago_linea.get("id_cuenta_bancaria"),
-                    id_caja=pago_linea.get("id_caja"),
-                    id_tasa=id_tasa,
-                    referencia=pago_linea.get("referencia"),
-                    fecha_pago=factura.fecha_emision,
+                    id_caja=id_caja_vuelto,
+                    monto=monto_vuelto,
+                    descripcion=descripcion_vuelto,
                     id_usuario=id_usuario,
+                    fecha=fecha_vuelto,
                 )
+            else:
+                # id_cuenta_bancaria_vuelto/referencia_vuelto ya se validaron como no-None
+                # mas arriba (unico camino para llegar aca con metodo_vuelto bancario).
+                assert id_cuenta_bancaria_vuelto is not None and referencia_vuelto is not None
+                BancoService._registrar_egreso_vuelto(
+                    session,
+                    id_cuenta=id_cuenta_bancaria_vuelto,
+                    monto=monto_vuelto,
+                    descripcion=descripcion_vuelto,
+                    referencia=referencia_vuelto,
+                    id_usuario=id_usuario,
+                    fecha=fecha_vuelto,
+                )
+
+            factura.monto_vuelto = monto_vuelto
+            factura.metodo_vuelto = metodo_vuelto
+            factura.referencia_vuelto = referencia_vuelto if metodo_vuelto != "efectivo" else None
+            factura.autorizado_por_vuelto = id_autorizador_vuelto if metodo_vuelto != "efectivo" else None
+            factura.fecha_autorizacion_vuelto = datetime.now() if metodo_vuelto != "efectivo" else None
 
         session.commit()
         session.refresh(factura)
@@ -480,6 +639,9 @@ class VentaService:
                 "autorizado_por_descuento": factura.autorizado_por_descuento,
                 "dias_credito_aplicados": factura.dias_credito_aplicados,
                 "autorizado_por_dias_credito": factura.autorizado_por_dias_credito,
+                "monto_vuelto": str(factura.monto_vuelto) if factura.monto_vuelto > 0 else None,
+                "metodo_vuelto": factura.metodo_vuelto,
+                "autorizado_por_vuelto": factura.autorizado_por_vuelto,
                 "pagos": (
                     [
                         {"metodo_pago": p["metodo_pago"], "moneda": p["moneda"], "monto_usd": str(monto_usd)}
@@ -548,8 +710,20 @@ class VentaService:
             .all()
         ]
         if ids_detalle:
+            # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18/C22/C24 (ver tambien
+            # PagoComisionService.pagar_comisiones_vendedor) -- sin esto, un pago de
+            # comisiones concurrente puede marcar 'pagada' una de estas filas justo
+            # despues de leerla aca como 'pendiente' pero antes del DELETE de mas abajo:
+            # la anulacion pasaria el guard igual y borraria una comision que el vendedor
+            # ya cobro de verdad.
             comisiones = (
-                session.query(ComisionFactura).filter(ComisionFactura.id_factura_detalle.in_(ids_detalle)).all()
+                session.execute(
+                    select(ComisionFactura)
+                    .where(ComisionFactura.id_factura_detalle.in_(ids_detalle))
+                    .with_hint(ComisionFactura, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+                )
+                .scalars()
+                .all()
             )
             if any(comision.estado_pago == "pagada" for comision in comisiones):
                 raise ValueError("No se puede anular: hay comisiones ya pagadas sobre esta factura.")
@@ -578,19 +752,20 @@ class VentaService:
 
         factura.estado_factura = "ANULADA"
         factura.modificado_por = id_usuario
-        session.commit()
-        session.refresh(factura)
 
-        logger.info(
-            "Factura %s anulada: motivo=%s monto_revertido_a_nota_credito=%s usuario=%s",
-            factura.numero_factura,
-            motivo,
-            monto_pagado,
-            id_usuario,
-        )
-
+        # La nota de credito se crea AHORA, con el nucleo interno sin commit propio
+        # (NotaCreditoService._crear_nota_credito_cliente), en la MISMA transaccion que la
+        # anulacion -- antes cada una comiteaba por separado (la anulacion arriba, la nota
+        # de credito en su propio commit() dentro del metodo publico): si esa segunda
+        # insercion fallaba, la anulacion ya habia quedado comprometida sin su
+        # compensacion, y el dinero que el cliente ya pago desaparecia contablemente sin
+        # dejar rastro ni forma de revertir. numero_nota_credito se captura en una
+        # variable local ANTES del commit -- despues de comitear la sesion expira los
+        # atributos por defecto, y no hace falta un refresh extra solo para loguear/auditar
+        # un string que ya no cambia.
+        numero_nota_credito = None
         if monto_pagado > 0:
-            NotaCreditoService.crear_nota_credito_cliente(
+            nota_credito = NotaCreditoService._crear_nota_credito_cliente(
                 session,
                 id_cliente=factura.id_cliente_factura,
                 id_factura_origen=id_factura,
@@ -598,6 +773,19 @@ class VentaService:
                 motivo=motivo,
                 id_usuario=id_usuario,
             )
+            numero_nota_credito = nota_credito.numero_nota_credito
+
+        session.commit()
+        session.refresh(factura)
+
+        logger.info(
+            "Factura %s anulada: motivo=%s monto_revertido_a_nota_credito=%s nota_credito=%s usuario=%s",
+            factura.numero_factura,
+            motivo,
+            monto_pagado,
+            numero_nota_credito,
+            id_usuario,
+        )
 
         AuditoriaService.registrar_evento(
             session,
@@ -607,7 +795,7 @@ class VentaService:
             detalle={
                 "numero_factura": factura.numero_factura,
                 "motivo": motivo,
-                "nota_credito_generada": str(monto_pagado) if monto_pagado > 0 else None,
+                "nota_credito_generada": numero_nota_credito,
             },
         )
         return factura
@@ -622,6 +810,7 @@ class VentaService:
         estado: str | None = None,
         numero_factura: str | None = None,
         nombre_cliente: str | None = None,
+        texto_busqueda: str | None = None,
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
@@ -643,12 +832,24 @@ class VentaService:
             query = query.filter(FacturaVenta.numero_factura.ilike(f"%{numero_factura}%"))
         if nombre_cliente:
             # Usar subquery para filtrar por nombre de cliente sin afectar los joinedloads
-            from app.db.models import Cliente
-
             subq_cliente = session.query(Cliente.id_cliente).filter(
                 Cliente.nombre_razon_social.ilike(f"%{nombre_cliente}%")
             )
             query = query.filter(FacturaVenta.id_cliente_factura.in_(subq_cliente))
+        if texto_busqueda:
+            # Barra de busqueda unica del listado (FacturacionPanel): matchea CUALQUIERA
+            # de los datos que se muestran en pantalla -- numero de factura, cliente o
+            # vendedor -- en vez de exigir que el cajero sepa en cual de dos/tres cajas
+            # separadas escribir. numero_factura/nombre_cliente (arriba) se mantienen
+            # aparte para uso programatico/tests que quieran un filtro AND preciso.
+            like = f"%{texto_busqueda}%"
+            subq_cliente_texto = session.query(Cliente.id_cliente).filter(Cliente.nombre_razon_social.ilike(like))
+            subq_vendedor_texto = session.query(Vendedor.id_vendedor).filter(Vendedor.nombre_vendedor.ilike(like))
+            query = query.filter(
+                FacturaVenta.numero_factura.ilike(like)
+                | FacturaVenta.id_cliente_factura.in_(subq_cliente_texto)
+                | FacturaVenta.id_vendedor.in_(subq_vendedor_texto)
+            )
 
         hoy = date.today()
         if estado:
@@ -703,29 +904,33 @@ class VentaService:
                 for c in session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_(ids_pagina)).all()
             }
 
-        # Obtener métodos de pago para ventas de contado
-        pagos_por_cxc = {}
+        # Metodos de pago para ventas de contado -- una factura puede tener varias lineas
+        # de pago con metodos distintos (PagoLineaDialog en la UI permite repartir el
+        # total). Se agrupan TODAS las lineas por cxc (antes un dict {id_cxc: ultimo_pago}
+        # se quedaba con una arbitraria y descartaba el resto en silencio).
+        pagos_por_cxc: dict[int, list[PagoCobro]] = {}
         if cxc_por_factura:
             ids_cxc = [c.id_cuenta_por_cobrar for c in cxc_por_factura.values()]
             if ids_cxc:
-                pagos_por_cxc = {
-                    p.id_cuenta_por_cobrar: p
-                    for p in session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar.in_(ids_cxc)).all()
-                }
+                for p in session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar.in_(ids_cxc)).all():
+                    pagos_por_cxc.setdefault(p.id_cuenta_por_cobrar, []).append(p)
 
         for f in facturas:
             f.estado_visual = _calcular_estado_visual(f.estado_factura, cxc_por_factura.get(f.id_factura), hoy)
 
-            # Agregar método de pago para ventas de contado
+            # "mixto" es un sentinel para mas de un metodo distinto -- ver
+            # historial_cliente.obtener_historial_cliente() para el mismo criterio.
+            f.metodo_pago = None
             if f.condicion_pago == "contado":
                 cxc = cxc_por_factura.get(f.id_factura)
                 if cxc:
-                    pago = pagos_por_cxc.get(cxc.id_cuenta_por_cobrar)
-                    f.metodo_pago = pago.metodo_pago if pago else None
-                else:
-                    f.metodo_pago = None
-            else:
-                f.metodo_pago = None
+                    metodos_distintos = list(
+                        dict.fromkeys(p.metodo_pago for p in pagos_por_cxc.get(cxc.id_cuenta_por_cobrar, []))
+                    )
+                    if len(metodos_distintos) == 1:
+                        f.metodo_pago = metodos_distintos[0]
+                    elif len(metodos_distintos) > 1:
+                        f.metodo_pago = "mixto"
 
         return {"items": facturas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
 
@@ -744,12 +949,24 @@ class VentaService:
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
         factura.estado_visual = _calcular_estado_visual(factura.estado_factura, cxc, date.today())
 
-        # Obtener método de pago para ventas de contado
-        metodo_pago = None
+        # Todas las lineas de pago para ventas de contado -- una factura puede tener mas
+        # de una (PagoLineaDialog permite repartir el total entre varios metodos/monedas),
+        # y el detalle de factura necesita mostrarlas TODAS, no solo la primera (antes
+        # `.first()` descartaba el resto en silencio). "mixto" en `metodo_pago` es el mismo
+        # sentinel que usa listar_facturas()/historial_cliente para mas de un metodo
+        # distinto -- queda ademas la lista completa en "pagos" para el desglose.
+        pagos_cobro: list[PagoCobro] = []
         if factura.condicion_pago == "contado" and cxc:
-            pago = session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar).first()
-            if pago:
-                metodo_pago = pago.metodo_pago
+            pagos_cobro = (
+                session.query(PagoCobro)
+                .filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar)
+                .order_by(PagoCobro.fecha_pago)
+                .all()
+            )
+        metodo_pago = None
+        if pagos_cobro:
+            metodos_distintos = list(dict.fromkeys(p.metodo_pago for p in pagos_cobro))
+            metodo_pago = metodos_distintos[0] if len(metodos_distintos) == 1 else "mixto"
 
         detalles = (
             session.query(FacturaDetalle)
@@ -757,7 +974,23 @@ class VentaService:
             .filter(FacturaDetalle.id_factura == id_factura)
             .all()
         )
-        return {"factura": factura, "detalles": detalles, "metodo_pago": metodo_pago}
+
+        # Nota de credito que esta factura genero al anularse (si la hubo) -- a lo sumo
+        # una por factura (anular_factura crea una sola, ver NotaCreditoService). Se
+        # incluye aca para que FacturaDetalleDialog pueda ofrecer un atajo directo de
+        # "Devolver esta nota" sin que el usuario tenga que ir a buscarla al historial
+        # del cliente.
+        nota_credito = (
+            session.query(NotaCreditoCliente).filter(NotaCreditoCliente.id_factura_origen == id_factura).first()
+        )
+
+        return {
+            "factura": factura,
+            "detalles": detalles,
+            "metodo_pago": metodo_pago,
+            "pagos": pagos_cobro,
+            "nota_credito": nota_credito,
+        }
 
     @staticmethod
     def consultar_limite_disponible(session: Session, id_cliente: int, id_usuario: int | None = None) -> dict:

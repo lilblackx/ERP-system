@@ -31,13 +31,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.db.models import Caja, FacturaVenta, Usuario
+from app.db.models import Caja, FacturaVenta, NotaCreditoCliente, Usuario
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
 from app.ui.caja_apertura_dialog import CajaAperturaDialog
+from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.factura_form_dialog import FacturaFormDialog
 from app.ui.factura_pdf import imprimir_factura
@@ -72,6 +73,14 @@ POR_PAGINA = 20
 # (D-01), este es un QComboBox sin busqueda-mientras-se-escribe, asi que el tope es mas
 # generoso que el usado ahi (50) para que siga siendo util sin buscador.
 LIMITE_CLIENTES_FILTRO = 200
+
+
+def _etiqueta_metodo_pago(valor: str | None) -> str:
+    """ "mixto" es el sentinel que VentaService.listar_facturas() usa cuando una factura
+    tuvo mas de una forma de pago con metodo distinto (ver PagoLineaDialog) -- se traduce
+    aca para no mostrar el valor crudo en la tabla/exportacion. El resto de los valores
+    (efectivo, transferencia, etc.) se muestran tal cual, sin mas cambios."""
+    return "Mixto" if valor == "mixto" else (valor or "—")
 
 
 def _tarea_imprimir_factura(session, id_factura: int, id_usuario: int | None) -> str | None:
@@ -206,24 +215,18 @@ class FacturacionPanel(QWidget):
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)
 
+        # Barra de busqueda unica: matchea numero de factura, cliente o vendedor (ver
+        # VentaService.listar_facturas(texto_busqueda=...)) -- antes eran dos cajas
+        # separadas (N° factura / cliente) que se combinaban con AND, obligando a saber
+        # en cual escribir cada dato.
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText("Buscar por N° de factura…")
+        self.buscar_input.setPlaceholderText("Buscar por N° de factura, cliente o vendedor…")
         self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
-        self.buscar_input.setFixedWidth(200)
+        self.buscar_input.setFixedWidth(320)
         self.buscar_input.returnPressed.connect(self._buscar_desde_inicio)
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
-
-        self.buscar_cliente_input = QLineEdit()
-        self.buscar_cliente_input.setPlaceholderText("Buscar por cliente…")
-        self.buscar_cliente_input.addAction(
-            qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition
-        )
-        self.buscar_cliente_input.setObjectName("SearchInput")
-        self.buscar_cliente_input.setStyleSheet(SEARCH_QSS)
-        self.buscar_cliente_input.setFixedWidth(200)
-        self.buscar_cliente_input.returnPressed.connect(self._buscar_desde_inicio)
 
         self.estado_combo = QComboBox()
         for etiqueta, valor in ESTADOS_FILTRO:
@@ -250,7 +253,6 @@ class FacturacionPanel(QWidget):
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_facturas, on_pdf=self.exportar_pdf_facturas)
 
         h.addWidget(self.buscar_input)
-        h.addWidget(self.buscar_cliente_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nueva_factura)
         h.addWidget(self.btn_filtrar)
@@ -361,8 +363,7 @@ class FacturacionPanel(QWidget):
         try:
             resultado = VentaService.listar_facturas(
                 session,
-                numero_factura=self.buscar_input.text().strip() or None,
-                nombre_cliente=self.buscar_cliente_input.text().strip() or None,
+                texto_busqueda=self.buscar_input.text().strip() or None,
                 estado=self.estado_combo.currentData(),
                 condicion_pago=self.condicion_combo.currentData(),
                 pagina=self.pagina_actual,
@@ -392,9 +393,9 @@ class FacturacionPanel(QWidget):
             self.tabla.setItem(fila, 5, QTableWidgetItem(condicion))
 
             # Método de pago
-            metodo_pago = getattr(f, "metodo_pago", None) or "—"
-            if f.condicion_pago != "contado":
-                metodo_pago = "N/A"
+            metodo_pago = (
+                "N/A" if f.condicion_pago != "contado" else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None))
+            )
             item_metodo = QTableWidgetItem(metodo_pago)
             item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_metodo)
@@ -569,8 +570,12 @@ class FacturacionPanel(QWidget):
             return
 
         session = self.session_factory()
+        id_factura_anulada = None
         try:
-            VentaService.anular_factura(session, id_factura, id_usuario=self.usuario.id_usuario, motivo=motivo)
+            factura = VentaService.anular_factura(
+                session, id_factura, id_usuario=self.usuario.id_usuario, motivo=motivo
+            )
+            id_factura_anulada = factura.id_factura
             self.cargar_facturas()
         except ValueError as exc:
             session.rollback()
@@ -582,11 +587,45 @@ class FacturacionPanel(QWidget):
         finally:
             session.close()
 
+        # Fuera del try/finally de arriba (con su propia sesion) para no arriesgar que un
+        # rollback/cierre de la sesion de la anulacion interfiera con esta consulta -- ver
+        # comentario de _ofrecer_devolver_nota_credito.
+        if id_factura_anulada is not None:
+            self._ofrecer_devolver_nota_credito(id_factura_anulada)
+
+    def _ofrecer_devolver_nota_credito(self, id_factura: int) -> None:
+        """Seguimiento inmediato tras anular una factura de contado con pago aplicado:
+        en vez de dejar al cajero que se entere de la nota de credito generada navegando
+        a otro modulo (Clientes > Historial), se le ofrece devolverla en el momento. El
+        proceso contable sigue siendo el mismo de 2 pasos (anular = reversion fiscal,
+        devolver = operacion de tesoreria aparte, con su propia autorizacion) -- esto
+        solo evita la navegacion, no salta ningun paso ni ninguna validacion."""
+        session = self.session_factory()
+        try:
+            nota = session.query(NotaCreditoCliente).filter(NotaCreditoCliente.id_factura_origen == id_factura).first()
+            if nota is None or nota.saldo_disponible <= 0:
+                return
+
+            respuesta = QMessageBox.question(
+                self,
+                "Nota de crédito generada",
+                f"Se generó la nota de crédito {nota.numero_nota_credito} por "
+                f"${float(nota.saldo_disponible):,.2f}. ¿Deseas devolver el dinero al cliente ahora?",
+            )
+            if respuesta != QMessageBox.StandardButton.Yes:
+                return
+
+            dialogo = DevolverNotaCreditoDialog(session, self.usuario.id_usuario, [nota], parent=self)
+            dialogo.exec()
+        except Exception:
+            logger.exception("Fallo al ofrecer la devolucion de la nota de credito de la factura %s", id_factura)
+        finally:
+            session.close()
+
     def _filas_para_exportar(self, session) -> list[list]:
         resultado = VentaService.listar_facturas(
             session,
-            numero_factura=self.buscar_input.text().strip() or None,
-            nombre_cliente=self.buscar_cliente_input.text().strip() or None,
+            texto_busqueda=self.buscar_input.text().strip() or None,
             estado=self.estado_combo.currentData(),
             condicion_pago=self.condicion_combo.currentData(),
             pagina=1,
@@ -601,7 +640,7 @@ class FacturacionPanel(QWidget):
                 f.vendedor.nombre_vendedor if f.vendedor else None,
                 f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
                 "Contado" if f.condicion_pago == "contado" else "Crédito",
-                getattr(f, "metodo_pago", None) or "—" if f.condicion_pago == "contado" else "N/A",
+                "N/A" if f.condicion_pago != "contado" else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None)),
                 float(f.total_venta),
                 f.estado_visual,
             ]

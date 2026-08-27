@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 from app.db.models import (
+    BancoMovimiento,
     CajaMovimiento,
     ComisionFactura,
     CuentaPorCobrar,
@@ -19,11 +20,15 @@ from app.services.tasas import TasaService
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
 from tests.factories import (
+    asignar_permiso,
     crear_caja,
     crear_cliente,
     crear_cuenta_bancaria,
+    crear_permiso,
     crear_precio_producto,
     crear_producto,
+    crear_rol,
+    crear_usuario,
     crear_usuario_admin,
     crear_vendedor,
     pago_contado,
@@ -61,6 +66,32 @@ def test_emitir_factura_sin_usuario_autorizado_falla(db_session):
             id_cliente=cliente.id_cliente,
             id_usuario=None,
             id_vendedor=None,
+            condicion_pago="contado",
+            pagos=pago_contado(db_session),
+            items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
+        )
+
+
+def test_emitir_factura_contado_sin_permiso_pagos_falla(db_session):
+    """N4 (auditoria de facturacion 2026-08-25): emitir_factura() de contado exige
+    'pagos'/'crear' ademas de 'ventas'/'crear' (ventas.py, linea del `if pagos:
+    require_permiso(...)`) porque liquida la cuenta por cobrar en la misma transaccion --
+    un vendedor sin ese permiso no puede facturar de contado aunque si pueda de credito."""
+    rol = crear_rol(db_session)
+    permiso_ventas = crear_permiso(db_session, recurso="ventas", accion="crear")
+    asignar_permiso(db_session, rol, permiso_ventas)
+    vendedor_usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(PermisoDenegadoError):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=vendedor_usuario.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
             condicion_pago="contado",
             pagos=pago_contado(db_session),
             items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
@@ -432,6 +463,79 @@ def test_emitir_factura_agrupa_items_repetidos_para_validar_stock(db_session):
                 {"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "20.00"},
             ],
         )
+
+
+def test_emitir_factura_bloquea_stock_con_updlock_rowlock_concurrente(db_session, test_engine):
+    """N3 (auditoria de facturacion 2026-08-25): el WITH (UPDLOCK, ROWLOCK) sobre
+    Inventario (ventas.py, validacion de stock) solo estaba verificado leyendo el codigo,
+    nunca ejercitado con dos conexiones reales compitiendo por el mismo producto -- este
+    test abre una segunda sesion real sobre test_engine (db_session no sirve para esto:
+    una Session de SQLAlchemy no es segura para compartir entre threads) que sostiene el
+    lock manualmente sobre la fila del producto y comprueba que un emitir_factura()
+    concurrente sobre ESE MISMO producto de verdad se queda bloqueado esperando el lock
+    (no lee un stock stale) hasta que la primera transaccion lo libera."""
+    import threading
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import sessionmaker
+
+    from app.db.models import Inventario
+
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=10)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    id_producto, id_cliente, id_vendedor, id_usuario = (
+        producto.id_producto,
+        cliente.id_cliente,
+        vendedor.id_vendedor,
+        admin.id_usuario,
+    )
+
+    session_factory = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
+    sesion_bloqueadora = session_factory()
+    resultado: dict = {}
+
+    try:
+        sesion_bloqueadora.execute(
+            select(Inventario)
+            .where(Inventario.id_producto == id_producto)
+            .with_hint(Inventario, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one()
+
+        def _emitir_en_thread():
+            sesion_hilo = session_factory()
+            try:
+                factura = VentaService.emitir_factura(
+                    sesion_hilo,
+                    id_cliente=id_cliente,
+                    id_usuario=id_usuario,
+                    id_vendedor=id_vendedor,
+                    condicion_pago="credito",
+                    items=[{"id_producto": id_producto, "cantidad": 3, "precio_unitario": "10.00"}],
+                )
+                resultado["id_factura"] = factura.id_factura
+            finally:
+                sesion_hilo.close()
+
+        hilo = threading.Thread(target=_emitir_en_thread)
+        hilo.start()
+
+        # El lock sigue sostenido: emitir_factura debe seguir esperando, no adelantarse.
+        hilo.join(timeout=1.5)
+        assert hilo.is_alive(), "emitir_factura no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre Inventario"
+
+        # Libera el lock (rollback: esta sesion solo leyo, no debe dejar nada escrito).
+        sesion_bloqueadora.rollback()
+
+        hilo.join(timeout=10)
+        assert not hilo.is_alive(), "emitir_factura no continuo tras liberarse el lock"
+        assert "id_factura" in resultado
+    finally:
+        sesion_bloqueadora.close()
+
+    db_session.refresh(producto)
+    assert producto.cantidad_unidad == Decimal("7.00")
 
 
 def test_emitir_factura_sin_items(db_session):
@@ -990,6 +1094,38 @@ def test_listar_facturas_filtra_por_numero_parcial(db_session):
 
     assert resultado["total"] == 1
     assert resultado["items"][0].numero_factura == factura.numero_factura
+
+
+def test_listar_facturas_texto_busqueda_matchea_numero_cliente_o_vendedor(db_session):
+    """texto_busqueda es la barra de busqueda unica de FacturacionPanel: un solo termino
+    debe matchear numero de factura, nombre de cliente O nombre de vendedor -- antes eran
+    dos cajas separadas (numero_factura/nombre_cliente) que se combinaban con AND."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session, nombre_vendedor="Roberto Distinguible")
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session, nombre_razon_social="Comercial Unico SA")
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    por_numero = VentaService.listar_facturas(
+        db_session, texto_busqueda=factura.numero_factura[-4:], id_usuario=admin.id_usuario
+    )
+    por_cliente = VentaService.listar_facturas(db_session, texto_busqueda="Unico", id_usuario=admin.id_usuario)
+    por_vendedor = VentaService.listar_facturas(db_session, texto_busqueda="Distinguible", id_usuario=admin.id_usuario)
+    sin_match = VentaService.listar_facturas(db_session, texto_busqueda="NoExiste123", id_usuario=admin.id_usuario)
+
+    for resultado in (por_numero, por_cliente, por_vendedor):
+        assert resultado["total"] == 1
+        assert resultado["items"][0].id_factura == factura.id_factura
+    assert sin_match["total"] == 0
 
 
 def test_listar_facturas_filtra_por_estado_vencida(db_session):
@@ -1662,3 +1798,261 @@ def test_consultar_limite_disponible_sin_usuario_autorizado_falla(db_session):
     cliente = crear_cliente(db_session)
     with pytest.raises(PermisoDenegadoError):
         VentaService.consultar_limite_disponible(db_session, cliente.id_cliente)
+
+
+# --- Vuelto (cambio) en facturas de contado -------------------------------------------
+
+
+def test_emitir_factura_vuelto_bancario_sin_referencia_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+    cuenta_vuelto = crear_cuenta_bancaria(db_session)
+
+    with pytest.raises(ValueError, match="referencia bancaria"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            pagos=[
+                {
+                    "metodo_pago": "transferencia",
+                    "moneda": "USD",
+                    "monto_moneda_origen": Decimal("150.00"),
+                    "id_cuenta_bancaria": cuenta.id_cuenta,
+                }
+            ],
+            metodo_vuelto="transferencia",
+            id_cuenta_bancaria_vuelto=cuenta_vuelto.id_cuenta,
+            id_autorizador_vuelto=admin.id_usuario,
+        )
+
+
+def test_emitir_factura_vuelto_bancario_sin_autorizador_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+    cuenta_vuelto = crear_cuenta_bancaria(db_session)
+
+    with pytest.raises(ValueError, match="autorizacion de un supervisor"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            pagos=[
+                {
+                    "metodo_pago": "transferencia",
+                    "moneda": "USD",
+                    "monto_moneda_origen": Decimal("150.00"),
+                    "id_cuenta_bancaria": cuenta.id_cuenta,
+                }
+            ],
+            metodo_vuelto="pago_movil",
+            id_cuenta_bancaria_vuelto=cuenta_vuelto.id_cuenta,
+            referencia_vuelto="REF1234",
+        )
+
+
+def test_emitir_factura_vuelto_bancario_autorizador_sin_permiso_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+    cuenta_vuelto = crear_cuenta_bancaria(db_session)
+    otro_rol = crear_rol(db_session)
+    autorizador_sin_permiso = crear_usuario(db_session, id_rol=otro_rol.id_rol)
+
+    with pytest.raises(PermisoDenegadoError):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            pagos=[
+                {
+                    "metodo_pago": "transferencia",
+                    "moneda": "USD",
+                    "monto_moneda_origen": Decimal("150.00"),
+                    "id_cuenta_bancaria": cuenta.id_cuenta,
+                }
+            ],
+            metodo_vuelto="transferencia",
+            id_cuenta_bancaria_vuelto=cuenta_vuelto.id_cuenta,
+            referencia_vuelto="REF1234",
+            id_autorizador_vuelto=autorizador_sin_permiso.id_usuario,
+        )
+
+
+def test_emitir_factura_vuelto_bancario_autorizado_ok(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+    cuenta_vuelto = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("1000.00"))
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        pagos=[
+            {
+                "metodo_pago": "transferencia",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("150.00"),
+                "id_cuenta_bancaria": cuenta.id_cuenta,
+            }
+        ],
+        metodo_vuelto="transferencia",
+        id_cuenta_bancaria_vuelto=cuenta_vuelto.id_cuenta,
+        referencia_vuelto="REF1234",
+        id_autorizador_vuelto=admin.id_usuario,
+    )
+
+    assert factura.monto_vuelto == Decimal("50.00")
+    assert factura.metodo_vuelto == "transferencia"
+    assert factura.referencia_vuelto == "REF1234"
+    assert factura.autorizado_por_vuelto == admin.id_usuario
+    assert factura.fecha_autorizacion_vuelto is not None
+
+    movimiento = (
+        db_session.query(BancoMovimiento)
+        .filter(BancoMovimiento.id_cuenta == cuenta_vuelto.id_cuenta, BancoMovimiento.tipo_movimiento == "cargo")
+        .first()
+    )
+    assert movimiento is not None
+    assert movimiento.monto_movimiento == Decimal("50.00")
+    assert movimiento.referencia_movimiento == "REF1234"
+
+
+def test_emitir_factura_vuelto_efectivo_no_requiere_autorizacion(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        pagos=[
+            {
+                "metodo_pago": "efectivo",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("150.00"),
+                "id_caja": caja.id_caja,
+            }
+        ],
+        metodo_vuelto="efectivo",
+        id_caja_vuelto=caja.id_caja,
+    )
+
+    assert factura.monto_vuelto == Decimal("50.00")
+    assert factura.metodo_vuelto == "efectivo"
+    assert factura.referencia_vuelto is None
+    assert factura.autorizado_por_vuelto is None
+
+    salida = (
+        db_session.query(CajaMovimiento)
+        .filter(CajaMovimiento.id_caja == caja.id_caja, CajaMovimiento.tipo_movimiento == "salida")
+        .first()
+    )
+    assert salida is not None
+    assert salida.monto_movimiento == Decimal("50.00")
+
+    # 500 apertura + 150 cobrado - 50 vuelto = 600
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("600.00")
+
+
+def test_emitir_factura_vuelto_efectivo_saldo_insuficiente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    caja = crear_caja(db_session)
+    # La caja de vuelto abre en 0 y el pago que genera el vuelto entra por transferencia
+    # (no aporta efectivo a esta caja) -- no hay de donde sacar el vuelto.
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("0.00"))
+    cuenta = crear_cuenta_bancaria(db_session)
+
+    with pytest.raises(ValueError, match="no tiene saldo suficiente"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            pagos=[
+                {
+                    "metodo_pago": "transferencia",
+                    "moneda": "USD",
+                    "monto_moneda_origen": Decimal("150.00"),
+                    "id_cuenta_bancaria": cuenta.id_cuenta,
+                }
+            ],
+            metodo_vuelto="efectivo",
+            id_caja_vuelto=caja.id_caja,
+        )
+
+
+def test_emitir_factura_vuelto_efectivo_se_infiere_de_la_unica_caja_usada(db_session):
+    """Sin metodo_vuelto explicito: si las formas de pago usaron una unica caja, el vuelto
+    se infiere de esa misma caja (ver comentario en VentaService.emitir_factura) -- esto es
+    lo que permite que pago_contado() (tests/factories.py) siga sin declarar nada de vuelto
+    para tests de otros modulos (comisiones, notas de credito, etc.)."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    cliente = crear_cliente(db_session)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        pagos=[
+            {
+                "metodo_pago": "efectivo",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("150.00"),
+                "id_caja": caja.id_caja,
+            }
+        ],
+    )
+
+    assert factura.monto_vuelto == Decimal("50.00")
+    assert factura.metodo_vuelto == "efectivo"
+    assert factura.autorizado_por_vuelto is None
+    salida = (
+        db_session.query(CajaMovimiento)
+        .filter(CajaMovimiento.id_caja == caja.id_caja, CajaMovimiento.tipo_movimiento == "salida")
+        .first()
+    )
+    assert salida is not None
+    assert salida.monto_movimiento == Decimal("50.00")

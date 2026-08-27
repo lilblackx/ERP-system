@@ -4,6 +4,7 @@ Insertan directamente contra los modelos (sin pasar por la capa de
 servicios) para mantener cada test enfocado en el servicio bajo prueba.
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -144,16 +145,29 @@ def crear_cuenta_bancaria(session: Session, saldo_total_banco: Decimal | int = 0
 def pago_contado(session: Session, **overrides) -> list[dict]:
     """Forma de pago 'de sobra' para VentaService.emitir_factura(condicion_pago='contado')
     en tests que no ejercitan el circuito de pagos en si (comisiones, notas de credito,
-    desempeno de vendedor, etc.): transferencia a una cuenta bancaria nueva por un monto
-    grande en USD, para no tener que calcular el total exacto de cada factura -- el
-    sobrante se recorta silenciosamente (vuelto), no genera error (ver
-    VentaService.emitir_factura)."""
-    cuenta = overrides.pop("cuenta_bancaria", None) or crear_cuenta_bancaria(session)
+    desempeno de vendedor, etc.): efectivo por un monto grande en USD contra una caja
+    nueva ya abierta con saldo de apertura igualmente generoso, para no tener que calcular
+    el total exacto de cada factura. El sobrante (vuelto) ya no se descarta en silencio
+    (ver migrations/0027_vuelto_factura.sql) -- pagar en efectivo hace que
+    VentaService.emitir_factura() infiera metodo_vuelto='efectivo' contra esta misma caja
+    automaticamente cuando el caller no indica uno explicito (unica caja usada en pagos),
+    asi que estos tests siguen sin necesitar saber nada de vuelto."""
+    caja = overrides.pop("caja", None)
+    if caja is None:
+        caja = Caja(
+            nombre_caja=_siguiente("Caja-pago-contado-"),
+            estado_caja="ABIERTA",
+            saldo_apertura=Decimal("9999999999.99"),
+            fecha_apertura=datetime.now(),
+        )
+        session.add(caja)
+        session.commit()
+        session.refresh(caja)
     linea = {
-        "metodo_pago": "transferencia",
+        "metodo_pago": "efectivo",
         "moneda": "USD",
         "monto_moneda_origen": Decimal("999999.99"),
-        "id_cuenta_bancaria": cuenta.id_cuenta,
+        "id_caja": caja.id_caja,
     }
     linea.update(overrides)
     return [linea]

@@ -25,7 +25,13 @@ def main():
             break
 
         window = MainWindow(login.usuario_autenticado)
-        window.show()
+        # Maximizada al abrir (pedido del usuario, 2026-08-27): evita problemas de
+        # resolucion -- usa siempre el espacio disponible real de la pantalla en vez de
+        # depender del tamaño fijo de MainWindow.resize(1200, 720), que en monitores mas
+        # chicos podia dejar la ventana con menos espacio del ideal y en monitores mas
+        # grandes la dejaba con bordes muertos alrededor. setMinimumSize(900, 600) sigue
+        # protegiendo el piso si el usuario la restaura/desmaximiza a mano.
+        window.showMaximized()
         app.exec()
 
     sys.exit(0)

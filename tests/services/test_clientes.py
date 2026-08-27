@@ -88,6 +88,34 @@ def test_list_clientes_filtra_por_texto(db_session):
     assert resultado[0].nombre_razon_social == "Cliente de Prueba"
 
 
+def test_list_clientes_texto_busqueda_matchea_identificacion_email_o_telefono(db_session):
+    """Barra de busqueda unica de ClientesPanel: un solo termino debe matchear tambien
+    identificacion/email/telefono, no solo nombre/codigo -- antes eran dos cajas
+    separadas (nombre / identificacion) que se combinaban con AND."""
+    admin = crear_usuario_admin(db_session)
+    clientes_service.create_cliente(
+        db_session,
+        **_datos_cliente(
+            codigo_cliente="CLI-UNICO",
+            identificacion_cliente="99887766",
+            nombre_razon_social="Distribuidora Zeta",
+            email="contacto@zeta-unico.com",
+            telefono="04121234567",
+            creado_por=admin.id_usuario,
+        ),
+    )
+
+    por_identificacion = clientes_service.list_clientes(
+        db_session, texto_busqueda="99887766", id_usuario=admin.id_usuario
+    )
+    por_email = clientes_service.list_clientes(db_session, texto_busqueda="zeta-unico", id_usuario=admin.id_usuario)
+    por_telefono = clientes_service.list_clientes(db_session, texto_busqueda="1234567", id_usuario=admin.id_usuario)
+
+    for resultado in (por_identificacion, por_email, por_telefono):
+        assert len(resultado) == 1
+        assert resultado[0].nombre_razon_social == "Distribuidora Zeta"
+
+
 def test_list_clientes_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         clientes_service.list_clientes(db_session)

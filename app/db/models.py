@@ -290,6 +290,19 @@ class FacturaVenta(Base):
     motivo_dias_credito: Mapped[str | None] = mapped_column(String(255))
     autorizado_por_dias_credito: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    # Vuelto (cambio) de una factura de contado cuando las formas de pago exceden
+    # total_a_cobrar -- el excedente siempre se entrega al cliente (no hay "saldo a
+    # favor" como metodo de vuelto). monto_vuelto=0.00 en toda factura sin vuelto
+    # (incluidas todas las de credito). Efectivo es libre (metodo_vuelto/
+    # referencia_vuelto/autorizado_por_vuelto quedan NULL); pago_movil/transferencia
+    # exigen referencia_vuelto + autorizado_por_vuelto (permiso 'vueltos_bancarios'/
+    # 'crear', mismo mecanismo que 'descuentos'/'creditos') -- ver
+    # migrations/0027_vuelto_factura.sql y VentaService.emitir_factura().
+    monto_vuelto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False, server_default="0.00")
+    metodo_vuelto: Mapped[str | None] = mapped_column(String(20))
+    referencia_vuelto: Mapped[str | None] = mapped_column(String(50))
+    autorizado_por_vuelto: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_autorizacion_vuelto: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
     cliente = relationship("Cliente")
     usuario = relationship("Usuario", foreign_keys=[id_usuario_factura])
@@ -298,6 +311,7 @@ class FacturaVenta(Base):
     modificador = relationship("Usuario", foreign_keys=[modificado_por])
     autorizador_descuento = relationship("Usuario", foreign_keys=[autorizado_por_descuento])
     autorizador_dias_credito = relationship("Usuario", foreign_keys=[autorizado_por_dias_credito])
+    autorizador_vuelto = relationship("Usuario", foreign_keys=[autorizado_por_vuelto])
 
 
 class FacturaDetalle(Base):

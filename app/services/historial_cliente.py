@@ -24,6 +24,8 @@ class HistorialItem(TypedDict):
     total_pagado: Decimal
     saldo_pendiente: Decimal
     metodo_pago: str | None
+    monto_vuelto: Decimal
+    metodo_vuelto: str | None
 
 
 def obtener_historial_cliente(session: Session, id_cliente: int) -> list[HistorialItem]:
@@ -70,13 +72,23 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d") if factura.fecha_emision else ""
         fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
 
-        # Obtener días de crédito del cliente
-        dias_credito = factura.cliente.dias_credito if factura.cliente else None
+        # Dias de credito REALMENTE aplicados a esta factura, no los configurados hoy en
+        # el cliente -- factura.dias_credito_aplicados es la foto tomada al emitir
+        # (migrations/0025_autorizacion_dias_credito.sql). Antes esto leia
+        # factura.cliente.dias_credito (el valor EN VIVO del cliente): si despues se
+        # cambiaban los dias de credito configurados, el historial mostraba el valor
+        # nuevo para TODAS las facturas ya emitidas, como si el cambio fuera retroactivo
+        # -- aunque fecha_vencimiento (ya guardada en la factura) nunca se tocaba.
+        dias_credito = factura.dias_credito_aplicados
 
-        # Obtener método de pago (para ventas de contado)
+        # Metodo de pago (para ventas de contado) -- una factura puede tener varias lineas
+        # de pago con metodos distintos (ver PagoLineaDialog en la UI); "mixto" es un
+        # sentinel para ese caso, distinto de cualquier metodo_pago real, que la UI
+        # traduce a una etiqueta propia en vez de mostrar arbitrariamente solo el primero.
         metodo_pago = None
         if factura.condicion_pago == "contado" and pagos:
-            metodo_pago = pagos[0].metodo_pago
+            metodos_distintos = list(dict.fromkeys(pago.metodo_pago for pago in pagos))
+            metodo_pago = metodos_distintos[0] if len(metodos_distintos) == 1 else "mixto"
 
         item: HistorialItem = {
             "id_cuenta": cxc.id_cuenta_por_cobrar if cxc else None,
@@ -92,6 +104,8 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "total_pagado": total_pagado,
             "saldo_pendiente": saldo_pendiente,
             "metodo_pago": metodo_pago,
+            "monto_vuelto": factura.monto_vuelto,
+            "metodo_vuelto": factura.metodo_vuelto,
         }
 
         historial.append(item)

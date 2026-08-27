@@ -5,7 +5,7 @@ Centraliza todos los QSS en un solo lugar para facilitar el mantenimiento.
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QGraphicsDropShadowEffect, QTableWidget, QWidget
+from PySide6.QtWidgets import QComboBox, QGraphicsDropShadowEffect, QTableWidget, QWidget
 
 # ── Paleta principal ────────────────────────────────────────────────────────
 COLOR_PRIMARY = "#0D47A1"  # Azul corporativo principal
@@ -363,3 +363,19 @@ def alinear_encabezados(tabla: QTableWidget, alineaciones: dict[int, Qt.Alignmen
         item = tabla.horizontalHeaderItem(columna)
         if item is not None:
             item.setTextAlignment(int(alineacion | Qt.AlignmentFlag.AlignVCenter))
+
+
+class ComboBoxSinScroll(QComboBox):
+    """QComboBox que ignora la rueda del mouse salvo que ya tenga foco (click previo).
+    Por defecto, Qt cambia el valor seleccionado con solo pasar el mouse por encima y
+    girar la rueda mientras se hace scroll de la pantalla que lo contiene -- un combo
+    dentro de un formulario largo puede terminar con un valor distinto al que el usuario
+    veia sin que haya hecho click en el, un problema de usabilidad conocido de Qt.
+    Ignorar el evento sin foco hace que se propague normalmente al widget padre
+    (QScrollArea, etc.), que sí debe scrollear."""
+
+    def wheelEvent(self, event) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()

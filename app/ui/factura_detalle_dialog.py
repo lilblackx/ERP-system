@@ -23,7 +23,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.empresa import EmpresaService
+from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_pdf import generar_pdf_factura
+from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -93,6 +95,17 @@ QPushButton#BtnSecondary:hover {{
 
 logger = logging.getLogger(__name__)
 
+_ETIQUETAS_METODO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO}
+_ETIQUETAS_MONEDA = {valor: etiqueta for etiqueta, valor in MONEDAS}
+# Metodo de VUELTO (cambio), distinto de metodo de pago -- ver METODOS_VUELTO en
+# factura_form_dialog.py. Duplicado aca a proposito (3 valores fijos) en vez de importar
+# entre dos dialogos de UI que no se relacionan.
+_ETIQUETAS_METODO_VUELTO = {
+    "efectivo": "Efectivo",
+    "pago_movil": "Pago Móvil",
+    "transferencia": "Transferencia",
+}
+
 
 class FacturaDetalleDialog(QDialog):
     """Vista de solo lectura de una factura: cabecera + lineas. `datos` es el dict
@@ -107,10 +120,27 @@ class FacturaDetalleDialog(QDialog):
         self.factura = datos["factura"]
         self.detalles = datos["detalles"]
         self.metodo_pago = datos.get("metodo_pago")
+        self.pagos = datos.get("pagos", [])
+        self.nota_credito = datos.get("nota_credito")
         self.session = session
         self.id_usuario = id_usuario
         self.setWindowTitle(f"Factura {self.factura.numero_factura}")
-        self.setFixedSize(720, 560)
+        # Alto base +20 por la linea de desglose Subtotal/Descuento/IVA del footer
+        # (siempre presente). El resto escala con la cantidad real de datos a mostrar en
+        # vez de un numero fijo adivinado -- un estimado plano quedaba corto o largo
+        # segun cuantas formas de pago hubiera (ver tambien el fix de
+        # _make_card_pagos_vuelto: el alto de la TABLA en si se mide de verdad, esto solo
+        # dimensiona la VENTANA para que le entre). setMinimumSize en vez de
+        # setFixedSize para que las tarjetas nuevas no queden recortadas.
+        alto_pagos_vuelto = 0
+        if self.pagos:
+            alto_pagos_vuelto = 70 + 40 * len(self.pagos)
+        if self.factura.monto_vuelto > 0:
+            alto_pagos_vuelto += 40
+        hay_nota_disponible = self.nota_credito is not None and self.nota_credito.saldo_disponible > 0
+        alto = 580 + alto_pagos_vuelto + (70 if hay_nota_disponible else 0)
+        self.resize(720, alto)
+        self.setMinimumSize(720, alto)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -123,6 +153,12 @@ class FacturaDetalleDialog(QDialog):
 
         root.addWidget(self._make_header())
         root.addWidget(self._make_ficha())
+        card_pagos_vuelto = self._make_card_pagos_vuelto()
+        if card_pagos_vuelto is not None:
+            root.addWidget(card_pagos_vuelto)
+        card_nota_credito = self._make_card_nota_credito()
+        if card_nota_credito is not None:
+            root.addWidget(card_nota_credito)
         root.addWidget(self._make_tabla_items(), stretch=1)
         root.addLayout(self._make_footer())
 
@@ -221,10 +257,18 @@ class FacturaDetalleDialog(QDialog):
         tasa = self.factura.tasa
         tasa_texto = f"{float(tasa.tasa_dolar_bcv):,.2f} Bs/USD" if tasa else "—"
 
-        # Método de pago para ventas de contado
-        metodo_pago_texto = self.metodo_pago if self.metodo_pago else "—"
+        # Metodo de pago para ventas de contado -- "mixto" (VentaService.obtener_factura)
+        # significa que hubo mas de una forma de pago con metodo distinto; el desglose
+        # linea por linea esta en la tarjeta de "Formas de pago" (_make_card_pagos_vuelto),
+        # aca solo un resumen legible en vez del sentinel crudo.
         if self.factura.condicion_pago != "contado":
             metodo_pago_texto = "N/A"
+        elif self.metodo_pago == "mixto":
+            metodo_pago_texto = "Mixto (ver desglose abajo)"
+        elif self.metodo_pago:
+            metodo_pago_texto = _ETIQUETAS_METODO.get(self.metodo_pago, self.metodo_pago)
+        else:
+            metodo_pago_texto = "—"
 
         campos = [
             ("N° de Control", self.factura.numero_control),
@@ -243,6 +287,135 @@ class FacturaDetalleDialog(QDialog):
 
         layout.addLayout(grid)
         return card
+
+    def _make_card_pagos_vuelto(self) -> QWidget | None:
+        """Desglose de formas de pago (una linea por PagoCobro -- antes invisible: la
+        ficha solo mostraba UN metodo de pago, `.first()`/dict que se quedaba con uno
+        arbitrario) y del vuelto entregado (antes no se mostraba en ningun lado de la UI,
+        aunque `FacturaVenta.monto_vuelto`/`metodo_vuelto`/`referencia_vuelto`/
+        `autorizado_por_vuelto` ya estaban persistidos -- ver migrations/0027_vuelto_factura.sql).
+        Solo se construye para facturas de contado con algo que mostrar."""
+        if not self.pagos and self.factura.monto_vuelto <= 0:
+            return None
+
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 12, 16, 14)
+        layout.setSpacing(8)
+
+        titulo_row = QHBoxLayout()
+        titulo_row.setSpacing(6)
+        icono_titulo = QLabel()
+        icono_titulo.setPixmap(qta.icon("fa5s.money-bill-wave", color=COLOR_PRIMARY).pixmap(QSize(12, 12)))
+        titulo = QLabel("FORMAS DE PAGO")
+        titulo.setProperty("class", "SectionTitle")
+        titulo_row.addWidget(icono_titulo)
+        titulo_row.addWidget(titulo)
+        titulo_row.addStretch()
+        layout.addLayout(titulo_row)
+
+        if self.pagos:
+            tabla = QTableWidget(len(self.pagos), 3)
+            tabla.setHorizontalHeaderLabels(["Método", "Moneda", "Monto"])
+            alinear_encabezados(
+                tabla, {0: Qt.AlignmentFlag.AlignLeft, 1: Qt.AlignmentFlag.AlignLeft, 2: Qt.AlignmentFlag.AlignRight}
+            )
+            tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            tabla.setAlternatingRowColors(True)
+            tabla.setShowGrid(False)
+            tabla.verticalHeader().setVisible(False)
+            tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            tabla.setStyleSheet(TABLE_QSS)
+            aplicar_sombra(tabla)
+            for fila, pago in enumerate(self.pagos):
+                tabla.setItem(fila, 0, QTableWidgetItem(_ETIQUETAS_METODO.get(pago.metodo_pago, pago.metodo_pago)))
+                tabla.setItem(fila, 1, QTableWidgetItem(_ETIQUETAS_MONEDA.get(pago.moneda, pago.moneda)))
+                item_monto = QTableWidgetItem(f"{float(pago.monto_moneda_origen or pago.monto):,.2f}")
+                item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                tabla.setItem(fila, 2, item_monto)
+            # Alto exacto medido DESPUES de poblar filas/estilo -- un estimado a mano
+            # (header/fila con un numero fijo de px) subestimaba el alto real del QSS
+            # (padding 10px del header + 2px de borde, padding 8px de cada item), y el
+            # resultado quedaba con el header ocupando casi toda la tarjeta y la fila de
+            # datos apenas visible, un pixel de alto (reportado por el usuario: "el grid
+            # de formas de pago no se ve bien").
+            alto_filas = sum(tabla.rowHeight(fila) for fila in range(tabla.rowCount()))
+            tabla.setFixedHeight(tabla.horizontalHeader().sizeHint().height() + alto_filas + 2)
+            layout.addWidget(tabla)
+
+        if self.factura.monto_vuelto > 0:
+            metodo_vuelto_texto = _ETIQUETAS_METODO_VUELTO.get(self.factura.metodo_vuelto, self.factura.metodo_vuelto)
+            texto_vuelto = f"Vuelto entregado: ${float(self.factura.monto_vuelto):,.2f} · {metodo_vuelto_texto}"
+            if self.factura.metodo_vuelto != "efectivo":
+                autorizador = self.factura.autorizador_vuelto
+                nombre_autorizador = autorizador.nombre_usuario if autorizador else "—"
+                texto_vuelto += f" · Ref. {self.factura.referencia_vuelto or '—'} · Autorizó: {nombre_autorizador}"
+            lbl_vuelto = QLabel(texto_vuelto)
+            lbl_vuelto.setWordWrap(True)
+            lbl_vuelto.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_PRIMARY}; padding-top: 4px;")
+            layout.addWidget(lbl_vuelto)
+
+        return card
+
+    def _make_card_nota_credito(self) -> QWidget | None:
+        """Atajo directo para devolver la nota de credito que ESTA factura genero al
+        anularse (si la hubo) -- antes, para devolver esa plata, habia que ir a buscar la
+        nota al historial del cliente sin ninguna pista de que existia desde aca. No
+        ofrece "aplicar a otra factura": esa accion si necesita ver el resto de facturas
+        abiertas del cliente, que este dialogo no conoce (solo los items de ESTA
+        factura) -- para eso sigue estando HistorialClienteWindow."""
+        if self.nota_credito is None or self.nota_credito.saldo_disponible <= 0:
+            return None
+
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(10)
+
+        icono = QLabel()
+        icono.setPixmap(qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY).pixmap(QSize(16, 16)))
+        layout.addWidget(icono)
+
+        self.lbl_nota_credito = QLabel(
+            f"Esta factura generó la nota de crédito {self.nota_credito.numero_nota_credito} — "
+            f"disponible ${float(self.nota_credito.saldo_disponible):,.2f}"
+        )
+        self.lbl_nota_credito.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
+        layout.addWidget(self.lbl_nota_credito, stretch=1)
+
+        self.btn_devolver_nota = QPushButton("Devolver esta nota")
+        self.btn_devolver_nota.setIcon(qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY))
+        self.btn_devolver_nota.setObjectName("BtnSecondary")
+        self.btn_devolver_nota.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_devolver_nota.setAutoDefault(False)
+        self.btn_devolver_nota.clicked.connect(self._devolver_nota_credito)
+        layout.addWidget(self.btn_devolver_nota)
+
+        return card
+
+    def _devolver_nota_credito(self) -> None:
+        dialogo = DevolverNotaCreditoDialog(self.session, self.id_usuario, [self.nota_credito], parent=self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.nota_actualizada is None:
+            return
+
+        self.nota_credito = dialogo.nota_actualizada
+        if self.nota_credito.saldo_disponible <= 0:
+            self.lbl_nota_credito.setText(
+                f"Esta factura generó la nota de crédito {self.nota_credito.numero_nota_credito} — ya devuelta"
+            )
+            self.btn_devolver_nota.setEnabled(False)
+        else:
+            self.lbl_nota_credito.setText(
+                f"Esta factura generó la nota de crédito {self.nota_credito.numero_nota_credito} — "
+                f"disponible ${float(self.nota_credito.saldo_disponible):,.2f}"
+            )
+        QMessageBox.information(self, "Nota de crédito devuelta", "La devolución se registró con éxito.")
 
     def _make_tabla_items(self) -> QTableWidget:
         columnas = ["Producto", "Cantidad", "Precio Unitario", "Subtotal"]
@@ -294,13 +467,28 @@ class FacturaDetalleDialog(QDialog):
         footer.setContentsMargins(0, 4, 0, 0)
         footer.setSpacing(10)
 
-        total_a_pagar = (
-            float(self.factura.total_venta)
-            - float(self.factura.monto_descuento or 0)
-            + float(self.factura.monto_iva or 0)
-        )
+        # Desglose Subtotal/Descuento/IVA -- antes solo se mostraba el total combinado, y
+        # habia que exportar a PDF (que si desglosa, ver factura_pdf.py::_filas_totales)
+        # para ver si se habia aplicado descuento o cuanto IVA.
+        subtotal = float(self.factura.total_venta)
+        descuento = float(self.factura.monto_descuento or 0)
+        monto_iva = float(self.factura.monto_iva or 0)
+        total_a_pagar = subtotal - descuento + monto_iva
+
+        resumen_partes = [f"Subtotal: ${subtotal:,.2f}"]
+        if descuento > 0:
+            resumen_partes.append(f"Descuento: -${descuento:,.2f}")
+        if self.factura.iva_aplicado:
+            resumen_partes.append(f"IVA ({float(self.factura.porcentaje_iva_aplicado):g}%): ${monto_iva:,.2f}")
+
+        col_totales = QVBoxLayout()
+        col_totales.setSpacing(1)
+        lbl_resumen = QLabel("  ·  ".join(resumen_partes))
+        lbl_resumen.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
+        col_totales.addWidget(lbl_resumen)
         lbl_total = QLabel(f"Total a pagar: ${total_a_pagar:,.2f}")
         lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        col_totales.addWidget(lbl_total)
 
         btn_exportar = QPushButton("Exportar PDF")
         btn_exportar.setIcon(qta.icon("fa5s.file-pdf", color=COLOR_DANGER))
@@ -318,7 +506,7 @@ class FacturaDetalleDialog(QDialog):
         btn_cerrar.setAutoDefault(False)
         btn_cerrar.clicked.connect(self.accept)
 
-        footer.addWidget(lbl_total)
+        footer.addLayout(col_totales)
         footer.addStretch()
         footer.addWidget(btn_exportar)
         footer.addWidget(btn_cerrar)
