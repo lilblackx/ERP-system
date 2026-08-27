@@ -16,11 +16,16 @@ from tests.factories import (
 
 
 def _datos_usuario(**overrides) -> dict:
+    # email se deriva de nombre_usuario (en vez de un literal fijo) para que dos llamadas
+    # con distinto nombre_usuario en el mismo test no choquen contra el nuevo requisito
+    # de email unico (auditoria de Usuarios, 2026-08-27) -- overrides["email"] explicito
+    # sigue ganando via el update() de abajo.
+    nombre_usuario = overrides.get("nombre_usuario", "jperez")
     datos = {
-        "nombre_usuario": "jperez",
+        "nombre_usuario": nombre_usuario,
         "nombre": "Juan",
         "apellido": "Perez",
-        "email": "jperez@example.com",
+        "email": f"{nombre_usuario}@example.com",
         "clave": "Secreta123!",
         "id_rol": None,
     }
@@ -59,6 +64,15 @@ def test_crear_usuario_requiere_clave(db_session):
         UsuarioService.crear_usuario(db_session, **_datos_usuario(clave=""), realizado_por=admin.id_usuario)
 
 
+def test_crear_usuario_requiere_email(db_session):
+    """El correo es a donde RecuperacionAccesoService envia los codigos de desbloqueo y
+    recuperacion de clave -- un usuario sin correo registrado queda sin forma de
+    recuperar el acceso por si solo."""
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="email"):
+        UsuarioService.crear_usuario(db_session, **_datos_usuario(email=""), realizado_por=admin.id_usuario)
+
+
 def test_crear_usuario_nombre_duplicado(db_session):
     admin = crear_usuario_admin(db_session)
     UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
@@ -66,6 +80,29 @@ def test_crear_usuario_nombre_duplicado(db_session):
     with pytest.raises(ValueError, match="ya esta en uso"):
         UsuarioService.crear_usuario(
             db_session, **_datos_usuario(email="otro@example.com"), realizado_por=admin.id_usuario
+        )
+
+
+def test_crear_usuario_email_duplicado(db_session):
+    """Auditoria de Usuarios (2026-08-27): el correo identifica a donde van los codigos
+    de desbloqueo/recuperacion -- dos usuarios con el mismo correo podrian recibir el
+    codigo del otro."""
+    admin = crear_usuario_admin(db_session)
+    UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
+
+    with pytest.raises(ValueError, match="ya esta en uso"):
+        UsuarioService.crear_usuario(
+            db_session,
+            **_datos_usuario(nombre_usuario="otro_user", email="jperez@example.com"),
+            realizado_por=admin.id_usuario,
+        )
+
+
+def test_crear_usuario_nombre_usuario_muy_largo(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="nombre_usuario no puede superar"):
+        UsuarioService.crear_usuario(
+            db_session, **_datos_usuario(nombre_usuario="x" * 51), realizado_por=admin.id_usuario
         )
 
 
@@ -115,6 +152,31 @@ def test_crear_usuario_rol_vendedor_pero_vendedor_inexistente(db_session):
         )
 
 
+def test_crear_usuario_vendedor_ya_vinculado_a_otro_usuario_falla(db_session):
+    """Auditoria de Usuarios (2026-08-27): dos logins distintos vinculados al mismo
+    Vendedor mezclarian reportes/comisiones entre ambos sin forma de distinguirlos."""
+    admin = crear_usuario_admin(db_session)
+    rol = crear_rol(db_session, nombre="VENDEDOR")
+    vendedor = crear_vendedor(db_session)
+    UsuarioService.crear_usuario(
+        db_session,
+        **_datos_usuario(id_rol=rol.id_rol, id_vendedor_usuario=vendedor.id_vendedor),
+        realizado_por=admin.id_usuario,
+    )
+
+    with pytest.raises(ValueError, match="ya esta vinculado"):
+        UsuarioService.crear_usuario(
+            db_session,
+            **_datos_usuario(
+                nombre_usuario="otro_user",
+                email="otro@example.com",
+                id_rol=rol.id_rol,
+                id_vendedor_usuario=vendedor.id_vendedor,
+            ),
+            realizado_por=admin.id_usuario,
+        )
+
+
 # --- editar_usuario --------------------------------------------------------------
 
 
@@ -141,6 +203,16 @@ def test_editar_usuario_actualiza_campos(db_session):
     )
 
     assert actualizado.nombre == "Carlos"
+
+
+def test_editar_usuario_no_permite_vaciar_email(db_session):
+    """Mismo motivo que test_crear_usuario_requiere_email: una edicion no debe poder
+    dejar a un usuario existente sin correo registrado."""
+    admin = crear_usuario_admin(db_session)
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
+
+    with pytest.raises(ValueError, match="email"):
+        UsuarioService.editar_usuario(db_session, usuario.id_usuario, {"email": ""}, realizado_por=admin.id_usuario)
 
 
 def test_editar_usuario_ignora_clave_en_datos(db_session):
@@ -208,6 +280,37 @@ def test_editar_usuario_mismo_nombre_usuario_no_falla(db_session):
     assert actualizado.nombre_usuario == "usuario1"
 
 
+def test_editar_usuario_email_duplicado(db_session):
+    admin = crear_usuario_admin(db_session)
+    UsuarioService.crear_usuario(
+        db_session, **_datos_usuario(nombre_usuario="usuario1", email="uno@example.com"), realizado_por=admin.id_usuario
+    )
+    otro = UsuarioService.crear_usuario(
+        db_session, **_datos_usuario(nombre_usuario="usuario2", email="dos@example.com"), realizado_por=admin.id_usuario
+    )
+
+    with pytest.raises(ValueError, match="ya esta en uso"):
+        UsuarioService.editar_usuario(
+            db_session, otro.id_usuario, {"email": "uno@example.com"}, realizado_por=admin.id_usuario
+        )
+
+
+def test_editar_usuario_mismo_email_no_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    usuario = UsuarioService.crear_usuario(
+        db_session, **_datos_usuario(email="uno@example.com"), realizado_por=admin.id_usuario
+    )
+
+    actualizado = UsuarioService.editar_usuario(
+        db_session,
+        usuario.id_usuario,
+        {"email": "uno@example.com", "nombre": "X"},
+        realizado_por=admin.id_usuario,
+    )
+
+    assert actualizado.email == "uno@example.com"
+
+
 # --- cambiar_estado --------------------------------------------------------------
 
 
@@ -241,6 +344,44 @@ def test_cambiar_estado_ok(db_session):
     )
 
     assert actualizado.estado == "INACTIVO"
+
+
+def test_cambiar_estado_no_permite_auto_desactivarse(db_session):
+    """Auditoria de Usuarios (2026-08-27): antes este guard solo existia en la UI
+    (usuarios_panel.py) -- cualquier otro punto de entrada al servicio podia desactivar
+    la propia cuenta sin aviso."""
+    admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="No puedes desactivar tu propia cuenta"):
+        UsuarioService.cambiar_estado(db_session, admin.id_usuario, "INACTIVO", realizado_por=admin.id_usuario)
+
+
+def test_cambiar_estado_no_permite_desactivar_al_unico_admin_activo(db_session):
+    """El guard de auto-desactivacion ya cubre el caso obvio (un ADMIN no puede
+    desactivarse a si mismo). Este cubre el caso donde OTRO actor con 'usuarios'/
+    'editar' (hoy nadie fuera de ADMIN lo tiene, pero un futuro rol Supervisor si podria)
+    intenta desactivar al unico ADMIN activo restante, dejando el sistema sin nadie que
+    pueda gestionar Usuarios/Permisos salvo tocando la base directo."""
+    admin = crear_usuario_admin(db_session)
+    rol_supervisor = crear_rol(db_session, nombre="SUPERVISOR")
+    permiso = crear_permiso(db_session, recurso="usuarios", accion="editar")
+    asignar_permiso(db_session, rol_supervisor, permiso)
+    supervisor = crear_usuario(db_session, nombre_usuario="supervisor1", id_rol=rol_supervisor.id_rol)
+
+    with pytest.raises(ValueError, match="unico administrador activo"):
+        UsuarioService.cambiar_estado(db_session, admin.id_usuario, "INACTIVO", realizado_por=supervisor.id_usuario)
+
+
+def test_cambiar_estado_permite_desactivar_admin_si_hay_otro_activo(db_session):
+    admin_1 = crear_usuario_admin(db_session)
+    admin_2 = crear_usuario_admin(db_session, nombre_usuario="admin2")
+
+    actualizado = UsuarioService.cambiar_estado(
+        db_session, admin_1.id_usuario, "INACTIVO", realizado_por=admin_2.id_usuario
+    )
+
+    assert actualizado.estado == "INACTIVO"
+    assert admin_2.estado == "ACTIVO"
 
 
 # --- desbloquear_usuario (C7: via de escape manual, sin correo) --------------------
@@ -394,3 +535,14 @@ def test_verificar_permiso_usuario_bloqueado_es_false_aunque_tenga_el_permiso(db
     usuario = crear_usuario(db_session, id_rol=rol.id_rol, bloqueado_desde=datetime.now())
 
     assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "crear") is False
+
+
+def test_verificar_permiso_admin_bypassa_sin_filas_en_rol_permisos(db_session):
+    """Bug preexistente sin caller real hasta que app/ui/sidebar.py empezo a usar este
+    metodo para filtrar el menu por rol (2026-08-27): a diferencia de
+    PermisoService.require_permiso(), este metodo no tenia el bypass de ADMIN -- un ADMIN
+    real (sin filas en rol_permisos, ver el seed de schema_sqlserver.sql) quedaba
+    evaluado como si no tuviera ningun permiso."""
+    admin = crear_usuario_admin(db_session)
+    assert UsuarioService.verificar_permiso(db_session, admin.id_usuario, "clientes", "eliminar") is True
+    assert UsuarioService.verificar_permiso(db_session, admin.id_usuario, "usuarios", "crear") is True

@@ -9,17 +9,17 @@ el resto de la aplicación con un diálogo de error.
 import logging
 from datetime import datetime
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from app.db.models import Usuario
 from app.services.tasas import TasaService
 from app.ui.styles import (
+    COLOR_BORDER,
     COLOR_DANGER,
     COLOR_SUCCESS,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
-    COLOR_TOPBAR_BORDER,
 )
 from app.ui.workers import QueryWorker
 
@@ -48,7 +48,28 @@ class TasaTicker(QWidget):
         self.usuario = usuario
         self._fecha_tasa = None
         self.setFixedHeight(38)
-        self.setStyleSheet(f"background-color: white; border-bottom: 1px solid {COLOR_TOPBAR_BORDER};")
+        # QSS CON selector de objectName, no una regla suelta -- mismo patron que
+        # TopBar/TOPBAR_QSS (`QWidget#TopBar {...}`, app/ui/styles.py), la otra barra fija
+        # del shell, que siempre se vio bien. Una regla sin selector
+        # (`"background-color: white; border-bottom: ..."`) NO se aplica al widget: Qt la
+        # trata como heredable y la pasa a todos los hijos, asi que cada bloque de texto
+        # dibujaba su propio borde inferior y la linea aparecia SOLO debajo de ellos, con
+        # huecos en el espacio vacio del medio -- la franja nunca pinto su propio borde
+        # continuo (reportado por el usuario, 2026-08-27: "no se ve completa"; cambiar
+        # color/grosor antes solo hacia mas notorios esos fragmentos). Ese mismo cascade
+        # ademas le imponia `background-color: white` al separador vertical, que peleaba
+        # contra su propio color de fondo.
+        # WA_StyledBackground: un QWidget "pelado" (no QFrame/QLabel) no dibuja el
+        # background/border de su QSS por si solo -- su paintEvent por defecto no llama al
+        # estilo, asi que con el selector ya puesto la regla existia pero no se pintaba
+        # (sintoma: se dejaron de ver los fragmentos heredados por los hijos, pero la
+        # linea desaparecio del todo). Este atributo es lo que hace que el widget se pinte
+        # a si mismo con el QSS.
+        self.setObjectName("TasaTicker")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(
+            f"QWidget#TasaTicker {{ background-color: white; border-bottom: 1px solid {COLOR_BORDER}; }}"
+        )
         self._build_ui()
 
         self._timer_elapsed = QTimer(self)
@@ -70,9 +91,16 @@ class TasaTicker(QWidget):
         layout.setSpacing(14)
 
         self.bloque_bcv, self.lbl_valor_bcv, self.lbl_delta_bcv = self._make_bloque("Tasa BCV")
-        separador = QFrame()
-        separador.setFrameShape(QFrame.Shape.VLine)
-        separador.setStyleSheet(f"color: {COLOR_TOPBAR_BORDER};")
+        # QLabel con background-color, no QFrame: QFrame.Shape.VLine con "color:" en QSS
+        # no pinta nada (ver GUIA_ESTILO_UI.md 8.8). 1px con COLOR_BORDER, igual que la
+        # linea inferior de la franja -- antes hizo falta subirlo a 2px oscuro para que se
+        # notara, pero eso compensaba el bug real de arriba (el QSS sin selector le metia
+        # `background-color: white` a este mismo hijo); resuelto ese cascade, el tono
+        # estandar de bordes de la app alcanza.
+        separador = QLabel()
+        separador.setFixedWidth(1)
+        separador.setFixedHeight(20)
+        separador.setStyleSheet(f"background-color: {COLOR_BORDER};")
         self.bloque_paralelo, self.lbl_valor_paralelo, self.lbl_delta_paralelo = self._make_bloque("Dólar paralelo")
 
         self.lbl_actualizado = QLabel("")
@@ -143,6 +171,14 @@ class TasaTicker(QWidget):
         self._fecha_tasa = datos["fecha_tasa"]
         self._actualizar_elapsed()
         self.setVisible(True)
+        # Mismo artefacto de primer pintado que en dialogos (ver GUIA_ESTILO_UI.md 8.1):
+        # a diferencia de un QDialog, este widget nunca pasa por un showEvent propio de
+        # navegacion (vive fuera del QStackedWidget, se crea una sola vez) -- este es el
+        # unico momento en que pasa de oculto/sin datos a visible con contenido real, asi
+        # que es el punto equivalente para forzar el repintado si DWM dejo el primer
+        # pintado a medias (reportado por el usuario: el border-bottom de la franja no se
+        # veia continuo en todo el ancho, 2026-08-27).
+        QTimer.singleShot(0, self.update)
 
     def _set_delta(self, lbl: QLabel, porcentaje: float | None) -> None:
         if porcentaje is None:

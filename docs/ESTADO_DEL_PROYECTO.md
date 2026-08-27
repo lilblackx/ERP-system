@@ -475,6 +475,94 @@ de servicio.
   `rol_permisos` — ningún otro rol califica sin importar qué permisos tenga asignados.
   `app/ui/caja_apertura_dialog.py` no necesitó cambios: ya capturaba
   `PermisoDenegadoError` de `abrir_caja()` y lo mostraba en pantalla.
+- **UI de Usuarios + Roles/Permisos, y filtrado del sidebar por rol (2026-08-27)**: el
+  backend (`RolService`/`PermisoService`/`UsuarioService`) existía completo desde antes
+  sin ninguna pantalla — `MODULOS_CONFIG["usuarios"]` caía en `PlaceholderView`. Se agregó
+  `app/ui/usuarios_panel.py` (listado + alta/edición + activar/desactivar + desbloqueo
+  manual, pestaña "Usuarios") y `app/ui/roles_permisos_panel.py` (CRUD de roles +
+  checkbox-grid de permisos por rol, pestaña "Roles y Permisos"), ambas dentro de un solo
+  `QTabWidget` para no sumar una segunda entrada de sidebar. El checkbox-grid de ADMIN se
+  deshabilita (con aviso) en vez de dejar tildar algo que no tendría efecto: ADMIN
+  bypassa `require_permiso()` por completo sin importar `rol_permisos`.
+
+  **Modelo final de roles** (decisión del usuario): ADMIN (superadmin, bypass total),
+  CAJERO (día a día: factura, cobra, aplica/devuelve notas de crédito —
+  `migrations/0030_permisos_rol_cajero.sql` le otorga 13 permisos que la migración 0004
+  había dejado sin asignar a propósito) y VENDEDOR (rep de campo de solo lectura:
+  `inventario:ver` + sus propios `reportes_ventas:ver`/`reportes_comisiones:ver`, seed
+  original sin cambios). Sin un rol Supervisor intermedio todavía: las autorizaciones
+  sensibles (`descuentos`, `creditos`, `vueltos_bancarios`, `notas_credito:editar`)
+  quedan reservadas solo a ADMIN — es dato en `rol_permisos`, no código, así que un rol
+  intermedio futuro es agregar la fila + tildar casillas desde esta misma pantalla.
+  Recordar que abrir/cerrar turno de caja sigue restringido a ADMIN literal sin importar
+  la matriz (`_require_admin()`, ver arriba) — otorgarle `cajas:editar` a CAJERO no le
+  habilita eso.
+
+  **Bug encontrado al construir esto**: `UsuarioService.verificar_permiso()` no tenía el
+  bypass de ADMIN que sí tiene `require_permiso()` — sin caller real hasta ahora (solo
+  tests), así que nunca se había notado. Se usó para calcular qué módulos mostrar en el
+  sidebar según el rol (`MainWindow._calcular_modulos_visibles()` +
+  `MODULO_PERMISO`, `app/ui/main_window.py`); sin el fix, un ADMIN real se hubiera
+  quedado sin ver ningún módulo en el menú. Corregido con el mismo bypass que
+  `require_permiso()`, test de regresión en `test_usuarios.py`.
+
+  **Filtrado del sidebar por rol** (`app/ui/sidebar.py`): es solo UX (evitar que un
+  usuario entre a un módulo y choque con "sin permiso") — la barrera de seguridad real
+  sigue siendo `require_permiso()` en cada servicio, sin ninguna dependencia de esto. Una
+  sección entera de la sidebar (ej. "ADMINISTRACIÓN") se omite si ninguno de sus módulos
+  queda visible para el rol, en vez de dejar un título de sección huérfano.
+
+  **Auditoría de Usuarios (2026-08-27), todos los hallazgos resueltos el mismo día**:
+  - **[Medio] Auto-desactivación y "último ADMIN" sin guard server-side**:
+    `UsuarioService.cambiar_estado()` solo tenía el chequeo en la UI
+    (`usuarios_panel.py`) — cualquier otro punto de entrada al servicio podía desactivar
+    la propia cuenta, o entre varios ADMIN dejar el sistema sin ninguno activo. Ahora
+    valida `id_usuario != realizado_por` y, si el objetivo es ADMIN, que quede al menos
+    otro ADMIN activo después del cambio — mismo criterio en servicio y UI (defensa en
+    profundidad, no solo un guard visual).
+  - **`email` obligatorio pero no único**: agregado `_validar_email_unico()`
+    (`usuarios.py`), mismo patrón que `_validar_nombre_usuario_unico()` — sin esto, dos
+    usuarios con el mismo correo podían recibir códigos de desbloqueo/recuperación
+    cruzados (`RecuperacionAccesoService` busca por `nombre_usuario`, no por email).
+  - **Sin tope de longitud** en `nombre_usuario`/`nombre`/`apellido`/`email` (ni cliente
+    ni servidor) y sin tope de bytes en `clave` (bcrypt exige ≤72 bytes utf-8, ver
+    `PASSWORD_MAX_BYTES` en `auth.py` — sin esto, un texto muy largo pegado disparaba un
+    error crudo de SQL Server o de la librería bcrypt en vez de un mensaje claro).
+    Validado en `usuarios.py`/`auth.py` y con `setMaxLength()` en
+    `usuario_form_dialog.py`.
+  - **Vínculo Usuario↔Vendedor sin unicidad**: `_resolver_vinculo_vendedor()` ahora
+    rechaza vincular un `Vendedor` que ya está vinculado a otro usuario — mezclaría
+    reportes/comisiones entre ambos logins sin forma de distinguirlos.
+  - **Bypass de ADMIN por nombre de rol, sin protección de UI**: `require_permiso()`
+    identifica al superusuario por el string literal `"ADMIN"` (no un flag estable), y
+    `RolesPermisosPanel` es la primera pantalla que permite renombrar/eliminar roles.
+    `RolService.actualizar_rol()`/`eliminar_rol()` ahora rechazan renombrar o eliminar el
+    rol `ADMIN` específicamente — cerraba la única vía (aunque hoy inalcanzable, ya que
+    solo ADMIN llega a esa pantalla) para que un futuro rol con `'permisos'/'editar'`
+    se autoescalara o dejara el sistema sin superusuario.
+
+- **UI de Tasas de Cambio (2026-08-27)**: `app/ui/tasas_panel.py` +
+  `app/ui/tasa_registro_dialog.py` — tasa vigente con delta vs. ayer, alta de una tasa
+  nueva, histórico exportable. Sin edición/eliminación: `TasaService` no las tiene, cada
+  registro es un snapshot histórico inmutable. **Auditoría del módulo (2026-08-27),
+  todos los hallazgos resueltos el mismo día**:
+  - **[Medio] Sin aviso ante un posible error de tipeo**: como `emitir_factura()`/
+    `registrar_compra()` leen `ControlDeTasa` directo para convertir pagos en VES/COP,
+    una tasa mal tipeada (ej. `4.20` en vez de `42.00`) afectaba de inmediato todas las
+    ventas en esa moneda sin ningún paso intermedio. `TasasPanel._confirmar_si_salto_
+    brusco()` ahora pide confirmación (no bloquea — una tasa SÍ puede saltar de verdad
+    en una crisis cambiaria) cuando el nuevo valor difiere más de 30% del último
+    registrado, para BCV/paralelo/COP.
+  - **`tasa_paralelo`/`tasa_cop` sin validar en el servidor**: `registrar_tasa()` solo
+    validaba `tasa_bcv > 0` — ahora los tres campos exigen ser mayores a cero si se
+    proveen (ni la UI ni la base tenían esta guarda; `DECIMAL(10,2)` no tiene `CHECK`).
+  - **Etiqueta "vs. ayer" podía ser engañosa**: `obtener_tasa_actual()` comparaba
+    contra la tasa registrada más reciente antes de hoy sin verificar que fuera
+    literalmente de ayer — con un hueco de varios días sin registrar (fin de semana,
+    feriado) el porcentaje era real pero la comparación no era con "ayer". Ahora solo
+    calcula el `porcentaje_vs_ayer_*` cuando la tasa anterior es del día calendario
+    inmediatamente anterior; si no, queda en `None` (la UI ya lo maneja: sin porcentaje,
+    no se muestra nada). Beneficia también a `TasaTicker`, que usa el mismo método.
 
 ## 8. Validaciones de negocio destacadas
 
@@ -521,10 +609,15 @@ de servicio.
 
 ## 9. Pendiente / próximos pasos sugeridos
 
-- UI: solo están cubiertos login y clientes; falta construir las pantallas para el
-  resto de los módulos de servicio ya implementados (incluida la nueva matriz de
-  permisos de `permisos.py`, pensada para un checkbox-grid por rol vía
-  `PermisoService.obtener_matriz_rol()` / `establecer_permisos_rol()`).
+- UI: cubiertos login, clientes, inventario, facturación, vendedores, config. de
+  empresa, dashboard, ~~usuarios~~ (resuelto 2026-08-27, ver sección 7 "UI de Usuarios +
+  Roles/Permisos") y ~~control de tasas~~ (resuelto 2026-08-27: `app/ui/tasas_panel.py` +
+  `app/ui/tasa_registro_dialog.py` — tasa vigente con delta vs. ayer, alta de una tasa
+  nueva y el histórico exportable con selector de rango de días; sin edición/eliminación
+  porque `TasaService` no las tiene, cada registro es un snapshot histórico inmutable).
+  Falta el resto de los módulos de servicio ya implementados sin pantalla propia:
+  proveedores, compras, bancos, cuentas bancarias, cajas (cierre de turno diferido a
+  propósito, ver sección 9 más abajo), comisiones.
 - ~~RBAC modelado pero no aplicado~~ — resuelto (2026-08-22), ver sección 7. ~~Sigue
   pendiente extenderlo a operaciones de lectura~~ — también resuelto (2026-08-22, misma
   sección).

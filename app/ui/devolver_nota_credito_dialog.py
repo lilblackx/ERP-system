@@ -298,7 +298,8 @@ class DevolverNotaCreditoDialog(QDialog):
             f"Se va a devolver ${monto:,.2f} de la nota {nota.numero_nota_credito}. "
             "Un supervisor debe autorizar esta devolución."
         )
-        motivo_label = "Número de referencia bancaria" if metodo != "efectivo" else "Motivo de la devolución"
+        es_bancario = metodo != "efectivo"
+        motivo_label = "Número de referencia bancaria" if es_bancario else "Motivo de la devolución"
         dialogo = AutorizacionDialog(
             self.session,
             recurso="notas_credito",
@@ -306,6 +307,8 @@ class DevolverNotaCreditoDialog(QDialog):
             mensaje=mensaje,
             titulo="Autorización de devolución requerida",
             motivo_label=motivo_label,
+            motivo_min_length=4 if es_bancario else 1,
+            motivo_max_length=50 if es_bancario else None,
             parent=self,
         )
         if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:

@@ -56,9 +56,9 @@ from app.ui.styles import (
     COLORES_ESTADO_FACTURA,
     SEARCH_QSS,
     TABLE_QSS,
+    EstadoBadge,
     alinear_encabezados,
     aplicar_sombra,
-    color_con_alpha,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 from app.ui.workers import QueryWorker
@@ -68,11 +68,6 @@ logger = logging.getLogger(__name__)
 COLS_VISIBLES = ["ID", "N° Factura", "Cliente", "Vendedor", "Fecha", "Condición", "Método Pago", "Total", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
-# Tope del combo "Cliente" del filtro (hallazgo #6 de la auditoria de facturacion): antes
-# cargaba el catalogo completo sin limite -- a diferencia de otros selectores de la app
-# (D-01), este es un QComboBox sin busqueda-mientras-se-escribe, asi que el tope es mas
-# generoso que el usado ahi (50) para que siga siendo util sin buscador.
-LIMITE_CLIENTES_FILTRO = 200
 
 
 def _etiqueta_metodo_pago(valor: str | None) -> str:
@@ -112,26 +107,6 @@ CONDICIONES_FILTRO = [
     ("Contado", "contado"),
     ("Crédito", "credito"),
 ]
-
-
-class EstadoFacturaBadge(QWidget):
-    """Badge de color por estado de factura (EMITIDA/PAGADA/PARCIAL/VENCIDA/ANULADA),
-    mismo criterio visual que BadgeItem en clientes_panel.py/inventario_panel.py pero
-    con mas de 2 estados posibles -- ver COLORES_ESTADO_FACTURA en app/ui/styles.py."""
-
-    def __init__(self, estado: str, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 4, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        color = COLORES_ESTADO_FACTURA.get(estado, COLOR_TEXT_MUTED)
-        lbl = QLabel(estado.capitalize())
-        lbl.setStyleSheet(
-            f"background-color: {color_con_alpha(color)}; color: {color}; border-radius: 10px;"
-            " padding: 2px 10px; font-size: 11px; font-weight: bold;"
-        )
-        layout.addWidget(lbl)
 
 
 class FacturacionPanel(QWidget):
@@ -371,6 +346,8 @@ class FacturacionPanel(QWidget):
                 id_usuario=self.usuario.id_usuario,
             )
             self._poblar_tabla(resultado)
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
         except Exception:
             logger.exception("Fallo al cargar el listado de facturas")
             QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de facturas.")
@@ -404,7 +381,8 @@ class FacturacionPanel(QWidget):
             item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_total)
 
-            badge = EstadoFacturaBadge(f.estado_visual)
+            color_estado = COLORES_ESTADO_FACTURA.get(f.estado_visual, COLOR_TEXT_MUTED)
+            badge = EstadoBadge(f.estado_visual.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 8, badge)
 
         total = resultado["total"]
@@ -499,6 +477,8 @@ class FacturacionPanel(QWidget):
                 # el resto de la UI) -- ver _disparar_impresion_automatica.
                 self._disparar_impresion_automatica(factura.id_factura)
                 QMessageBox.information(self, "Factura emitida", f"Factura {factura.numero_factura} emitida con éxito.")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
         except Exception:
             logger.exception("Fallo al procesar la emision de la factura")
             QMessageBox.critical(self, "Error", "No se pudo emitir la factura.")
@@ -547,6 +527,8 @@ class FacturacionPanel(QWidget):
             dialogo.exec()
         except ValueError as exc:
             QMessageBox.warning(self, "No se pudo abrir la factura", str(exc))
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
         except Exception:
             logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
             QMessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
@@ -580,6 +562,9 @@ class FacturacionPanel(QWidget):
         except ValueError as exc:
             session.rollback()
             QMessageBox.warning(self, "No se pudo anular la factura", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para anular facturas.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al anular la factura %s", id_factura)

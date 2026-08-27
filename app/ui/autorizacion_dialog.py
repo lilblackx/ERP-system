@@ -107,6 +107,8 @@ class AutorizacionDialog(QDialog):
         mensaje: str,
         titulo: str = "Autorización requerida",
         motivo_label: str = "Motivo",
+        motivo_min_length: int = 1,
+        motivo_max_length: int | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -115,6 +117,15 @@ class AutorizacionDialog(QDialog):
         self.accion = accion
         self.usuario_autorizador: Usuario | None = None
         self.motivo: str = ""
+        # min/max por defecto (1, sin tope) cubren el uso original de este campo como
+        # "motivo" libre (descuento, dias de credito) -- cuando se reutiliza como
+        # referencia bancaria (vuelto/devolucion de nota de credito, ver
+        # factura_form_dialog.py/devolver_nota_credito_dialog.py) el caller pasa el
+        # mismo minimo/maximo que ya exige VentaService.emitir_factura()/
+        # NotaCreditoService.devolver_nota_credito_cliente() server-side (>=4, <=50),
+        # para no dejar que el supervisor se reautentique con clave para nada si la
+        # referencia que tipeo es invalida y el servidor la va a rechazar igual.
+        self.motivo_min_length = motivo_min_length
 
         self.setWindowTitle(titulo)
         self.setFixedSize(420, 320)
@@ -122,6 +133,8 @@ class AutorizacionDialog(QDialog):
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui(mensaje, motivo_label)
+        if motivo_max_length is not None:
+            self.motivo_input.setMaxLength(motivo_max_length)
 
     def _build_ui(self, mensaje: str, motivo_label: str) -> None:
         root = QVBoxLayout(self)
@@ -188,6 +201,11 @@ class AutorizacionDialog(QDialog):
 
         if not motivo:
             QMessageBox.warning(self, "Motivo requerido", "Ingrese el motivo.")
+            return
+        if len(motivo) < self.motivo_min_length:
+            QMessageBox.warning(
+                self, "Motivo demasiado corto", f"Debe tener al menos {self.motivo_min_length} caracteres."
+            )
             return
         if not nombre_usuario or not clave:
             QMessageBox.warning(self, "Credenciales requeridas", "Ingrese usuario y clave del supervisor.")

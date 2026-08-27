@@ -84,8 +84,8 @@ def test_list_clientes_filtra_por_texto(db_session):
 
     resultado = clientes_service.list_clientes(db_session, texto_busqueda="Prueba", id_usuario=admin.id_usuario)
 
-    assert len(resultado) == 1
-    assert resultado[0].nombre_razon_social == "Cliente de Prueba"
+    assert resultado["total"] == 1
+    assert resultado["items"][0].nombre_razon_social == "Cliente de Prueba"
 
 
 def test_list_clientes_texto_busqueda_matchea_identificacion_email_o_telefono(db_session):
@@ -112,8 +112,8 @@ def test_list_clientes_texto_busqueda_matchea_identificacion_email_o_telefono(db
     por_telefono = clientes_service.list_clientes(db_session, texto_busqueda="1234567", id_usuario=admin.id_usuario)
 
     for resultado in (por_identificacion, por_email, por_telefono):
-        assert len(resultado) == 1
-        assert resultado[0].nombre_razon_social == "Distribuidora Zeta"
+        assert resultado["total"] == 1
+        assert resultado["items"][0].nombre_razon_social == "Distribuidora Zeta"
 
 
 def test_list_clientes_sin_usuario_autorizado_falla(db_session):
@@ -121,40 +121,29 @@ def test_list_clientes_sin_usuario_autorizado_falla(db_session):
         clientes_service.list_clientes(db_session)
 
 
-def test_list_clientes_respeta_limite(db_session):
+def test_list_clientes_pagina_resultados(db_session):
+    """D-01: list_clientes() pagina de verdad (pagina/por_pagina/total), reemplaza el
+    viejo `limite` (solo capaba filas sin llevar cuenta de pagina) -- mismo patron que
+    ProductoService.buscar()/VentaService.listar_facturas()."""
     admin = crear_usuario_admin(db_session)
     for i in range(5):
         clientes_service.create_cliente(
             db_session,
             **_datos_cliente(
-                codigo_cliente=f"CLI-LIM-{i}",
+                codigo_cliente=f"CLI-PAG-{i}",
                 identificacion_cliente=f"{i:08d}",
-                nombre_razon_social=f"Cliente Limite {i}",
+                nombre_razon_social=f"Cliente Pagina {i}",
                 creado_por=admin.id_usuario,
             ),
         )
 
-    resultado = clientes_service.list_clientes(db_session, id_usuario=admin.id_usuario, limite=3)
+    pagina_1 = clientes_service.list_clientes(db_session, pagina=1, por_pagina=2, id_usuario=admin.id_usuario)
+    pagina_2 = clientes_service.list_clientes(db_session, pagina=2, por_pagina=2, id_usuario=admin.id_usuario)
 
-    assert len(resultado) == 3
-
-
-def test_list_clientes_sin_limite_devuelve_todos(db_session):
-    admin = crear_usuario_admin(db_session)
-    for i in range(3):
-        clientes_service.create_cliente(
-            db_session,
-            **_datos_cliente(
-                codigo_cliente=f"CLI-SL-{i}",
-                identificacion_cliente=f"{i:08d}9",
-                nombre_razon_social=f"Cliente Sin Limite {i}",
-                creado_por=admin.id_usuario,
-            ),
-        )
-
-    resultado = clientes_service.list_clientes(db_session, id_usuario=admin.id_usuario)
-
-    assert len(resultado) >= 3
+    assert pagina_1["total"] == 5
+    assert len(pagina_1["items"]) == 2
+    assert len(pagina_2["items"]) == 2
+    assert {c.id_cliente for c in pagina_1["items"]}.isdisjoint({c.id_cliente for c in pagina_2["items"]})
 
 
 def test_update_cliente(db_session):
@@ -198,7 +187,7 @@ def test_delete_cliente_siempre_falla_para_proteger_integridad(db_session):
     with pytest.raises(ValueError, match="No se puede eliminar"):
         clientes_service.delete_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
 
-    assert len(clientes_service.list_clientes(db_session, id_usuario=admin.id_usuario)) == 1
+    assert clientes_service.list_clientes(db_session, id_usuario=admin.id_usuario)["total"] == 1
 
 
 def test_delete_cliente_sin_usuario_autorizado_falla(db_session):

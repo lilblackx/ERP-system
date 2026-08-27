@@ -129,6 +129,41 @@ def test_eliminar_rol_con_usuarios_asignados_falla(db_session):
     assert RolService.obtener_rol(db_session, rol.id_rol, id_usuario=admin.id_usuario) is not None
 
 
+def _rol_admin(db_session, admin):
+    return next(r for r in RolService.listar_roles(db_session, id_usuario=admin.id_usuario) if r.nombre == "ADMIN")
+
+
+def test_actualizar_rol_no_permite_renombrar_admin(db_session):
+    """Auditoria de Usuarios (2026-08-27): require_permiso() identifica al superusuario
+    por el nombre literal 'ADMIN' -- renombrarlo le sacaria el bypass a todos los
+    usuarios con ese rol sin ningun aviso."""
+    admin = crear_usuario_admin(db_session)
+    rol_admin = _rol_admin(db_session, admin)
+
+    with pytest.raises(ValueError, match="ADMIN no se puede renombrar"):
+        RolService.actualizar_rol(db_session, rol_admin.id_rol, id_usuario=admin.id_usuario, nombre="SUPERADMIN")
+
+
+def test_actualizar_rol_admin_permite_editar_otros_campos(db_session):
+    admin = crear_usuario_admin(db_session)
+    rol_admin = _rol_admin(db_session, admin)
+
+    actualizado = RolService.actualizar_rol(
+        db_session, rol_admin.id_rol, id_usuario=admin.id_usuario, descripcion="Acceso total"
+    )
+
+    assert actualizado.nombre == "ADMIN"
+    assert actualizado.descripcion == "Acceso total"
+
+
+def test_eliminar_rol_no_permite_eliminar_admin(db_session):
+    admin = crear_usuario_admin(db_session)
+    rol_admin = _rol_admin(db_session, admin)
+
+    with pytest.raises(ValueError, match="ADMIN no se puede eliminar"):
+        RolService.eliminar_rol(db_session, rol_admin.id_rol, id_usuario=admin.id_usuario)
+
+
 # --- PermisoService: catalogo -------------------------------------------------------
 
 

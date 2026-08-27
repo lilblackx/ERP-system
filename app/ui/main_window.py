@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
+from app.services.usuarios import UsuarioService
 from app.ui.clientes_panel import ClientesPanel
 from app.ui.config_empresa_panel import ConfigEmpresaPanel
 from app.ui.dashboard_panel import DashboardPanel
@@ -35,7 +36,9 @@ from app.ui.placeholder_view import PlaceholderView
 from app.ui.sidebar import Sidebar
 from app.ui.styles import GLOBAL_QSS
 from app.ui.tasa_ticker import TasaTicker
+from app.ui.tasas_panel import TasasPanel
 from app.ui.topbar import TopBar
+from app.ui.usuarios_panel import UsuariosPanel
 from app.ui.vendedores_panel import VendedoresPanel
 
 logger = logging.getLogger(__name__)
@@ -54,9 +57,33 @@ MODULOS_CONFIG = {
     "cajas": ("Cajas", None),
     "vendedores": ("Vendedores", VendedoresPanel),
     "comisiones": ("Comisiones", None),
-    "control_tasas": ("Control de Tasas", None),
+    "control_tasas": ("Control de Tasas", TasasPanel),
     "config_empresa": ("Configuración de Empresa", ConfigEmpresaPanel),
-    "usuarios": ("Usuarios", None),
+    "usuarios": ("Usuarios", UsuariosPanel),
+}
+
+# Permiso (recurso, accion) que un usuario necesita para VER cada modulo en el sidebar --
+# separado del RBAC real que ya protegen los servicios (require_permiso, la unica barrera
+# de seguridad de verdad): esto es solo para no mostrar en el menu un modulo al que el
+# usuario va a chocar con un "sin permiso" apenas entre (2026-08-27, a raiz del rol
+# CAJERO). 'ver' en todos los casos porque lo minimo para que un modulo tenga sentido en
+# el menu es poder consultarlo -- un rol con 'crear' pero no 'ver' sobre algo no existe en
+# ningun caso real hoy.
+MODULO_PERMISO: dict[str, tuple[str, str]] = {
+    "panel_general": ("dashboard", "ver"),
+    "clientes": ("clientes", "ver"),
+    "proveedores": ("proveedores", "ver"),
+    "inventario": ("inventario", "ver"),
+    "facturacion": ("ventas", "ver"),
+    "compras": ("compras", "ver"),
+    "bancos": ("bancos", "ver"),
+    "cuentas_bancarias": ("bancos", "ver"),
+    "cajas": ("cajas", "ver"),
+    "vendedores": ("vendedores", "ver"),
+    "comisiones": ("comisiones", "ver"),
+    "control_tasas": ("tasas", "ver"),
+    "config_empresa": ("empresa", "ver"),
+    "usuarios": ("usuarios", "ver"),
 }
 
 
@@ -73,9 +100,39 @@ class MainWindow(QMainWindow):
         # Aplicar estilos globales
         self.setStyleSheet(GLOBAL_QSS)
 
+        self._modulos_visibles = self._calcular_modulos_visibles()
         empresa = self._obtener_nombre_empresa()
         self._setup_ui(empresa)
-        self._ir_a_modulo("panel_general")
+        # "panel_general" es el destino por defecto, pero un rol futuro sin 'dashboard'/
+        # 'ver' no deberia aterrizar en un modulo que ni siquiera ve en el sidebar --
+        # cae al primero que si tenga visible (ADMIN/CAJERO/VENDEDOR de hoy siempre lo
+        # incluyen, asi que en la practica esto no cambia nada todavia).
+        destino_inicial = (
+            "panel_general"
+            if "panel_general" in self._modulos_visibles
+            else next(iter(self._modulos_visibles), "panel_general")
+        )
+        self._ir_a_modulo(destino_inicial)
+
+    # ── RBAC del sidebar ───────────────────────────────────────────────────
+
+    def _calcular_modulos_visibles(self) -> set[str]:
+        """Que modulos mostrar en el sidebar segun el rol del usuario logueado -- ver
+        MODULO_PERMISO. Es solo una comodidad de UX (no repetir el paseo de "entrar y
+        chocar con un mensaje de sin permiso"): la barrera de seguridad real sigue siendo
+        require_permiso() en cada servicio, que no depende de esto para nada."""
+        session = SessionLocal()
+        try:
+            return {
+                clave
+                for clave, (recurso, accion) in MODULO_PERMISO.items()
+                if UsuarioService.verificar_permiso(session, self.usuario.id_usuario, recurso, accion)
+            }
+        except Exception:
+            logger.exception("No se pudo calcular los modulos visibles del sidebar; se muestran todos")
+            return set(MODULO_PERMISO.keys())
+        finally:
+            session.close()
 
     # ── Construcción del layout principal ────────────────────────────────
 
@@ -97,7 +154,7 @@ class MainWindow(QMainWindow):
         main_h.setSpacing(0)
 
         # Sidebar
-        self.sidebar = Sidebar(empresa_nombre, self.usuario)
+        self.sidebar = Sidebar(empresa_nombre, self.usuario, modulos_visibles=self._modulos_visibles)
         self.sidebar.modulo_seleccionado.connect(self._ir_a_modulo)
         self.sidebar.cerrar_sesion.connect(self._confirmar_cerrar_sesion)
         main_h.addWidget(self.sidebar)

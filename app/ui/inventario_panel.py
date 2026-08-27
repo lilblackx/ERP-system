@@ -49,6 +49,7 @@ from app.ui.styles import (
     COLOR_WARNING,
     SEARCH_QSS,
     TABLE_QSS,
+    EstadoBadge,
     alinear_encabezados,
     aplicar_sombra,
 )
@@ -59,40 +60,6 @@ logger = logging.getLogger(__name__)
 COLS_VISIBLES = ["ID", "Código", "Nombre", "Categoría", "Cantidad", "Costo", "Precio Venta", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
-
-
-class BadgeItem(QWidget):
-    """Widget badge para mostrar estado ACTIVO / INACTIVO -- mismo patron visual que
-    app/ui/clientes_panel.py::BadgeItem."""
-
-    def __init__(self, estado: str, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 4, 0)
-        layout.setSpacing(4)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        activo = estado.upper() == "ACTIVO"
-        bg_color = "#DCFCE7" if activo else "#FEF2F2"
-        text_color = COLOR_SUCCESS if activo else COLOR_DANGER
-        icon_name = "fa5s.check-circle" if activo else "fa5s.times-circle"
-
-        icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon(icon_name, color=text_color).pixmap(12, 12))
-        icon_lbl.setStyleSheet("background: transparent;")
-
-        lbl = QLabel(estado.capitalize())
-        lbl.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 11px; font-weight: bold;")
-
-        container = QWidget()
-        container.setStyleSheet(f"background-color: {bg_color}; border-radius: 10px; padding: 2px 8px;")
-        c_layout = QHBoxLayout(container)
-        c_layout.setContentsMargins(6, 2, 6, 2)
-        c_layout.setSpacing(4)
-        c_layout.addWidget(icon_lbl)
-        c_layout.addWidget(lbl)
-
-        layout.addWidget(container)
 
 
 class InventarioPanel(QWidget):
@@ -383,7 +350,9 @@ class InventarioPanel(QWidget):
             item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_precio)
 
-            badge = BadgeItem(p.estado_producto or "ACTIVO")
+            estado_producto = p.estado_producto or "ACTIVO"
+            color_estado = COLOR_SUCCESS if estado_producto.upper() == "ACTIVO" else COLOR_DANGER
+            badge = EstadoBadge(estado_producto.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 7, badge)
 
         total = resultado["total"]

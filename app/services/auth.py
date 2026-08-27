@@ -10,6 +10,12 @@ from app.services.auditoria import AuditoriaService
 MAX_INTENTOS_FALLIDOS = 5
 
 PASSWORD_MIN_LENGTH = 8
+# bcrypt trunca (versiones viejas) o directamente rechaza (bcrypt>=4 para el paquete
+# python) cualquier clave cuyos bytes UTF-8 superen 72 -- sin este tope, hash_password()
+# podia fallar con un ValueError crudo de la libreria en vez de un mensaje claro, o peor,
+# hashear silenciosamente solo los primeros 72 bytes y descartar el resto sin avisar
+# (auditoria de Usuarios, 2026-08-27).
+PASSWORD_MAX_BYTES = 72
 PASSWORD_POLICY_DESCRIPCION = (
     f"minimo {PASSWORD_MIN_LENGTH} caracteres, con al menos una mayuscula, una minuscula, "
     "un numero y un caracter especial"
@@ -49,6 +55,8 @@ def validar_password_policy(password: str) -> None:
     faltantes = []
     if len(password) < PASSWORD_MIN_LENGTH:
         faltantes.append(f"minimo {PASSWORD_MIN_LENGTH} caracteres")
+    if len(password.encode("utf-8")) > PASSWORD_MAX_BYTES:
+        faltantes.append(f"maximo {PASSWORD_MAX_BYTES} bytes (bcrypt no admite claves mas largas)")
     if not re.search(r"[A-Z]", password):
         faltantes.append("una mayuscula")
     if not re.search(r"[a-z]", password):

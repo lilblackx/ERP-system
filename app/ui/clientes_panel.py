@@ -45,13 +45,13 @@ from app.ui.styles import (
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
-    COLOR_PRIMARY,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
+    EstadoBadge,
     alinear_encabezados,
     aplicar_sombra,
 )
@@ -73,81 +73,13 @@ COLS_VISIBLES = [
     "Estado",
 ]
 COL_ID_INTERNO = 0  # oculto
+POR_PAGINA = 20
 
 ESTADOS_FILTRO = [
     ("Todos los estados", None),
     ("Activos", "ACTIVO"),
     ("Inactivos", "INACTIVO"),
 ]
-
-
-class BadgeItem(QWidget):
-    """Widget badge para mostrar estado ACTIVO / INACTIVO de forma visual."""
-
-    def __init__(self, estado: str, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 4, 0)
-        layout.setSpacing(4)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        activo = estado.upper() == "ACTIVO"
-        bg_color = "#DCFCE7" if activo else "#FEF2F2"
-        text_color = COLOR_SUCCESS if activo else COLOR_DANGER
-        icon_name = "fa5s.check-circle" if activo else "fa5s.times-circle"
-
-        icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon(icon_name, color=text_color).pixmap(12, 12))
-        icon_lbl.setStyleSheet("background: transparent;")
-
-        lbl = QLabel(estado.capitalize())
-        lbl.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 11px; font-weight: bold;")
-
-        container = QWidget()
-        container.setStyleSheet(f"background-color: {bg_color}; border-radius: 10px; padding: 2px 8px;")
-        c_layout = QHBoxLayout(container)
-        c_layout.setContentsMargins(6, 2, 6, 2)
-        c_layout.setSpacing(4)
-        c_layout.addWidget(icon_lbl)
-        c_layout.addWidget(lbl)
-
-        layout.addWidget(container)
-
-
-class AccionesItem(QWidget):
-    """Botones de acción por fila: Editar + Activar/Desactivar."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(6)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.btn_editar = QPushButton(" Editar")
-        self.btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_PRIMARY))
-        self.btn_editar.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #EFF6FF; color: {COLOR_PRIMARY};
-                border: 1px solid #BFDBFE; border-radius: 5px;
-                padding: 4px 10px; font-size: 11px; font-weight: bold;
-            }}
-            QPushButton:hover {{ background-color: #DBEAFE; }}
-        """)
-
-        self.btn_estado = QPushButton(" Estado")
-        self.btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_SUCCESS))
-        self.btn_estado.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #F0FDF4; color: {COLOR_SUCCESS};
-                border: 1px solid #BBF7D0; border-radius: 5px;
-                padding: 4px 10px; font-size: 11px; font-weight: bold;
-            }}
-            QPushButton:hover {{ background-color: #DCFCE7; }}
-        """)
-
-        layout.addWidget(self.btn_editar)
-        layout.addWidget(self.btn_estado)
 
 
 class ClientesPanel(QWidget):
@@ -161,6 +93,8 @@ class ClientesPanel(QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
+        self.pagina_actual = 1
+        self.total_paginas = 1
         self.setObjectName("ContentArea")
         self._setup_ui()
         # Carga inicial diferida para no bloquear el arranque
@@ -227,7 +161,7 @@ class ClientesPanel(QWidget):
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
         self.buscar_input.setFixedWidth(320)
-        self.buscar_input.returnPressed.connect(self.cargar_clientes)
+        self.buscar_input.returnPressed.connect(self._buscar_desde_inicio)
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
 
         # Botones primarios
@@ -240,7 +174,7 @@ class ClientesPanel(QWidget):
         self.estado_combo = QComboBox()
         for etiqueta, valor in ESTADOS_FILTRO:
             self.estado_combo.addItem(etiqueta, valor)
-        self.estado_combo.currentIndexChanged.connect(self.cargar_clientes)
+        self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         # Filtro de vendedor
         self.vendedor_combo = QComboBox()
@@ -254,7 +188,7 @@ class ClientesPanel(QWidget):
                 self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
         finally:
             session.close()
-        self.vendedor_combo.currentIndexChanged.connect(self.cargar_clientes)
+        self.vendedor_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         # Filtro de categoría
         self.categoria_combo = QComboBox()
@@ -265,7 +199,7 @@ class ClientesPanel(QWidget):
                 self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
         finally:
             session.close()
-        self.categoria_combo.currentIndexChanged.connect(self.cargar_clientes)
+        self.categoria_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         self.btn_filtrar = BotonFiltros(
             [
@@ -313,15 +247,13 @@ class ClientesPanel(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(9, 120)
-        self.tabla.setStyleSheet(
-            TABLE_QSS
-            + """
-            QTableWidget::item { padding: 8px; }
-            QTableWidget::item:alternate { background-color: #F8FAFC; }
-            QTableWidget::item:!alternate { background-color: #E3F2FD; }
-            QTableWidget::item:selected { background-color: #DBEAFE; color: #0D47A1; }
-        """
-        )
+        # Antes esto agregaba QSS propio encima de TABLE_QSS (fondo "#E3F2FD" a mano para
+        # filas no-alternas y su propio color de seleccion) -- una version vieja/paralela
+        # de lo que TABLE_QSS ya resuelve, que ademas dejaba las filas SIN seleccionar con
+        # un tinte azul en vez de blanco/gris como el resto de los paneles (reportado por
+        # el usuario, 2026-08-27) y no reflejaba el ajuste global de color de seleccion.
+        # TABLE_QSS solo, igual que inventario_panel.py/vendedores_panel.py/usuarios_panel.py.
+        self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)  # ID oculto
         self.tabla.verticalHeader().setDefaultSectionSize(48)
@@ -334,15 +266,27 @@ class ClientesPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_pagina = QLabel("Mostrando todos los registros")
+        self.lbl_pagina = QLabel("Página 1")
         self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
 
-        btn_editar = QPushButton("EDITAR SELECCIONADO")
+        self.btn_anterior = QPushButton()
+        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
+        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_anterior.setFixedWidth(40)
+        self.btn_anterior.clicked.connect(self._pagina_anterior)
+
+        self.btn_siguiente = QPushButton()
+        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_siguiente.setFixedWidth(40)
+        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+
+        btn_editar = QPushButton("Editar seleccionado")
         btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_editar.clicked.connect(self.editar_cliente)
 
-        btn_estado = QPushButton("CAMBIAR ESTADO")
+        btn_estado = QPushButton("Cambiar estado")
         btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
         btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_estado.clicked.connect(self.cambiar_estado_cliente_seleccionado)
@@ -350,12 +294,14 @@ class ClientesPanel(QWidget):
         # Antes solo se llegaba al historial con doble clic en la fila -- sin ningun
         # boton visible que lo indicara (hallazgo de UX). ver_historial_cliente() ya
         # existia, este boton solo lo hace descubrible.
-        btn_historial = QPushButton("VER HISTORIAL")
+        btn_historial = QPushButton("Ver historial")
         btn_historial.setIcon(qta.icon("fa5s.history", color=COLOR_TEXT_DARK))
         btn_historial.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_historial.clicked.connect(self.ver_historial_cliente)
 
         h.addWidget(self.lbl_pagina)
+        h.addWidget(self.btn_anterior)
+        h.addWidget(self.btn_siguiente)
         h.addStretch()
         h.addWidget(btn_editar)
         h.addWidget(btn_estado)
@@ -368,30 +314,47 @@ class ClientesPanel(QWidget):
         if not hasattr(self, "_timer_busqueda"):
             self._timer_busqueda = QTimer()
             self._timer_busqueda.setSingleShot(True)
-            self._timer_busqueda.timeout.connect(self.cargar_clientes)
+            self._timer_busqueda.timeout.connect(self._buscar_desde_inicio)
         self._timer_busqueda.start(300)
+
+    def _buscar_desde_inicio(self) -> None:
+        self.pagina_actual = 1
+        self.cargar_clientes()
+
+    def _pagina_anterior(self) -> None:
+        if self.pagina_actual > 1:
+            self.pagina_actual -= 1
+            self.cargar_clientes()
+
+    def _pagina_siguiente(self) -> None:
+        if self.pagina_actual < self.total_paginas:
+            self.pagina_actual += 1
+            self.cargar_clientes()
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
     def cargar_clientes(self) -> None:
         session = self.session_factory()
         try:
-            clientes = list_clientes(
+            resultado = list_clientes(
                 session,
                 self.buscar_input.text().strip() or None,
                 id_usuario=self.usuario.id_usuario,
                 estado_cliente=self.estado_combo.currentData(),
                 id_vendedor=self.vendedor_combo.currentData(),
                 id_categoria=self.categoria_combo.currentData(),
+                pagina=self.pagina_actual,
+                por_pagina=POR_PAGINA,
             )
-            self._poblar_tabla(clientes)
+            self._poblar_tabla(resultado)
         except Exception:
             logger.exception("Fallo al cargar la lista de clientes")
             QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de clientes.")
         finally:
             session.close()
 
-    def _poblar_tabla(self, clientes: list[Cliente]) -> None:
+    def _poblar_tabla(self, resultado: dict) -> None:
+        clientes: list[Cliente] = resultado["items"]
         self.tabla.setRowCount(len(clientes))
         for fila, c in enumerate(clientes):
             # Columna 0: ID (oculta)
@@ -428,22 +391,32 @@ class ClientesPanel(QWidget):
             self.tabla.setItem(fila, 8, item_dias)
 
             # Columna 9: Badge de estado
-            badge = BadgeItem(c.estado_cliente or "ACTIVO")
+            estado_cliente = c.estado_cliente or "ACTIVO"
+            color_estado = COLOR_SUCCESS if estado_cliente.upper() == "ACTIVO" else COLOR_DANGER
+            badge = EstadoBadge(estado_cliente.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 9, badge)
 
-        total = len(clientes)
+        total = resultado["total"]
+        self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math
+        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''}")
-        self.lbl_pagina.setText(f"Mostrando {total} registro{'s' if total != 1 else ''}")
+        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
+        self.btn_anterior.setEnabled(self.pagina_actual > 1)
+        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
     def _filas_para_exportar(self, session) -> list[list]:
-        clientes = list_clientes(
+        resultado = list_clientes(
             session,
             self.buscar_input.text().strip() or None,
             id_usuario=self.usuario.id_usuario,
             estado_cliente=self.estado_combo.currentData(),
             id_vendedor=self.vendedor_combo.currentData(),
             id_categoria=self.categoria_combo.currentData(),
+            pagina=1,
+            por_pagina=1_000_000,
         )
+        clientes = resultado["items"]
         return [
             [
                 c.id_cliente,

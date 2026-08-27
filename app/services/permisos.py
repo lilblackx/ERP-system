@@ -118,6 +118,12 @@ class RolService:
         nuevo_nombre = datos.get("nombre")
         if "nombre" in datos and not nuevo_nombre:
             raise ValueError("nombre es requerido")
+        if rol.nombre == "ADMIN" and nuevo_nombre and nuevo_nombre != "ADMIN":
+            # require_permiso() identifica al superusuario por este nombre literal (no
+            # por un flag estable) -- renombrarlo le sacaria el bypass a todos los
+            # usuarios con este rol sin ningun aviso. Auditoria de Usuarios, 2026-08-27:
+            # RolesPermisosPanel es la primera UI que permite renombrar roles.
+            raise ValueError("El rol ADMIN no se puede renombrar")
         if nuevo_nombre and nuevo_nombre != rol.nombre:
             RolService._validar_nombre_unico(session, nuevo_nombre, excluir_id=id_rol)
 
@@ -141,6 +147,11 @@ class RolService:
         rol = session.get(Rol, id_rol)
         if rol is None:
             return
+
+        if rol.nombre == "ADMIN":
+            # Mismo motivo que en actualizar_rol(): es el nombre literal que
+            # require_permiso() usa para el bypass de superusuario.
+            raise ValueError("El rol ADMIN no se puede eliminar")
 
         usuarios_con_rol = session.query(Usuario).filter(Usuario.id_rol == id_rol).count()
         if usuarios_con_rol > 0:

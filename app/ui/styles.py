@@ -5,7 +5,7 @@ Centraliza todos los QSS en un solo lugar para facilitar el mantenimiento.
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QComboBox, QGraphicsDropShadowEffect, QTableWidget, QWidget
+from PySide6.QtWidgets import QComboBox, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QTableWidget, QWidget
 
 # ── Paleta principal ────────────────────────────────────────────────────────
 COLOR_PRIMARY = "#0D47A1"  # Azul corporativo principal
@@ -45,7 +45,12 @@ COLOR_INFO = "#0284C7"
 # encabezado de tabla se distinga de los chips de campo y del fondo de pagina.
 COLOR_TABLE_HEADER = "#E2E8F0"
 COLOR_TABLE_ALT_ROW = "#F8FAFC"
-COLOR_TABLE_SELECTED = "#DBEAFE"
+# Antes #DBEAFE (azul) -- se notaba como un resaltado ajeno a la paleta gris/blanco
+# intercalada del resto de la tabla (hallazgo del usuario en Usuarios, 2026-08-27, pero
+# es una constante compartida por TABLE_QSS: aplica a TODAS las tablas de la app, no solo
+# esa). Mismo tono que COLOR_TABLE_HEADER -- se nota lo suficiente contra el blanco y el
+# gris de fila alterna sin salirse de la paleta neutra.
+COLOR_TABLE_SELECTED = "#E2E8F0"
 COLOR_TABLE_HOVER = "#EFF6FF"
 
 # ── Dimensiones ─────────────────────────────────────────────────────────────
@@ -214,6 +219,11 @@ QHeaderView::section:first {{
 QHeaderView::section:last {{
     border-top-right-radius: 8px;
 }}
+QTableCornerButton::section {{
+    background-color: {COLOR_TABLE_HEADER};
+    border: none;
+    border-top-left-radius: 8px;
+}}
 """
 
 BUTTON_PRIMARY_QSS = f"""
@@ -294,25 +304,36 @@ QWidget#Card {{
 }}
 """
 
-BADGE_ACTIVE_QSS = f"""
-QLabel {{
-    background-color: #DCFCE7;
-    color: {COLOR_SUCCESS};
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: bold;
+# QTabWidget/QTabBar sin estilo propio renderiza el tema nativo de Windows (una caja
+# gris solida en la pestaña activa) -- no se nota que son pestañas clickeables, ajeno al
+# resto de la paleta. Antes solo factura_form_dialog.py lo definia, local dentro de su
+# propio DIALOG_STYLE; se promovio aca cuando usuarios_panel.py necesito el mismo
+# QTabWidget con pestañas por primera vez FUERA de un dialogo (2026-08-27) -- para no
+# repetir una tercera copia que termine divergiendo (mismo motivo que EstadoBadge/
+# TABLE_QSS, ver GUIA_ESTILO_UI.md secciones 5 y 9). Subrayado azul en la pestaña activa,
+# sin caja/fondo, mismo criterio visual que el resto de la app (acento de color en vez de
+# relleno solido).
+TABS_QSS = f"""
+QTabWidget::pane {{
+    border: none;
+    top: -1px;
 }}
-"""
-
-BADGE_INACTIVE_QSS = f"""
-QLabel {{
-    background-color: #FEF2F2;
-    color: {COLOR_DANGER};
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: bold;
+QTabBar::tab {{
+    background-color: transparent;
+    color: {COLOR_TEXT_MUTED};
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 4px;
+    margin-right: 22px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QTabBar::tab:selected {{
+    color: {COLOR_PRIMARY};
+    border-bottom: 2px solid {COLOR_PRIMARY};
+}}
+QTabBar::tab:disabled {{
+    color: #CBD5E1;
 }}
 """
 
@@ -379,3 +400,28 @@ class ComboBoxSinScroll(QComboBox):
             super().wheelEvent(event)
         else:
             event.ignore()
+
+
+class EstadoBadge(QWidget):
+    """Badge de estado unico para toda la app (tablas de clientes/inventario/vendedores/
+    usuarios/facturacion): texto sobre un fondo translucido del mismo color, sin icono.
+    Antes cada panel tenia su propia version -- clientes_panel.py/inventario_panel.py/
+    vendedores_panel.py/usuarios_panel.py repetian una version identica con icono dentro
+    de un contenedor de ancho fijo (en Usuarios, con la columna angosta que le tocaba,
+    quedaba con el texto cortado: "Act" en vez de "Activo") -- facturacion_panel.py ya
+    tenia esta version mas simple (EstadoFacturaBadge) para sus 5 estados posibles, y es
+    la que el usuario pidio como estandar (2026-08-27). Consolidado aca en vez de
+    mantener 5 clases identicas repetidas."""
+
+    def __init__(self, texto: str, color: str, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        lbl = QLabel(texto)
+        lbl.setStyleSheet(
+            f"background-color: {color_con_alpha(color)}; color: {color}; border-radius: 10px;"
+            " padding: 2px 10px; font-size: 11px; font-weight: bold;"
+        )
+        layout.addWidget(lbl)

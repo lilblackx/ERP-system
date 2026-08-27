@@ -28,16 +28,20 @@ def list_clientes(
     session: Session,
     texto_busqueda: str | None = None,
     id_usuario: int | None = None,
-    limite: int | None = None,
     estado_cliente: str | None = None,
     id_vendedor: int | None = None,
     id_categoria: int | None = None,
     identificacion: str | None = None,
-) -> list[Cliente]:
-    """limite: tope opcional de filas (D-01) -- pensado para selectores tipo
-    buscar-mientras-se-escribe (ej. app/ui/factura_form_dialog.py) que no necesitan traer
-    el catalogo completo a memoria en cada tecla. None preserva el comportamiento
-    original (sin limite) para los callers que si necesitan el listado completo."""
+    pagina: int = 1,
+    por_pagina: int = 20,
+) -> dict:
+    """D-01, mismo patron que ProductoService.buscar()/VentaService.listar_facturas():
+    el catalogo de clientes puede crecer sin cota, asi que ClientesPanel (2026-08-27) lo
+    pagina en vez de traer todo a memoria -- antes devolvia un list[Cliente] plano sin
+    paginado real (`limite` solo capaba filas, no llevaba cuenta de pagina/total).
+    Selectores tipo buscar-mientras-se-escribe (ej. app/ui/factura_form_dialog.py) piden
+    `por_pagina=LIMITE_CATALOGO` y leen `resultado["items"]`, mismo patron que
+    ProductoService.buscar()."""
     require_permiso(session, id_usuario, "clientes", "ver")
     query = session.query(Cliente).options(joinedload(Cliente.vendedor), joinedload(Cliente.categoria))
     if texto_busqueda:
@@ -65,9 +69,10 @@ def list_clientes(
     if id_categoria:
         query = query.filter(Cliente.id_categoria_cliente == id_categoria)
     query = query.order_by(Cliente.nombre_razon_social)
-    if limite is not None:
-        query = query.limit(limite)
-    return query.all()
+
+    total = query.count()
+    clientes = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+    return {"items": clientes, "total": total, "pagina": pagina, "por_pagina": por_pagina}
 
 
 def create_cliente(session: Session, **datos) -> Cliente:

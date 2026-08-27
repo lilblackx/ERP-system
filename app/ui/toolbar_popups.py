@@ -31,6 +31,7 @@ from collections.abc import Callable
 
 import qtawesome as qta
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.ui.styles import (
@@ -124,6 +125,14 @@ class _PopupAnclado(QWidget):
 
     def mostrar_bajo(self, boton: QPushButton) -> None:
         punto = boton.mapToGlobal(boton.rect().bottomLeft())
+        ancho = self.width()
+        pantalla = QGuiApplication.screenAt(punto) or boton.screen() or QGuiApplication.primaryScreen()
+        if pantalla is not None:
+            disponible = pantalla.availableGeometry()
+            margen = 8
+            x_max = disponible.right() - ancho - margen
+            x = min(punto.x(), x_max) if x_max >= disponible.left() else disponible.left() + margen
+            punto.setX(x)
         self.move(punto.x(), punto.y() + 4)
         self.show()
 

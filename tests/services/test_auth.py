@@ -3,6 +3,7 @@ import pytest
 from app.services.auditoria import AuditoriaService
 from app.services.auth import (
     MAX_INTENTOS_FALLIDOS,
+    PASSWORD_MAX_BYTES,
     PASSWORD_MIN_LENGTH,
     CuentaBloqueadaError,
     authenticate,
@@ -233,6 +234,16 @@ def test_validar_password_policy_acumula_todas_las_faltantes():
     assert "mayuscula" in mensaje
     assert "numero" in mensaje
     assert "caracter especial" in mensaje
+
+
+def test_validar_password_policy_rechaza_clave_mas_larga_que_72_bytes():
+    """bcrypt (hash_password) exige <=72 bytes utf-8 -- sin este tope, una clave mas
+    larga fallaba con un ValueError crudo de la libreria bcrypt en vez de un mensaje
+    claro, o en versiones viejas la truncaba en silencio sin avisar."""
+    clave_larga = "Aa1!" + "x" * (PASSWORD_MAX_BYTES)
+    assert len(clave_larga.encode("utf-8")) > PASSWORD_MAX_BYTES
+    with pytest.raises(ValueError, match=f"maximo {PASSWORD_MAX_BYTES} bytes"):
+        validar_password_policy(clave_larga)
 
 
 def test_authenticate_bloqueado_no_verifica_clave_correcta(db_session):

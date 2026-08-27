@@ -50,6 +50,24 @@ def test_registrar_tasa_bcv_negativa(db_session):
         TasaService.registrar_tasa(db_session, tasa_bcv=Decimal("-1.00"), creado_por=admin.id_usuario)
 
 
+def test_registrar_tasa_paralelo_negativa(db_session):
+    """Auditoria de Tasas (2026-08-27): antes solo tasa_bcv se validaba -- ni el
+    servicio ni la base (DECIMAL(10,2) sin CHECK) impedian un tasa_paralelo negativo."""
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="tasa_paralelo debe ser mayor a cero"):
+        TasaService.registrar_tasa(
+            db_session, tasa_bcv=Decimal("40.00"), tasa_paralelo=Decimal("-1.00"), creado_por=admin.id_usuario
+        )
+
+
+def test_registrar_tasa_cop_negativa(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="tasa_cop debe ser mayor a cero"):
+        TasaService.registrar_tasa(
+            db_session, tasa_bcv=Decimal("40.00"), tasa_cop=Decimal("-1.00"), creado_por=admin.id_usuario
+        )
+
+
 def test_obtener_tasa_actual_sin_tasas(db_session):
     admin = crear_usuario_admin(db_session)
     assert TasaService.obtener_tasa_actual(db_session, id_usuario=admin.id_usuario) is None
@@ -81,6 +99,23 @@ def test_obtener_tasa_actual_calcula_porcentaje_vs_ayer(db_session):
 
     assert actual["tasa_bcv"] == Decimal("110.00")
     assert actual["porcentaje_vs_ayer_bcv"] == 10.0
+
+
+def test_obtener_tasa_actual_no_calcula_porcentaje_si_hueco_de_varios_dias(db_session):
+    """Auditoria de Tasas (2026-08-27): antes comparaba contra la ultima tasa
+    registrada sin importar cuantos dias atras fuera, y la UI lo etiquetaba "vs. ayer"
+    de todos modos -- un hueco de varios dias sin registrar (fin de semana, feriado) daba
+    un porcentaje real pero con una etiqueta enganosa."""
+    admin = crear_usuario_admin(db_session)
+    hace_5_dias = datetime.now() - timedelta(days=5)
+    _insertar_tasa(db_session, hace_5_dias, tasa_bcv=Decimal("100.00"))
+
+    TasaService.registrar_tasa(db_session, tasa_bcv=Decimal("110.00"), creado_por=admin.id_usuario)
+
+    actual = TasaService.obtener_tasa_actual(db_session, id_usuario=admin.id_usuario)
+
+    assert actual["tasa_bcv"] == Decimal("110.00")
+    assert actual["porcentaje_vs_ayer_bcv"] is None
 
 
 def test_obtener_tasa_actual_devuelve_la_mas_reciente(db_session):

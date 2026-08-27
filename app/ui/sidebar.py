@@ -224,7 +224,13 @@ class Sidebar(QWidget):
     toggled = Signal(bool)  # True = expandido, False = colapsado
     cerrar_sesion = Signal()
 
-    def __init__(self, empresa_nombre: str = "Mi Empresa", usuario: Usuario | None = None, parent=None):
+    def __init__(
+        self,
+        empresa_nombre: str = "Mi Empresa",
+        usuario: Usuario | None = None,
+        modulos_visibles: set[str] | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setObjectName("Sidebar")
         self._expandido = True
@@ -233,6 +239,9 @@ class Sidebar(QWidget):
         self._activo = "panel_general"
         self._empresa = empresa_nombre
         self._usuario = usuario
+        # None = sin filtrar (todos los modulos visibles) -- mantiene compatible cualquier
+        # caller que todavia no pase el set calculado por rol (ver MainWindow._setup_ui).
+        self._modulos_visibles = modulos_visibles
 
         # ── Paleta + stylesheet forzados ──────────────────────────────────
         self.setAutoFillBackground(True)
@@ -312,13 +321,24 @@ class Sidebar(QWidget):
         self._nav_layout.setSpacing(3)
 
         for nombre_seccion, items in SECCIONES:
+            items_visibles = [
+                (clave, texto)
+                for clave, texto in items
+                if self._modulos_visibles is None or clave in self._modulos_visibles
+            ]
+            if not items_visibles:
+                # Seccion entera sin ningun modulo visible para este rol (ej. CAJERO sin
+                # 'empresa'/'usuarios' -> toda "ADMINISTRACION" desaparece) -- se omite el
+                # encabezado tambien, no queda un titulo de seccion huerfano sin items abajo.
+                continue
+
             lbl_seccion = QLabel(nombre_seccion)
             lbl_seccion.setObjectName("SidebarSection")
             lbl_seccion.setFixedHeight(24)
             self._lbl_secciones.append(lbl_seccion)
             self._nav_layout.addWidget(lbl_seccion)
 
-            for clave, texto in items:
+            for clave, texto in items_visibles:
                 btn = SidebarButton(clave, texto)
                 btn.clicked.connect(lambda checked, k=clave: self._on_click(k))
                 self._botones[clave] = btn

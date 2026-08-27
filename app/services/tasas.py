@@ -32,6 +32,14 @@ class TasaService:
         require_permiso(session, creado_por, "tasas", "crear")
         if Decimal(str(tasa_bcv)) <= 0:
             raise ValueError("tasa_bcv debe ser mayor a cero")
+        # tasa_paralelo/tasa_cop no tenian ninguna validacion (ni aca ni en la base --
+        # DECIMAL(10,2) sin CHECK) -- la UI ya impide negativos y convierte 0 a None, pero
+        # un caller directo del servicio podia insertar un valor negativo sin aviso
+        # (auditoria de Tasas, 2026-08-27).
+        if tasa_paralelo is not None and Decimal(str(tasa_paralelo)) <= 0:
+            raise ValueError("tasa_paralelo debe ser mayor a cero")
+        if tasa_cop is not None and Decimal(str(tasa_cop)) <= 0:
+            raise ValueError("tasa_cop debe ser mayor a cero")
 
         tasa = ControlDeTasa(
             fecha_tasa=datetime.now(),
@@ -74,6 +82,13 @@ class TasaService:
             .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
             .first()
         )
+        # "vs. ayer" solo es honesto si `anterior` es literalmente del dia calendario
+        # anterior -- sin este chequeo, un hueco de varios dias sin registrar (fin de
+        # semana, feriado) comparaba igual contra lo ultimo que hubiera, sin importar
+        # cuantos dias atras fuera, y la UI lo etiquetaba "vs. ayer" de todos modos
+        # (auditoria de Tasas, 2026-08-27).
+        anterior_es_de_ayer = anterior is not None and (actual.fecha_tasa.date() - anterior.fecha_tasa.date()).days == 1
+        anterior_valido = anterior if anterior_es_de_ayer else None
 
         return {
             "id_tasa": actual.id_tasa,
@@ -82,10 +97,10 @@ class TasaService:
             "tasa_paralelo": actual.tasa_dolar_paralelo,
             "tasa_cop": actual.tasa_cop,
             "porcentaje_vs_ayer_bcv": _calcular_porcentaje(
-                actual.tasa_dolar_bcv, anterior.tasa_dolar_bcv if anterior else None
+                actual.tasa_dolar_bcv, anterior_valido.tasa_dolar_bcv if anterior_valido else None
             ),
             "porcentaje_vs_ayer_paralelo": _calcular_porcentaje(
-                actual.tasa_dolar_paralelo, anterior.tasa_dolar_paralelo if anterior else None
+                actual.tasa_dolar_paralelo, anterior_valido.tasa_dolar_paralelo if anterior_valido else None
             ),
         }
 

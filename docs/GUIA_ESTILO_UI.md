@@ -24,7 +24,7 @@ acá y el archivo no coinciden, gana el archivo (esta guía puede quedar desactu
 | `COLOR_FIELD_BG` | `#F1F5F9` | Fondo de "chips" de campo individuales dentro de una tarjeta |
 | `COLOR_TABLE_HEADER` | `#E2E8F0` | Fondo de encabezado de tabla / hover de botón secundario |
 | `COLOR_TABLE_ALT_ROW` | `#F8FAFC` | Fila alterna de tabla |
-| `COLOR_TABLE_SELECTED` | `#DBEAFE` | Fila/ítem seleccionado |
+| `COLOR_TABLE_SELECTED` | `#E2E8F0` | Fila/ítem seleccionado (gris neutro — antes `#DBEAFE` azul, se notaba ajeno a la paleta gris/blanco intercalada del resto de la tabla, 2026-08-27) |
 | `COLOR_TABLE_HOVER` | `#EFF6FF` | Hover de fila de tabla |
 | `COLOR_TEXT_DARK` | `#1E293B` | Texto principal |
 | `COLOR_TEXT_MUTED` | `#64748B` | Texto secundario/subtítulos/placeholders |
@@ -73,6 +73,13 @@ Dentro de diálogos con `DIALOG_STYLE` local (ver sección 7) las mismas dos pri
 variantes existen como selectores por `objectName`: `#BtnPrimary` / `#BtnSecondary`
 (más `#BtnAgregar` / `#BtnQuitar` para filas de carrito/lista editable — fondo/texto
 azul o rojo muy claro, ver `factura_form_dialog.py`).
+
+**Texto del botón: Sentence case, nunca `MAYÚSCULAS` a mano** (`"Editar seleccionado"`,
+no `"EDITAR SELECCIONADO"`) — la app no transforma el texto por QSS, lo que se tipea en
+el `QPushButton(...)` es lo que se ve. Bug real encontrado (`clientes_panel.py`,
+2026-08-27): tres botones del footer quedaron en mayúsculas fijas, inconsistentes con
+el resto de la app (`facturacion_panel.py`/`vendedores_panel.py`/`usuarios_panel.py`,
+todos en sentence case).
 
 Checklist para **cualquier** botón nuevo:
 
@@ -239,6 +246,15 @@ Columnas que deben ajustarse al contenido (IDs, montos, badges de estado) usan
 `setSectionResizeMode(indice, QHeaderView.ResizeMode.ResizeToContents)` +
 `setColumnWidth` puntual en vez de `Stretch`.
 
+**`self.tabla.setStyleSheet(TABLE_QSS)` solo — nunca `TABLE_QSS + "..."` con reglas
+propias encima.** Bug real encontrado (`clientes_panel.py`, 2026-08-27): un panel tenía
+QSS local agregado sobre `TABLE_QSS` con su propio color de fila no-alterna y su propio
+`item:selected`, una versión vieja que quedó divergiendo en silencio del resto de la
+app — las filas sin seleccionar se veían con un tinte azul en vez de blanco/gris, y el
+color de selección no reflejaba cambios futuros a `COLOR_TABLE_SELECTED`. Si una tabla
+necesita algo que `TABLE_QSS` no cubre, el ajuste va **en `TABLE_QSS` mismo**
+(`app/ui/styles.py`), no duplicado y parcheado en el panel.
+
 ## 6. Formularios (inputs)
 
 Todo diálogo con campos define, dentro de su `DIALOG_STYLE` local, estas reglas
@@ -270,6 +286,28 @@ Label de campo obligatorio: `QLabel("Campo <span style='color: #DC2626;'>*</span
 con `lbl.setProperty("class", "FormLabel")`. Fuera de diálogos (paneles con barra de
 búsqueda), el input usa `SEARCH_QSS` en vez de lo de arriba.
 
+**Combos dentro de un formulario con scroll (pestañas largas, `QScrollArea`) usan
+`ComboBoxSinScroll` (`app/ui/styles.py`) en vez de `QComboBox` a secas.** Por defecto
+Qt cambia el valor seleccionado con solo pasar el mouse por encima y girar la rueda
+mientras se hace scroll de la pantalla que lo contiene — sin foco previo, sin haber
+hecho click. `ComboBoxSinScroll` ignora la rueda salvo que el combo ya tenga foco (un
+click previo), y el evento se propaga normal al padre para que el scroll de la pantalla
+siga funcionando. Reportado por el usuario en el combo de método de vuelto de
+`factura_form_dialog.py` (2026-08-27), aplicado ahí y en los combos de
+`aplicar_nota_credito_dialog.py`/`devolver_nota_credito_dialog.py`/
+`usuario_form_dialog.py`. Es un default de Qt en **todo** `QComboBox`, no solo esos —
+usar `ComboBoxSinScroll` para cualquier combo nuevo dentro de un formulario largo, no
+solo cuando alguien lo reporte.
+
+**`QTabWidget` (pestañas dentro de un diálogo o un panel) usa `TABS_QSS`
+(`app/ui/styles.py`)**, nunca el tema nativo de Windows (una caja gris sólida en la
+pestaña activa, no se nota que son clickeables). `self.tabs.setStyleSheet(TABS_QSS)` —
+subrayado de `2px` en `COLOR_PRIMARY` bajo la pestaña activa, sin relleno. Antes vivía
+solo, local, dentro del `DIALOG_STYLE` de `factura_form_dialog.py`; se promovió a
+`styles.py` cuando `usuarios_panel.py` necesitó el mismo `QTabWidget` fuera de un
+diálogo (2026-08-27) — mismo criterio que `TABLE_QSS`/`EstadoBadge`: un patrón que se
+repite en un segundo lugar se centraliza, no se copia.
+
 ## 7. Patrón de diálogo estándar
 
 Todo diálogo modal (`QDialog`) nuevo sigue esta estructura, sin excepciones:
@@ -280,7 +318,7 @@ Todo diálogo modal (`QDialog`) nuevo sigue esta estructura, sin excepciones:
    diálogo repite este bloque porque son ventanas top-level independientes — no
    heredan el stylesheet de `MainWindow`. Ver `caja_apertura_dialog.py` o
    `pago_linea_dialog.py` como plantilla mínima, `factura_form_dialog.py` como la más
-   completa (agrega `QTabWidget::pane`/`QTabBar::tab`).
+   completa (agrega `TABS_QSS`, ver más abajo).
 2. **Encabezado**: ícono en badge (`34–38px`, fondo `#EFF6FF`, borde `1.5px solid
    #BFDBFE`, radio `8px`) + columna de título (`17px` bold) y subtítulo (`12px`,
    `COLOR_TEXT_MUTED`).
@@ -388,33 +426,144 @@ explícito a ese selector y al de `QCheckBox`. Regla practica: dentro de un widg
 declará `border`/`background` explícitos en cada regla en vez de confiar en que un
 widget sin esas propiedades declaradas quede realmente sin fondo/borde.
 
+### 8.5 Popup anclado a un botón (`Qt.WindowType.Popup`) puede salirse de la pantalla
+
+**Bug real encontrado** (`toolbar_popups.py::_PopupAnclado.mostrar_bajo`, 2026-08-27):
+anclar un popup (`BotonFiltros`/`BotonExportar`) alineando su borde izquierdo con el
+borde izquierdo del botón (`boton.mapToGlobal(boton.rect().bottomLeft())`) asume que
+siempre hay espacio de sobra a la derecha. Con la ventana maximizada y el botón cerca
+del borde derecho de una pantalla ancha, el popup (ancho fijo, `setFixedWidth`) queda
+cortado por el borde de la pantalla. **Se resolvió** calculando la geometría disponible
+de la pantalla real (`QGuiApplication.screenAt(punto)`/`.primaryScreen()`,
+`.availableGeometry()`) y recortando la posición X para que el popup completo quede
+dentro de esa geometría, corriéndose a la izquierda si hace falta. Cualquier popup
+nuevo anclado a un widget (no solo `Qt.WindowType.Popup`) debe validar contra la
+geometría de pantalla real, nunca asumir que hay espacio infinito a la derecha/abajo.
+
+### 8.6 Contenido dentro de un `QTabWidget` necesita su propio margen — nunca `(0, x, 0, 0)`
+
+**Bug real encontrado** (`roles_permisos_panel.py`/`factura_form_dialog.py`, 2026-08-27):
+la página de una pestaña (`self.tabs.addTab(page, "...")`) es su **propio** contenedor de
+clipping — el margen del panel/diálogo que envuelve al `QTabWidget` (sección 2, típico
+`24,20,24,20`) no se hereda hacia adentro de cada pestaña. Un layout de página con
+`setContentsMargins(0, 12, 0, 0)` (patrón usado hasta ahora para tabs) deja las tarjetas
+con `aplicar_sombra()` pegadas al borde de la pestaña sin lugar para pintar su sombra o
+su borde redondeado — se ven cortadas, más notorio todavía con dos tarjetas lado a lado
+(quedan también pegadas entre sí). **Se resolvió** usando `(4, 12, 4, 4)` — margen chico
+pero no-cero en los cuatro lados — en toda página de pestaña que contenga una tarjeta o
+tabla con sombra. Al agregar una pestaña nueva a cualquier `QTabWidget`, nunca dejar el
+margen izquierdo/derecho/inferior en `0`.
+
+### 8.7 Esquina superior izquierda de `QTableWidget` "cortada" pese al `border-radius`
+
+**Bug real encontrado** (`TABLE_QSS`, 2026-08-27, reportado en Facturación/Clientes/etc.
+— cualquier tabla de la app): con `verticalHeader().setVisible(False)` (todas las tablas
+de esta app lo hacen, no muestran número de fila), Qt igual sigue reservando y pintando
+el widget interno `QTableCornerButton` en la esquina superior izquierda — la pequeña
+"celda" donde se cruzarían el encabezado de fila y el de columna. Sin QSS propio, ese
+widget se pinta con el estilo nativo de botón de Windows (plano, esquinas cuadradas, un
+gris distinto al `COLOR_TABLE_HEADER` del resto del encabezado) — un cuadradito que
+rompe visualmente el arco redondeado de `QHeaderView::section:first`, se ve como si la
+esquina estuviera "cortada". **Se resolvió** estilando `QTableCornerButton::section`
+igual que el encabezado (mismo `background-color`, mismo `border-top-left-radius: 8px`)
+para que se funda con el resto en vez de destacarse. Selector poco conocido — si una
+tabla nueva usa `TABLE_QSS` ya viene resuelto, pero si alguna vez se arma un QSS de
+tabla desde cero, no olvidar este selector.
+
+### 8.8 QSS **sin selector** se hereda a los hijos y no pinta el borde del propio widget
+
+**Bug real encontrado** (`tasa_ticker.py`, 2026-08-27 — costó varias rondas porque los
+síntomas parecían de contraste): el `border-bottom` de la franja de tasas se veía **solo
+debajo de los bloques de texto**, con huecos en el espacio vacío del medio. Subir el
+color y el grosor solo hacía más notorios esos fragmentos, nunca continuo.
+
+La causa no era el color: era el QSS **sin selector**.
+
+```python
+# ❌ MAL -- regla sin selector
+self.setStyleSheet(f"background-color: white; border-bottom: 1px solid {COLOR_BORDER};")
+```
+
+Una regla QSS sin selector Qt la trata como heredable y **se la pasa a todos los widgets
+hijos**. Cada hijo que no declare su propio `border` (los bloques con
+`background: transparent`, los `QLabel` de texto) dibuja entonces *su* borde inferior —
+de ahí los segmentos de línea debajo del contenido y los huecos donde no hay hijos. De
+paso, ese mismo cascade le imponía `background-color: white` al separador vertical, que
+peleaba contra su propio color de fondo y lo hacía parecer invisible.
+
+```python
+# ✅ BIEN -- objectName + selector, igual que TOPBAR_QSS (`QWidget#TopBar {...}`)
+self.setObjectName("TasaTicker")
+self.setStyleSheet(
+    f"QWidget#TasaTicker {{ background-color: white; border-bottom: 1px solid {COLOR_BORDER}; }}"
+)
+```
+
+**Regla práctica**: todo contenedor que defina `background`/`border` propios usa
+`setObjectName(...)` + selector `QWidget#Nombre {...}`, nunca una regla suelta. `TopBar`
+(`TOPBAR_QSS` en `styles.py`) es el ejemplo de referencia que siempre funcionó. Las
+barras de herramientas de los paneles usan regla suelta y *parecen* andar solo porque
+todos sus hijos (`QLineEdit`, botones) traen QSS propio completo que pisa lo heredado —
+no es garantía, es coincidencia.
+
+**Corolario para separadores**: usar `QLabel` con `background-color`, no `QFrame` —
+`QFrame` + `setFrameShape(QFrame.Shape.VLine)` + `setStyleSheet("color: ...")` no pinta
+nada (con stylesheet propio Qt deja de usar `qDrawShadeLine()`, y `color` es propiedad de
+*texto*, no controla el trazo). 1px con `COLOR_BORDER` alcanza y sobra:
+
+```python
+sep = QLabel()
+sep.setFixedWidth(1)
+sep.setFixedHeight(20)  # o la altura que corresponda al contexto
+sep.setStyleSheet(f"background-color: {COLOR_BORDER};")
+```
+
+Antes de subir grosor o saturar un color porque "no se ve", descartar primero que el
+problema sea de cascade/selector — subir contraste sobre un bug estructural lo tapa a
+medias y deja la UI más fea.
+
 ## 9. Badges de estado
 
-Dos familias, mismo patrón (`QLabel` con fondo pastel + texto del color fuerte
-correspondiente, radio `4–10px`, `padding: 2px 8px`, `font-size: 11px`,
-`font-weight: bold`):
+**Un solo widget para toda la app: `EstadoBadge` (`app/ui/styles.py`).** Antes había 4
+clases casi idénticas repetidas por panel (`BadgeItem` en `clientes_panel.py`/
+`inventario_panel.py`, `BadgeEstado` en `vendedores_panel.py`/`usuarios_panel.py`, más
+`EstadoFacturaBadge` en `facturacion_panel.py`) — se consolidaron en una sola clase
+(2026-08-27, a pedido del usuario) porque habían divergido: la versión con ícono dentro
+de un contenedor de ancho fijo quedaba con el texto cortado en columnas angostas (p. ej.
+"Act" en vez de "Activo" en Usuarios). `EstadoBadge` es la versión simple que ya usaba
+Facturación — `QLabel` sobre fondo translúcido del mismo color, sin ícono, sin
+contenedor aparte:
 
-- **Activo/Inactivo** (genérico — clientes, productos, cuentas, bancos): `BadgeItem` en
-  `clientes_panel.py` (patrón replicado en `inventario_panel.py` y demás paneles de
-  catálogo). Verde `#DCFCE7`/`COLOR_SUCCESS` + ícono `fa5s.check-circle` si `ACTIVO`;
-  rojo `#FEF2F2`/`COLOR_DANGER` + `fa5s.times-circle` si no. Las constantes
-  `BADGE_ACTIVE_QSS`/`BADGE_INACTIVE_QSS` de `styles.py` son la versión sin ícono de
-  esto mismo.
-- **Estado de factura** (`EstadoFacturaBadge` en `facturacion_panel.py`,
-  `COLORES_ESTADO_FACTURA` en `styles.py`): un color por estado de negocio, no
-  binario:
+```python
+from app.ui.styles import EstadoBadge, COLOR_SUCCESS, COLOR_DANGER
 
-  | Estado | Color |
-  |---|---|
-  | `EMITIDA` | `COLOR_INFO` |
-  | `PAGADA` | `COLOR_SUCCESS` |
-  | `PARCIAL` | `COLOR_WARNING` |
-  | `VENCIDA` | `COLOR_DANGER` |
-  | `ANULADA` | `COLOR_TEXT_MUTED` |
+# Caso binario (Activo/Inactivo) -- clientes, productos, vendedores, usuarios, bancos...
+activo = (estado or "").upper() == "ACTIVO"
+color = COLOR_SUCCESS if activo else COLOR_DANGER
+badge = EstadoBadge((estado or "Activo").capitalize(), color)
+self.tabla.setCellWidget(fila, columna, badge)
+```
 
-  Fallback gris (`COLOR_TEXT_MUTED`) para cualquier estado no listado. Si un dominio
-  nuevo necesita esta misma idea (badge multi-estado), agregar el diccionario a
-  `styles.py` junto a `COLORES_ESTADO_FACTURA`, no duplicarlo suelto en el panel.
+Para un estado multi-valor no binario (como facturas: `EMITIDA`/`PAGADA`/`PARCIAL`/
+`VENCIDA`/`ANULADA`), armar un diccionario `estado -> color` junto a
+`COLORES_ESTADO_FACTURA` en `styles.py` (no uno suelto en el panel) y resolver el color
+antes de construir el badge:
+
+```python
+color = COLORES_ESTADO_FACTURA.get(estado, COLOR_TEXT_MUTED)  # fallback gris
+badge = EstadoBadge(estado.capitalize(), color)
+```
+
+| Estado (facturas) | Color |
+|---|---|
+| `EMITIDA` | `COLOR_INFO` |
+| `PAGADA` | `COLOR_SUCCESS` |
+| `PARCIAL` | `COLOR_WARNING` |
+| `VENCIDA` | `COLOR_DANGER` |
+| `ANULADA` | `COLOR_TEXT_MUTED` |
+
+**Nunca crear una clase Badge nueva por panel** — si `EstadoBadge` no alcanza para un
+caso nuevo (ej. necesita un ícono de verdad), extenderla en `styles.py`, no clonarla.
 
 ## 10. Tarjetas KPI (dashboard)
 
@@ -432,8 +581,17 @@ indicadores tipo dashboard — un formulario normal usa `SectionCard`, no `KpiCa
       `setWindowFlags(...WindowContextHelpButtonHint)` + `showEvent` con repintado
       diferido si hay tarjetas con sombra.
 - [ ] Botones: variante correcta (`BtnPrimary`/`BtnSecondary`/danger), ícono con color
-      semántico, `setCursor(PointingHandCursor)`, `setAutoDefault(False)`.
-- [ ] Tablas: `TABLE_QSS` + `aplicar_sombra` + setup estándar de la sección 5.
+      semántico, `setCursor(PointingHandCursor)`, `setAutoDefault(False)`, texto en
+      Sentence case (nunca mayúsculas a mano — sección 3).
+- [ ] Tablas: `TABLE_QSS` solo (sin reglas propias encima, sección 5) + `aplicar_sombra`
+      + setup estándar de la sección 5. Columna de estado: `EstadoBadge` (sección 9),
+      nunca una clase Badge nueva por panel. Listado que puede crecer sin cota: paginado
+      real (`pagina`/`por_pagina`/`total`, mismo patrón que `VentaService.listar_facturas()`/
+      `ProductoService.buscar()`), no un `.all()` sin límite.
+- [ ] Combos dentro de un formulario con scroll: `ComboBoxSinScroll` (sección 6), no
+      `QComboBox` a secas.
+- [ ] Página dentro de un `QTabWidget`: margen `(4, 12, 4, 4)`, nunca `(0, x, 0, 0)`, si
+      contiene una tarjeta/tabla con sombra (sección 8.6).
 - [ ] Toolbar de panel: orden fijo `Buscar — (stretch) — Nuevo X — Filtrar — Exportar`
       (sección 3.4). Dos o más filtros (o incluso uno) van dentro de `BotonFiltros`, no
       como dropdowns sueltos en la barra (sección 3.3).

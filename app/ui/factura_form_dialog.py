@@ -60,6 +60,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     TABLE_QSS,
+    TABS_QSS,
     ComboBoxSinScroll,
     alinear_encabezados,
     aplicar_sombra,
@@ -191,27 +192,7 @@ QPushButton#BtnQuitar {{
 QPushButton#BtnQuitar:hover {{
     background-color: #FEE2E2;
 }}
-QTabWidget::pane {{
-    border: none;
-    top: -1px;
-}}
-QTabBar::tab {{
-    background-color: transparent;
-    color: {COLOR_TEXT_MUTED};
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 8px 4px;
-    margin-right: 22px;
-    font-size: 13px;
-    font-weight: 600;
-}}
-QTabBar::tab:selected {{
-    color: {COLOR_PRIMARY};
-    border-bottom: 2px solid {COLOR_PRIMARY};
-}}
-QTabBar::tab:disabled {{
-    color: #CBD5E1;
-}}
+{TABS_QSS}
 """
 
 
@@ -308,7 +289,10 @@ class FacturaFormDialog(QDialog):
         pasar a la pestana de formas de pago, que solo tiene sentido conociendolo."""
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 12, 0, 0)
+        # Margen chico pero no-cero: con 0 las tarjetas (con aplicar_sombra) quedaban
+        # pegadas al borde de la pestana, sin lugar para pintar su sombra/borde redondeado
+        # (mismo bug encontrado en RolesPermisosPanel, reportado por el usuario 2026-08-27).
+        layout.setContentsMargins(4, 12, 4, 4)
         layout.setSpacing(12)
         layout.addWidget(self._make_card_cabecera())
         layout.addWidget(self._make_card_carrito(), stretch=1)
@@ -317,7 +301,7 @@ class FacturaFormDialog(QDialog):
     def _make_tab_pagos(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setContentsMargins(4, 12, 4, 4)
         layout.setSpacing(12)
         layout.addWidget(self._make_card_pagos(), stretch=1)
         return page
@@ -912,8 +896,8 @@ class FacturaFormDialog(QDialog):
         self._buscar_clientes(None)
 
     def _buscar_clientes(self, texto: str | None) -> None:
-        todos = list_clientes(self.session, texto, id_usuario=self.id_usuario, limite=LIMITE_CATALOGO)
-        self._clientes = [c for c in todos if (c.estado_cliente or "ACTIVO") == "ACTIVO"]
+        resultado = list_clientes(self.session, texto, id_usuario=self.id_usuario, por_pagina=LIMITE_CATALOGO)
+        self._clientes = [c for c in resultado["items"] if (c.estado_cliente or "ACTIVO") == "ACTIVO"]
         self._poblar_combo_clientes(self._clientes)
 
     def _poblar_combo_clientes(self, clientes: list) -> None:
@@ -1418,6 +1402,8 @@ class FacturaFormDialog(QDialog):
                         mensaje=mensaje,
                         titulo="Autorización de vuelto bancario requerida",
                         motivo_label="Número de referencia bancaria",
+                        motivo_min_length=4,
+                        motivo_max_length=50,
                         parent=self,
                     )
                     if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
@@ -1442,6 +1428,10 @@ class FacturaFormDialog(QDialog):
         except ValueError as exc:
             self.session.rollback()
             QMessageBox.warning(self, "No se pudo emitir la factura", str(exc))
+            return
+        except PermisoDenegadoError:
+            self.session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
             return
         except Exception:
             self.session.rollback()

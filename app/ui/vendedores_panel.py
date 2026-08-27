@@ -42,6 +42,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
+    EstadoBadge,
     alinear_encabezados,
     aplicar_sombra,
 )
@@ -51,39 +52,6 @@ logger = logging.getLogger(__name__)
 
 COLS_VISIBLES = ["ID", "Nombre", "Código", "Identificación", "Teléfono", "Email", "Estado"]
 COL_ID_INTERNO = 0  # oculto
-
-
-class BadgeEstado(QWidget):
-    """Mismo criterio visual que BadgeItem en clientes_panel.py."""
-
-    def __init__(self, estado: str, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 4, 0)
-        layout.setSpacing(4)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        activo = estado.upper() == "ACTIVO"
-        bg_color = "#DCFCE7" if activo else "#FEF2F2"
-        text_color = COLOR_SUCCESS if activo else COLOR_DANGER
-        icon_name = "fa5s.check-circle" if activo else "fa5s.times-circle"
-
-        icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon(icon_name, color=text_color).pixmap(12, 12))
-        icon_lbl.setStyleSheet("background: transparent;")
-
-        lbl = QLabel(estado.capitalize())
-        lbl.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 11px; font-weight: bold;")
-
-        container = QWidget()
-        container.setStyleSheet(f"background-color: {bg_color}; border-radius: 10px; padding: 2px 8px;")
-        c_layout = QHBoxLayout(container)
-        c_layout.setContentsMargins(6, 2, 6, 2)
-        c_layout.setSpacing(4)
-        c_layout.addWidget(icon_lbl)
-        c_layout.addWidget(lbl)
-
-        layout.addWidget(container)
 
 
 class VendedoresPanel(QWidget):
@@ -258,7 +226,9 @@ class VendedoresPanel(QWidget):
             self.tabla.setItem(fila, 4, QTableWidgetItem(v.telefono_vendedor or ""))
             self.tabla.setItem(fila, 5, QTableWidgetItem(v.email_vendedor or ""))
 
-            badge = BadgeEstado(v.estado_vendedor or "ACTIVO")
+            estado_vendedor = v.estado_vendedor or "ACTIVO"
+            color_estado = COLOR_SUCCESS if estado_vendedor.upper() == "ACTIVO" else COLOR_DANGER
+            badge = EstadoBadge(estado_vendedor.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 6, badge)
 
         total = len(vendedores)
