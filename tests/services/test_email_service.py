@@ -95,3 +95,40 @@ def test_enviar_correo_sin_smtp_from_usa_smtp_user(monkeypatch):
     servidor = _FakeSMTP.instancias[0]
     assert servidor.iniciado_tls is False
     assert servidor.mensaje_enviado["From"] == "bot@example.com"
+
+
+def test_enviar_correo_sin_cuerpo_html_es_texto_plano_simple(monkeypatch):
+    """Sin cuerpo_html (comportamiento de siempre, cualquier caller que no lo pase), el
+    mensaje sigue siendo un unico part de texto plano -- no se vuelve multipart porque no
+    hay ninguna alternativa que ofrecer."""
+    _FakeSMTP.instancias = []
+    monkeypatch.setattr(config, "SMTP_USER", "bot@example.com")
+    monkeypatch.setattr(config, "SMTP_PASSWORD", "clave-app")
+    monkeypatch.setattr(email_service.smtplib, "SMTP", _FakeSMTP)
+
+    email_service.enviar_correo("destino@example.com", "Asunto", "Cuerpo")
+
+    mensaje = _FakeSMTP.instancias[0].mensaje_enviado
+    assert not mensaje.is_multipart()
+    assert mensaje.get_content().strip() == "Cuerpo"
+
+
+def test_enviar_correo_con_cuerpo_html_arma_multipart_alternative(monkeypatch):
+    """Con cuerpo_html, el mensaje debe traer AMBAS versiones (RFC 2046 multipart/
+    alternative) -- el texto plano como fallback y el HTML como la version 'linda' que la
+    mayoria de los clientes de correo van a preferir mostrar."""
+    _FakeSMTP.instancias = []
+    monkeypatch.setattr(config, "SMTP_USER", "bot@example.com")
+    monkeypatch.setattr(config, "SMTP_PASSWORD", "clave-app")
+    monkeypatch.setattr(email_service.smtplib, "SMTP", _FakeSMTP)
+
+    email_service.enviar_correo(
+        "destino@example.com", "Asunto", "Cuerpo plano", cuerpo_html="<html><body>Cuerpo HTML</body></html>"
+    )
+
+    mensaje = _FakeSMTP.instancias[0].mensaje_enviado
+    assert mensaje.is_multipart()
+    assert mensaje.get_content_type() == "multipart/alternative"
+    partes = list(mensaje.iter_parts())
+    assert any(p.get_content_type() == "text/plain" and "Cuerpo plano" in p.get_content() for p in partes)
+    assert any(p.get_content_type() == "text/html" and "Cuerpo HTML" in p.get_content() for p in partes)

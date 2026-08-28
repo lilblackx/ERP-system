@@ -25,8 +25,8 @@ def codigos_capturados(monkeypatch):
     """Intercepta el envio real de correo -- los tests nunca deben tocar SMTP real."""
     enviados = []
 
-    def _fake_enviar(destinatario, asunto, cuerpo):
-        enviados.append({"destinatario": destinatario, "asunto": asunto, "cuerpo": cuerpo})
+    def _fake_enviar(destinatario, asunto, cuerpo, cuerpo_html=None):
+        enviados.append({"destinatario": destinatario, "asunto": asunto, "cuerpo": cuerpo, "cuerpo_html": cuerpo_html})
 
     monkeypatch.setattr(ra, "enviar_correo", _fake_enviar)
     return enviados
@@ -52,6 +52,35 @@ def test_solicitar_codigo_desbloqueo_envia_correo(db_session, codigos_capturados
 
     assert len(codigos_capturados) == 1
     assert codigos_capturados[0]["destinatario"] == "jperez@example.com"
+
+
+def test_solicitar_codigo_incluye_version_html_corporativa(db_session, codigos_capturados):
+    """El correo de codigo ahora manda una version HTML ademas del texto plano (pedido del
+    usuario: que se vea corporativo/formal en vez de texto crudo, 2026-08-28) -- este test
+    protege contra que ese HTML se rompa o desincronice del codigo real en un refactor
+    futuro. No valida el marcado completo (fragil, cambia con cualquier ajuste visual),
+    solo que el codigo efectivamente enviado aparece dentro del HTML."""
+    _crear_usuario_con_email(db_session)
+
+    RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+
+    enviado = codigos_capturados[0]
+    codigo = _extraer_codigo(enviado["cuerpo"])
+    assert enviado["cuerpo_html"] is not None
+    assert "<html" in enviado["cuerpo_html"].lower()
+    assert codigo in enviado["cuerpo_html"]
+
+
+def test_solicitar_codigo_html_usa_nombre_de_empresa_configurado(db_session, codigos_capturados):
+    from app.db.models import ConfiguracionEmpresa
+
+    db_session.add(ConfiguracionEmpresa(razon_social_empresa="Distribuidora DJ, C.A."))
+    db_session.commit()
+    _crear_usuario_con_email(db_session)
+
+    RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+
+    assert "Distribuidora DJ, C.A." in codigos_capturados[0]["cuerpo_html"]
 
 
 def test_solicitar_codigo_usuario_inexistente_no_envia_y_responde_generico(db_session, codigos_capturados):
