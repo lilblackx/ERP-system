@@ -28,11 +28,14 @@ from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
 from app.services.usuarios import UsuarioService
 from app.ui.clientes_panel import ClientesPanel
+from app.ui.compras import ComprasView
 from app.ui.config_empresa_panel import ConfigEmpresaPanel
+from app.ui.cuentas_por_pagar_panel import CuentasPorPagarPanel
 from app.ui.dashboard_panel import DashboardPanel
 from app.ui.facturacion_panel import FacturacionPanel
 from app.ui.inventario_panel import InventarioPanel
 from app.ui.placeholder_view import PlaceholderView
+from app.ui.proveedores_panel import ProveedoresPanel
 from app.ui.sidebar import Sidebar
 from app.ui.styles import GLOBAL_QSS
 from app.ui.tasa_ticker import TasaTicker
@@ -48,18 +51,21 @@ logger = logging.getLogger(__name__)
 MODULOS_CONFIG = {
     "panel_general": ("Panel General", DashboardPanel),
     "clientes": ("Clientes", ClientesPanel),
-    "proveedores": ("Proveedores", None),
+    "proveedores": ("Proveedores", ProveedoresPanel),
     "inventario": ("Inventario", InventarioPanel),
     "facturacion": ("Facturación", FacturacionPanel),
-    "compras": ("Compras", None),
+    "compras": ("Compras", ComprasView),
     "bancos": ("Bancos", None),
     "cuentas_bancarias": ("Cuentas Bancarias", None),
+    "cuentas_por_cobrar": ("Cuentas por Cobrar", None),
+    "cuentas_por_pagar": ("Cuentas por Pagar", CuentasPorPagarPanel),
     "cajas": ("Cajas", None),
     "vendedores": ("Vendedores", VendedoresPanel),
     "comisiones": ("Comisiones", None),
     "control_tasas": ("Control de Tasas", TasasPanel),
-    "config_empresa": ("Configuración de Empresa", ConfigEmpresaPanel),
+    "config_empresa": ("Configuración", ConfigEmpresaPanel),
     "usuarios": ("Usuarios", UsuariosPanel),
+    "auditoria": ("Auditoría", None),
 }
 
 # Permiso (recurso, accion) que un usuario necesita para VER cada modulo en el sidebar --
@@ -78,12 +84,21 @@ MODULO_PERMISO: dict[str, tuple[str, str]] = {
     "compras": ("compras", "ver"),
     "bancos": ("bancos", "ver"),
     "cuentas_bancarias": ("bancos", "ver"),
+    # Sin recurso propio todavia (ver docs/ESTADO_DEL_PROYECTO.md seccion 9): vista de
+    # consulta sobre saldo_pendiente ya expuesto por ventas, no un modulo CRUD
+    # independiente -- mismo criterio que cuentas_bancarias piggybackeando en 'bancos'.
+    "cuentas_por_cobrar": ("ventas", "ver"),
+    # A diferencia de cuentas_por_cobrar (placeholder), esta SI es una pantalla real
+    # (CuentasPorPagarPanel) -- usa 'pagos'/'ver' porque PagoService.listar_cuentas_por_pagar
+    # exige ese mismo permiso.
+    "cuentas_por_pagar": ("pagos", "ver"),
     "cajas": ("cajas", "ver"),
     "vendedores": ("vendedores", "ver"),
     "comisiones": ("comisiones", "ver"),
     "control_tasas": ("tasas", "ver"),
     "config_empresa": ("empresa", "ver"),
     "usuarios": ("usuarios", "ver"),
+    "auditoria": ("auditoria", "ver"),
 }
 
 
@@ -144,26 +159,26 @@ class MainWindow(QMainWindow):
         outer_v.setContentsMargins(0, 0, 0, 0)
         outer_v.setSpacing(0)
 
-        # Franja de tasas de cambio (BCV / paralelo), full-width por encima del shell
-        self.ticker_tasas = TasaTicker(SessionLocal, self.usuario)
-        outer_v.addWidget(self.ticker_tasas)
-
         fila = QWidget()
         main_h = QHBoxLayout(fila)
         main_h.setContentsMargins(0, 0, 0, 0)
         main_h.setSpacing(0)
 
-        # Sidebar
+        # Sidebar (full height, a la izquierda -- el ticker de tasas ya NO va arriba de
+        # esto, va solo arriba del area derecha, pedido del usuario 2026-08-27).
         self.sidebar = Sidebar(empresa_nombre, self.usuario, modulos_visibles=self._modulos_visibles)
         self.sidebar.modulo_seleccionado.connect(self._ir_a_modulo)
         self.sidebar.cerrar_sesion.connect(self._confirmar_cerrar_sesion)
         main_h.addWidget(self.sidebar)
 
-        # Área derecha: TopBar + contenido
+        # Área derecha: franja de tasas + TopBar + contenido
         right_w = QWidget()
         right_v = QVBoxLayout(right_w)
         right_v.setContentsMargins(0, 0, 0, 0)
         right_v.setSpacing(0)
+
+        self.ticker_tasas = TasaTicker(SessionLocal, self.usuario)
+        right_v.addWidget(self.ticker_tasas)
 
         self.topbar = TopBar(self.usuario)
         right_v.addWidget(self.topbar)

@@ -44,6 +44,7 @@ from app.ui.styles import (
     COLOR_TABLE_HOVER,
     COLOR_TEXT_DARK,
     FONT_FAMILY,
+    ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
 )
 
@@ -66,13 +67,23 @@ QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
-    padding: 5px 10px;
+    padding: 5px 24px 5px 10px;
     font-size: 13px;
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
 QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QComboBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
 }}
 QCheckBox {{
     font-size: 13px;

@@ -616,6 +616,8 @@ class HistorialClienteWindow(QDialog):
             dialogo.exec()
         except ValueError as exc:
             QMessageBox.warning(self, "No se pudo abrir la factura", str(exc))
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
         except Exception:
             logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
             QMessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")

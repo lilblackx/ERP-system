@@ -11,6 +11,7 @@ from app.db.migrar import verificar_migraciones_al_dia
 from app.logging_config import setup_logging
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
+from app.ui.styles import generar_iconos_qss
 
 
 def main():
@@ -18,6 +19,10 @@ def main():
     validar_configuracion()
     verificar_migraciones_al_dia()
     app = QApplication(sys.argv)
+    # qtawesome necesita una QApplication ya creada para renderizar el PNG que usan las
+    # flechas de QComboBox/QDateEdit (GLOBAL_QSS y los QSS locales de los dialogos) --
+    # ver el comentario junto a generar_iconos_qss() en app/ui/styles.py.
+    generar_iconos_qss()
 
     while True:
         login = LoginWindow()

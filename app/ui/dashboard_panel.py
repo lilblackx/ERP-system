@@ -65,6 +65,31 @@ def _card(inner: QWidget) -> QWidget:
     return contenedor
 
 
+class _SeparadorKpi(QWidget):
+    """Linea vertical sutil entre KPIs, pintada a mano con un QPen cosmetico en vez de
+    un QLabel con background-color de 1px: bajo escalado de DPI fraccionario (125%,
+    150%...) un ancho fijo de 1px logico redondea a un numero distinto de pixeles
+    fisicos segun la posicion horizontal exacta del widget dentro del layout (que
+    depende del ancho acumulado de las tarjetas previas, distinto para cada una) --
+    por eso el primer separador se veia mas grueso que los demas (reportado por el
+    usuario, 2026-08-27). Un QPen cosmetico siempre dibuja exactamente 1px de
+    dispositivo sin importar la posicion ni el factor de escala."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(1)
+        self.setFixedHeight(40)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        painter = QPainter(self)
+        pen = QPen(QColor(COLOR_BORDER))
+        pen.setCosmetic(True)
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.drawLine(0, 0, 0, self.height())
+        painter.end()
+
+
 class KpiCard(QWidget):
     """Tarjeta de indicador: título + ícono + valor grande + detalle/delta."""
 
@@ -119,13 +144,13 @@ class KpiCard(QWidget):
 
 
 class VentasSemanaChart(QWidget):
-    """Gráfico de línea (sin dependencias externas, dibujado con QPainter) para
+    """Gráfico de línea suave (sin dependencias externas, dibujado con QPainter) para
     el total vendido por día en los últimos 7 días."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._puntos: list[dict] = []
-        self.setMinimumHeight(200)
+        self.setMinimumHeight(140)
 
     def set_datos(self, puntos: list[dict]) -> None:
         self._puntos = puntos
@@ -142,7 +167,8 @@ class VentasSemanaChart(QWidget):
             painter.end()
             return
 
-        margen_izq, margen_der, margen_arriba, margen_abajo = 16, 16, 12, 8
+        # Margen: margen_abajo = 26px para elevar la base de la curva y dar holgura sobre los días
+        margen_izq, margen_der, margen_arriba, margen_abajo = 20, 20, 16, 26
         plot = QRectF(
             rect.left() + margen_izq,
             rect.top() + margen_arriba,
@@ -151,7 +177,8 @@ class VentasSemanaChart(QWidget):
         )
 
         montos = [float(p["monto"]) for p in self._puntos]
-        maximo = max(montos) or 1.0
+        max_val = max(montos)
+        maximo = (max_val * 1.3) if max_val > 0 else 1.0
         n = len(self._puntos)
         paso_x = plot.width() / (n - 1) if n > 1 else 0.0
 
@@ -159,69 +186,63 @@ class VentasSemanaChart(QWidget):
         for i, monto in enumerate(montos):
             x = plot.left() + paso_x * i
             frac = monto / maximo
-            y = plot.bottom() - frac * plot.height()
+            y = plot.bottom() - (frac * plot.height())
             puntos_xy.append((x, y))
 
-        # Área bajo la curva
-        area = QPainterPath()
-        area.moveTo(puntos_xy[0][0], plot.bottom())
-        for x, y in puntos_xy:
-            area.lineTo(x, y)
-        area.lineTo(puntos_xy[-1][0], plot.bottom())
-        area.closeSubpath()
+        if len(puntos_xy) >= 2:
+            # 1. Curva suave usando Bézier cúbica (spline)
+            curva = QPainterPath()
+            curva.moveTo(*puntos_xy[0])
+            for i in range(1, len(puntos_xy)):
+                x_prev, y_prev = puntos_xy[i - 1]
+                x_curr, y_curr = puntos_xy[i]
+                # Puntos de control intermedios para tangentes horizontales suaves
+                cx1 = x_prev + (x_curr - x_prev) / 2.0
+                cy1 = y_prev
+                cx2 = x_prev + (x_curr - x_prev) / 2.0
+                cy2 = y_curr
+                curva.cubicTo(cx1, cy1, cx2, cy2, x_curr, y_curr)
 
-        gradiente = QLinearGradient(0, plot.top(), 0, plot.bottom())
-        gradiente.setColorAt(0.0, QColor(13, 71, 161, 80))
-        gradiente.setColorAt(1.0, QColor(13, 71, 161, 0))
-        painter.fillPath(area, gradiente)
+            # 2. Área con gradiente suave bajo la curva
+            area = QPainterPath(curva)
+            area.lineTo(puntos_xy[-1][0], plot.bottom())
+            area.lineTo(puntos_xy[0][0], plot.bottom())
+            area.closeSubpath()
 
-        # Línea
-        linea = QPainterPath()
-        linea.moveTo(*puntos_xy[0])
-        for x, y in puntos_xy[1:]:
-            linea.lineTo(x, y)
-        pluma = QPen(QColor(COLOR_PRIMARY))
-        pluma.setWidthF(2.4)
-        painter.setPen(pluma)
-        painter.drawPath(linea)
+            gradiente = QLinearGradient(0, plot.top(), 0, plot.bottom())
+            gradiente.setColorAt(0.0, QColor(13, 71, 161, 65))  # Azul suave arriba
+            gradiente.setColorAt(0.65, QColor(13, 71, 161, 15))  # Difuminado medio
+            gradiente.setColorAt(1.0, QColor(13, 71, 161, 0))  # Transparente abajo
+            painter.fillPath(area, gradiente)
 
-        # Puntos
-        painter.setBrush(QColor(COLOR_PRIMARY))
-        painter.setPen(Qt.PenStyle.NoPen)
-        for x, y in puntos_xy:
-            painter.drawEllipse(QRectF(x - 3.5, y - 3.5, 7, 7))
+            # 3. Línea superior continua
+            pluma = QPen(QColor(COLOR_PRIMARY))
+            pluma.setWidthF(2.2)
+            pluma.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pluma.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pluma)
+            painter.drawPath(curva)
 
         painter.end()
 
 
 class EtiquetasDiasSemana(QWidget):
-    """Fila de "Lun".."Dom" bajo VentasSemanaChart, como QLabel reales en vez de texto
-    pintado a mano dentro de paintEvent -- el intento anterior (drawText posicionado a
-    mano relativo a plot.bottom()) seguia sin verse en pantalla despues de dos rondas de
-    ajuste de margenes/manejo de excepciones, asi que se delega el renderizado del texto
-    a QLabel, que lo resuelve solo de forma confiable.
+    """Fila de días 'Lun'..'Dom' como QLabel dedicados debajo de la gráfica."""
 
-    El posicionamiento NO usa un QHBoxLayout con stretch: eso centra cada etiqueta en 7
-    columnas de igual ancho, mientras que los puntos del grafico van de borde a borde
-    (el punto 0 pegado al margen izquierdo, el punto 6 pegado al derecho -- ver
-    VentasSemanaChart.paintEvent, `x = plot.left() + paso_x * i`). Con columnas iguales
-    las etiquetas de los extremos quedan corridas hacia adentro y ya no coinciden con el
-    pico real del grafico. Por eso aqui se replica exactamente la misma formula via
-    setGeometry en un resizeEvent propio, usando los mismos margenes (16, 16)."""
-
-    MARGEN_IZQ = 16
-    MARGEN_DER = 16
-    _ANCHO_ETIQUETA = 36
+    MARGEN_IZQ = 20
+    MARGEN_DER = 20
+    _ANCHO_ETIQUETA = 40
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._labels: list[QLabel] = []
-        self.setContentsMargins(0, 0, 0, 4)
-        self.setFixedHeight(18)
+        self.setFixedHeight(24)
         for _ in range(7):
             lbl = QLabel("", self)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(f"font-size: 10px; color: {COLOR_TEXT_MUTED}; background: transparent; border: none;")
+            lbl.setStyleSheet(
+                f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-weight: 600; background: transparent; border: none;"
+            )
             self._labels.append(lbl)
         self._reposicionar()
 
@@ -243,9 +264,13 @@ class EtiquetasDiasSemana(QWidget):
             texto = ""
             if i < len(puntos):
                 try:
-                    texto = DIAS_SEMANA[puntos[i]["fecha"].weekday()]
+                    f = puntos[i]["fecha"]
+                    if hasattr(f, "weekday"):
+                        texto = DIAS_SEMANA[f.weekday()]
+                    elif isinstance(f, str):
+                        texto = DIAS_SEMANA[datetime.strptime(f[:10], "%Y-%m-%d").weekday()]
                 except Exception:
-                    logger.exception("No se pudo calcular la etiqueta de dia para el punto %s del grafico semanal", i)
+                    logger.exception("No se pudo calcular la etiqueta del dia para el punto %s", i)
             lbl.setText(texto)
         self._reposicionar()
 
@@ -484,7 +509,10 @@ class DashboardPanel(QWidget):
         self.kpi_por_pagar = KpiCard("Por pagar", "fa5s.hand-holding-usd", COLOR_WARNING)
         self.kpi_productos_alerta = KpiCard("Productos en alerta", "fa5s.exclamation-triangle", COLOR_DANGER)
 
-        for card in (self.kpi_ventas_hoy, self.kpi_por_cobrar, self.kpi_por_pagar, self.kpi_productos_alerta):
+        cards = (self.kpi_ventas_hoy, self.kpi_por_cobrar, self.kpi_por_pagar, self.kpi_productos_alerta)
+        for i, card in enumerate(cards):
+            if i > 0:
+                h.addWidget(_SeparadorKpi(), 0, Qt.AlignmentFlag.AlignVCenter)
             h.addWidget(card)
         return w
 
@@ -499,7 +527,7 @@ class DashboardPanel(QWidget):
         grafico_inner.setStyleSheet("background: transparent; border: none;")
         gv = QVBoxLayout(grafico_inner)
         gv.setContentsMargins(18, 16, 18, 16)
-        gv.setSpacing(4)
+        gv.setSpacing(8)
         lbl_titulo = QLabel("Ventas de la semana")
         lbl_titulo.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
         lbl_subtitulo = QLabel("Total facturado por día, últimos 7 días")

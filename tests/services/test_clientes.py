@@ -173,6 +173,54 @@ def test_update_cliente_no_permite_vaciar_codigo(db_session):
         clientes_service.update_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario, codigo_cliente="")
 
 
+def test_update_cliente_codigo_duplicado(db_session):
+    """Hueco de auditoria 2026-08-27: la re-validacion de duplicado al CAMBIAR
+    codigo_cliente/identificacion_cliente (clientes.py:111-117) tenia codigo pero
+    ningun test la ejercitaba, solo el camino de create_cliente."""
+    admin = crear_usuario_admin(db_session)
+    clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
+    otro = clientes_service.create_cliente(
+        db_session,
+        **_datos_cliente(codigo_cliente="CLI-002", identificacion_cliente="87654321", creado_por=admin.id_usuario),
+    )
+
+    with pytest.raises(ValueError):
+        clientes_service.update_cliente(
+            db_session, otro.id_cliente, id_usuario=admin.id_usuario, codigo_cliente="CLI-001"
+        )
+
+
+def test_update_cliente_identificacion_duplicada(db_session):
+    admin = crear_usuario_admin(db_session)
+    clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
+    otro = clientes_service.create_cliente(
+        db_session,
+        **_datos_cliente(codigo_cliente="CLI-002", identificacion_cliente="87654321", creado_por=admin.id_usuario),
+    )
+
+    with pytest.raises(ValueError):
+        clientes_service.update_cliente(
+            db_session, otro.id_cliente, id_usuario=admin.id_usuario, identificacion_cliente="12345678"
+        )
+
+
+def test_update_cliente_permite_conservar_su_propio_codigo(db_session):
+    """Guardar sin cambiar codigo_cliente/identificacion_cliente no debe chocar contra
+    si mismo."""
+    admin = crear_usuario_admin(db_session)
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
+
+    actualizado = clientes_service.update_cliente(
+        db_session,
+        cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        codigo_cliente="CLI-001",
+        nombre_razon_social="Nombre Nuevo",
+    )
+
+    assert actualizado.nombre_razon_social == "Nombre Nuevo"
+
+
 def test_update_cliente_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
 

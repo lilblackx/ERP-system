@@ -10,6 +10,14 @@ from app.services.permisos import require_permiso
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
+def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | None = None) -> None:
+    query = session.query(Vendedor).filter(getattr(Vendedor, campo) == valor)
+    if excluir_id is not None:
+        query = query.filter(Vendedor.id_vendedor != excluir_id)
+    if query.first() is not None:
+        raise ValueError(f"Ya existe un vendedor con {campo}='{valor}'")
+
+
 class VendedorService:
     @staticmethod
     def obtener(session: Session, id_vendedor: int, id_usuario: int | None = None) -> Vendedor | None:
@@ -17,7 +25,18 @@ class VendedorService:
         return session.get(Vendedor, id_vendedor)
 
     @staticmethod
-    def listar(session: Session, texto_busqueda: str | None = None, id_usuario: int | None = None) -> list[Vendedor]:
+    def listar(
+        session: Session,
+        texto_busqueda: str | None = None,
+        id_usuario: int | None = None,
+        estado_vendedor: str | None = None,
+        pagina: int = 1,
+        por_pagina: int = 20,
+    ) -> dict:
+        """D-01, mismo patron que ClienteService.list_clientes(): paginado real (antes
+        devolvia un list[Vendedor] plano) para no traer todo el equipo de ventas a
+        memoria a medida que crece -- hallazgo de auditoria Vendedores/Clientes,
+        2026-08-27."""
         require_permiso(session, id_usuario, "vendedores", "ver")
         query = session.query(Vendedor)
         if texto_busqueda:
@@ -27,11 +46,24 @@ class VendedorService:
                 | Vendedor.identificacion_vendedor.ilike(like)
                 | Vendedor.codigo_vendedor.ilike(like)
             )
-        return query.order_by(Vendedor.nombre_vendedor).all()
+        if estado_vendedor:
+            query = query.filter(Vendedor.estado_vendedor == estado_vendedor)
+        query = query.order_by(Vendedor.nombre_vendedor)
+
+        total = query.count()
+        vendedores = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+        return {"items": vendedores, "total": total, "pagina": pagina, "por_pagina": por_pagina}
 
     @staticmethod
     def crear(session: Session, **datos) -> Vendedor:
         require_permiso(session, datos.get("creado_por"), "vendedores", "crear")
+        if not datos.get("nombre_vendedor"):
+            raise ValueError("nombre_vendedor es requerido")
+        if datos.get("codigo_vendedor"):
+            _validar_unico(session, "codigo_vendedor", datos["codigo_vendedor"])
+        if datos.get("identificacion_vendedor"):
+            _validar_unico(session, "identificacion_vendedor", datos["identificacion_vendedor"])
+
         vendedor = Vendedor(**datos)
         session.add(vendedor)
         session.commit()
@@ -52,6 +84,18 @@ class VendedorService:
         vendedor = session.get(Vendedor, id_vendedor)
         if vendedor is None:
             raise ValueError("Vendedor no encontrado")
+
+        if "nombre_vendedor" in datos and not datos["nombre_vendedor"]:
+            raise ValueError("nombre_vendedor es requerido")
+
+        nuevo_codigo = datos.get("codigo_vendedor")
+        if nuevo_codigo and nuevo_codigo != vendedor.codigo_vendedor:
+            _validar_unico(session, "codigo_vendedor", nuevo_codigo, excluir_id=id_vendedor)
+
+        nueva_identificacion = datos.get("identificacion_vendedor")
+        if nueva_identificacion and nueva_identificacion != vendedor.identificacion_vendedor:
+            _validar_unico(session, "identificacion_vendedor", nueva_identificacion, excluir_id=id_vendedor)
+
         for campo, valor in datos.items():
             setattr(vendedor, campo, valor)
         session.commit()

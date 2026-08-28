@@ -36,6 +36,7 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
+    ICON_CHEVRON_DOWN_URL,
     ComboBoxSinScroll,
     aplicar_sombra,
 )
@@ -78,6 +79,19 @@ QLineEdit, QComboBox {{
 }}
 QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
+}}
+QComboBox {{
+    padding-right: 24px;
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QComboBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -303,10 +317,14 @@ class UsuarioFormDialog(QDialog):
             self.rol_combo.addItem(rol.nombre, rol.id_rol)
 
         try:
-            vendedores = VendedorService.listar(self.session, id_usuario=self.id_usuario_actor)
+            # por_pagina alto: este combo necesita TODOS los vendedores activos, no un
+            # recorte de pagina (VendedorService.listar() pagina desde 2026-08-27, ver
+            # auditoria Vendedores/Clientes).
+            self._vendedores = VendedorService.listar(
+                self.session, id_usuario=self.id_usuario_actor, estado_vendedor="ACTIVO", por_pagina=1000
+            )["items"]
         except PermisoDenegadoError:
-            vendedores = []
-        self._vendedores = [v for v in vendedores if (v.estado_vendedor or "ACTIVO") == "ACTIVO"]
+            self._vendedores = []
         self.vendedor_combo.addItem("Sin vincular", None)
         for vendedor in self._vendedores:
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)

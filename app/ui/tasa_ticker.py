@@ -47,7 +47,7 @@ class TasaTicker(QWidget):
         self.session_factory = session_factory
         self.usuario = usuario
         self._fecha_tasa = None
-        self.setFixedHeight(38)
+        self.setFixedHeight(30)
         # QSS CON selector de objectName, no una regla suelta -- mismo patron que
         # TopBar/TOPBAR_QSS (`QWidget#TopBar {...}`, app/ui/styles.py), la otra barra fija
         # del shell, que siempre se vio bien. Una regla sin selector
@@ -99,7 +99,7 @@ class TasaTicker(QWidget):
         # estandar de bordes de la app alcanza.
         separador = QLabel()
         separador.setFixedWidth(1)
-        separador.setFixedHeight(20)
+        separador.setFixedHeight(16)
         separador.setStyleSheet(f"background-color: {COLOR_BORDER};")
         self.bloque_paralelo, self.lbl_valor_paralelo, self.lbl_delta_paralelo = self._make_bloque("Dólar paralelo")
 

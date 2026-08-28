@@ -38,8 +38,9 @@ TITULOS = {
     "vendedores": "Vendedores",
     "comisiones": "Comisiones",
     "control_tasas": "Tasas de Cambio",
-    "config_empresa": "Configuración de Empresa",
+    "config_empresa": "Configuración",
     "usuarios": "Usuarios",
+    "auditoria": "Auditoría",
 }
 
 

@@ -3,9 +3,47 @@ Paleta de colores y hojas de estilo globales para el ERP moderno.
 Centraliza todos los QSS en un solo lugar para facilitar el mantenimiento.
 """
 
+import tempfile
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QComboBox, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QTableWidget, QWidget
+
+# Flecha de QComboBox/QDateEdit compartida por toda la app (GLOBAL_QSS y los dialogos con
+# stylesheet propio que no heredan de MainWindow). El truco CSS de "triangulo con bordes"
+# (border-left/right transparentes + border-top solido) NO se renderiza en QComboBox::down-arrow
+# bajo Windows -- ni con el estilo nativo ni con Fusion (verificado renderizando ambos
+# aislado con QWidget.grab(), 2026-08-27): Qt usa su propio icono de flecha por defecto y
+# ese hack de bordes se ignora. `image: url(...)` con un PNG real si funciona en cualquier
+# estilo, asi que se genera un PNG de qtawesome una sola vez a un archivo de cache -- no se
+# puede generar al importar este modulo (qtawesome necesita una QApplication ya creada, y
+# app/main.py importa los modulos de app/ui, este incluido, ANTES de instanciar
+# QApplication), por eso la ruta se calcula aca (no requiere Qt) pero el PNG se escribe de
+# forma perezosa via generar_iconos_qss(), llamado desde main() justo despues de crear la
+# QApplication.
+_ICON_CACHE_DIR = Path(tempfile.gettempdir()) / "distribuidora_dj_ui_icons"
+ICON_CHEVRON_DOWN_PATH = _ICON_CACHE_DIR / "chevron_down.png"
+ICON_CHEVRON_DOWN_URL = str(ICON_CHEVRON_DOWN_PATH).replace("\\", "/")
+# Mismo criterio para los botones up/down de QSpinBox/QDoubleSpinBox -- su chrome nativo
+# (flechitas triangulares apiladas con separador) es el mismo tipo de "no combina" que la
+# flecha del combobox, reportado por el usuario, 2026-08-27.
+ICON_CHEVRON_UP_PATH = _ICON_CACHE_DIR / "chevron_up.png"
+ICON_CHEVRON_UP_URL = str(ICON_CHEVRON_UP_PATH).replace("\\", "/")
+
+
+def generar_iconos_qss() -> None:
+    """Genera (si falta) los PNG que referencian los `image: url(...)` de este archivo y
+    de los QSS locales de los dialogos. Requiere una QApplication ya creada -- llamar
+    desde main() apenas se instancia, antes de mostrar cualquier ventana."""
+    import qtawesome as qta
+
+    _ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    if not ICON_CHEVRON_DOWN_PATH.exists():
+        qta.icon("fa5s.chevron-down", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(str(ICON_CHEVRON_DOWN_PATH))
+    if not ICON_CHEVRON_UP_PATH.exists():
+        qta.icon("fa5s.chevron-up", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(str(ICON_CHEVRON_UP_PATH))
+
 
 # ── Paleta principal ────────────────────────────────────────────────────────
 COLOR_PRIMARY = "#0D47A1"  # Azul corporativo principal
@@ -89,6 +127,92 @@ QToolTip {{
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 12px;
+}}
+QComboBox {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 6px 28px 6px 12px;
+    color: {COLOR_TEXT_DARK};
+    selection-background-color: {COLOR_TABLE_SELECTED};
+    selection-color: {COLOR_TEXT_DARK};
+}}
+QComboBox:hover {{
+    border-color: {COLOR_TEXT_MUTED};
+}}
+QComboBox:focus {{
+    border-color: {COLOR_PRIMARY};
+}}
+QComboBox:disabled {{
+    color: {COLOR_TEXT_LIGHT};
+    background-color: {COLOR_CONTENT_BG};
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
+    border: none;
+    background: transparent;
+}}
+QComboBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 8px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 4px;
+    outline: none;
+    selection-background-color: {COLOR_TABLE_SELECTED};
+    selection-color: {COLOR_TEXT_DARK};
+}}
+QSpinBox, QDoubleSpinBox {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: {COLOR_TEXT_DARK};
+}}
+QSpinBox:hover, QDoubleSpinBox:hover {{
+    border-color: {COLOR_TEXT_MUTED};
+}}
+QSpinBox:focus, QDoubleSpinBox:focus {{
+    border-color: {COLOR_PRIMARY};
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    border: none;
+    border-left: 1px solid {COLOR_BORDER};
+    border-top-right-radius: 6px;
+    background: transparent;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+    border: none;
+    border-left: 1px solid {COLOR_BORDER};
+    border-bottom-right-radius: 6px;
+    background: transparent;
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {COLOR_CONTENT_BG};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url({ICON_CHEVRON_UP_URL});
+    width: 10px;
+    height: 10px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 10px;
+    height: 10px;
 }}
 """
 

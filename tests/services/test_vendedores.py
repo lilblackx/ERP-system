@@ -31,6 +31,56 @@ def test_crear_vendedor_sin_usuario_autorizado_falla(db_session):
         VendedorService.crear(db_session, **_datos_vendedor())
 
 
+def test_crear_vendedor_requiere_nombre(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="nombre_vendedor"):
+        VendedorService.crear(db_session, **_datos_vendedor(nombre_vendedor="", creado_por=admin.id_usuario))
+
+
+def test_crear_vendedor_codigo_duplicado(db_session):
+    admin = crear_usuario_admin(db_session)
+    VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="codigo_vendedor"):
+        VendedorService.crear(
+            db_session,
+            **_datos_vendedor(identificacion_vendedor="V-99999999", creado_por=admin.id_usuario),
+        )
+
+
+def test_crear_vendedor_identificacion_duplicada(db_session):
+    admin = crear_usuario_admin(db_session)
+    VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="identificacion_vendedor"):
+        VendedorService.crear(
+            db_session,
+            **_datos_vendedor(codigo_vendedor="VEN-002", creado_por=admin.id_usuario),
+        )
+
+
+def test_crear_vendedor_sin_codigo_ni_identificacion_no_choca(db_session):
+    """codigo_vendedor/identificacion_vendedor son opcionales -- dos vendedores sin
+    ninguno de los dos no deben chocar contra la unicidad (NULL no colisiona consigo
+    mismo en SQL Server, ver migrations/0031)."""
+    admin = crear_usuario_admin(db_session)
+    VendedorService.crear(
+        db_session,
+        codigo_vendedor=None,
+        identificacion_vendedor=None,
+        nombre_vendedor="Vendedor Uno",
+        creado_por=admin.id_usuario,
+    )
+    otro = VendedorService.crear(
+        db_session,
+        codigo_vendedor=None,
+        identificacion_vendedor=None,
+        nombre_vendedor="Vendedor Dos",
+        creado_por=admin.id_usuario,
+    )
+    assert otro.id_vendedor is not None
+
+
 def test_obtener_vendedor(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
@@ -64,13 +114,52 @@ def test_listar_vendedores_filtra_por_texto(db_session):
 
     resultado = VendedorService.listar(db_session, texto_busqueda="Prueba", id_usuario=admin.id_usuario)
 
-    assert len(resultado) == 1
-    assert resultado[0].nombre_vendedor == "Vendedor de Prueba"
+    assert resultado["total"] == 1
+    assert resultado["items"][0].nombre_vendedor == "Vendedor de Prueba"
 
 
 def test_listar_vendedores_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         VendedorService.listar(db_session)
+
+
+def test_listar_vendedores_pagina_resultados(db_session):
+    """D-01, mismo patron que ClienteService.list_clientes()."""
+    admin = crear_usuario_admin(db_session)
+    for i in range(5):
+        VendedorService.crear(
+            db_session,
+            **_datos_vendedor(
+                codigo_vendedor=f"VEN-PAG-{i}",
+                identificacion_vendedor=f"V-{i:08d}",
+                nombre_vendedor=f"Vendedor Pagina {i}",
+                creado_por=admin.id_usuario,
+            ),
+        )
+
+    pagina_1 = VendedorService.listar(db_session, pagina=1, por_pagina=2, id_usuario=admin.id_usuario)
+    pagina_2 = VendedorService.listar(db_session, pagina=2, por_pagina=2, id_usuario=admin.id_usuario)
+
+    assert pagina_1["total"] == 5
+    assert len(pagina_1["items"]) == 2
+    assert len(pagina_2["items"]) == 2
+    assert {v.id_vendedor for v in pagina_1["items"]}.isdisjoint({v.id_vendedor for v in pagina_2["items"]})
+
+
+def test_listar_vendedores_filtra_por_estado(db_session):
+    admin = crear_usuario_admin(db_session)
+    activo = VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+    inactivo = VendedorService.crear(
+        db_session,
+        **_datos_vendedor(codigo_vendedor="VEN-002", identificacion_vendedor="V-22222222", nombre_vendedor="Otro"),
+        creado_por=admin.id_usuario,
+    )
+    VendedorService.cambiar_estado(db_session, inactivo.id_vendedor, "INACTIVO", id_usuario=admin.id_usuario)
+
+    resultado = VendedorService.listar(db_session, estado_vendedor="ACTIVO", id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].id_vendedor == activo.id_vendedor
 
 
 def test_actualizar_vendedor(db_session):
@@ -98,6 +187,57 @@ def test_actualizar_vendedor_inexistente(db_session):
         VendedorService.actualizar(db_session, 999999, id_usuario=admin.id_usuario, nombre_vendedor="X")
 
 
+def test_actualizar_vendedor_no_permite_vaciar_nombre(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="nombre_vendedor"):
+        VendedorService.actualizar(db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, nombre_vendedor="")
+
+
+def test_actualizar_vendedor_codigo_duplicado(db_session):
+    admin = crear_usuario_admin(db_session)
+    VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+    otro = VendedorService.crear(
+        db_session,
+        **_datos_vendedor(codigo_vendedor="VEN-002", identificacion_vendedor="V-22222222", creado_por=admin.id_usuario),
+    )
+
+    with pytest.raises(ValueError, match="codigo_vendedor"):
+        VendedorService.actualizar(db_session, otro.id_vendedor, id_usuario=admin.id_usuario, codigo_vendedor="VEN-001")
+
+
+def test_actualizar_vendedor_identificacion_duplicada(db_session):
+    admin = crear_usuario_admin(db_session)
+    VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+    otro = VendedorService.crear(
+        db_session,
+        **_datos_vendedor(codigo_vendedor="VEN-002", identificacion_vendedor="V-22222222", creado_por=admin.id_usuario),
+    )
+
+    with pytest.raises(ValueError, match="identificacion_vendedor"):
+        VendedorService.actualizar(
+            db_session, otro.id_vendedor, id_usuario=admin.id_usuario, identificacion_vendedor="V-11111111"
+        )
+
+
+def test_actualizar_vendedor_permite_conservar_su_propio_codigo(db_session):
+    """Guardar sin cambiar codigo_vendedor/identificacion_vendedor no debe chocar contra
+    si mismo -- misma logica que ClienteService.update_cliente."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+
+    actualizado = VendedorService.actualizar(
+        db_session,
+        vendedor.id_vendedor,
+        id_usuario=admin.id_usuario,
+        codigo_vendedor="VEN-001",
+        telefono_vendedor="0414-0000000",
+    )
+
+    assert actualizado.telefono_vendedor == "0414-0000000"
+
+
 def test_eliminar_vendedor_siempre_falla_para_proteger_integridad(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
@@ -105,7 +245,7 @@ def test_eliminar_vendedor_siempre_falla_para_proteger_integridad(db_session):
     with pytest.raises(ValueError, match="No se puede eliminar"):
         VendedorService.eliminar(db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario)
 
-    assert len(VendedorService.listar(db_session, id_usuario=admin.id_usuario)) == 1
+    assert VendedorService.listar(db_session, id_usuario=admin.id_usuario)["total"] == 1
 
 
 def test_eliminar_vendedor_sin_usuario_autorizado_falla(db_session):

@@ -50,8 +50,8 @@ class Vendedor(Base):
     __tablename__ = "vendedores"
 
     id_vendedor: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    codigo_vendedor: Mapped[str | None] = mapped_column(String(20))
-    identificacion_vendedor: Mapped[str | None] = mapped_column(String(20))
+    codigo_vendedor: Mapped[str | None] = mapped_column(String(20), unique=True)
+    identificacion_vendedor: Mapped[str | None] = mapped_column(String(20), unique=True)
     nombre_vendedor: Mapped[str] = mapped_column(String(150), nullable=False)
     direccion_vendedor: Mapped[str | None] = mapped_column(String(255))
     telefono_vendedor: Mapped[str | None] = mapped_column(String(20))
@@ -99,7 +99,10 @@ class Permiso(Base):
 
     id_permiso: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     recurso: Mapped[str] = mapped_column(String(50), nullable=False)
-    accion: Mapped[str] = mapped_column(String(10), nullable=False)
+    # VARCHAR(30) desde migrations/0033 (era VARCHAR(10) -- las acciones granulares del
+    # flujo OC, ej. 'autorizar_enmienda_oc', no entraban en 10 caracteres). CK_permisos_accion
+    # sigue siendo un enum compartido por todos los recursos, no por fila -- ver esa migracion.
+    accion: Mapped[str] = mapped_column(String(30), nullable=False)
     descripcion: Mapped[str | None] = mapped_column(String(255))
 
 
@@ -375,6 +378,9 @@ class Compra(Base):
     fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
     observaciones_compra: Mapped[str | None] = mapped_column(String(255))
     modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    # NULL para una compra directa (flujo viejo, sin OC); poblada por
+    # CompraService.crear_compra_desde_oc() (migrations/0032, ver app/services/compras.py).
+    id_oc: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("compra_oc.id_oc"))
 
     proveedor = relationship("Proveedor")
     usuario = relationship("Usuario", foreign_keys=[id_usuario_compra])
@@ -393,8 +399,172 @@ class CompraDetalle(Base):
     cantidad_producto: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     costo_unitario: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     observaciones_item: Mapped[str | None] = mapped_column(String(255))
+    # True cuando esta linea viene de CompraService.crear_compra_desde_oc(): el stock ya
+    # se sumo al recibir la mercancia (trg_nota_recepcion_detalle_ins), asi que
+    # trg_compra_detalle_stock_ins la ignora en vez de sumarla de nuevo (migrations/0032).
+    # DEFAULT False preserva el flujo viejo (compra directa) sin cambios.
+    stock_ya_contabilizado: Mapped[bool] = mapped_column(Boolean, server_default="0")
 
     compra = relationship("Compra")
+    producto = relationship("Inventario")
+
+
+# ── Flujo OC -> NR -> Compra -> Pago (migrations/0032) ──────────────────────────────
+# Compra/CompraDetalle arriba quedan sin tocar a proposito -- el vinculo compras.id_oc
+# (agregado en 0032) todavia no se mapea aca, se agrega en el paso que conecte los
+# servicios de Compra con este flujo nuevo.
+
+
+class CompraOC(Base):
+    __tablename__ = "compra_oc"
+
+    id_oc: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_proveedor: Mapped[int] = mapped_column(BigInteger, ForeignKey("proveedores.id_proveedor"), nullable=False)
+    numero_oc: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    fecha_oc: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    # DATE (no DATETIME) -- migrations/0035: es una fecha limite, mismo criterio que
+    # Compra.fecha_vencimiento/CuentaPorPagar.fecha_vencimiento en este mismo archivo.
+    fecha_estimada_entrega: Mapped[datetime.date | None] = mapped_column(Date)
+    cantidad_solicitada: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), server_default="0")
+    cantidad_recibida: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), server_default="0")
+    cantidad_facturada: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), server_default="0")
+    estado: Mapped[str] = mapped_column(String(20), server_default="PENDIENTE")
+    motivo_cierre: Mapped[str | None] = mapped_column(String(500))
+    total_oc: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0")
+    observaciones: Mapped[str | None] = mapped_column(String(500))
+    id_usuario_creador: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    id_usuario_modificador: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_modificacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    proveedor = relationship("Proveedor")
+    usuario_creador = relationship("Usuario", foreign_keys=[id_usuario_creador])
+    usuario_modificador = relationship("Usuario", foreign_keys=[id_usuario_modificador])
+    detalles = relationship("CompraOCDetalle", back_populates="oc")
+    enmiendas = relationship("CompraOCEnmienda", back_populates="oc")
+    recepciones = relationship("NotaRecepcion", back_populates="oc")
+
+
+class CompraOCDetalle(Base):
+    __tablename__ = "compra_oc_detalle"
+
+    id_detalle: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_oc: Mapped[int] = mapped_column(BigInteger, ForeignKey("compra_oc.id_oc"), nullable=False)
+    id_producto: Mapped[int] = mapped_column(BigInteger, ForeignKey("inventario.id_producto"), nullable=False)
+    cantidad_solicitada: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    cantidad_recibida: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), server_default="0")
+    cantidad_facturada: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), server_default="0")
+    cantidad_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), server_default="0")
+    precio_unitario: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    total_linea: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+
+    oc = relationship("CompraOC", back_populates="detalles")
+    producto = relationship("Inventario")
+    recepciones = relationship("NotaRecepcionDetalle", back_populates="oc_detalle")
+
+
+class CompraOCEnmienda(Base):
+    # implicit_returning=False: trg_compra_oc_enmienda_autorizar (AFTER UPDATE, ver
+    # migrations/0032) esta definido sobre esta tabla -- mismo motivo que compras/
+    # compra_detalle (ver docs/ESTADO_DEL_PROYECTO.md seccion 3).
+    __tablename__ = "compra_oc_enmienda"
+    __table_args__ = {"implicit_returning": False}
+
+    id_enmienda: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_oc: Mapped[int] = mapped_column(BigInteger, ForeignKey("compra_oc.id_oc"), nullable=False)
+    numero_enmienda: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    fecha_enmienda: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    tipo_cambio: Mapped[str] = mapped_column(String(20), nullable=False)
+    cantidad_anterior: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 4))
+    cantidad_nueva: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 4))
+    precio_anterior: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 4))
+    precio_nuevo: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 4))
+    # DATE (no DATETIME) -- migrations/0035, mismo motivo que CompraOC.fecha_estimada_entrega.
+    fecha_entrega_anterior: Mapped[datetime.date | None] = mapped_column(Date)
+    fecha_entrega_nueva: Mapped[datetime.date | None] = mapped_column(Date)
+    motivo: Mapped[str] = mapped_column(String(500), nullable=False)
+    observaciones: Mapped[str | None] = mapped_column(String(500))
+    id_usuario_solicitante: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"), nullable=False)
+    id_usuario_autorizador: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_autorizacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    estado_enmienda: Mapped[str] = mapped_column(String(20), server_default="PENDIENTE")
+
+    oc = relationship("CompraOC", back_populates="enmiendas")
+    solicitante = relationship("Usuario", foreign_keys=[id_usuario_solicitante])
+    autorizador = relationship("Usuario", foreign_keys=[id_usuario_autorizador])
+
+
+class NotaRecepcion(Base):
+    __tablename__ = "nota_recepcion"
+
+    id_nr: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_oc: Mapped[int] = mapped_column(BigInteger, ForeignKey("compra_oc.id_oc"), nullable=False)
+    numero_nr: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    fecha_recepcion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    estado: Mapped[str] = mapped_column(String(20), server_default="RECIBIDA")
+    observaciones: Mapped[str | None] = mapped_column(String(500))
+    id_usuario_recepcion: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"), nullable=False)
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+
+    oc = relationship("CompraOC", back_populates="recepciones")
+    usuario_recepcion = relationship("Usuario")
+    detalles = relationship("NotaRecepcionDetalle", back_populates="nota_recepcion")
+    devoluciones = relationship("NotaDevolucion", back_populates="nota_recepcion")
+
+
+class NotaRecepcionDetalle(Base):
+    # implicit_returning=False: trg_nota_recepcion_detalle_ins (AFTER INSERT, ver
+    # migrations/0032) esta definido sobre esta tabla.
+    __tablename__ = "nota_recepcion_detalle"
+    __table_args__ = {"implicit_returning": False}
+
+    id_detalle: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_nr: Mapped[int] = mapped_column(BigInteger, ForeignKey("nota_recepcion.id_nr"), nullable=False)
+    id_oc_detalle: Mapped[int] = mapped_column(BigInteger, ForeignKey("compra_oc_detalle.id_detalle"), nullable=False)
+    id_producto: Mapped[int] = mapped_column(BigInteger, ForeignKey("inventario.id_producto"), nullable=False)
+    cantidad_recibida: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    cantidad_rechazada: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), server_default="0")
+    precio_unitario: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    total_linea: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+
+    nota_recepcion = relationship("NotaRecepcion", back_populates="detalles")
+    oc_detalle = relationship("CompraOCDetalle", back_populates="recepciones")
+    producto = relationship("Inventario")
+
+
+class NotaDevolucion(Base):
+    __tablename__ = "nota_devolucion"
+
+    id_devolucion: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_nr: Mapped[int] = mapped_column(BigInteger, ForeignKey("nota_recepcion.id_nr"), nullable=False)
+    numero_nota_devolucion: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    fecha_devolucion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    motivo: Mapped[str] = mapped_column(String(50), nullable=False)
+    cantidad_total: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), server_default="0")
+    estado: Mapped[str] = mapped_column(String(20), server_default="PENDIENTE")
+    observaciones: Mapped[str | None] = mapped_column(String(500))
+    id_usuario_creador: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+
+    nota_recepcion = relationship("NotaRecepcion", back_populates="devoluciones")
+    usuario_creador = relationship("Usuario")
+    detalles = relationship("NotaDevolucionDetalle", back_populates="devolucion")
+
+
+class NotaDevolucionDetalle(Base):
+    # implicit_returning=False: trg_nota_devolucion_detalle_ins (AFTER INSERT, ver
+    # migrations/0032) esta definido sobre esta tabla.
+    __tablename__ = "nota_devolucion_detalle"
+    __table_args__ = {"implicit_returning": False}
+
+    id_detalle: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_devolucion: Mapped[int] = mapped_column(BigInteger, ForeignKey("nota_devolucion.id_devolucion"), nullable=False)
+    id_producto: Mapped[int] = mapped_column(BigInteger, ForeignKey("inventario.id_producto"), nullable=False)
+    cantidad_devuelta: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    precio_unitario: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    total_linea: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+
+    devolucion = relationship("NotaDevolucion", back_populates="detalles")
     producto = relationship("Inventario")
 
 

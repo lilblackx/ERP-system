@@ -51,12 +51,25 @@ def _crear_compra(session):
     admin = crear_usuario_admin(session)
     producto = crear_producto(session, cantidad_unidad=10)
     proveedor = crear_proveedor(session)
+    caja = crear_caja(session)
+    CajaService.abrir_caja(session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("100.00"))
     compra = CompraService.registrar_compra(
         session,
         id_proveedor=proveedor.id_proveedor,
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "10.00"}],
+        # Una compra de contado exige pago (validacion en compras.py, ver su docstring):
+        # exactamente el total, sin vuelto -- por eso "10.00" a mano en vez de reusar
+        # pago_contado() (pensado para VentaService.emitir_factura, que si tolera sobrante).
+        pago={
+            "metodo_pago": "efectivo",
+            "moneda": "USD",
+            "monto_moneda_origen": Decimal("10.00"),
+            "id_caja": caja.id_caja,
+            "id_cuenta_bancaria": None,
+            "referencia": None,
+        },
     )
     return proveedor, compra, admin
 

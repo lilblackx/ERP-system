@@ -617,7 +617,10 @@ de servicio.
   porque `TasaService` no las tiene, cada registro es un snapshot histórico inmutable).
   Falta el resto de los módulos de servicio ya implementados sin pantalla propia:
   proveedores, compras, bancos, cuentas bancarias, cajas (cierre de turno diferido a
-  propósito, ver sección 9 más abajo), comisiones.
+  propósito, ver sección 9 más abajo), comisiones, cuentas por cobrar y cuentas por
+  pagar (2026-08-27: hoy solo se ven implícitas dentro de Facturación/Compras y el
+  historial de cliente -- falta una pantalla propia para consultar/gestionar el saldo
+  pendiente agregado por cliente/proveedor).
 - ~~RBAC modelado pero no aplicado~~ — resuelto (2026-08-22), ver sección 7. ~~Sigue
   pendiente extenderlo a operaciones de lectura~~ — también resuelto (2026-08-22, misma
   sección).
@@ -814,3 +817,37 @@ de servicio.
   facturacion 2026-08-25 (N5): esta linea decia "Pendiente: correr la suite en CI (hoy es
   manual...)" desde antes de que el workflow existiera, y quedo asi sin actualizar
   despues de agregarlo.
+- **Auditoria de Vendedores y Clientes 2026-08-27** (evaluando si ambos modulos estaban
+  listos para seguir avanzando): Clientes ya estaba listo (requeridos + unicidad
+  validados en servicio y reforzados con `UNIQUE` real en BD, delete fisico bloqueado,
+  RBAC completo, UI paginada con filtros). Vendedores tenia varios huecos frente a ese
+  mismo estandar, todos resueltos el mismo dia:
+  - **`codigo_vendedor`/`identificacion_vendedor` sin proteccion de unicidad**, a
+    diferencia de los mismos campos en Cliente -- se podian crear vendedores duplicados
+    con el mismo codigo interno o cedula. `migrations/0031_unique_vendedor_codigo_identificacion.sql`
+    agrega la proteccion, pero con un matiz importante: **no es un `UNIQUE CONSTRAINT`
+    normal, es un indice unico FILTRADO** (`CREATE UNIQUE INDEX ... WHERE campo IS NOT
+    NULL`). SQL Server (a diferencia de Postgres/el estandar ANSI) trata todos los NULL
+    como el mismo valor dentro de un `UNIQUE` normal -- permite maximo UNA fila con NULL,
+    no muchas. `clientes.codigo_cliente`/`identificacion_cliente` usan un `UNIQUE` plano
+    sin problema solo porque `ClienteService` los exige siempre no vacios; en Vendedor
+    ambos campos son legitimamente opcionales (sin asterisco en el formulario), asi que
+    un `UNIQUE` plano rompia crear el segundo vendedor sin codigo/identificacion (se
+    detecto en pruebas al escribir el test correspondiente). Si se agrega otra columna
+    opcional+unica en el futuro en cualquier tabla, usar este mismo patron de indice
+    filtrado, no `ADD CONSTRAINT ... UNIQUE`.
+  - **`VendedorService.crear()`/`actualizar()` no validaban nada** (ni `nombre_vendedor`
+    requerido pese a ser `NOT NULL` en BD, ni duplicados) -- ahora siguen el mismo patron
+    `_validar_unico()`/requerido que `clientes.py`.
+  - **`VendedorService.listar()` no paginaba** (D-01) y **`VendedoresPanel` no tenia
+    filtro de estado** -- ambos igualados a `ClienteService.list_clientes()`/
+    `ClientesPanel`. Los 3 callers de `VendedorService.listar()` que dependian del
+    `list[Vendedor]` plano (`VendedoresPanel`, el selector de vendedor de
+    `FacturaFormDialog`, el combo de vendedor vinculado de `UsuarioFormDialog`) se
+    actualizaron a leer `resultado["items"]` con `estado_vendedor="ACTIVO"` y un
+    `por_pagina` alto (esos dos ultimos son selectores que necesitan TODOS los activos,
+    no una pagina).
+  - Tests nuevos para cada hallazgo (`tests/services/test_vendedores.py`) + el hueco
+    menor que tenia Clientes (`update_cliente` nunca se probaba re-validando duplicado al
+    cambiar codigo/identificacion, solo el camino de `create_cliente`) cerrado en
+    `tests/services/test_clientes.py`.

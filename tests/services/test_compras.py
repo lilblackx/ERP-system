@@ -2,18 +2,55 @@ from decimal import Decimal
 
 import pytest
 
-from app.db.models import CajaMovimiento, CompraDetalle, CuentaPorPagar, NotaCreditoProveedor, PagoProveedor
+from app.db.models import (
+    BancoMovimiento,
+    CajaMovimiento,
+    CompraDetalle,
+    CuentaPorPagar,
+    NotaCreditoProveedor,
+    PagoProveedor,
+)
 from app.services.compras import CompraService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
+from app.services.tasas import TasaService
 from app.services.tesoreria import CajaService
-from tests.factories import crear_caja, crear_producto, crear_proveedor, crear_usuario_admin
+from tests.factories import crear_caja, crear_cuenta_bancaria, crear_producto, crear_proveedor, crear_usuario_admin
+
+
+def _abrir_caja_con_saldo(db_session, admin, saldo=Decimal("1000.00")):
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=saldo)
+    return caja
+
+
+def _pago_efectivo(id_caja, monto) -> dict:
+    return {
+        "metodo_pago": "efectivo",
+        "moneda": "USD",
+        "monto_moneda_origen": monto,
+        "id_caja": id_caja,
+        "id_cuenta_bancaria": None,
+        "referencia": None,
+    }
+
+
+def _pago_transferencia(id_cuenta_bancaria, monto, referencia="REF-001") -> dict:
+    return {
+        "metodo_pago": "transferencia",
+        "moneda": "USD",
+        "monto_moneda_origen": monto,
+        "id_caja": None,
+        "id_cuenta_bancaria": id_cuenta_bancaria,
+        "referencia": referencia,
+    }
 
 
 def test_registrar_compra_contado_repone_stock_y_calcula_total(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, cantidad_unidad=10)
     proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
 
     compra = CompraService.registrar_compra(
         db_session,
@@ -21,6 +58,7 @@ def test_registrar_compra_contado_repone_stock_y_calcula_total(db_session):
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("40.00")),
     )
 
     db_session.refresh(producto)
@@ -90,6 +128,7 @@ def test_registrar_compra_contado_no_abre_cuenta_por_pagar(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session)
     proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
 
     compra = CompraService.registrar_compra(
         db_session,
@@ -97,6 +136,7 @@ def test_registrar_compra_contado_no_abre_cuenta_por_pagar(db_session):
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
     )
 
     cxp = db_session.query(CuentaPorPagar).filter_by(id_compra=compra.id_compra).first()
@@ -204,6 +244,7 @@ def test_anular_compra_contado_repone_stock(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, cantidad_unidad=10)
     proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
 
     compra = CompraService.registrar_compra(
         db_session,
@@ -211,6 +252,7 @@ def test_anular_compra_contado_repone_stock(db_session):
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("40.00")),
     )
 
     CompraService.anular_compra(db_session, compra.id_compra, id_usuario=admin.id_usuario, motivo="Error de carga")
@@ -227,6 +269,7 @@ def test_anular_compra_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, cantidad_unidad=10)
     proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
 
     compra = CompraService.registrar_compra(
         db_session,
@@ -234,6 +277,7 @@ def test_anular_compra_sin_usuario_autorizado_falla(db_session):
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 5, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("40.00")),
     )
 
     with pytest.raises(PermisoDenegadoError):
@@ -313,12 +357,14 @@ def test_anular_compra_sin_motivo(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session)
     proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
     compra = CompraService.registrar_compra(
         db_session,
         id_proveedor=proveedor.id_proveedor,
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
     )
 
     with pytest.raises(ValueError, match="motivo"):
@@ -329,12 +375,14 @@ def test_anular_compra_ya_anulada(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session)
     proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
     compra = CompraService.registrar_compra(
         db_session,
         id_proveedor=proveedor.id_proveedor,
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
     )
     CompraService.anular_compra(db_session, compra.id_compra, id_usuario=admin.id_usuario, motivo="Motivo 1")
 
@@ -353,6 +401,7 @@ def test_listar_compras_filtra_por_proveedor(db_session):
     producto = crear_producto(db_session)
     proveedor_a = crear_proveedor(db_session)
     proveedor_b = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
 
     CompraService.registrar_compra(
         db_session,
@@ -360,6 +409,7 @@ def test_listar_compras_filtra_por_proveedor(db_session):
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
     )
     CompraService.registrar_compra(
         db_session,
@@ -367,6 +417,7 @@ def test_listar_compras_filtra_por_proveedor(db_session):
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
         items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
     )
 
     resultado = CompraService.listar_compras(
@@ -380,3 +431,169 @@ def test_listar_compras_filtra_por_proveedor(db_session):
 def test_listar_compras_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         CompraService.listar_compras(db_session)
+
+
+def test_registrar_compra_contado_sin_pago_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session)
+
+    with pytest.raises(ValueError, match="pago es requerido"):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=proveedor.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        )
+
+
+def test_registrar_compra_contado_efectivo_descuenta_caja(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin, saldo=Decimal("100.00"))
+
+    CompraService.registrar_compra(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        id_usuario=admin.id_usuario,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
+    )
+
+    movimiento = db_session.query(CajaMovimiento).filter_by(id_caja=caja.id_caja, tipo_movimiento="salida").one()
+    assert movimiento.monto_movimiento == Decimal("8.00")
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("92.00")
+
+
+def test_registrar_compra_contado_transferencia_registra_movimiento_bancario(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+
+    CompraService.registrar_compra(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        id_usuario=admin.id_usuario,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        pago=_pago_transferencia(cuenta.id_cuenta, Decimal("8.00")),
+    )
+
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta, tipo_movimiento="cargo").one()
+    assert movimiento.monto_movimiento == Decimal("8.00")
+    assert movimiento.referencia_movimiento == "REF-001"
+
+
+def test_registrar_compra_contado_pago_no_coincide_con_total_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
+
+    with pytest.raises(ValueError, match="no coincide"):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=proveedor.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+            pago=_pago_efectivo(caja.id_caja, Decimal("5.00")),
+        )
+
+
+def test_registrar_compra_contado_caja_sin_saldo_suficiente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin, saldo=Decimal("1.00"))
+
+    with pytest.raises(ValueError, match="no tiene saldo suficiente"):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=proveedor.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="contado",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+            pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
+        )
+
+
+def test_registrar_compra_contado_convierte_pago_ves_con_tasa_vigente(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
+    TasaService.registrar_tasa(db_session, tasa_bcv=Decimal("40.00"), creado_por=admin.id_usuario)
+
+    compra = CompraService.registrar_compra(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        id_usuario=admin.id_usuario,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+        pago={
+            "metodo_pago": "efectivo",
+            "moneda": "VES",
+            "monto_moneda_origen": Decimal("320.00"),
+            "id_caja": caja.id_caja,
+            "id_cuenta_bancaria": None,
+            "referencia": None,
+        },
+    )
+
+    assert compra.total_compra == Decimal("8.00")
+    movimiento = db_session.query(CajaMovimiento).filter_by(id_caja=caja.id_caja, tipo_movimiento="salida").one()
+    assert movimiento.monto_movimiento == Decimal("8.00")  # el movimiento de caja se guarda en su equivalente USD
+
+
+def test_registrar_compra_credito_con_pago_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=1000)
+    caja = _abrir_caja_con_saldo(db_session, admin)
+
+    with pytest.raises(ValueError, match="no admite pago"):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=proveedor.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "8.00"}],
+            pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
+        )
+
+
+def test_obtener_compra_devuelve_compra_y_detalles(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session)
+    caja = _abrir_caja_con_saldo(db_session, admin)
+    compra = CompraService.registrar_compra(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        id_usuario=admin.id_usuario,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 2, "costo_unitario": "8.00"}],
+        pago=_pago_efectivo(caja.id_caja, Decimal("16.00")),
+    )
+
+    resultado = CompraService.obtener_compra(db_session, compra.id_compra, id_usuario=admin.id_usuario)
+
+    assert resultado["compra"].id_compra == compra.id_compra
+    assert len(resultado["detalles"]) == 1
+    assert resultado["detalles"][0].cantidad_producto == Decimal("2.00")
+
+
+def test_obtener_compra_inexistente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="Compra no encontrada"):
+        CompraService.obtener_compra(db_session, 999999, id_usuario=admin.id_usuario)
+
+
+def test_obtener_compra_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        CompraService.obtener_compra(db_session, 999999)

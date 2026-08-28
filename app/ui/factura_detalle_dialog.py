@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.empresa import EmpresaService
+from app.services.permisos import PermisoDenegadoError
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_pdf import generar_pdf_factura
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS
@@ -523,6 +524,8 @@ class FacturaDetalleDialog(QDialog):
             config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario)
             generar_pdf_factura(self.datos, config_empresa, ruta)
             QMessageBox.information(self, "Exportación completa", f"Factura exportada a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la configuración de empresa.")
         except Exception:
             logger.exception("Fallo al exportar la factura %s a PDF", self.factura.numero_factura)
             QMessageBox.critical(self, "Error", "No se pudo exportar la factura a PDF.")

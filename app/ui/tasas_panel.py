@@ -402,6 +402,8 @@ class TasasPanel(QWidget):
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} tasas a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
         except Exception:
             logger.exception("Fallo al exportar el histórico de tasas a Excel")
             QMessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")
@@ -418,6 +420,8 @@ class TasasPanel(QWidget):
             filas = self._filas_para_exportar(session)
             exportar_pdf(ruta, "Histórico de Tasas de Cambio", COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} tasas a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
         except Exception:
             logger.exception("Fallo al exportar el histórico de tasas a PDF")
             QMessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")

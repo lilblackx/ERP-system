@@ -34,6 +34,7 @@ from app.db.models import Inventario, ProductoPrecio, Usuario
 from app.services.categorias import CategoriaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import PrecioService, ProductoService
+from app.services.permisos import PermisoDenegadoError
 from app.ui.producto_form_dialog import ProductoFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -303,6 +304,8 @@ class InventarioPanel(QWidget):
             precios = self._obtener_precios(session, [p.id_producto for p in resultado["items"]])
             self._poblar_tabla(resultado, precios)
             self._actualizar_alertas(session)
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
         except Exception:
             logger.exception("Fallo al cargar el catálogo de inventario")
             QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el catálogo de inventario.")
@@ -392,6 +395,9 @@ class InventarioPanel(QWidget):
         except ValueError as exc:
             session.rollback()
             QMessageBox.warning(self, "Dato inválido", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear productos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear producto")
@@ -424,6 +430,9 @@ class InventarioPanel(QWidget):
         except ValueError as exc:
             session.rollback()
             QMessageBox.warning(self, "Dato inválido", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar productos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar producto")
@@ -450,6 +459,9 @@ class InventarioPanel(QWidget):
 
             ProductoService.cambiar_estado(session, id_producto, nuevo_estado, id_usuario=self.usuario.id_usuario)
             self.cargar_productos()
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de productos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del producto %s", id_producto)
@@ -494,6 +506,8 @@ class InventarioPanel(QWidget):
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
         except Exception:
             logger.exception("Fallo al exportar el catálogo de inventario a Excel")
             QMessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
@@ -510,6 +524,8 @@ class InventarioPanel(QWidget):
             filas = self._filas_para_exportar(session)
             exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
         except Exception:
             logger.exception("Fallo al exportar el catálogo de inventario a PDF")
             QMessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")

@@ -36,6 +36,8 @@ from app.ui.styles import (
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    ICON_CHEVRON_DOWN_URL,
+    ICON_CHEVRON_UP_URL,
     ComboBoxSinScroll,
     aplicar_sombra,
 )
@@ -73,6 +75,43 @@ QComboBox, QDoubleSpinBox {{
 }}
 QComboBox:focus, QDoubleSpinBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
+}}
+QComboBox {{
+    padding-right: 24px;
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QComboBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+}}
+QDoubleSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    border: none;
+    border-left: 1px solid {COLOR_BORDER};
+}}
+QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+    border: none;
+    border-left: 1px solid {COLOR_BORDER};
+}}
+QDoubleSpinBox::up-arrow {{
+    image: url({ICON_CHEVRON_UP_URL});
+    width: 10px;
+    height: 10px;
+}}
+QDoubleSpinBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 10px;
+    height: 10px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};

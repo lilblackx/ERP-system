@@ -95,13 +95,53 @@ def test_listar_proveedores_filtra_por_texto(db_session):
 
     resultado = ProveedorService.listar(db_session, texto_busqueda="Prueba", id_usuario=admin.id_usuario)
 
-    assert len(resultado) == 1
-    assert resultado[0].nombre_razon_social == "Proveedor de Prueba"
+    assert resultado["total"] == 1
+    assert resultado["items"][0].nombre_razon_social == "Proveedor de Prueba"
 
 
 def test_listar_proveedores_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         ProveedorService.listar(db_session)
+
+
+def test_listar_proveedores_pagina_resultados(db_session):
+    admin = crear_usuario_admin(db_session)
+    for i in range(5):
+        ProveedorService.crear(
+            db_session,
+            **_datos_proveedor(
+                codigo_proveedor=f"PROV-{i:03d}",
+                identificacion_proveedor=f"J-{i:08d}",
+                creado_por=admin.id_usuario,
+            ),
+        )
+
+    pagina1 = ProveedorService.listar(db_session, pagina=1, por_pagina=2, id_usuario=admin.id_usuario)
+    pagina2 = ProveedorService.listar(db_session, pagina=2, por_pagina=2, id_usuario=admin.id_usuario)
+
+    assert pagina1["total"] == 5
+    assert len(pagina1["items"]) == 2
+    assert len(pagina2["items"]) == 2
+    ids_pagina1 = {p.id_proveedor for p in pagina1["items"]}
+    ids_pagina2 = {p.id_proveedor for p in pagina2["items"]}
+    assert ids_pagina1.isdisjoint(ids_pagina2)
+
+
+def test_listar_proveedores_filtra_por_estado(db_session):
+    admin = crear_usuario_admin(db_session)
+    activo = ProveedorService.crear(db_session, **_datos_proveedor(creado_por=admin.id_usuario))
+    inactivo = ProveedorService.crear(
+        db_session,
+        **_datos_proveedor(
+            codigo_proveedor="PROV-002", identificacion_proveedor="J-87654321", creado_por=admin.id_usuario
+        ),
+    )
+    ProveedorService.cambiar_estado(db_session, inactivo.id_proveedor, "INACTIVO", id_usuario=admin.id_usuario)
+
+    resultado = ProveedorService.listar(db_session, estado_proveedor="ACTIVO", id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].id_proveedor == activo.id_proveedor
 
 
 def test_actualizar_proveedor(db_session):
@@ -208,7 +248,7 @@ def test_eliminar_proveedor_siempre_falla_para_proteger_integridad(db_session):
     with pytest.raises(ValueError, match="No se puede eliminar"):
         ProveedorService.eliminar(db_session, proveedor.id_proveedor, id_usuario=admin.id_usuario)
 
-    assert len(ProveedorService.listar(db_session, id_usuario=admin.id_usuario)) == 1
+    assert ProveedorService.listar(db_session, id_usuario=admin.id_usuario)["total"] == 1
 
 
 def test_eliminar_proveedor_sin_usuario_autorizado_falla(db_session):

@@ -1,6 +1,7 @@
 """
-Panel para el módulo de Configuración de Empresa.
-Permite editar los datos de la empresa (RIF, Nombre, Dirección, Teléfono, Logo).
+Panel del módulo Configuración. Hoy solo cubre los datos de la empresa (RIF, Nombre,
+Dirección, Teléfono, Logo) -- pensado para crecer con mas pestañas de configuración de
+la app (ver docs/ESTADO_DEL_PROYECTO.md).
 """
 
 import logging
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.services.empresa import _SENTINEL, EmpresaService
+from app.services.permisos import PermisoDenegadoError
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -75,7 +77,7 @@ class ConfigEmpresaPanel(QWidget):
         card_layout.setSpacing(24)
 
         # Título
-        lbl_titulo = QLabel("Configuración de la Empresa")
+        lbl_titulo = QLabel("Datos de la Empresa")
         lbl_titulo.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
         card_layout.addWidget(lbl_titulo)
 
@@ -221,17 +223,12 @@ class ConfigEmpresaPanel(QWidget):
         lbl_impresora = QLabel("Impresora predeterminada:")
         lbl_impresora.setStyleSheet(lbl_style)
 
+        # Sin stylesheet propio: hereda el QComboBox global (GLOBAL_QSS en styles.py,
+        # incluye la flecha custom) -- una regla local aca pisaba el padding-right que
+        # le deja espacio a esa flecha, dejandola encimada con el texto.
         self.impresora_combo = QComboBox()
         self.impresora_combo.setMinimumHeight(38)
         self.impresora_combo.setMinimumWidth(260)
-        self.impresora_combo.setStyleSheet(f"""
-            QComboBox {{
-                border: 1px solid {COLOR_BORDER};
-                border-radius: 6px;
-                padding: 0 10px;
-                font-size: 14px;
-            }}
-        """)
         self._cargar_impresoras_disponibles()
 
         impresora_layout.addWidget(lbl_impresora)
@@ -364,6 +361,9 @@ class ConfigEmpresaPanel(QWidget):
 
             self.logo_bytes = _SENTINEL  # Reset sentinel para no re-guardar
 
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar la configuración de empresa.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al guardar la configuración de empresa")

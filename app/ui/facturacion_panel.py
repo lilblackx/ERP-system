@@ -644,6 +644,8 @@ class FacturacionPanel(QWidget):
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
         except Exception:
             logger.exception("Fallo al exportar el listado de facturas a Excel")
             QMessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
@@ -660,6 +662,8 @@ class FacturacionPanel(QWidget):
             filas = self._filas_para_exportar(session)
             exportar_pdf(ruta, "Facturas de Venta", COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
         except Exception:
             logger.exception("Fallo al exportar el listado de facturas a PDF")
             QMessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import CategoriaCliente, Cliente, Vendedor
+from app.db.models import Proveedor
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -146,25 +146,26 @@ QPushButton#BtnSecondary:hover {{
 """
 
 
-class ClienteFormDialog(QDialog):
+class ProveedorFormDialog(QDialog):
     """
-    Diálogo moderno, horizontal y centrado para la creación y edición de clientes.
-    Utiliza Font Awesome para todos los íconos y cuenta con selector fiscal (J, G, V, E, P).
+    Diálogo de creación/edición de proveedores -- mismo patrón visual que
+    ClienteFormDialog (Proveedor es un subconjunto de los campos de Cliente: sin
+    vendedor asignado ni categoría, que no aplican a un proveedor).
     """
 
-    def __init__(self, session: Session, cliente: Cliente | None = None, parent=None):
+    def __init__(self, session: Session, proveedor: Proveedor | None = None, parent=None):
         super().__init__(parent)
         self.session = session
-        self.cliente = cliente
-        self.setWindowTitle("Editar Cliente" if cliente else "Nuevo Cliente")
-        self.setFixedSize(860, 480)
+        self.proveedor = proveedor
+        self.setWindowTitle("Editar Proveedor" if proveedor else "Nuevo Proveedor")
+        self.setFixedSize(860, 420)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
-        if cliente:
-            self._precargar(cliente)
+        if proveedor:
+            self._precargar(proveedor)
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -178,7 +179,7 @@ class ClienteFormDialog(QDialog):
         header_layout.setSpacing(12)
 
         icon_lbl = QLabel()
-        fa_icon_name = "fa5s.user-edit" if self.cliente else "fa5s.user-plus"
+        fa_icon_name = "fa5s.user-edit" if self.proveedor else "fa5s.truck-loading"
         icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
@@ -190,11 +191,11 @@ class ClienteFormDialog(QDialog):
         titles_layout.setSpacing(1)
         titles_layout.setContentsMargins(0, 0, 0, 0)
 
-        titulo_text = "Editar Cliente" if self.cliente else "Nuevo Cliente"
+        titulo_text = "Editar Proveedor" if self.proveedor else "Nuevo Proveedor"
         lbl_titulo = QLabel(titulo_text)
         lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
-        lbl_subtitulo = QLabel("Complete los datos requeridos para registrar la ficha comercial del cliente.")
+        lbl_subtitulo = QLabel("Complete los datos requeridos para registrar la ficha del proveedor.")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
 
         titles_layout.addWidget(lbl_titulo)
@@ -232,7 +233,7 @@ class ClienteFormDialog(QDialog):
         lbl_cod = QLabel("Código <span style='color: #DC2626;'>*</span>")
         lbl_cod.setProperty("class", "FormLabel")
         self.codigo_input = QLineEdit()
-        self.codigo_input.setPlaceholderText("Ej: CLI-001")
+        self.codigo_input.setPlaceholderText("Ej: PROV-001")
         self.codigo_input.setFixedHeight(32)
         grid1.addWidget(lbl_cod, 0, 0)
         grid1.addWidget(self.codigo_input, 1, 0)
@@ -263,36 +264,10 @@ class ClienteFormDialog(QDialog):
         lbl_nom = QLabel("Razón Social o Nombre Completo <span style='color: #DC2626;'>*</span>")
         lbl_nom.setProperty("class", "FormLabel")
         self.nombre_input = QLineEdit()
-        self.nombre_input.setPlaceholderText("Ej: Distribuidora Central, C.A.")
+        self.nombre_input.setPlaceholderText("Ej: Suministros Industriales, C.A.")
         self.nombre_input.setFixedHeight(32)
         grid1.addWidget(lbl_nom, 2, 0, 1, 2)
         grid1.addWidget(self.nombre_input, 3, 0, 1, 2)
-
-        # Vendedor Asignado
-        lbl_vend = QLabel("Vendedor Asignado")
-        lbl_vend.setProperty("class", "FormLabel")
-        self.vendedor_combo = QComboBox()
-        self.vendedor_combo.setFixedHeight(32)
-        self.vendedor_combo.addItem("Sin asignar", None)
-        for vendedor in (
-            self.session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor)
-        ):
-            self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
-
-        grid1.addWidget(lbl_vend, 4, 0)
-        grid1.addWidget(self.vendedor_combo, 5, 0)
-
-        # Categoría
-        lbl_cat = QLabel("Categoría de Cliente")
-        lbl_cat.setProperty("class", "FormLabel")
-        self.categoria_combo = QComboBox()
-        self.categoria_combo.setFixedHeight(32)
-        self.categoria_combo.addItem("Sin asignar", None)
-        for categoria in self.session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):
-            self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
-
-        grid1.addWidget(lbl_cat, 4, 1)
-        grid1.addWidget(self.categoria_combo, 5, 1)
 
         col1_layout.addLayout(grid1)
         col1_layout.addStretch()
@@ -327,16 +302,16 @@ class ClienteFormDialog(QDialog):
         lbl_email = QLabel("Correo Electrónico")
         lbl_email.setProperty("class", "FormLabel")
         self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("Ej: contacto@cliente.com")
+        self.email_input.setPlaceholderText("Ej: contacto@proveedor.com")
         self.email_input.setFixedHeight(32)
         grid2.addWidget(lbl_email, 0, 1)
         grid2.addWidget(self.email_input, 1, 1)
 
         # Dirección
-        lbl_dir = QLabel("Dirección Fiscal / Entrega")
+        lbl_dir = QLabel("Dirección")
         lbl_dir.setProperty("class", "FormLabel")
         self.direccion_input = QLineEdit()
-        self.direccion_input.setPlaceholderText("Ej: Av. Principal, Edificio Central, Piso 2")
+        self.direccion_input.setPlaceholderText("Ej: Av. Principal, Zona Industrial, Galpón 3")
         self.direccion_input.setFixedHeight(32)
         grid2.addWidget(lbl_dir, 2, 0, 1, 2)
         grid2.addWidget(self.direccion_input, 3, 0, 1, 2)
@@ -359,7 +334,7 @@ class ClienteFormDialog(QDialog):
         self.dias_credito_input.setRange(0, 365)
         self.dias_credito_input.setSuffix(" días")
         self.dias_credito_input.setFixedHeight(32)
-        self.dias_credito_input.setToolTip("0 = cliente de contado, no podrá facturarse a crédito")
+        self.dias_credito_input.setToolTip("0 = proveedor de contado, no se le podrá comprar a crédito")
         grid2.addWidget(lbl_dias, 4, 1)
         grid2.addWidget(self.dias_credito_input, 5, 1)
 
@@ -385,7 +360,7 @@ class ClienteFormDialog(QDialog):
         self.btn_cancelar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancelar.clicked.connect(self.reject)
 
-        self.btn_guardar = QPushButton("Guardar Cliente")
+        self.btn_guardar = QPushButton("Guardar Proveedor")
         self.btn_guardar.setIcon(qta.icon("fa5s.save", color="#FFFFFF"))
         self.btn_guardar.setObjectName("BtnPrimary")
         self.btn_guardar.setFixedHeight(36)
@@ -397,35 +372,29 @@ class ClienteFormDialog(QDialog):
 
         root.addLayout(footer_layout)
 
-    def _precargar(self, cliente: Cliente):
-        self.codigo_input.setText(cliente.codigo_cliente or "")
+    def _precargar(self, proveedor: Proveedor):
+        self.codigo_input.setText(proveedor.codigo_proveedor or "")
 
         # id_legal contiene solo la letra (V, J, G, E, P)
-        # identificacion_cliente contiene solo el número
-        prefix = (cliente.id_legal or "").strip().upper() or "V"
-        numero = cliente.identificacion_cliente or ""
+        # identificacion_proveedor contiene solo el número
+        prefix = (proveedor.id_legal or "").strip().upper() or "J"
+        numero = proveedor.identificacion_proveedor or ""
 
         idx_pref = self.tipo_id_combo.findText(prefix)
         if idx_pref >= 0:
             self.tipo_id_combo.setCurrentIndex(idx_pref)
         self.identificacion_input.setText(numero)
 
-        self.nombre_input.setText(cliente.nombre_razon_social or "")
-        self.telefono_input.setText(cliente.telefono or "")
-        self.email_input.setText(cliente.email or "")
-        self.direccion_input.setText(cliente.direccion or "")
-        self.limite_credito_input.setValue(float(cliente.limite_credito or 0))
-        self.dias_credito_input.setValue(cliente.dias_credito or 0)
-
-        idx_vendedor = self.vendedor_combo.findData(cliente.vendedor_cliente)
-        self.vendedor_combo.setCurrentIndex(idx_vendedor if idx_vendedor >= 0 else 0)
-
-        idx_categoria = self.categoria_combo.findData(cliente.id_categoria_cliente)
-        self.categoria_combo.setCurrentIndex(idx_categoria if idx_categoria >= 0 else 0)
+        self.nombre_input.setText(proveedor.nombre_razon_social or "")
+        self.telefono_input.setText(proveedor.telefono or "")
+        self.email_input.setText(proveedor.email or "")
+        self.direccion_input.setText(proveedor.direccion or "")
+        self.limite_credito_input.setValue(float(proveedor.limite_credito or 0))
+        self.dias_credito_input.setValue(proveedor.dias_credito or 0)
 
     def _validar_y_aceptar(self):
         if not self.codigo_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El código del cliente es obligatorio.")
+            QMessageBox.warning(self, "Dato requerido", "El código del proveedor es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
@@ -433,7 +402,7 @@ class ClienteFormDialog(QDialog):
             self.identificacion_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "La razón social o nombre del cliente es obligatoria.")
+            QMessageBox.warning(self, "Dato requerido", "La razón social o nombre del proveedor es obligatoria.")
             self.nombre_input.setFocus()
             return
         self.accept()
@@ -443,15 +412,13 @@ class ClienteFormDialog(QDialog):
         num = self.identificacion_input.text().strip()
 
         return {
-            "codigo_cliente": self.codigo_input.text().strip() or None,
+            "codigo_proveedor": self.codigo_input.text().strip() or None,
             "id_legal": tipo if tipo else None,
-            "identificacion_cliente": num if num else None,
+            "identificacion_proveedor": num if num else None,
             "nombre_razon_social": self.nombre_input.text().strip(),
             "telefono": self.telefono_input.text().strip() or None,
             "email": self.email_input.text().strip() or None,
             "direccion": self.direccion_input.text().strip() or None,
             "limite_credito": self.limite_credito_input.value(),
             "dias_credito": self.dias_credito_input.value(),
-            "vendedor_cliente": self.vendedor_combo.currentData(),
-            "id_categoria_cliente": self.categoria_combo.currentData(),
         }

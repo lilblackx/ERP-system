@@ -59,6 +59,8 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
+    ICON_CHEVRON_DOWN_URL,
+    ICON_CHEVRON_UP_URL,
     TABLE_QSS,
     TABS_QSS,
     ComboBoxSinScroll,
@@ -132,6 +134,36 @@ QLineEdit::placeholder {{
 QComboBox::drop-down, QDateEdit::drop-down {{
     border: none;
     width: 22px;
+}}
+QComboBox::down-arrow, QDateEdit::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    border: none;
+    border-left: 1px solid {COLOR_BORDER};
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+    border: none;
+    border-left: 1px solid {COLOR_BORDER};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url({ICON_CHEVRON_UP_URL});
+    width: 10px;
+    height: 10px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 10px;
+    height: 10px;
 }}
 QComboBox QAbstractItemView {{
     background-color: #FFFFFF;
@@ -1034,11 +1066,9 @@ class FacturaFormDialog(QDialog):
     # ── Vendedor ───────────────────────────────────────────────────────────
 
     def _cargar_vendedores(self) -> None:
-        vendedores = [
-            v
-            for v in VendedorService.listar(self.session, id_usuario=self.id_usuario)
-            if (v.estado_vendedor or "ACTIVO") == "ACTIVO"
-        ]
+        vendedores = VendedorService.listar(
+            self.session, id_usuario=self.id_usuario, estado_vendedor="ACTIVO", por_pagina=LIMITE_CATALOGO
+        )["items"]
         if not vendedores:
             self.vendedor_combo.addItem("Sin vendedores activos", None)
         for vendedor in vendedores:

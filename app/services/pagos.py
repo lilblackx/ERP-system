@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Caja, CuentaBancaria, CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
+from app.db.models import Caja, Compra, CuentaBancaria, CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
@@ -248,3 +248,29 @@ class PagoService:
             .order_by(PagoProveedor.fecha_pago.desc())
             .all()
         )
+
+    @staticmethod
+    def listar_cuentas_por_pagar(
+        session: Session,
+        id_proveedor: int | None = None,
+        estado: str | None = None,
+        pagina: int = 1,
+        por_pagina: int = 20,
+        id_usuario: int | None = None,
+    ) -> dict:
+        """Necesario para la pestana 'CxP' de app/ui/compras.py -- no existia ningun
+        metodo de lectura sobre cuentas_por_pagar hasta ahora (el flujo OC->NR->Compra->Pago
+        es el primero en necesitar mostrarlas en una pantalla, ver auditoria de Compras/
+        Proveedores previa a este trabajo)."""
+        require_permiso(session, id_usuario, "pagos", "ver")
+        query = session.query(CuentaPorPagar).join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
+        if id_proveedor:
+            query = query.filter(Compra.id_proveedor == id_proveedor)
+        if estado:
+            query = query.filter(CuentaPorPagar.estado == estado)
+
+        total = query.count()
+        cuentas = (
+            query.order_by(CuentaPorPagar.fecha_vencimiento).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+        )
+        return {"items": cuentas, "total": total, "pagina": pagina, "por_pagina": por_pagina}

@@ -36,6 +36,7 @@ from app.services.clientes import (
     update_cliente,
 )
 from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.permisos import PermisoDenegadoError
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.historial_cliente_window import HistorialClienteWindow
 from app.ui.styles import (
@@ -347,6 +348,8 @@ class ClientesPanel(QWidget):
                 por_pagina=POR_PAGINA,
             )
             self._poblar_tabla(resultado)
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al cargar la lista de clientes")
             QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de clientes.")
@@ -447,6 +450,8 @@ class ClientesPanel(QWidget):
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al exportar la lista de clientes a Excel")
             QMessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
@@ -489,6 +494,8 @@ class ClientesPanel(QWidget):
                 col_widths=col_widths,
             )
             QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al exportar la lista de clientes a PDF")
             QMessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
@@ -525,6 +532,9 @@ class ClientesPanel(QWidget):
             # etc.) -- no es un str(exc) tecnico, mismo criterio que C3.
             session.rollback()
             QMessageBox.warning(self, "Dato invalido", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear clientes.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear cliente")
@@ -552,6 +562,9 @@ class ClientesPanel(QWidget):
         except ValueError as exc:
             session.rollback()
             QMessageBox.warning(self, "Dato invalido", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar clientes.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar cliente")
@@ -578,6 +591,9 @@ class ClientesPanel(QWidget):
 
             cambiar_estado_cliente(session, id_cliente, nuevo_estado, id_usuario=self.usuario.id_usuario)
             self.cargar_clientes()
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de clientes.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del cliente %s", id_cliente)

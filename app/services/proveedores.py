@@ -24,7 +24,14 @@ class ProveedorService:
         return session.get(Proveedor, id_proveedor)
 
     @staticmethod
-    def listar(session: Session, texto_busqueda: str | None = None, id_usuario: int | None = None) -> list[Proveedor]:
+    def listar(
+        session: Session,
+        texto_busqueda: str | None = None,
+        estado_proveedor: str | None = None,
+        id_usuario: int | None = None,
+        pagina: int = 1,
+        por_pagina: int = 20,
+    ) -> dict:
         require_permiso(session, id_usuario, "proveedores", "ver")
         query = session.query(Proveedor)
         if texto_busqueda:
@@ -34,7 +41,13 @@ class ProveedorService:
                 | Proveedor.identificacion_proveedor.ilike(like)
                 | Proveedor.codigo_proveedor.ilike(like)
             )
-        return query.order_by(Proveedor.nombre_razon_social).all()
+        if estado_proveedor:
+            query = query.filter(Proveedor.estado_proveedor == estado_proveedor)
+
+        query = query.order_by(Proveedor.nombre_razon_social)
+        total = query.count()
+        proveedores = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+        return {"items": proveedores, "total": total, "pagina": pagina, "por_pagina": por_pagina}
 
     @staticmethod
     def _validar_requeridos(datos: dict) -> None:
