@@ -219,7 +219,16 @@ necesario para no dejar el flujo de contado en efectivo sin salida.
     tipos, DETAL/MAYOR/ESPECIAL). `producto_precios` se mantiene (no se borro la tabla)
     pero `CK_producto_precios_tipo` ahora exige `tipo_precio = 'UNICO'` -- la migracion
     consolido los datos existentes con prioridad DETAL>MAYOR>ESPECIAL, respaldando en
-    `dbo.auditoria` (accion `MIGRACION_CONSOLIDAR_PRECIOS`) lo que se descarto.
+    `dbo.auditoria` (accion `MIGRACION_CONSOLIDAR_PRECIOS`) lo que se descarto. Esa
+    migracion (0011) restringio el *valor* de `tipo_precio`, pero no agrego ninguna
+    `UNIQUE` sobre `id_producto` -- la invariante "un solo precio por producto" vivia solo
+    en `PrecioService.establecer_precio()` (check-then-insert-or-update sin lock), sin
+    respaldo real en la base. Auditoria de Productos (2026-08-28) lo detecto y
+    `migrations/0036_producto_precios_unico_por_producto.sql` lo cerro: agrega
+    `UQ_producto_precios_id_producto` (con el mismo patron de deduplicacion+respaldo en
+    auditoria que 0011, accion `MIGRACION_DEDUPLICAR_PRECIOS`) y `establecer_precio()` gano
+    `WITH (UPDLOCK, ROWLOCK)` sobre la fila existente para que dos ediciones de precio
+    concurrentes al mismo producto se serialicen en vez de competir.
   - **Calculo**: `ComisionService.calcular_comisiones_factura()` se llama desde
     `VentaService.emitir_factura()`, en la MISMA transaccion atomica que la venta (despues
     del `flush()` de `factura_detalle`, sin `commit()` propio). Sin vendedor en la factura,
@@ -239,13 +248,18 @@ necesario para no dejar el flujo de contado en efectivo sin salida.
   - Catalogo de permisos nuevo modulo `comisiones` (ver/crear/editar/eliminar), distinto
     del `reportes_comisiones` preexistente (solo lectura, ya asignado a VENDEDOR en el seed
     original).
-  - Sin UI propia todavia -- `sidebar.py`/`main_window.py` (`MODULOS_CONFIG`) siguen
-    resolviendo la entrada "Comisiones" a `PlaceholderView` (`clase_panel=None`). Nota
-    corregida en la auditoria de facturacion 2026-08-25 (N5): cuando se escribio esto
-    ("no existe ninguna UI real de ventas/inventario, solo login/clientes") todavia era
-    cierto, pero quedo obsoleta desde que se implementaron `facturacion_panel.py`
-    (2026-08-24) e `inventario_panel.py` (2026-08-23) -- la falta de UI de esta seccion es
-    especifica de Comisiones, no generalizada al resto de los modulos.
+  - **UI completa** (2026-08-28, `app/ui/comisiones_panel.py`): dos modos en el mismo
+    panel. Modo gestion (`comisiones:ver`/`crear`, para ADMIN/CAJERO): selector de vendedor,
+    tabla de comisiones, filtro por estado, boton "Pagar" → abre dialogo de pago sin monto
+    editable (paga el total pendiente en batch), seleccion de metodo/origen caja/banco/referencia.
+    Modo "Mis Comisiones" (`reportes_comisiones:ver`, para VENDEDOR): igual pero sin selector
+    de vendedor ni boton pagar, titulo "Mis Comisiones" -- ve solo las suyas. Tambien resolvio
+    un permiso huerfano: `reportes_comisiones:ver` existia en el catalogo desde el inicio
+    (schema_sqlserver.sql linea 877) asignado a VENDEDOR (linea 883) con la intencion de
+    "ver propias comisiones", pero `ComisionService.listar_comisiones_vendedor()` exigia
+    `comisiones:ver` en su lugar -- VENDEDOR nunca tuvo ese permiso. Nuevo metodo
+    `ComisionService.listar_mis_comisiones()` usa el permiso correcto, sidebar respeta el OR
+    (`comisiones:ver` O `reportes_comisiones:ver`) para mostrar la entrada a VENDEDOR.
 
   **Correlativo fiscal** (`migrations/0003_correlativo_notas_credito_clientes.sql`,
   2026-08-22): `NotaCreditoCliente` es un documento que la empresa emite (reduce lo que
@@ -617,10 +631,13 @@ de servicio.
   porque `TasaService` no las tiene, cada registro es un snapshot histórico inmutable).
   Falta el resto de los módulos de servicio ya implementados sin pantalla propia:
   proveedores, compras, bancos, cuentas bancarias, cajas (cierre de turno diferido a
-  propósito, ver sección 9 más abajo), comisiones, cuentas por cobrar y cuentas por
-  pagar (2026-08-27: hoy solo se ven implícitas dentro de Facturación/Compras y el
-  historial de cliente -- falta una pantalla propia para consultar/gestionar el saldo
-  pendiente agregado por cliente/proveedor).
+  propósito, ver sección 9 más abajo), ~~comisiones~~ (resuelto, `ComisionesPanel` con
+  modo gestión para admin/cajero y modo "Mis Comisiones" de solo lectura para el
+  vendedor), ~~cuentas por pagar~~ y ~~cuentas por cobrar~~ (resuelto 2026-08-28:
+  `CuentasPorPagarPanel`/`CuentasPorCobrarPanel`, ambos con filtro de estado —incluida
+  "Vencida", derivada en el momento porque ninguna trigger persiste ese estado— y diálogo
+  de pago/cobro contra `PagoService`; `PagoService.listar_cuentas_por_cobrar()` es nuevo,
+  simétrico a `listar_cuentas_por_pagar()`).
 - ~~RBAC modelado pero no aplicado~~ — resuelto (2026-08-22), ver sección 7. ~~Sigue
   pendiente extenderlo a operaciones de lectura~~ — también resuelto (2026-08-22, misma
   sección).

@@ -10,7 +10,9 @@ from app.db.models import (
     NotaCreditoProveedor,
     PagoProveedor,
 )
+from app.services.compra_oc import CompraOCService
 from app.services.compras import CompraService
+from app.services.nota_recepcion import NotaRecepcionService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
@@ -597,3 +599,224 @@ def test_obtener_compra_inexistente_falla(db_session):
 def test_obtener_compra_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         CompraService.obtener_compra(db_session, 999999)
+
+
+# ===== Tests para crear_compra_desde_oc workflow (Fix: Paso 3 del flujo OC->NR->Compra) =====
+
+
+def test_crear_compra_desde_oc_credito_basico(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+
+    # Paso 1: Crear OC
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 10, "precio_unitario": "5.00"}],
+        id_usuario=admin.id_usuario,
+    )
+
+    # Paso 2: Recibir mercancia
+    NotaRecepcionService.crear_nota_recepcion(
+        db_session,
+        id_oc=oc.id_oc,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad_recibida": 10}],
+        id_usuario=admin.id_usuario,
+    )
+
+    # Paso 3: Facturar
+    compra = CompraService.crear_compra_desde_oc(
+        db_session,
+        id_oc=oc.id_oc,
+        id_usuario=admin.id_usuario,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 10}],
+        condicion_pago="credito",
+    )
+
+    db_session.refresh(producto)
+    assert compra.total_compra == Decimal("50.00")
+    assert compra.estado_compra == "EMITIDA"
+    assert compra.condicion_pago == "credito"
+    # Stock fue sumado en NR, no debe duplicarse en factura (stock_ya_contabilizado=True)
+    assert producto.cantidad_unidad == Decimal("10.00")
+
+
+def test_crear_compra_desde_oc_contado_descuenta_caja(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+    caja = _abrir_caja_con_saldo(db_session, admin, Decimal("100.00"))
+
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 5, "precio_unitario": "10.00"}],
+        id_usuario=admin.id_usuario,
+    )
+
+    NotaRecepcionService.crear_nota_recepcion(
+        db_session,
+        id_oc=oc.id_oc,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad_recibida": 5}],
+        id_usuario=admin.id_usuario,
+    )
+
+    compra = CompraService.crear_compra_desde_oc(
+        db_session,
+        id_oc=oc.id_oc,
+        id_usuario=admin.id_usuario,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 5}],
+        condicion_pago="contado",
+        pago=_pago_efectivo(caja.id_caja, Decimal("50.00")),
+    )
+
+    db_session.refresh(caja)
+    assert compra.total_compra == Decimal("50.00")
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("50.00")
+
+
+def test_crear_compra_desde_oc_parcial_segunda_factura(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+
+    # OC por 10 unidades
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 10, "precio_unitario": "5.00"}],
+        id_usuario=admin.id_usuario,
+    )
+
+    # Recibir 10 unidades
+    NotaRecepcionService.crear_nota_recepcion(
+        db_session,
+        id_oc=oc.id_oc,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad_recibida": 10}],
+        id_usuario=admin.id_usuario,
+    )
+
+    # Facturar 6 unidades
+    compra1 = CompraService.crear_compra_desde_oc(
+        db_session,
+        id_oc=oc.id_oc,
+        id_usuario=admin.id_usuario,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 6}],
+        condicion_pago="credito",
+    )
+
+    db_session.refresh(oc.detalles[0])
+    assert oc.detalles[0].cantidad_facturada == Decimal("6")
+    assert compra1.total_compra == Decimal("30.00")
+
+    # Facturar 4 unidades restantes (debe permitir)
+    compra2 = CompraService.crear_compra_desde_oc(
+        db_session,
+        id_oc=oc.id_oc,
+        id_usuario=admin.id_usuario,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 4}],
+        condicion_pago="credito",
+    )
+
+    db_session.refresh(oc.detalles[0])
+    assert oc.detalles[0].cantidad_facturada == Decimal("10")
+    assert compra2.total_compra == Decimal("20.00")
+
+
+def test_crear_compra_desde_oc_cantidad_facturada_excede_recibida_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 10, "precio_unitario": "5.00"}],
+        id_usuario=admin.id_usuario,
+    )
+
+    # Recibir solo 5
+    NotaRecepcionService.crear_nota_recepcion(
+        db_session,
+        id_oc=oc.id_oc,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad_recibida": 5}],
+        id_usuario=admin.id_usuario,
+    )
+
+    # Intentar facturar 6 (solo tenemos 5 recibidas)
+    with pytest.raises(ValueError, match="solo hay.*5.*recibidas"):
+        CompraService.crear_compra_desde_oc(
+            db_session,
+            id_oc=oc.id_oc,
+            id_usuario=admin.id_usuario,
+            items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 6}],
+            condicion_pago="credito",
+        )
+
+
+def test_crear_compra_desde_oc_stock_no_duplicado(db_session):
+    """Verifica que stock_ya_contabilizado=True previene duplicar stock: el stock solo
+    sube en NR (nota de recepcion), no en la factura."""
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 10, "precio_unitario": "5.00"}],
+        id_usuario=admin.id_usuario,
+    )
+
+    # Recibir: stock sube de 0 a 10
+    NotaRecepcionService.crear_nota_recepcion(
+        db_session,
+        id_oc=oc.id_oc,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad_recibida": 10}],
+        id_usuario=admin.id_usuario,
+    )
+
+    db_session.refresh(producto)
+    stock_tras_nr = producto.cantidad_unidad
+    assert stock_tras_nr == Decimal("10.00")
+
+    # Facturar: stock NO debe subir de nuevo
+    CompraService.crear_compra_desde_oc(
+        db_session,
+        id_oc=oc.id_oc,
+        id_usuario=admin.id_usuario,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 10}],
+        condicion_pago="credito",
+    )
+
+    db_session.refresh(producto)
+    assert producto.cantidad_unidad == Decimal("10.00"), (
+        f"stock no debe cambiar al facturar: era {stock_tras_nr}, ahora es {producto.cantidad_unidad}"
+    )
+
+
+def test_crear_compra_desde_oc_oc_anulada_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 10, "precio_unitario": "5.00"}],
+        id_usuario=admin.id_usuario,
+    )
+
+    # Anular la OC
+    oc.estado = "ANULADA"
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="No se puede facturar una orden de compra anulada"):
+        CompraService.crear_compra_desde_oc(
+            db_session,
+            id_oc=oc.id_oc,
+            id_usuario=admin.id_usuario,
+            items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 5}],
+            condicion_pago="credito",
+        )

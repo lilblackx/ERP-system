@@ -6,9 +6,17 @@ Centraliza todos los QSS en un solo lugar para facilitar el mantenimiento.
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QComboBox, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QTableWidget, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QGraphicsDropShadowEffect,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QTableWidget,
+    QWidget,
+)
 
 # Flecha de QComboBox/QDateEdit compartida por toda la app (GLOBAL_QSS y los dialogos con
 # stylesheet propio que no heredan de MainWindow). El truco CSS de "triangulo con bordes"
@@ -549,3 +557,85 @@ class EstadoBadge(QWidget):
             " padding: 2px 10px; font-size: 11px; font-weight: bold;"
         )
         layout.addWidget(lbl)
+
+
+class FlowLayout(QLayout):
+    """Layout que acomoda sus widgets en filas, saltando a la siguiente cuando no entra
+    mas en el ancho disponible -- Qt no trae uno propio (a diferencia de CSS flex-wrap),
+    asi que esta es la adaptacion estandar del ejemplo oficial "Flow Layout" de Qt.
+
+    Se agrego para roles_permisos_panel.py (auditoria de Roles/Permisos, 2026-08-28): la
+    matriz de permisos ponia un checkbox por accion en una sola fila de ancho fijo por
+    recurso -- bien mientras todo tenia ~4 acciones (ver/crear/editar/eliminar), pero
+    'compras' ya tiene 8 (incluidas las del flujo de OC, con nombres largos como
+    'autorizar_enmienda_oc') y la fila se salia del panel entero, forzando un scroll
+    horizontal de toda la pantalla. Con FlowLayout el grupo de checkboxes de un recurso
+    simplemente ocupa dos o tres lineas en vez de desbordar -- escala solo a cualquier
+    cantidad de acciones que se agreguen despues, sin volver a tocar este layout."""
+
+    def __init__(self, parent=None, margin: int = 0, spacing: int = -1):
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+        self._items: list = []
+
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self) -> Qt.Orientation:
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._acomodar(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._acomodar(rect, test_only=False)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        left, top, right, bottom = self.getContentsMargins()
+        size += QSize(left + right, top + bottom)
+        return size
+
+    def _acomodar(self, rect: QRect, test_only: bool) -> int:
+        left, top, right, bottom = self.getContentsMargins()
+        efectivo = rect.adjusted(left, top, -right, -bottom)
+        x, y = efectivo.x(), efectivo.y()
+        alto_fila = 0
+
+        for item in self._items:
+            espacio_x = self.spacing()
+            espacio_y = self.spacing()
+            siguiente_x = x + item.sizeHint().width() + espacio_x
+            if siguiente_x - espacio_x > efectivo.right() and alto_fila > 0:
+                x = efectivo.x()
+                y += alto_fila + espacio_y
+                siguiente_x = x + item.sizeHint().width() + espacio_x
+                alto_fila = 0
+
+            if not test_only:
+                item.setGeometry(QRect(x, y, item.sizeHint().width(), item.sizeHint().height()))
+
+            x = siguiente_x
+            alto_fila = max(alto_fila, item.sizeHint().height())
+
+        return y + alto_fila - rect.y()

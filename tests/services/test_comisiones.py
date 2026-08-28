@@ -285,3 +285,31 @@ def test_listar_pagos_comision_vendedor(db_session):
 
     assert len(pagos) == 1
     assert pagos[0].monto == Decimal("1.00")
+
+
+def test_listar_mis_comisiones_retorna_solo_propias(db_session):
+    """listar_mis_comisiones retorna solo comisiones del vendedor vinculado.
+    Usa un usuario ADMIN con id_vendedor_usuario para testear el filtrado."""
+    admin = crear_usuario_admin(db_session)
+    vendedor1 = crear_vendedor(db_session)
+    vendedor2 = crear_vendedor(db_session)
+
+    admin.id_vendedor_usuario = vendedor1.id_vendedor
+    db_session.commit()
+
+    _crear_comisiones_pendientes(db_session, vendedor1, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
+    _crear_comisiones_pendientes(db_session, vendedor2, admin, [(Decimal("1.00"), Decimal("3.00"), Decimal("1"))])
+
+    comisiones = ComisionService.listar_mis_comisiones(db_session, admin.id_usuario)
+
+    assert len(comisiones) == 1
+    assert comisiones[0].id_vendedor == vendedor1.id_vendedor
+    assert comisiones[0].monto_comision == Decimal("1.00")
+
+
+def test_listar_mis_comisiones_sin_vendedor_vinculado(db_session):
+    """Usuario sin vendedor vinculado lanza ValueError."""
+    admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="no tiene un vendedor vinculado"):
+        ComisionService.listar_mis_comisiones(db_session, admin.id_usuario)

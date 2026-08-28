@@ -15,6 +15,7 @@ from app.db.models import (
     FacturaVenta,
     PagoComision,
     ProductoPrecio,
+    Usuario,
     Vendedor,
 )
 from app.services.auditoria import AuditoriaService
@@ -73,6 +74,9 @@ class ComisionService:
             monto_venta = Decimal(str(detalle.precio_unitario)) * cantidad
             monto_comision = max(Decimal("0.00"), monto_venta - monto_base)
 
+            if monto_comision <= 0:
+                continue
+
             comision = ComisionFactura(
                 id_factura_detalle=detalle.id_factura_detalle,
                 id_vendedor=factura.id_vendedor,
@@ -93,10 +97,28 @@ class ComisionService:
         session: Session, id_vendedor: int, estado_pago: str | None = None, id_usuario: int | None = None
     ) -> list[ComisionFactura]:
         require_permiso(session, id_usuario, "comisiones", "ver")
-        query = session.query(ComisionFactura).filter(ComisionFactura.id_vendedor == id_vendedor)
+        query = session.query(ComisionFactura).filter(
+            ComisionFactura.id_vendedor == id_vendedor, ComisionFactura.monto_comision > 0
+        )
         if estado_pago:
             query = query.filter(ComisionFactura.estado_pago == estado_pago)
         return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
+
+    @staticmethod
+    def listar_mis_comisiones(session: Session, id_usuario: int | None) -> list[ComisionFactura]:
+        """Retorna las comisiones del vendedor logueado. Requiere permiso reportes_comisiones:ver
+        (distinto de comisiones:ver, que es para gestion/pago). El usuario debe tener un vendedor
+        vinculado (Usuario.id_vendedor_usuario) -- esto es verdad para usuarios con rol VENDEDOR."""
+        require_permiso(session, id_usuario, "reportes_comisiones", "ver")
+        usuario = session.get(Usuario, id_usuario) if id_usuario is not None else None
+        if usuario is None or usuario.id_vendedor_usuario is None:
+            raise ValueError("Este usuario no tiene un vendedor vinculado")
+        return (
+            session.query(ComisionFactura)
+            .filter(ComisionFactura.id_vendedor == usuario.id_vendedor_usuario, ComisionFactura.monto_comision > 0)
+            .order_by(ComisionFactura.fecha_calculo.desc())
+            .all()
+        )
 
 
 class PagoComisionService:

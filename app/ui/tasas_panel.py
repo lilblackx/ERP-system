@@ -10,7 +10,7 @@ import logging
 from decimal import Decimal
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -58,6 +58,13 @@ OPCIONES_RANGO = [("Últimos 30 días", 30), ("Últimos 60 días", 60), ("Últim
 class TasasPanel(QWidget):
     """Panel principal del módulo Tasas de Cambio: tasa vigente + registrar una nueva +
     histórico exportable."""
+
+    # TasaTicker (franja superior del shell, app/ui/tasa_ticker.py) vive fuera de este
+    # panel y tiene su propio timer de refresco cada 5 minutos -- sin esta señal, registrar
+    # una tasa aca la dejaba mostrando la tasa VIEJA (y su "Actualizado hace X" desfasado)
+    # hasta el proximo tick del timer. MainWindow conecta esto a ticker_tasas.cargar_tasa
+    # al crear el panel (mismo patron que DashboardPanel.nueva_factura_solicitada).
+    tasa_registrada = Signal()
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -362,6 +369,7 @@ class TasasPanel(QWidget):
         try:
             TasaService.registrar_tasa(session, **datos, creado_por=self.usuario.id_usuario)
             self.cargar_datos()
+            self.tasa_registrada.emit()
             QMessageBox.information(self, "Tasa registrada", "La tasa del día se registró con éxito.")
         except ValueError as exc:
             session.rollback()

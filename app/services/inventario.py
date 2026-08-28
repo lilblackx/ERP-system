@@ -1,7 +1,8 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Inventario, ProductoPrecio
 from app.services.auditoria import AuditoriaService
@@ -129,7 +130,11 @@ class ProductoService:
         busqueda en la UI); `codigo`/`nombre` quedan aparte para filtros estructurados que
         SI deban acotar por columna especifica, no se pisan entre si."""
         require_permiso(session, id_usuario, "inventario", "ver")
-        query = session.query(Inventario)
+        # joinedload(categoria): InventarioPanel muestra/exporta el nombre de categoria por
+        # fila (auditoria de Productos 2026-08-28) -- sin esto cada fila dispara su propio
+        # SELECT lazy al acceder a producto.categoria.nombre (N+1), agravado en la
+        # exportacion (hasta 1_000_000 filas en una sola llamada).
+        query = session.query(Inventario).options(joinedload(Inventario.categoria))
         if texto:
             like = f"%{texto}%"
             query = query.filter(Inventario.cod_producto.ilike(like) | Inventario.nombre_producto.ilike(like))
@@ -204,7 +209,17 @@ class PrecioService:
         precio_venta = Decimal(str(precio_venta))
         margen = PrecioService._calcular_margen(producto.costo_producto, precio_venta)
 
-        precio = session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).first()
+        # WITH (UPDLOCK, ROWLOCK): sin esto, dos ediciones de precio concurrentes sobre el
+        # mismo producto pueden ambas ver "no existe fila" y ambas insertar -- dejando dos
+        # filas para el mismo id_producto (la UNIQUE de migrations/0036 evitaria la
+        # corrupcion silenciosa, pero la segunda terminaria en un IntegrityError crudo en
+        # vez de aplicarse como el UPDATE que el usuario esperaba). Mismo patron que
+        # pagos.py/ventas.py (C1/C18).
+        precio = session.execute(
+            select(ProductoPrecio)
+            .where(ProductoPrecio.id_producto == id_producto)
+            .with_hint(ProductoPrecio, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if precio is None:
             precio = ProductoPrecio(
                 id_producto=id_producto,

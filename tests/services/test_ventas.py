@@ -854,6 +854,8 @@ def test_emitir_factura_con_vendedor_calcula_comision_sobre_diferencia(db_sessio
 
 
 def test_emitir_factura_precio_igual_al_de_lista_comision_cero(db_session):
+    """Vender exactamente al precio de lista no genera comisión (monto_comision == 0)
+    -- no se crea ComisionFactura en ese caso."""
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
@@ -871,8 +873,8 @@ def test_emitir_factura_precio_igual_al_de_lista_comision_cero(db_session):
     )
 
     detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
-    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
-    assert comision.monto_comision == Decimal("0.00")  # nunca negativa
+    comisiones = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).all()
+    assert len(comisiones) == 0  # no crea comisión si monto es 0
 
 
 def test_emitir_factura_precio_menor_al_de_lista_requiere_autorizacion_y_comision_cero(db_session):
@@ -900,8 +902,8 @@ def test_emitir_factura_precio_menor_al_de_lista_requiere_autorizacion_y_comisio
     assert factura.autorizado_por_descuento == admin.id_usuario
     assert factura.motivo_descuento == "Cliente frecuente"
     detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
-    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
-    assert comision.monto_comision == Decimal("0.00")  # nunca negativa
+    comisiones = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).all()
+    assert len(comisiones) == 0  # no crea comisión si precio < precio_lista (monto <= 0)
 
 
 def test_emitir_factura_precio_menor_al_de_lista_sin_autorizacion_falla(db_session):

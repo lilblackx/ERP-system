@@ -621,3 +621,178 @@ def test_borrar_pago_proveedor_por_banco_revierte_saldo_bancario(db_session):
     db_session.refresh(cxp)
     assert cxp.saldo_pendiente == Decimal("80.00")
     assert cxp.estado == "pendiente"
+
+
+def test_registrar_pago_proveedor_por_caja_valida_turno_abierto(db_session):
+    """Fix: PagoService.registrar_pago_proveedor debe validar que la caja tenga turno
+    abierto, no solo la UI. El lock WITH (UPDLOCK, ROWLOCK) serializa pagos concurrentes
+    contra la misma caja, previniendo race conditions en saldo_actual."""
+    cxp, admin = _crear_cxp(db_session, Decimal("100.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("200.00"))
+
+    # Pagar parte
+    PagoService.registrar_pago_proveedor(
+        db_session,
+        id_cuenta_por_pagar=cxp.id_cuenta,
+        monto=Decimal("40.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    # Verificar que saldo se descuento correctamente
+    saldo_actual = CajaService.calcular_saldo_actual(db_session, caja.id_caja)
+    assert saldo_actual == Decimal("160.00")
+
+    # Cerrar caja
+    CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario)
+
+    # Intentar pagar contra caja cerrada - debe fallar
+    with pytest.raises(ValueError, match="no tiene un turno abierto"):
+        PagoService.registrar_pago_proveedor(
+            db_session,
+            id_cuenta_por_pagar=cxp.id_cuenta,
+            monto=Decimal("30.00"),
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_registrar_pago_cobro_bloquea_con_updlock_rowlock_concurrente(db_session, test_engine):
+    """Auditoria de CxC (2026-08-28), hallazgo H2: _aplicar_pago_cobro leia la
+    CuentaPorCobrar con session.get() sin lock -- dos cobros concurrentes contra la MISMA
+    cuenta podian ambos leer el mismo saldo_pendiente antes de que ninguno commitee, pasar
+    el guard "monto > saldo_pendiente" cada uno por separado y sobregirar la cuenta (el
+    segundo terminaria en un RAISERROR crudo de trg_pagos_cobros_io en vez de un ValueError
+    legible). Este test abre una segunda sesion real sobre test_engine (db_session no sirve
+    para esto, no es segura para compartir entre threads) que sostiene el lock manualmente
+    y comprueba que un registrar_pago_cobro() concurrente sobre esa MISMA cuenta se queda
+    bloqueado esperando el lock, mismo patron que
+    test_emitir_factura_bloquea_stock_con_updlock_rowlock_concurrente."""
+    import threading
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import sessionmaker
+
+    from app.db.models import CuentaPorCobrar
+
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    id_cxc, id_caja, id_usuario = cxc.id_cuenta_por_cobrar, caja.id_caja, admin.id_usuario
+
+    session_factory = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
+    sesion_bloqueadora = session_factory()
+    resultado: dict = {}
+
+    try:
+        sesion_bloqueadora.execute(
+            select(CuentaPorCobrar)
+            .where(CuentaPorCobrar.id_cuenta_por_cobrar == id_cxc)
+            .with_hint(CuentaPorCobrar, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one()
+
+        def _pagar_en_thread():
+            sesion_hilo = session_factory()
+            try:
+                pago = PagoService.registrar_pago_cobro(
+                    sesion_hilo,
+                    id_cuenta_por_cobrar=id_cxc,
+                    monto=Decimal("40.00"),
+                    metodo_pago="efectivo",
+                    id_caja=id_caja,
+                    id_usuario=id_usuario,
+                )
+                resultado["id_pago_cobro"] = pago.id_pago_cobro
+            finally:
+                sesion_hilo.close()
+
+        hilo = threading.Thread(target=_pagar_en_thread)
+        hilo.start()
+
+        # El lock sigue sostenido: registrar_pago_cobro debe seguir esperando, no adelantarse.
+        hilo.join(timeout=1.5)
+        assert hilo.is_alive(), "registrar_pago_cobro no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre la CxC"
+
+        # Libera el lock (rollback: esta sesion solo leyo, no debe dejar nada escrito).
+        sesion_bloqueadora.rollback()
+
+        hilo.join(timeout=10)
+        assert not hilo.is_alive(), "registrar_pago_cobro no continuo tras liberarse el lock"
+        assert "id_pago_cobro" in resultado
+    finally:
+        sesion_bloqueadora.close()
+
+    db_session.refresh(cxc)
+    assert cxc.saldo_pendiente == Decimal("60.00")
+
+
+# --- listar_cuentas_por_cobrar --------------------------------------------------
+
+
+def test_listar_cuentas_por_cobrar_sin_filtro(db_session):
+    cxc1, admin = _crear_cxc(db_session, Decimal("100.00"))
+    cxc2, _ = _crear_cxc(db_session, Decimal("50.00"))
+
+    resultado = PagoService.listar_cuentas_por_cobrar(db_session, id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 2
+    assert {c.id_cuenta_por_cobrar for c in resultado["items"]} == {
+        cxc1.id_cuenta_por_cobrar,
+        cxc2.id_cuenta_por_cobrar,
+    }
+
+
+def test_listar_cuentas_por_cobrar_filtra_por_cliente(db_session):
+    cxc1, admin = _crear_cxc(db_session, Decimal("100.00"))
+    _crear_cxc(db_session, Decimal("50.00"))
+    id_cliente = cxc1.factura.id_cliente_factura
+
+    resultado = PagoService.listar_cuentas_por_cobrar(db_session, id_cliente=id_cliente, id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].id_cuenta_por_cobrar == cxc1.id_cuenta_por_cobrar
+
+
+def test_listar_cuentas_por_cobrar_filtra_por_estado_vencida(db_session):
+    from datetime import date, timedelta
+
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    cxc.fecha_vencimiento = date.today() - timedelta(days=5)
+    db_session.commit()
+
+    resultado_vencida = PagoService.listar_cuentas_por_cobrar(db_session, estado="vencida", id_usuario=admin.id_usuario)
+    assert resultado_vencida["total"] == 1
+    assert resultado_vencida["items"][0].estado_visual == "vencida"
+
+    resultado_pendiente = PagoService.listar_cuentas_por_cobrar(
+        db_session, estado="pendiente", id_usuario=admin.id_usuario
+    )
+    assert resultado_pendiente["total"] == 0
+
+
+def test_listar_cuentas_por_cobrar_filtra_por_estado_pagada(db_session):
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto=Decimal("100.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = PagoService.listar_cuentas_por_cobrar(db_session, estado="pagada", id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].estado_visual == "pagada"
+
+
+def test_listar_cuentas_por_cobrar_sin_usuario_autorizado_falla(db_session):
+    _crear_cxc(db_session, Decimal("100.00"))
+    with pytest.raises(PermisoDenegadoError):
+        PagoService.listar_cuentas_por_cobrar(db_session)

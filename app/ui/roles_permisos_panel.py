@@ -15,7 +15,6 @@ import qtawesome as qta
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -41,6 +40,7 @@ from app.ui.styles import (
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
+    FlowLayout,
     aplicar_sombra,
 )
 
@@ -335,29 +335,40 @@ class RolesPermisosPanel(QWidget):
             por_recurso[permiso["recurso"]].append(permiso)
 
         for recurso in sorted(por_recurso):
-            fila = QWidget()
-            fila.setStyleSheet("background: transparent;")
-            grid = QGridLayout(fila)
-            grid.setContentsMargins(0, 0, 0, 0)
-            grid.setHorizontalSpacing(18)
-            grid.setVerticalSpacing(2)
+            bloque = QWidget()
+            bloque.setStyleSheet("background: transparent;")
+            bloque_layout = QVBoxLayout(bloque)
+            bloque_layout.setContentsMargins(0, 0, 0, 6)
+            bloque_layout.setSpacing(4)
 
             lbl_recurso = QLabel(recurso.replace("_", " ").capitalize())
-            lbl_recurso.setFixedWidth(160)
             lbl_recurso.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK}; border: none;")
-            grid.addWidget(lbl_recurso, 0, 0)
+            bloque_layout.addWidget(lbl_recurso)
 
-            for columna, permiso in enumerate(sorted(por_recurso[recurso], key=lambda p: p["accion"]), start=1):
-                chk = QCheckBox(permiso["accion"].capitalize())
+            # FlowLayout en vez de una fila de ancho fijo (QGridLayout): un recurso como
+            # 'compras' ya tiene 8 acciones (incluidas las del flujo de OC, con nombres
+            # largos como 'autorizar_enmienda_oc') -- una sola fila se salia del panel y
+            # forzaba scroll horizontal de toda la pantalla (auditoria de Roles/Permisos,
+            # 2026-08-28). Con esto el grupo de checkboxes ocupa las lineas que necesite.
+            checks_widget = QWidget()
+            checks_widget.setStyleSheet("background: transparent;")
+            checks_layout = FlowLayout(checks_widget, spacing=14)
+
+            for permiso in sorted(por_recurso[recurso], key=lambda p: p["accion"]):
+                # .replace("_", " ") antes de .capitalize(): sin esto una accion granular
+                # como 'autorizar_enmienda_oc' se mostraba literal, guion bajo incluido
+                # ("Autorizar_enmienda_oc") -- el label del recurso, arriba, ya lo hacia
+                # bien, a esta le faltaba el mismo tratamiento.
+                chk = QCheckBox(permiso["accion"].replace("_", " ").capitalize())
                 chk.setChecked(permiso["asignado"])
                 chk.setEnabled(not es_admin)
                 chk.setToolTip(permiso["descripcion"] or "")
                 chk.setStyleSheet("font-size: 12px; border: none;")
                 self._checkboxes[permiso["id_permiso"]] = chk
-                grid.addWidget(chk, 0, columna)
+                checks_layout.addWidget(chk)
 
-            grid.setColumnStretch(len(por_recurso[recurso]) + 1, 1)
-            self._matriz_layout.insertWidget(self._matriz_layout.count() - 1, fila)
+            bloque_layout.addWidget(checks_widget)
+            self._matriz_layout.insertWidget(self._matriz_layout.count() - 1, bloque)
 
     def guardar_matriz(self) -> None:
         if self._rol_seleccionado_id is None:

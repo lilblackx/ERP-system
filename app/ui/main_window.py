@@ -26,10 +26,13 @@ from PySide6.QtWidgets import (
 
 from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
+from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
 from app.ui.clientes_panel import ClientesPanel
+from app.ui.comisiones_panel import ComisionesPanel
 from app.ui.compras import ComprasView
 from app.ui.config_empresa_panel import ConfigEmpresaPanel
+from app.ui.cuentas_por_cobrar_panel import CuentasPorCobrarPanel
 from app.ui.cuentas_por_pagar_panel import CuentasPorPagarPanel
 from app.ui.dashboard_panel import DashboardPanel
 from app.ui.facturacion_panel import FacturacionPanel
@@ -57,12 +60,18 @@ MODULOS_CONFIG = {
     "compras": ("Compras", ComprasView),
     "bancos": ("Bancos", None),
     "cuentas_bancarias": ("Cuentas Bancarias", None),
-    "cuentas_por_cobrar": ("Cuentas por Cobrar", None),
+    "cuentas_por_cobrar": ("Cuentas por Cobrar", CuentasPorCobrarPanel),
     "cuentas_por_pagar": ("Cuentas por Pagar", CuentasPorPagarPanel),
     "cajas": ("Cajas", None),
     "vendedores": ("Vendedores", VendedoresPanel),
-    "comisiones": ("Comisiones", None),
+    "comisiones": ("Comisiones", ComisionesPanel),
     "control_tasas": ("Control de Tasas", TasasPanel),
+    # Placeholder a proposito -- ReporteService (app/services/reportes.py) ya tiene
+    # aging_cuentas_por_cobrar/arqueo_caja, pero el modulo de UI se desarrolla aparte
+    # (pedido del usuario, 2026-08-28). El recurso 'reportes' ya existe en el catalogo de
+    # permisos desde migrations/0016_catalogo_permisos_reportes.sql, sin asignar a ningun
+    # rol todavia -- un ADMIN lo otorga explicitamente cuando el modulo este listo.
+    "reportes": ("Reportes", None),
     "config_empresa": ("Configuración", ConfigEmpresaPanel),
     "usuarios": ("Usuarios", UsuariosPanel),
     "auditoria": ("Auditoría", None),
@@ -84,18 +93,17 @@ MODULO_PERMISO: dict[str, tuple[str, str]] = {
     "compras": ("compras", "ver"),
     "bancos": ("bancos", "ver"),
     "cuentas_bancarias": ("bancos", "ver"),
-    # Sin recurso propio todavia (ver docs/ESTADO_DEL_PROYECTO.md seccion 9): vista de
-    # consulta sobre saldo_pendiente ya expuesto por ventas, no un modulo CRUD
-    # independiente -- mismo criterio que cuentas_bancarias piggybackeando en 'bancos'.
-    "cuentas_por_cobrar": ("ventas", "ver"),
-    # A diferencia de cuentas_por_cobrar (placeholder), esta SI es una pantalla real
-    # (CuentasPorPagarPanel) -- usa 'pagos'/'ver' porque PagoService.listar_cuentas_por_pagar
+    # CuentasPorCobrarPanel usa 'pagos'/'ver' porque PagoService.listar_cuentas_por_cobrar
+    # exige ese mismo permiso -- simetrico a cuentas_por_pagar mas abajo.
+    "cuentas_por_cobrar": ("pagos", "ver"),
+    # CuentasPorPagarPanel -- usa 'pagos'/'ver' porque PagoService.listar_cuentas_por_pagar
     # exige ese mismo permiso.
     "cuentas_por_pagar": ("pagos", "ver"),
     "cajas": ("cajas", "ver"),
     "vendedores": ("vendedores", "ver"),
     "comisiones": ("comisiones", "ver"),
     "control_tasas": ("tasas", "ver"),
+    "reportes": ("reportes", "ver"),
     "config_empresa": ("empresa", "ver"),
     "usuarios": ("usuarios", "ver"),
     "auditoria": ("auditoria", "ver"),
@@ -138,11 +146,20 @@ class MainWindow(QMainWindow):
         require_permiso() en cada servicio, que no depende de esto para nada."""
         session = SessionLocal()
         try:
-            return {
-                clave
-                for clave, (recurso, accion) in MODULO_PERMISO.items()
-                if UsuarioService.verificar_permiso(session, self.usuario.id_usuario, recurso, accion)
-            }
+            visibles = set()
+            for clave, (recurso, accion) in MODULO_PERMISO.items():
+                if UsuarioService.verificar_permiso(session, self.usuario.id_usuario, recurso, accion):
+                    visibles.add(clave)
+                    continue
+                if clave == "comisiones":
+                    try:
+                        if UsuarioService.verificar_permiso(
+                            session, self.usuario.id_usuario, "reportes_comisiones", "ver"
+                        ):
+                            visibles.add(clave)
+                    except PermisoDenegadoError:
+                        pass
+            return visibles
         except Exception:
             logger.exception("No se pudo calcular los modulos visibles del sidebar; se muestran todos")
             return set(MODULO_PERMISO.keys())
@@ -213,6 +230,8 @@ class MainWindow(QMainWindow):
 
             if isinstance(panel, DashboardPanel):
                 panel.nueva_factura_solicitada.connect(lambda: self.navegar_a("facturacion"))
+            if isinstance(panel, TasasPanel):
+                panel.tasa_registrada.connect(self.ticker_tasas.cargar_tasa)
 
             self._paneles[clave] = panel
             self.stack.addWidget(panel)

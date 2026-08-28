@@ -340,8 +340,8 @@ def test_establecer_precio_actualiza_existente(db_session):
 
 def test_establecer_precio_segunda_vez_actualiza_no_duplica(db_session):
     """C14: un solo precio por producto -- establecer_precio() dos veces no crea una
-    segunda fila (invariante que ademas garantiza UQ_producto_tipo_precio a nivel de BD,
-    ver migrations/0011_consolidar_producto_precios.sql)."""
+    segunda fila (invariante que ademas garantiza UQ_producto_precios_id_producto a nivel
+    de BD, ver migrations/0036_producto_precios_unico_por_producto.sql)."""
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
     PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
@@ -412,3 +412,65 @@ def test_eliminar_precio_sin_usuario_autorizado_falla(db_session):
 def test_eliminar_precio_inexistente_no_falla(db_session):
     admin = crear_usuario_admin(db_session)
     PrecioService.eliminar_precio(db_session, 999999, id_usuario=admin.id_usuario)
+
+
+def test_establecer_precio_bloquea_con_updlock_rowlock_concurrente(db_session, test_engine):
+    """Auditoria de Productos (2026-08-28), hallazgo #1: establecer_precio() leia la fila
+    de ProductoPrecio existente con un SELECT sin lock -- dos ediciones de precio
+    concurrentes sobre el MISMO producto podian ambas ver "no existe" (la primera vez) o
+    pisarse el update sin serializar, dejando el resultado en una condicion de carrera.
+    Este test abre una segunda sesion real sobre test_engine (db_session no es segura para
+    compartir entre threads) que sostiene el lock manualmente sobre la fila de precio ya
+    existente y comprueba que un establecer_precio() concurrente sobre ESE MISMO producto
+    se queda bloqueado esperando el lock, mismo patron que
+    test_registrar_pago_cobro_bloquea_con_updlock_rowlock_concurrente."""
+    import threading
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import sessionmaker
+
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
+    PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
+    id_producto, id_usuario = producto.id_producto, admin.id_usuario
+
+    session_factory = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
+    sesion_bloqueadora = session_factory()
+    resultado: dict = {}
+
+    try:
+        sesion_bloqueadora.execute(
+            select(ProductoPrecio)
+            .where(ProductoPrecio.id_producto == id_producto)
+            .with_hint(ProductoPrecio, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one()
+
+        def _establecer_en_thread():
+            sesion_hilo = session_factory()
+            try:
+                precio = PrecioService.establecer_precio(sesion_hilo, id_producto, "20.00", id_usuario=id_usuario)
+                resultado["id_producto_precio"] = precio.id_producto_precio
+            finally:
+                sesion_hilo.close()
+
+        hilo = threading.Thread(target=_establecer_en_thread)
+        hilo.start()
+
+        # El lock sigue sostenido: establecer_precio debe seguir esperando, no adelantarse.
+        hilo.join(timeout=1.5)
+        assert hilo.is_alive(), "establecer_precio no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre ProductoPrecio"
+
+        # Libera el lock (rollback: esta sesion solo leyo, no debe dejar nada escrito).
+        sesion_bloqueadora.rollback()
+
+        hilo.join(timeout=10)
+        assert not hilo.is_alive(), "establecer_precio no continuo tras liberarse el lock"
+        assert "id_producto_precio" in resultado
+    finally:
+        sesion_bloqueadora.close()
+
+    db_session.refresh(producto)
+    precio_final = PrecioService.obtener_precio(db_session, id_producto, id_usuario=id_usuario)
+    assert precio_final.precio_venta == Decimal("20.00")
+    total = db_session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).count()
+    assert total == 1

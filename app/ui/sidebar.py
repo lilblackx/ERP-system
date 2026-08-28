@@ -68,6 +68,12 @@ SECCIONES = [
         ],
     ),
     (
+        "REPORTES",
+        [
+            ("reportes", "Reportes"),
+        ],
+    ),
+    (
         "ADMINISTRACIÓN",
         [
             ("config_empresa", "Configuración"),
@@ -94,6 +100,7 @@ ICONOS_MODULO: dict[str, str] = {
     "cajas": "fa5s.cash-register",
     "comisiones": "fa5s.percentage",
     "control_tasas": "fa5s.exchange-alt",
+    "reportes": "fa5s.chart-bar",
     "config_empresa": "fa5s.cog",
     "usuarios": "fa5s.user-shield",
     "auditoria": "fa5s.history",

@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Inventario
 from app.services.categorias import CategoriaService
 from app.services.inventario import PrecioService
+from app.services.permisos import PermisoDenegadoError
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -372,24 +373,19 @@ class ProductoFormDialog(QDialog):
         self.lbl_margen.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; margin-top: -4px;")
         grid.addWidget(self.lbl_margen, 2, 0, 1, 2)
 
-        # Cantidad por caja / unidad
-        lbl_caja = QLabel("Cantidad por Caja")
-        lbl_caja.setProperty("class", "FormLabel")
-        self.cantidad_caja_input = QDoubleSpinBox()
-        self.cantidad_caja_input.setRange(0, 999999.99)
-        self.cantidad_caja_input.setDecimals(2)
-        self.cantidad_caja_input.setFixedHeight(32)
-        grid.addWidget(lbl_caja, 3, 0)
-        grid.addWidget(self.cantidad_caja_input, 4, 0)
-
-        lbl_unidad = QLabel("Cantidad por Unidad")
+        # Cantidad en stock -- "Cantidad por Caja" se saco del formulario (auditoria de
+        # Productos 2026-08-28): se capturaba y guardaba, pero ningun flujo de ventas/
+        # compras/alertas la usaba, solo cantidad_unidad cuenta para el stock real. La
+        # columna sigue existiendo en inventario (no se toco el schema), por si se retoma
+        # con una conversion caja->unidad real mas adelante.
+        lbl_unidad = QLabel("Cantidad en Stock")
         lbl_unidad.setProperty("class", "FormLabel")
         self.cantidad_unidad_input = QDoubleSpinBox()
         self.cantidad_unidad_input.setRange(0, 999999.99)
         self.cantidad_unidad_input.setDecimals(2)
         self.cantidad_unidad_input.setFixedHeight(32)
-        grid.addWidget(lbl_unidad, 3, 1)
-        grid.addWidget(self.cantidad_unidad_input, 4, 1)
+        grid.addWidget(lbl_unidad, 3, 0, 1, 2)
+        grid.addWidget(self.cantidad_unidad_input, 4, 0, 1, 2)
 
         layout.addLayout(grid)
         layout.addStretch()
@@ -423,7 +419,24 @@ class ProductoFormDialog(QDialog):
 
     def _cargar_categorias(self, seleccionar_id: int | None = None) -> None:
         self.categoria_combo.clear()
-        for categoria in CategoriaService.listar(self.session, id_usuario=self.id_usuario):
+        try:
+            categorias = CategoriaService.listar(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            # 'inventario'/'crear' o 'editar' no implican 'categorias'/'ver' en el catalogo
+            # de permisos -- son recursos independientes (auditoria de Productos
+            # 2026-08-28). Si un rol custom armado desde roles_permisos_panel.py tiene el
+            # primero sin el segundo, sin este catch el PermisoDenegadoError explotaba en
+            # medio de la construccion del dialogo (antes de que el usuario llegara a ver
+            # nada) en vez de dar un mensaje que apunte al recurso real que falta.
+            QMessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar categorías ('categorias'/'ver'), "
+                "necesario para poder asignarle una al producto.",
+            )
+            self.categoria_combo.setEnabled(False)
+            return
+        for categoria in categorias:
             self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria)
         if seleccionar_id is not None:
             idx = self.categoria_combo.findData(seleccionar_id)
@@ -460,7 +473,6 @@ class ProductoFormDialog(QDialog):
         self.nombre_input.setText(producto.nombre_producto or "")
         self.descripcion_input.setText(producto.descripcion_producto or "")
         self.costo_input.setValue(float(producto.costo_producto or 0))
-        self.cantidad_caja_input.setValue(float(producto.cantidad_caja or 0))
         self.cantidad_unidad_input.setValue(float(producto.cantidad_unidad or 0))
 
         idx_categoria = self.categoria_combo.findData(producto.id_categoria)
@@ -499,7 +511,6 @@ class ProductoFormDialog(QDialog):
             "descripcion_producto": self.descripcion_input.text().strip() or None,
             "id_categoria": self.categoria_combo.currentData(),
             "costo_producto": self.costo_input.value(),
-            "cantidad_caja": self.cantidad_caja_input.value(),
             "cantidad_unidad": self.cantidad_unidad_input.value(),
             "fecha_vencimiento": (
                 self.vencimiento_input.date().toPython() if self.tiene_vencimiento_check.isChecked() else None

@@ -2,9 +2,19 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Caja, Compra, CuentaBancaria, CuentaPorCobrar, CuentaPorPagar, PagoCobro, PagoProveedor
+from app.db.models import (
+    Caja,
+    Compra,
+    CuentaBancaria,
+    CuentaPorCobrar,
+    CuentaPorPagar,
+    FacturaVenta,
+    PagoCobro,
+    PagoProveedor,
+)
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
@@ -46,7 +56,19 @@ class PagoService:
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
 
-        cuenta = session.get(CuentaPorCobrar, id_cuenta_por_cobrar)
+        # WITH (UPDLOCK, ROWLOCK): sin esto, dos pagos concurrentes contra la MISMA cuenta
+        # por cobrar (ej. dos cajeros cobrando la misma factura por error, o un doble clic)
+        # pueden ambos leer el mismo saldo_pendiente antes de que ninguno commitee, pasar
+        # el guard de abajo por separado y sobregirar la cuenta -- trg_pagos_cobros_io
+        # arreglaria el segundo con un RAISERROR crudo (CK_saldo_pendiente_no_negativo,
+        # migrations/0010) en vez de este ValueError legible, pero de igual forma dejaria
+        # al segundo cajero viendo un error de SQL sin sentido. Mismo patron que Inventario/
+        # Cliente en VentaService.emitir_factura (C1/C18).
+        cuenta = session.execute(
+            select(CuentaPorCobrar)
+            .where(CuentaPorCobrar.id_cuenta_por_cobrar == id_cuenta_por_cobrar)
+            .with_hint(CuentaPorCobrar, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if cuenta is None:
             raise ValueError("Cuenta por cobrar no encontrada")
         if monto > cuenta.saldo_pendiente:
@@ -130,9 +152,12 @@ class PagoService:
         session.refresh(cuenta)
 
         logger.info(
-            "Pago de cobro registrado: cuenta_por_cobrar=%s monto=%s estado_resultante=%s usuario=%s",
+            "Pago de cobro registrado: cuenta_por_cobrar=%s monto=%s moneda=%s metodo_pago=%s "
+            "estado_resultante=%s usuario=%s",
             id_cuenta_por_cobrar,
             pago.monto,
+            pago.moneda,
+            pago.metodo_pago,
             cuenta.estado,
             id_usuario,
         )
@@ -184,6 +209,20 @@ class PagoService:
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
 
+        if id_caja is not None:
+            # Mismo lock que registrar_compra -- serializa dos pagos concurrentes contra
+            # la misma caja: si dos usuarios pagan en paralelo, un pago queda bloqueado
+            # hasta que el otro commit y libera la fila.
+            caja = session.execute(
+                select(Caja)
+                .where(Caja.id_caja == id_caja)
+                .with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one_or_none()
+            if caja is None:
+                raise ValueError("Caja no encontrada")
+            if caja.fecha_apertura is None or caja.fecha_cierre is not None:
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+
         # Ver el comentario equivalente en registrar_pago_cobro (C12).
         if fecha_pago is None:
             fecha_pago = datetime.now()
@@ -205,9 +244,10 @@ class PagoService:
         session.refresh(cuenta)
 
         logger.info(
-            "Pago a proveedor registrado: cuenta_por_pagar=%s monto=%s estado_resultante=%s usuario=%s",
+            "Pago a proveedor registrado: cuenta_por_pagar=%s monto=%s metodo_pago=%s estado_resultante=%s usuario=%s",
             id_cuenta_por_pagar,
             pago.monto,
+            pago.metodo_pago,
             cuenta.estado,
             id_usuario,
         )
@@ -273,4 +313,62 @@ class PagoService:
         cuentas = (
             query.order_by(CuentaPorPagar.fecha_vencimiento).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
         )
+        return {"items": cuentas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+
+    @staticmethod
+    def listar_cuentas_por_cobrar(
+        session: Session,
+        id_cliente: int | None = None,
+        estado: str | None = None,
+        pagina: int = 1,
+        por_pagina: int = 20,
+        id_usuario: int | None = None,
+    ) -> dict:
+        """Analogo a listar_cuentas_por_pagar, para la pestana de consulta+cobro del modulo
+        Cuentas por Cobrar (app/ui/cuentas_por_cobrar_panel.py) -- antes de esto no existia
+        ningun metodo de lectura publico sobre cuentas_por_cobrar, la unica UI que tocaba
+        el modulo era FacturacionPanel mostrando el estado derivado por factura.
+
+        'vencida' nunca se persiste en cuentas_por_cobrar.estado (el CHECK la admite pero
+        ningun trigger la asigna) -- se deriva con el mismo criterio que
+        VentaService._calcular_estado_visual/listar_facturas: pendiente o parcial con
+        fecha_vencimiento ya pasada. Filtrar por estado='pendiente'/'parcial' excluye las
+        que ya vencieron (van aparte, bajo 'vencida') para que los 4 filtros sean
+        mutuamente excluyentes en la UI, igual que el combo de FacturacionPanel.
+        """
+        require_permiso(session, id_usuario, "pagos", "ver")
+        hoy = date.today()
+        query = session.query(CuentaPorCobrar).join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+        if id_cliente:
+            query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
+        if estado == "vencida":
+            query = query.filter(
+                CuentaPorCobrar.estado.in_(("pendiente", "parcial")),
+                CuentaPorCobrar.fecha_vencimiento < hoy,
+            )
+        elif estado in ("pendiente", "parcial"):
+            query = query.filter(
+                CuentaPorCobrar.estado == estado,
+                or_(CuentaPorCobrar.fecha_vencimiento.is_(None), CuentaPorCobrar.fecha_vencimiento >= hoy),
+            )
+        elif estado:
+            query = query.filter(CuentaPorCobrar.estado == estado)
+
+        total = query.count()
+        cuentas = (
+            query.order_by(CuentaPorCobrar.fecha_vencimiento).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+        )
+
+        # estado_visual: atributo Python plano (no mapeado), mismo criterio que
+        # VentaService._calcular_estado_visual -- 'vencida' es una etiqueta de UI, no un
+        # valor que exista realmente en la columna.
+        for cuenta in cuentas:
+            cuenta.estado_visual = (
+                "vencida"
+                if cuenta.estado in ("pendiente", "parcial")
+                and cuenta.fecha_vencimiento is not None
+                and cuenta.fecha_vencimiento < hoy
+                else cuenta.estado
+            )
+
         return {"items": cuentas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
