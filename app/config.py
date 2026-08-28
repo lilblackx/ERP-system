@@ -19,9 +19,9 @@ DB_TRUSTED_CONNECTION = os.getenv("DB_TRUSTED_CONNECTION", "no")
 # de Google, con verificacion en 2 pasos activada.
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "")
+SMTP_USER = os.getenv("SMTP_USER", "djcomerdistreportes@gmail.com")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "fsxo ztot yqgf yzmy")
+SMTP_FROM = os.getenv("SMTP_FROM", "djcomerdistreportes@gmail.com")
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "yes").lower() in ("yes", "true", "1")
 
 
