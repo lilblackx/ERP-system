@@ -54,6 +54,7 @@ from app.services.nota_recepcion import NotaRecepcionService
 from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
 from app.services.usuarios import UsuarioService
+from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -1443,16 +1444,21 @@ class ComprasView(QWidget):
         layout.addWidget(toolbar)
 
         self.tabla_oc = self._make_tabla(
-            ["ID", "N° ODC", "Proveedor", "Fecha", "Cant. Sol.", "Cant. Rec.", "Total", "Estado"]
+            ["ID", "N° ODC", "Proveedor", "Fecha", "Total Productos", "Cant. Rec.", "Total", "Estado"]
         )
+        self.tabla_oc.doubleClicked.connect(self.ver_detalle_oc)
         layout.addWidget(self.tabla_oc, stretch=1)
 
+        btn_ver_detalle = QPushButton("Ver Detalle")
+        btn_ver_detalle.setIcon(qta.icon("fa5s.eye", color=COLOR_TEXT_DARK))
+        btn_ver_detalle.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_ver_detalle.clicked.connect(self.ver_detalle_oc_seleccionada)
         btn_enmendar = QPushButton("Enmendar")
         btn_enmendar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_enmendar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_enmendar.clicked.connect(self.enmendar_oc_seleccionada)
         footer, self.lbl_pagina_oc, self.btn_oc_anterior, self.btn_oc_siguiente = self._make_footer(
-            lambda: self._pagina_anterior("oc"), lambda: self._pagina_siguiente("oc"), [btn_enmendar]
+            lambda: self._pagina_anterior("oc"), lambda: self._pagina_siguiente("oc"), [btn_ver_detalle, btn_enmendar]
         )
         layout.addWidget(footer)
         return page
@@ -1493,9 +1499,9 @@ class ComprasView(QWidget):
             )
         except PermisoDenegadoError:
             QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar órdenes de compra.")
-        except Exception:
+        except Exception as exc:
             logger.exception("Fallo al cargar ordenes de compra")
-            QMessageBox.critical(self, "Error", "No se pudo cargar el listado de órdenes de compra.")
+            QMessageBox.critical(self, "Error", f"No se pudo cargar el listado de órdenes de compra: {exc}")
         finally:
             session.close()
 
@@ -1523,6 +1529,33 @@ class ComprasView(QWidget):
             dialogo = EnmiendaOCDialog(session, self.usuario.id_usuario, oc, parent=self)
             if dialogo.exec():
                 self.cargar_ocs()
+        finally:
+            session.close()
+
+    def ver_detalle_oc_seleccionada(self) -> None:
+        id_oc = self._fila_seleccionada_id(self.tabla_oc)
+        if id_oc is None:
+            return
+        self._abrir_detalle_oc(id_oc)
+
+    def ver_detalle_oc(self) -> None:
+        id_oc = self._fila_seleccionada_id(self.tabla_oc)
+        if id_oc is not None:
+            self._abrir_detalle_oc(id_oc)
+
+    def _abrir_detalle_oc(self, id_oc: int) -> None:
+        session = self.session_factory()
+        try:
+            datos = CompraOCService.obtener_oc(session, id_oc, id_usuario=self.usuario.id_usuario)
+            dialogo = OrdenCompraDetalleDialog(datos, parent=self)
+            dialogo.exec()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Orden no encontrada", str(exc))
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar esta orden de compra.")
+        except Exception as exc:
+            logger.exception("Fallo al abrir el detalle de la OC %s", id_oc)
+            QMessageBox.critical(self, "Error", f"No se pudo abrir el detalle de la orden de compra: {exc}")
         finally:
             session.close()
 
