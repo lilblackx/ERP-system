@@ -36,6 +36,7 @@ from app.ui.styles import (
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     ICON_CHEVRON_DOWN_URL,
     ICON_CHEVRON_UP_URL,
     ComboBoxSinScroll,
@@ -75,6 +76,10 @@ QComboBox, QDoubleSpinBox {{
 }}
 QComboBox:focus, QDoubleSpinBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
+}}
+QComboBox:disabled, QDoubleSpinBox:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    color: {COLOR_TEXT_LIGHT};
 }}
 QComboBox {{
     padding-right: 24px;

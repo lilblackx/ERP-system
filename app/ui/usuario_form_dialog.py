@@ -137,7 +137,6 @@ class UsuarioFormDialog(QDialog):
         self.id_usuario_actor = id_usuario_actor
         self.usuario = usuario
         self.setWindowTitle("Editar Usuario" if usuario else "Nuevo Usuario")
-        self.setFixedSize(480, 545)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -146,6 +145,16 @@ class UsuarioFormDialog(QDialog):
 
         self._build_ui()
         self._cargar_combos()
+
+        # Alto fijo calculado DESPUES de construir el grid, no antes: antes era un
+        # 545 a ojo que no contaba la fila "Vendedor vinculado" (solo visible con rol
+        # VENDEDOR) -- al mostrarla, el QGridLayout no tenia margen dentro del alto fijo y
+        # comprimia TODAS las filas para que entraran, montando cada etiqueta sobre el
+        # campo de arriba (hallazgo del usuario, 2026-08-28). retainSizeWhenHidden en esa
+        # fila (ver mas abajo) hace que sizeHint() ya reserve su espacio aunque este oculta
+        # -- fijar el alto sobre ese sizeHint elimina la compresion sin necesidad de
+        # adivinar un numero de pixeles.
+        self.setFixedSize(480, self.sizeHint().height())
 
         if usuario:
             self._precargar(usuario)
@@ -276,6 +285,16 @@ class UsuarioFormDialog(QDialog):
         self.lbl_vendedor.setProperty("class", "FormLabel")
         self.vendedor_combo = ComboBoxSinScroll()
         self.vendedor_combo.setFixedHeight(32)
+        # retainSizeWhenHidden: sin esto, ocultar esta fila (rol != VENDEDOR) le resta su
+        # alto al sizeHint() del dialogo -- y como el alto fijo se calcula una sola vez en
+        # __init__ sobre ese sizeHint, mostrarla despues (el usuario cambia a VENDEDOR)
+        # comprimiria el resto del formulario otra vez. Reservar el espacio siempre (quede
+        # en blanco cuando no aplica) evita recalcular el tamaño del dialogo en cada cambio
+        # de rol.
+        for widget in (self.lbl_vendedor, self.vendedor_combo):
+            politica = widget.sizePolicy()
+            politica.setRetainSizeWhenHidden(True)
+            widget.setSizePolicy(politica)
         grid.addWidget(self.lbl_vendedor, 12, 0, 1, 2)
         grid.addWidget(self.vendedor_combo, 13, 0, 1, 2)
 

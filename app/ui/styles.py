@@ -38,6 +38,15 @@ ICON_CHEVRON_DOWN_URL = str(ICON_CHEVRON_DOWN_PATH).replace("\\", "/")
 # flecha del combobox, reportado por el usuario, 2026-08-27.
 ICON_CHEVRON_UP_PATH = _ICON_CACHE_DIR / "chevron_up.png"
 ICON_CHEVRON_UP_URL = str(ICON_CHEVRON_UP_PATH).replace("\\", "/")
+# Tilde de QCheckBox::indicator:checked -- mismo motivo que los chevron de arriba. Sin
+# esto, NINGUN checkbox de la app (config_empresa_panel.py, producto_form_dialog.py,
+# inventario_panel.py, roles_permisos_panel.py -- los 4 modulos donde se usa uno,
+# hallazgo del usuario 2026-08-28) tenia estilo de ::indicator en absoluto, asi que el
+# recuadro se renderizaba invisible (blanco sobre blanco, sin borde) en vez del casillero
+# nativo que se ve sin stylesheet -- aplicar CUALQUIER stylesheet a un QCheckBox saca a
+# Qt del renderizado nativo del indicator sin volver a dibujarlo, no solo la marca visual.
+ICON_CHECK_PATH = _ICON_CACHE_DIR / "check.png"
+ICON_CHECK_URL = str(ICON_CHECK_PATH).replace("\\", "/")
 
 
 def generar_iconos_qss() -> None:
@@ -51,6 +60,8 @@ def generar_iconos_qss() -> None:
         qta.icon("fa5s.chevron-down", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(str(ICON_CHEVRON_DOWN_PATH))
     if not ICON_CHEVRON_UP_PATH.exists():
         qta.icon("fa5s.chevron-up", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(str(ICON_CHEVRON_UP_PATH))
+    if not ICON_CHECK_PATH.exists():
+        qta.icon("fa5s.check", color="#FFFFFF").pixmap(12, 12).save(str(ICON_CHECK_PATH))
 
 
 # ── Paleta principal ────────────────────────────────────────────────────────
@@ -190,6 +201,10 @@ QSpinBox:hover, QDoubleSpinBox:hover {{
 QSpinBox:focus, QDoubleSpinBox:focus {{
     border-color: {COLOR_PRIMARY};
 }}
+QSpinBox:disabled, QDoubleSpinBox:disabled {{
+    color: {COLOR_TEXT_LIGHT};
+    background-color: {COLOR_CONTENT_BG};
+}}
 QSpinBox::up-button, QDoubleSpinBox::up-button {{
     subcontrol-origin: border;
     subcontrol-position: top right;
@@ -221,6 +236,28 @@ QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
     image: url({ICON_CHEVRON_DOWN_URL});
     width: 10px;
     height: 10px;
+}}
+QCheckBox {{
+    spacing: 8px;
+}}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 4px;
+    background-color: {COLOR_CARD_BG};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {COLOR_PRIMARY};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {COLOR_PRIMARY};
+    border-color: {COLOR_PRIMARY};
+    image: url({ICON_CHECK_URL});
+}}
+QCheckBox::indicator:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    border-color: {COLOR_BORDER};
 }}
 """
 
@@ -396,6 +433,11 @@ QPushButton:hover {{
 QPushButton:pressed {{
     background-color: {COLOR_BORDER};
 }}
+QPushButton:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    color: {COLOR_TEXT_LIGHT};
+    border-color: {COLOR_BORDER};
+}}
 """
 
 BUTTON_DANGER_QSS = f"""
@@ -410,6 +452,10 @@ QPushButton {{
 }}
 QPushButton:hover {{
     background-color: #B91C1C;
+}}
+QPushButton:disabled {{
+    background-color: {COLOR_TEXT_LIGHT};
+    color: white;
 }}
 """
 

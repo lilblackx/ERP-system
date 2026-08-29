@@ -131,6 +131,8 @@ def _dentro_del_cooldown(session: Session, usuario: Usuario, tipo: str) -> bool:
 
 
 def _crear_y_enviar_codigo(session: Session, usuario: Usuario, tipo: str) -> None:
+    if not usuario.email:
+        return
     codigo = _generar_codigo()
     registro = CodigoVerificacion(
         id_usuario=usuario.id_usuario,

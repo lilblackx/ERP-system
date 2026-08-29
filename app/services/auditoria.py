@@ -3,11 +3,31 @@ from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Auditoria
+from app.db.models import Auditoria, Usuario
 
-# Modulos/acciones esperados para los eventos criticos descritos en la tarea; el campo
-# es VARCHAR libre en la BD, esta lista es solo una guia para mantener consistencia.
-MODULOS_SUGERIDOS = {"AUTH", "CAJAS", "VENTAS", "TASAS"}
+# Modulos que efectivamente llaman a registrar_evento() hoy (grep de `modulo="..."` en
+# app/services/*.py). El campo es VARCHAR libre en la BD -- este set no se enforce alli --
+# pero AuditoriaPanel (app/ui/auditoria_panel.py) lo usa para poblar el combo de filtro
+# "Modulo", asi que hay que mantenerlo en sync si se agrega un modulo nuevo.
+MODULOS_SUGERIDOS = {
+    "AUTH",
+    "BANCOS",
+    "CAJAS",
+    "CLIENTES",
+    "COMISIONES",
+    "COMPRAS",
+    "EMPRESA",
+    "INVENTARIO",
+    "NOTAS_CREDITO",
+    "OTROS_MOVIMIENTOS",
+    "PERMISOS",
+    "PROVEEDORES",
+    "TASAS",
+    "TESORERIA",
+    "USUARIOS",
+    "VENDEDORES",
+    "VENTAS",
+}
 
 
 class AuditoriaService:
@@ -46,6 +66,7 @@ class AuditoriaService:
         id_usuario: int | None = None,
         modulo: str | None = None,
         accion: str | None = None,
+        texto_busqueda: str | None = None,
         pagina: int = 1,
         por_pagina: int = 50,
         id_usuario_actor: int | None = None,
@@ -67,6 +88,23 @@ class AuditoriaService:
             query = query.filter(Auditoria.modulo == modulo)
         if accion:
             query = query.filter(Auditoria.accion == accion)
+        if texto_busqueda:
+            # Busqueda libre para AuditoriaPanel (app/ui/auditoria_panel.py): antes la
+            # barra de busqueda solo filtraba `accion` con coincidencia exacta (habia que
+            # saber de memoria el string "LOGIN"/"CREAR_CLIENTE"/etc, inutilizable para un
+            # usuario que no conoce el modelo de datos -- hallazgo del usuario, 2026-08-28).
+            # `accion`/`modulo` siguen disponibles arriba para filtros exactos (los combos
+            # del panel), esto es un OR parcial case-insensitive sobre accion/modulo/detalle
+            # y el nombre de usuario. `Auditoria.usuario.has(...)` genera un EXISTS
+            # correlacionado -- funciona bien con id_usuario NULL (eventos de sistema) sin
+            # necesitar un JOIN explicito que duplicaria filas.
+            patron = f"%{texto_busqueda}%"
+            query = query.filter(
+                Auditoria.accion.ilike(patron)
+                | Auditoria.modulo.ilike(patron)
+                | Auditoria.detalle.ilike(patron)
+                | Auditoria.usuario.has(Usuario.nombre_usuario.ilike(patron))
+            )
 
         total = query.count()
         eventos = (

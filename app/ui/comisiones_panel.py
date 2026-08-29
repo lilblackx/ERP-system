@@ -48,6 +48,7 @@ from app.ui.styles import (
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
@@ -99,6 +100,10 @@ QLineEdit, QComboBox {{
 }}
 QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
+}}
+QLineEdit:disabled, QComboBox:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    color: {COLOR_TEXT_LIGHT};
 }}
 QComboBox::drop-down {{
     border: none;

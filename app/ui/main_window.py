@@ -28,6 +28,7 @@ from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
+from app.ui.auditoria_panel import AuditoriaPanel
 from app.ui.clientes_panel import ClientesPanel
 from app.ui.comisiones_panel import ComisionesPanel
 from app.ui.compras import ComprasView
@@ -74,7 +75,7 @@ MODULOS_CONFIG = {
     "reportes": ("Reportes", None),
     "config_empresa": ("Configuración", ConfigEmpresaPanel),
     "usuarios": ("Usuarios", UsuariosPanel),
-    "auditoria": ("Auditoría", None),
+    "auditoria": ("Auditoría", AuditoriaPanel),
 }
 
 # Permiso (recurso, accion) que un usuario necesita para VER cada modulo en el sidebar --

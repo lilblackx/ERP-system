@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -37,7 +38,10 @@ from app.ui.styles import (
     COLOR_CONTENT_BG,
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
+    ICON_CHEVRON_DOWN_URL,
+    ICON_CHEVRON_UP_URL,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,10 +66,17 @@ class ConfigEmpresaPanel(QWidget):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(20)
 
-        # Tarjeta principal
+        # Tarjeta principal. Selector acotado a #SectionCard (mismo patron que el resto
+        # de la app, ver usuario_form_dialog.py y las otras 18 pantallas con esta misma
+        # tarjeta) -- un "QWidget {...}" sin ID aca se aplicaba a CUALQUIER widget hijo sin
+        # estilo propio mas especifico, no solo a la tarjeta: iva_activo_check (QCheckBox
+        # mas abajo, solo define color/font-size, sin "border: none") heredaba el borde +
+        # fondo + esquinas redondeadas de la tarjeta en vez de verse como un checkbox plano
+        # (hallazgo del usuario, 2026-08-28).
         card = QWidget()
+        card.setObjectName("SectionCard")
         card.setStyleSheet(f"""
-            QWidget {{
+            QWidget#SectionCard {{
                 background-color: {COLOR_CARD_BG};
                 border: 1px solid {COLOR_BORDER};
                 border-radius: 12px;
@@ -78,7 +89,14 @@ class ConfigEmpresaPanel(QWidget):
 
         # Título
         lbl_titulo = QLabel("Datos de la Empresa")
-        lbl_titulo.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
+        # "background: transparent" explicito, no solo "border: none": un QLabel con
+        # stylesheet propio puede terminar pintando el fondo de su paleta en vez de quedar
+        # realmente transparente si no se lo decimos -- mismo hallazgo que las etiquetas
+        # Desde/Hasta de AuditoriaPanel (2026-08-28), aca se veia como una barra gris
+        # detras del titulo.
+        lbl_titulo.setStyleSheet(
+            f"font-size: 24px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none; background: transparent;"
+        )
         card_layout.addWidget(lbl_titulo)
 
         # Sección de Logo
@@ -101,7 +119,7 @@ class ConfigEmpresaPanel(QWidget):
         logo_btn_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         lbl_logo_hint = QLabel("Formatos soportados: PNG, JPG")
-        lbl_logo_hint.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; border: none;")
+        lbl_logo_hint.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; border: none; background: transparent;")
 
         btn_seleccionar_logo = QPushButton("Seleccionar Logo")
         btn_seleccionar_logo.setStyleSheet(BUTTON_SECONDARY_QSS)
@@ -149,7 +167,9 @@ class ConfigEmpresaPanel(QWidget):
         self.direccion_input = _crear_input("Dirección principal")
         self.telefono_input = _crear_input("Ej: +58 412 1234567")
 
-        lbl_style = f"font-weight: bold; color: {COLOR_TEXT_DARK}; font-size: 14px; border: none;"
+        lbl_style = (
+            f"font-weight: bold; color: {COLOR_TEXT_DARK}; font-size: 14px; border: none; background: transparent;"
+        )
 
         lbl_rif = QLabel("RF Empresa:")
         lbl_rif.setStyleSheet(lbl_style)
@@ -196,7 +216,7 @@ class ConfigEmpresaPanel(QWidget):
         iva_layout.setSpacing(12)
 
         self.iva_activo_check = QCheckBox("Aplicar IVA en las facturas")
-        self.iva_activo_check.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 14px;")
+        self.iva_activo_check.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 14px; background: transparent;")
 
         self.iva_porcentaje_input = QDoubleSpinBox()
         self.iva_porcentaje_input.setRange(0, 100)
@@ -205,6 +225,59 @@ class ConfigEmpresaPanel(QWidget):
         self.iva_porcentaje_input.setValue(16.00)
         self.iva_porcentaje_input.setFixedWidth(110)
         self.iva_porcentaje_input.setMinimumHeight(38)
+        # Estilo propio (no confiar en heredar GLOBAL_QSS, ver comentario de
+        # impresora_combo mas abajo -- el mismo problema aplica aca): recuadro normal
+        # habilitado, atenuado/sin interaccion cuando "Aplicar IVA" esta desmarcado --
+        # antes el campo quedaba siempre editable con el mismo aspecto sin importar el
+        # estado del check, lo que no dejaba claro si el porcentaje aplicaba o no
+        # (hallazgo del usuario, 2026-08-28).
+        self.iva_porcentaje_input.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                background-color: #FFFFFF;
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 6px;
+                padding: 0 4px;
+                font-size: 14px;
+                color: {COLOR_TEXT_DARK};
+            }}
+            QDoubleSpinBox:focus {{
+                border: 1px solid {COLOR_PRIMARY};
+            }}
+            QDoubleSpinBox:disabled {{
+                background-color: {COLOR_CONTENT_BG};
+                color: {COLOR_TEXT_LIGHT};
+            }}
+            QDoubleSpinBox::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 18px;
+                border: none;
+                border-left: 1px solid {COLOR_BORDER};
+                border-top-right-radius: 6px;
+                background: transparent;
+            }}
+            QDoubleSpinBox::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 18px;
+                border: none;
+                border-left: 1px solid {COLOR_BORDER};
+                border-bottom-right-radius: 6px;
+                background: transparent;
+            }}
+            QDoubleSpinBox::up-arrow {{
+                image: url({ICON_CHEVRON_UP_URL});
+                width: 10px;
+                height: 10px;
+            }}
+            QDoubleSpinBox::down-arrow {{
+                image: url({ICON_CHEVRON_DOWN_URL});
+                width: 10px;
+                height: 10px;
+            }}
+        """)
+        self.iva_porcentaje_input.setEnabled(self.iva_activo_check.isChecked())
+        self.iva_activo_check.toggled.connect(self.iva_porcentaje_input.setEnabled)
 
         iva_layout.addWidget(self.iva_activo_check)
         iva_layout.addWidget(self.iva_porcentaje_input)
@@ -223,10 +296,42 @@ class ConfigEmpresaPanel(QWidget):
         lbl_impresora = QLabel("Impresora predeterminada:")
         lbl_impresora.setStyleSheet(lbl_style)
 
-        # Sin stylesheet propio: hereda el QComboBox global (GLOBAL_QSS en styles.py,
-        # incluye la flecha custom) -- una regla local aca pisaba el padding-right que
-        # le deja espacio a esa flecha, dejandola encimada con el texto.
+        # Estilo propio (copiado literal del bloque QComboBox de GLOBAL_QSS en styles.py,
+        # mismos valores de padding/flecha): antes este combo NO tenia stylesheet propio a
+        # proposito, para heredar GLOBAL_QSS -- pero al acotar el selector de `card` a
+        # #SectionCard (2026-08-28, ver comentario mas arriba) dejo de heredar ese fondo/
+        # borde de ningun lado y quedo sin caja visible. En vez de volver a depender de la
+        # cascada (fragil, ya genero un bug de padding-right encimando la flecha con el
+        # texto la primera vez que se intento), se fija el estilo aca mismo.
         self.impresora_combo = QComboBox()
+        self.impresora_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: #FFFFFF;
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 6px;
+                padding: 6px 28px 6px 12px;
+                color: {COLOR_TEXT_DARK};
+            }}
+            QComboBox:hover {{
+                border-color: {COLOR_TEXT_MUTED};
+            }}
+            QComboBox:focus {{
+                border-color: {COLOR_PRIMARY};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border: none;
+                background: transparent;
+            }}
+            QComboBox::down-arrow {{
+                image: url({ICON_CHEVRON_DOWN_URL});
+                width: 12px;
+                height: 12px;
+                margin-right: 8px;
+            }}
+        """)
         self.impresora_combo.setMinimumHeight(38)
         self.impresora_combo.setMinimumWidth(260)
         self._cargar_impresoras_disponibles()
@@ -250,8 +355,20 @@ class ConfigEmpresaPanel(QWidget):
 
         card_layout.addLayout(footer_layout)
 
-        root.addWidget(card)
-        root.addStretch()
+        # Scroll en vez de agregar `card` directo a `root`: sin esto, en una ventana mas
+        # baja que el contenido (titulo + logo + 5 filas de formulario + IVA + impresora +
+        # boton) el layout no tiene donde recortar y termina comprimiendo filas por debajo
+        # de su alto natural -- footer_input (QTextEdit, el unico campo sin
+        # setMinimumHeight) era el que mas se notaba, con su texto superpuesto a la fila de
+        # arriba (hallazgo del usuario, 2026-08-28). Mismo patron que
+        # roles_permisos_panel.py: NoFrame + fondo transparente para que no se note como un
+        # widget aparte.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setWidget(card)
+        root.addWidget(scroll, stretch=1)
 
         self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
 
@@ -287,6 +404,10 @@ class ConfigEmpresaPanel(QWidget):
                 self.telefono_input.setText(config.telefono_empresa or "")
                 self.footer_input.setPlainText(config.pie_pagina_empresa or "")
                 self.iva_activo_check.setChecked(bool(config.iva_activo))
+                # Explicito ademas de la conexion toggled->setEnabled en _build_ui():
+                # setChecked() solo emite toggled si el valor cambia, y si lo cargado
+                # coincide con el default (desmarcado) del constructor no dispararia nada.
+                self.iva_porcentaje_input.setEnabled(self.iva_activo_check.isChecked())
                 self.iva_porcentaje_input.setValue(float(config.iva_porcentaje))
                 self._cargar_impresoras_disponibles(config.impresora_predeterminada)
 

@@ -44,6 +44,7 @@ from app.ui.styles import (
     COLOR_TABLE_HOVER,
     COLOR_TEXT_DARK,
     FONT_FAMILY,
+    ICON_CHECK_URL,
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
 )
@@ -91,6 +92,21 @@ QCheckBox {{
     spacing: 8px;
     border: none;
     background: transparent;
+}}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 4px;
+    background-color: {COLOR_CARD_BG};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {COLOR_PRIMARY};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {COLOR_PRIMARY};
+    border-color: {COLOR_PRIMARY};
+    image: url({ICON_CHECK_URL});
 }}
 QPushButton#BtnLimpiarFiltros {{
     background-color: transparent;

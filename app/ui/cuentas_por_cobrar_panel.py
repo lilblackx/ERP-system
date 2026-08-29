@@ -55,6 +55,7 @@ from app.ui.styles import (
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
     FONT_FAMILY,
@@ -112,6 +113,10 @@ QLineEdit, QComboBox, QDoubleSpinBox {{
 }}
 QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
+}}
+QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    color: {COLOR_TEXT_LIGHT};
 }}
 QComboBox::drop-down {{
     border: none;

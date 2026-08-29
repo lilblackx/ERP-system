@@ -69,6 +69,75 @@ def test_consultar_auditoria_filtra_por_accion(db_session):
     assert resultado["items"][0].accion == "LOGOUT"
 
 
+def test_consultar_auditoria_texto_busqueda_coincide_parcial_en_accion(db_session):
+    admin = crear_usuario_admin(db_session)
+    AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="CREAR_CLIENTE", modulo="CLIENTES")
+    AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGIN", modulo="AUTH")
+
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, texto_busqueda="cliente", id_usuario_actor=admin.id_usuario
+    )
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].accion == "CREAR_CLIENTE"
+
+
+def test_consultar_auditoria_texto_busqueda_coincide_en_modulo(db_session):
+    admin = crear_usuario_admin(db_session)
+    AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="REGISTRAR_COMPRA", modulo="COMPRAS")
+    AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGIN", modulo="AUTH")
+
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, texto_busqueda="COMPRAS", id_usuario_actor=admin.id_usuario
+    )
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].modulo == "COMPRAS"
+
+
+def test_consultar_auditoria_texto_busqueda_coincide_en_detalle(db_session):
+    admin = crear_usuario_admin(db_session)
+    AuditoriaService.registrar_evento(
+        db_session, id_usuario=None, accion="CREAR_OC", modulo="COMPRAS", detalle={"numero_oc": "ODC-000001"}
+    )
+    AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGIN", modulo="AUTH")
+
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, texto_busqueda="ODC-000001", id_usuario_actor=admin.id_usuario
+    )
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].accion == "CREAR_OC"
+
+
+def test_consultar_auditoria_texto_busqueda_coincide_en_nombre_usuario(db_session):
+    admin = crear_usuario_admin(db_session)
+    usuario = crear_usuario(db_session)
+    AuditoriaService.registrar_evento(db_session, id_usuario=usuario.id_usuario, accion="LOGIN", modulo="AUTH")
+    # Evento de sistema sin usuario asociado -- no debe reventar el filtro por nombre de
+    # usuario (Auditoria.usuario.has(...) sobre id_usuario NULL debe resolver a False, no
+    # a un error, ver comentario en AuditoriaService.consultar_auditoria).
+    AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGOUT", modulo="AUTH")
+
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, texto_busqueda=usuario.nombre_usuario, id_usuario_actor=admin.id_usuario
+    )
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].id_usuario == usuario.id_usuario
+
+
+def test_consultar_auditoria_texto_busqueda_sin_coincidencias(db_session):
+    admin = crear_usuario_admin(db_session)
+    AuditoriaService.registrar_evento(db_session, id_usuario=None, accion="LOGIN", modulo="AUTH")
+
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, texto_busqueda="algo_que_no_existe", id_usuario_actor=admin.id_usuario
+    )
+
+    assert resultado["total"] == 0
+
+
 def test_consultar_auditoria_filtra_por_usuario(db_session):
     admin = crear_usuario_admin(db_session)
     usuario_a = crear_usuario(db_session)

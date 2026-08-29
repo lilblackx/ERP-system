@@ -37,8 +37,10 @@ from app.ui.styles import (
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
+    ICON_CHECK_URL,
     ICON_CHEVRON_DOWN_URL,
     ICON_CHEVRON_UP_URL,
     aplicar_sombra,
@@ -79,6 +81,10 @@ QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
 QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
     background-color: #FFFFFF;
+}}
+QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled, QDateEdit:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    color: {COLOR_TEXT_LIGHT};
 }}
 QLineEdit::placeholder {{
     color: #94A3B8;
@@ -128,6 +134,22 @@ QComboBox QAbstractItemView {{
 QCheckBox {{
     font-size: 12px;
     color: {COLOR_TEXT_DARK};
+    spacing: 8px;
+}}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 4px;
+    background-color: #FFFFFF;
+}}
+QCheckBox::indicator:hover {{
+    border-color: {COLOR_PRIMARY};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {COLOR_PRIMARY};
+    border-color: {COLOR_PRIMARY};
+    image: url({ICON_CHECK_URL});
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
