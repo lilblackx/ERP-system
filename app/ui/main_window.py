@@ -29,6 +29,7 @@ from app.db.session import SessionLocal
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
 from app.ui.auditoria_panel import AuditoriaPanel
+from app.ui.bancos_panel import BancosPanel
 from app.ui.clientes_panel import ClientesPanel
 from app.ui.comisiones_panel import ComisionesPanel
 from app.ui.compras import ComprasView
@@ -59,7 +60,7 @@ MODULOS_CONFIG = {
     "inventario": ("Inventario", InventarioPanel),
     "facturacion": ("Facturación", FacturacionPanel),
     "compras": ("Compras", ComprasView),
-    "bancos": ("Bancos", None),
+    "bancos": ("Bancos", BancosPanel),
     "cuentas_bancarias": ("Cuentas Bancarias", None),
     "cuentas_por_cobrar": ("Cuentas por Cobrar", CuentasPorCobrarPanel),
     "cuentas_por_pagar": ("Cuentas por Pagar", CuentasPorPagarPanel),
