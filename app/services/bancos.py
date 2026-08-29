@@ -40,9 +40,7 @@ class BancoService:
         if texto_busqueda:
             like = f"%{texto_busqueda}%"
             query = query.filter(
-                Banco.nombre_banco.ilike(like)
-                | Banco.identificacion_banco.ilike(like)
-                | Banco.codigo_banco.ilike(like)
+                Banco.nombre_banco.ilike(like) | Banco.identificacion_banco.ilike(like) | Banco.codigo_banco.ilike(like)
             )
         if estado_banco:
             query = query.filter(Banco.estado_banco == estado_banco)
@@ -133,9 +131,7 @@ class BancoService:
         return banco
 
     @staticmethod
-    def cambiar_estado(
-        session: Session, id_banco: int, nuevo_estado: str, id_usuario: int | None = None
-    ) -> Banco:
+    def cambiar_estado(session: Session, id_banco: int, nuevo_estado: str, id_usuario: int | None = None) -> Banco:
         require_permiso(session, id_usuario, "bancos", "eliminar")
         if nuevo_estado not in ESTADOS_VALIDOS:
             raise ValueError(f"nuevo_estado debe ser uno de {ESTADOS_VALIDOS}")

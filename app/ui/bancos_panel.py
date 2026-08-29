@@ -431,9 +431,7 @@ class BancosPanel(QWidget):
             banco = session.get(Banco, id_banco)
             dialogo = BancoFormDialog(session, banco, parent=self)
             if dialogo.exec():
-                BancoService.actualizar(
-                    session, id_banco, id_usuario=self.usuario.id_usuario, **dialogo.get_data()
-                )
+                BancoService.actualizar(session, id_banco, id_usuario=self.usuario.id_usuario, **dialogo.get_data())
                 self.cargar_bancos()
         except IntegrityError:
             session.rollback()

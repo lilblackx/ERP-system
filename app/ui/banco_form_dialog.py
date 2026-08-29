@@ -333,9 +333,7 @@ class BancoFormDialog(QDialog):
 
         if banco.modificador:
             nombre_modificador = (
-                banco.modificador.nombre
-                or banco.modificador.nombre_usuario
-                or f"ID {banco.modificado_por}"
+                banco.modificador.nombre or banco.modificador.nombre_usuario or f"ID {banco.modificado_por}"
             )
             self.modificado_por_label.setText(f"Modificado por: {nombre_modificador}")
         else:
