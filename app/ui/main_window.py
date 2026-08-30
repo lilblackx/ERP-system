@@ -34,6 +34,7 @@ from app.ui.clientes_panel import ClientesPanel
 from app.ui.comisiones_panel import ComisionesPanel
 from app.ui.compras import ComprasView
 from app.ui.config_empresa_panel import ConfigEmpresaPanel
+from app.ui.cuentas_bancarias_panel import CuentasBancariasPanel
 from app.ui.cuentas_por_cobrar_panel import CuentasPorCobrarPanel
 from app.ui.cuentas_por_pagar_panel import CuentasPorPagarPanel
 from app.ui.dashboard_panel import DashboardPanel
@@ -61,7 +62,7 @@ MODULOS_CONFIG = {
     "facturacion": ("Facturación", FacturacionPanel),
     "compras": ("Compras", ComprasView),
     "bancos": ("Bancos", BancosPanel),
-    "cuentas_bancarias": ("Cuentas Bancarias", None),
+    "cuentas_bancarias": ("Cuentas Bancarias", CuentasBancariasPanel),
     "cuentas_por_cobrar": ("Cuentas por Cobrar", CuentasPorCobrarPanel),
     "cuentas_por_pagar": ("Cuentas por Pagar", CuentasPorPagarPanel),
     "cajas": ("Cajas", None),
