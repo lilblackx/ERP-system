@@ -14,6 +14,7 @@ from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Usuario, Vendedor
+from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.vendedores import VendedorService
 from app.ui.styles import (
@@ -42,6 +44,7 @@ from app.ui.styles import (
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
@@ -49,6 +52,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_sombra,
 )
+from app.ui.toolbar_popups import BotonExportar
 from app.ui.vendedor_form_dialog import VendedorFormDialog
 
 logger = logging.getLogger(__name__)
@@ -129,7 +133,9 @@ class VendedoresPanel(QWidget):
 
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar vendedor…")
-        self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_input.addAction(
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
         self.buscar_input.setFixedWidth(220)
@@ -148,10 +154,13 @@ class VendedoresPanel(QWidget):
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_vendedores, on_pdf=self.exportar_pdf_vendedores)
+
         h.addWidget(self.buscar_input)
         h.addWidget(self.estado_combo)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nuevo)
+        h.addWidget(self.btn_exportar)
         return w
 
     def _make_table(self) -> QTableWidget:
@@ -293,6 +302,80 @@ class VendedoresPanel(QWidget):
         self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
         self.btn_anterior.setEnabled(self.pagina_actual > 1)
         self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
+
+    def _filas_para_exportar(self, session) -> list[list]:
+        resultado = VendedorService.listar(
+            session,
+            self.buscar_input.text().strip() or None,
+            id_usuario=self.usuario.id_usuario,
+            estado_vendedor=self.estado_combo.currentData(),
+            pagina=1,
+            por_pagina=1_000_000,
+        )
+        vendedores: list[Vendedor] = resultado["items"]
+        return [
+            [
+                v.id_vendedor,
+                v.nombre_vendedor,
+                v.codigo_vendedor,
+                v.identificacion_vendedor,
+                v.telefono_vendedor,
+                v.email_vendedor,
+                v.estado_vendedor,
+            ]
+            for v in vendedores
+        ]
+
+    def exportar_excel_vendedores(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar vendedores", "vendedores.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            filas = self._filas_para_exportar(session)
+            exportar_excel(ruta, COLS_VISIBLES, filas)
+            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} vendedores a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
+        except Exception:
+            logger.exception("Fallo al exportar la lista de vendedores a Excel")
+            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
+        finally:
+            session.close()
+
+    def exportar_pdf_vendedores(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar vendedores", "vendedores.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            filas = self._filas_para_exportar(session)
+
+            filtros = {}
+            texto_busqueda = self.buscar_input.text().strip()
+            filtros["Búsqueda"] = texto_busqueda if texto_busqueda else "Todos"
+            filtros["Estado"] = self.estado_combo.currentText()
+
+            col_widths = [0.5, 2.0, 1.0, 1.2, 1.3, 2.0, 1.0]
+
+            exportar_pdf(
+                ruta,
+                "Reporte de Vendedores",
+                COLS_VISIBLES,
+                filas,
+                filtros=filtros,
+                col_widths=col_widths,
+            )
+            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} vendedores a:\n{ruta}")
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
+        except Exception:
+            logger.exception("Fallo al exportar la lista de vendedores a PDF")
+            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
+        finally:
+            session.close()
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()

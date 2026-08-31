@@ -36,6 +36,10 @@ class ProductoService:
         cod_producto = datos.get("cod_producto")
         if not cod_producto:
             raise ValueError("cod_producto es requerido")
+        if not datos.get("nombre_producto"):
+            raise ValueError("nombre_producto es requerido")
+        if not datos.get("id_categoria"):
+            raise ValueError("id_categoria es requerido")
         ProductoService._validar_codigo_unico(session, cod_producto)
         producto = Inventario(**datos)
         session.add(producto)
@@ -57,6 +61,10 @@ class ProductoService:
         producto = session.get(Inventario, id_producto)
         if producto is None:
             raise ValueError("Producto no encontrado")
+        if "nombre_producto" in datos and not datos["nombre_producto"]:
+            raise ValueError("nombre_producto es requerido")
+        if "id_categoria" in datos and not datos["id_categoria"]:
+            raise ValueError("id_categoria es requerido")
         nuevo_codigo = datos.get("cod_producto")
         if nuevo_codigo and nuevo_codigo != producto.cod_producto:
             ProductoService._validar_codigo_unico(session, nuevo_codigo, excluir_id=id_producto)

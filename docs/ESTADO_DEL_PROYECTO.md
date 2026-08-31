@@ -842,20 +842,22 @@ de servicio.
   - **`codigo_vendedor`/`identificacion_vendedor` sin proteccion de unicidad**, a
     diferencia de los mismos campos en Cliente -- se podian crear vendedores duplicados
     con el mismo codigo interno o cedula. `migrations/0031_unique_vendedor_codigo_identificacion.sql`
-    agrega la proteccion, pero con un matiz importante: **no es un `UNIQUE CONSTRAINT`
-    normal, es un indice unico FILTRADO** (`CREATE UNIQUE INDEX ... WHERE campo IS NOT
-    NULL`). SQL Server (a diferencia de Postgres/el estandar ANSI) trata todos los NULL
-    como el mismo valor dentro de un `UNIQUE` normal -- permite maximo UNA fila con NULL,
-    no muchas. `clientes.codigo_cliente`/`identificacion_cliente` usan un `UNIQUE` plano
-    sin problema solo porque `ClienteService` los exige siempre no vacios; en Vendedor
-    ambos campos son legitimamente opcionales (sin asterisco en el formulario), asi que
-    un `UNIQUE` plano rompia crear el segundo vendedor sin codigo/identificacion (se
-    detecto en pruebas al escribir el test correspondiente). Si se agrega otra columna
-    opcional+unica en el futuro en cualquier tabla, usar este mismo patron de indice
-    filtrado, no `ADD CONSTRAINT ... UNIQUE`.
+    agrega la proteccion con un indice unico FILTRADO (`CREATE UNIQUE INDEX ... WHERE
+    campo IS NOT NULL`, no un `UNIQUE CONSTRAINT` normal) -- en su momento (2026-08-27)
+    ambos campos eran legitimamente opcionales en Vendedor, a diferencia de Cliente/
+    Proveedor, y SQL Server (a diferencia de Postgres/el estandar ANSI) trata todos los
+    NULL como el mismo valor dentro de un `UNIQUE` normal, permitiendo maximo una fila
+    con NULL. **Decision revertida (2026-09-01, pedido del usuario)**: `codigo_vendedor`/
+    `identificacion_vendedor` pasaron a ser obligatorios, igual que en Cliente/Proveedor
+    (`VendedorService.crear()`/`actualizar()` los exigen no vacios, `vendedor_form_dialog.py`
+    los marca con asterisco). El indice unico filtrado de la migracion 0031 sigue vigente
+    sin cambios de schema -- ya no se esperan NULLs en la practica, pero el filtro
+    `WHERE campo IS NOT NULL` sigue siendo valido igual que el `UNIQUE` plano de Cliente/
+    Proveedor es valido porque el servicio (no la base) es quien garantiza el no-vacio.
   - **`VendedorService.crear()`/`actualizar()` no validaban nada** (ni `nombre_vendedor`
     requerido pese a ser `NOT NULL` en BD, ni duplicados) -- ahora siguen el mismo patron
-    `_validar_unico()`/requerido que `clientes.py`.
+    `_validar_unico()`/requerido que `clientes.py`, incluidos `codigo_vendedor`/
+    `identificacion_vendedor` desde 2026-09-01 (ver parrafo anterior).
   - **`VendedorService.listar()` no paginaba** (D-01) y **`VendedoresPanel` no tenia
     filtro de estado** -- ambos igualados a `ClienteService.list_clientes()`/
     `ClientesPanel`. Los 3 callers de `VendedorService.listar()` que dependian del

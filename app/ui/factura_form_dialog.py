@@ -1374,6 +1374,7 @@ class FacturaFormDialog(QDialog):
                 mensaje=mensaje,
                 titulo="Autorización de descuento requerida",
                 motivo_label="Motivo del descuento",
+                motivo_max_length=255,
                 parent=self,
             )
             if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
@@ -1395,6 +1396,7 @@ class FacturaFormDialog(QDialog):
                 mensaje=mensaje,
                 titulo="Autorización de días de crédito requerida",
                 motivo_label="Motivo del cambio de días de crédito",
+                motivo_max_length=255,
                 parent=self,
             )
             if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:

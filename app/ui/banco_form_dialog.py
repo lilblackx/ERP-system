@@ -263,15 +263,15 @@ class BancoFormDialog(QDialog):
         auditoria_layout.addWidget(lbl_auditoria)
 
         self.fecha_creacion_label = QLabel()
-        self.fecha_creacion_label.setStyleSheet("font-size: 11px; color: #64748B;")
+        self.fecha_creacion_label.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         auditoria_layout.addWidget(self.fecha_creacion_label)
 
         self.creado_por_label = QLabel()
-        self.creado_por_label.setStyleSheet("font-size: 11px; color: #64748B;")
+        self.creado_por_label.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         auditoria_layout.addWidget(self.creado_por_label)
 
         self.modificado_por_label = QLabel()
-        self.modificado_por_label.setStyleSheet("font-size: 11px; color: #64748B;")
+        self.modificado_por_label.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         auditoria_layout.addWidget(self.modificado_por_label)
 
         card_layout.addLayout(grid)

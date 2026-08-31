@@ -59,26 +59,18 @@ def test_crear_vendedor_identificacion_duplicada(db_session):
         )
 
 
-def test_crear_vendedor_sin_codigo_ni_identificacion_no_choca(db_session):
-    """codigo_vendedor/identificacion_vendedor son opcionales -- dos vendedores sin
-    ninguno de los dos no deben chocar contra la unicidad (NULL no colisiona consigo
-    mismo en SQL Server, ver migrations/0031)."""
+def test_crear_vendedor_requiere_codigo(db_session):
+    """codigo_vendedor paso a ser obligatorio (decision del usuario, 2026-09-01) --
+    mismo criterio que Cliente/Proveedor, ya no es legitimamente opcional."""
     admin = crear_usuario_admin(db_session)
-    VendedorService.crear(
-        db_session,
-        codigo_vendedor=None,
-        identificacion_vendedor=None,
-        nombre_vendedor="Vendedor Uno",
-        creado_por=admin.id_usuario,
-    )
-    otro = VendedorService.crear(
-        db_session,
-        codigo_vendedor=None,
-        identificacion_vendedor=None,
-        nombre_vendedor="Vendedor Dos",
-        creado_por=admin.id_usuario,
-    )
-    assert otro.id_vendedor is not None
+    with pytest.raises(ValueError, match="codigo_vendedor"):
+        VendedorService.crear(db_session, **_datos_vendedor(codigo_vendedor=None, creado_por=admin.id_usuario))
+
+
+def test_crear_vendedor_requiere_identificacion(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="identificacion_vendedor"):
+        VendedorService.crear(db_session, **_datos_vendedor(identificacion_vendedor=None, creado_por=admin.id_usuario))
 
 
 def test_obtener_vendedor(db_session):
@@ -193,6 +185,24 @@ def test_actualizar_vendedor_no_permite_vaciar_nombre(db_session):
 
     with pytest.raises(ValueError, match="nombre_vendedor"):
         VendedorService.actualizar(db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, nombre_vendedor="")
+
+
+def test_actualizar_vendedor_no_permite_vaciar_codigo(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="codigo_vendedor"):
+        VendedorService.actualizar(db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, codigo_vendedor="")
+
+
+def test_actualizar_vendedor_no_permite_vaciar_identificacion(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="identificacion_vendedor"):
+        VendedorService.actualizar(
+            db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, identificacion_vendedor=""
+        )
 
 
 def test_actualizar_vendedor_codigo_duplicado(db_session):

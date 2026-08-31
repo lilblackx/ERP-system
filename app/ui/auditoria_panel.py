@@ -266,7 +266,7 @@ QCalendarWidget QMenu {{
     color: {COLOR_TEXT_DARK};
 }}
 QCalendarWidget QSpinBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_CARD_BG};
     color: {COLOR_TEXT_DARK};
     border: 1px solid {COLOR_BORDER};
     border-radius: 4px;
@@ -391,7 +391,9 @@ class AuditoriaPanel(QWidget):
 
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar por acción, módulo, usuario o detalle…")
-        self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_input.addAction(
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
         self.buscar_input.setFixedWidth(240)
@@ -632,4 +634,16 @@ class AuditoriaPanel(QWidget):
             f"Acción: {evento.accion}\n\n"
             f"Detalle:\n{detalle_texto}"
         )
-        QMessageBox.information(self, "Detalle del evento", cuerpo)
+        # QMessageBox.information() (metodo estatico) no permite fijar textFormat antes de
+        # mostrarse -- se arma el dialogo a mano para forzar PlainText: el `detalle` de un
+        # evento viene de campos de texto libre (motivo, observaciones) que un usuario
+        # pudo escribir con "<b>" o una etiqueta "<a href=...>", y por defecto Qt decide
+        # con una heuristica (Qt::AutoText) si interpretarlo como HTML -- sin esto, ese
+        # texto podia renderizarse como markup real (spoofing de un enlace falso) dentro
+        # del dialogo administrativo (hallazgo de auditoria, 2026-09-01).
+        cuadro = QMessageBox(self)
+        cuadro.setIcon(QMessageBox.Icon.Information)
+        cuadro.setWindowTitle("Detalle del evento")
+        cuadro.setTextFormat(Qt.TextFormat.PlainText)
+        cuadro.setText(cuerpo)
+        cuadro.exec()

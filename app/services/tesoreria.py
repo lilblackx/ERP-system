@@ -433,6 +433,7 @@ class CajaService:
                     "nombre_caja": caja.nombre_caja,
                     "cajero": caja.usuario.nombre_usuario if caja.usuario else None,
                     "estado": "ABIERTA" if esta_abierta else "CERRADA",
+                    "fecha_apertura": caja.fecha_apertura,
                     "saldo_apertura": caja.saldo_apertura,
                     "saldo_cierre": caja.saldo_cierre,
                     "cantidad_movimientos": cantidad_movimientos,
@@ -530,6 +531,26 @@ class CajaService:
         )
         saldo_apertura = caja.saldo_apertura if caja.saldo_apertura is not None else Decimal("0.00")
         return saldo_apertura + Decimal(str(entradas)) - Decimal(str(salidas))
+
+    @staticmethod
+    def listar_movimientos_turno(session: Session, id_caja: int, id_usuario: int | None = None) -> list[CajaMovimiento]:
+        """Movimientos del turno EN CURSO (o del ultimo turno si ya se cerro) -- mismo
+        filtro de rango de fecha que calcular_saldo_actual(), para que el detalle mostrado
+        antes de cerrar coincida exactamente con lo que compone el saldo calculado."""
+        require_permiso(session, id_usuario, "cajas", "ver")
+        caja = session.get(Caja, id_caja)
+        if caja is None:
+            raise ValueError("Caja no encontrada")
+        if caja.fecha_apertura is None:
+            return []
+
+        query = session.query(CajaMovimiento).filter(
+            CajaMovimiento.id_caja == id_caja,
+            CajaMovimiento.fecha_registro >= caja.fecha_apertura,
+        )
+        if caja.fecha_cierre is not None:
+            query = query.filter(CajaMovimiento.fecha_registro <= caja.fecha_cierre)
+        return query.order_by(CajaMovimiento.fecha_registro.desc()).all()
 
     @staticmethod
     def _registrar_egreso_vuelto(

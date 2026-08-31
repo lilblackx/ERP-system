@@ -22,6 +22,7 @@ from app.db.models import Banco, Usuario
 from app.services.cuentas_bancarias import CuentaBancariaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
+from app.services.tesoreria import _enmascarar_numero_cuenta
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -259,7 +260,7 @@ class CuentasBancariasPanel(QWidget):
 
             self.table.setItem(row, 0, QTableWidgetItem(str(cuenta.id_cuenta)))
             self.table.setItem(row, 1, QTableWidgetItem(cuenta.banco.nombre_banco if cuenta.banco else "N/A"))
-            self.table.setItem(row, 2, QTableWidgetItem(cuenta.numero_cuenta or "N/A"))
+            self.table.setItem(row, 2, QTableWidgetItem(_enmascarar_numero_cuenta(cuenta.numero_cuenta) or "N/A"))
             self.table.setItem(row, 3, QTableWidgetItem(cuenta.tipo_cuenta_banco or "N/A"))
             self.table.setItem(row, 4, QTableWidgetItem(cuenta.nombre_titular or "N/A"))
             self.table.setItem(row, 5, QTableWidgetItem(cuenta.identificacion_titular or "N/A"))
@@ -373,7 +374,7 @@ class CuentasBancariasPanel(QWidget):
             [
                 cuenta.id_cuenta,
                 cuenta.banco.nombre_banco if cuenta.banco else None,
-                cuenta.numero_cuenta,
+                _enmascarar_numero_cuenta(cuenta.numero_cuenta),
                 cuenta.tipo_cuenta_banco,
                 cuenta.nombre_titular,
                 cuenta.identificacion_titular,

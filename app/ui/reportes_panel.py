@@ -21,6 +21,7 @@ from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtGui import QColor, QShowEvent, QTextCharFormat
 from PySide6.QtWidgets import (
     QComboBox,
+    QCompleter,
     QDateEdit,
     QFileDialog,
     QHBoxLayout,
@@ -751,6 +752,22 @@ class ReportesPanel(QWidget):
         self.tipo_combo.addItem("Comisiones por Vendedor/Período", REPORTE_COMISIONES_VENDEDOR)
         self.tipo_combo.addItem("Comisiones Pagadas vs. Pendientes", REPORTE_COMISIONES_PAGADAS_PENDIENTES)
         self.tipo_combo.currentIndexChanged.connect(self._on_tipo_cambiado)
+
+        # Con 41 reportes en un solo combo plano, encontrar uno por nombre exacto en la
+        # lista es lento -- setEditable + QCompleter con MatchContains permite escribir
+        # cualquier parte del nombre para saltar directo (ej. "caja" filtra Arqueo de Caja/
+        # Movimientos de Caja/Cierre por Cajero/Flujo de Caja). InsertPolicy.NoInsert +
+        # el comportamiento nativo de Qt evitan que quede texto libre sin corresponder a
+        # ningun item: si no hay match exacto al perder foco, revierte al item ya
+        # seleccionado (hallazgo de auditoria UX, 2026-09-01).
+        self.tipo_combo.setEditable(True)
+        self.tipo_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.tipo_combo.lineEdit().setPlaceholderText("Buscar reporte…")
+        completer = QCompleter([self.tipo_combo.itemText(i) for i in range(self.tipo_combo.count())], self)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.tipo_combo.setCompleter(completer)
 
         # QStackedWidget (usado antes aca) hereda de QFrame, y anidado dentro del
         # QStackedWidget de MainWindow (el que conmuta entre modulos), Qt le pinta un

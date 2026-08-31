@@ -38,6 +38,19 @@ logger = logging.getLogger(__name__)
 _COLOR_PRIMARIO = colors.HexColor("#0D47A1")
 _COLOR_MUTED = colors.HexColor("#64748B")
 
+# Excel/LibreOffice interpretan una celda de texto que empieza con estos caracteres
+# como formula (CSV/Formula Injection, OWASP) -- un nombre de cliente/proveedor/motivo
+# como "=HYPERLINK(...)" o "=cmd|'/c calc'!A1" se ejecuta al abrir el .xlsx. Se antepone
+# un apostrofe (fuerza texto literal en Excel, invisible al abrir) a cualquier string que
+# venga de datos editables por el usuario antes de escribirlo en una celda.
+_PREFIJOS_FORMULA = ("=", "+", "-", "@")
+
+
+def _neutralizar_formula(valor: Any) -> Any:
+    if isinstance(valor, str) and valor.startswith(_PREFIJOS_FORMULA):
+        return "'" + valor
+    return valor
+
 
 def exportar_excel(
     ruta: str | Path,
@@ -71,7 +84,7 @@ def exportar_excel(
         for indice, (valor, fuente) in enumerate(lineas_empresa):
             if not valor:
                 continue
-            celda = hoja.cell(row=fila_actual, column=1, value=valor)
+            celda = hoja.cell(row=fila_actual, column=1, value=_neutralizar_formula(valor))
             celda.font = fuente
             if indice == 0:
                 # mas alto que el resto -- separa visualmente la razon social del RIF que
@@ -97,7 +110,7 @@ def exportar_excel(
     cantidad_filas = 0
     for fila in filas:
         for col_idx, valor in enumerate(fila, start=1):
-            hoja.cell(row=fila_actual, column=col_idx, value=valor)
+            hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
         fila_actual += 1
         cantidad_filas += 1
 

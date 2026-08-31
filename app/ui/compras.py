@@ -792,6 +792,8 @@ class EnmiendaOCDialog(QDialog):
             return
         tipo = self.tipo_combo.currentData()
 
+        self.btn_proponer.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             self.enmienda_creada = CompraOCService.crear_enmienda(
                 self.session,
@@ -816,6 +818,9 @@ class EnmiendaOCDialog(QDialog):
             logger.exception("Fallo al crear enmienda de OC")
             QMessageBox.critical(self, "Error", "No se pudo crear la enmienda.")
             return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.btn_proponer.setEnabled(True)
 
         # Seguimiento inmediato: solo tiene sentido ofrecerlo si quien esta logueado
         # puede autorizar (hoy, solo ADMIN -- ver migrations/0033). Si no puede, el
@@ -949,6 +954,8 @@ class NotaRecepcionFormDialog(QDialog):
             QMessageBox.warning(self, "Nada que recibir", "Ingrese al menos una cantidad recibida mayor a cero.")
             return
 
+        self.btn_registrar.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             self.nota_creada = NotaRecepcionService.crear_nota_recepcion(
                 self.session,
@@ -970,6 +977,9 @@ class NotaRecepcionFormDialog(QDialog):
             logger.exception("Fallo al crear nota de recepcion")
             QMessageBox.critical(self, "Error", "No se pudo registrar la recepción.")
             return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.btn_registrar.setEnabled(True)
 
         self.accept()
 
@@ -1076,6 +1086,8 @@ class NotaDevolucionFormDialog(QDialog):
             QMessageBox.warning(self, "Nada que devolver", "Ingrese al menos una cantidad a devolver mayor a cero.")
             return
 
+        self.btn_registrar.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             self.devolucion_creada = NotaRecepcionService.crear_nota_devolucion(
                 self.session,
@@ -1097,6 +1109,9 @@ class NotaDevolucionFormDialog(QDialog):
             logger.exception("Fallo al crear nota de devolucion")
             QMessageBox.critical(self, "Error", "No se pudo registrar la devolución.")
             return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.btn_registrar.setEnabled(True)
 
         self.accept()
 

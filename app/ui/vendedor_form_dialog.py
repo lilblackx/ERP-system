@@ -180,18 +180,20 @@ class VendedorFormDialog(QDialog):
         grid.addWidget(lbl_nombre, 0, 0, 1, 2)
         grid.addWidget(self.nombre_input, 1, 0, 1, 2)
 
-        lbl_codigo = QLabel("Código")
+        lbl_codigo = QLabel("Código <span style='color: #DC2626;'>*</span>")
         lbl_codigo.setProperty("class", "FormLabel")
         self.codigo_input = QLineEdit()
         self.codigo_input.setPlaceholderText("Ej: VEN-001")
+        self.codigo_input.setMaxLength(20)
         self.codigo_input.setFixedHeight(32)
         grid.addWidget(lbl_codigo, 2, 0)
         grid.addWidget(self.codigo_input, 3, 0)
 
-        lbl_id = QLabel("Identificación")
+        lbl_id = QLabel("Identificación <span style='color: #DC2626;'>*</span>")
         lbl_id.setProperty("class", "FormLabel")
         self.identificacion_input = QLineEdit()
         self.identificacion_input.setPlaceholderText("Ej: V-12345678")
+        self.identificacion_input.setMaxLength(20)
         self.identificacion_input.setFixedHeight(32)
         grid.addWidget(lbl_id, 2, 1)
         grid.addWidget(self.identificacion_input, 3, 1)
@@ -261,6 +263,14 @@ class VendedorFormDialog(QDialog):
         if not self.nombre_input.text().strip():
             QMessageBox.warning(self, "Dato requerido", "El nombre del vendedor es obligatorio.")
             self.nombre_input.setFocus()
+            return
+        if not self.codigo_input.text().strip():
+            QMessageBox.warning(self, "Dato requerido", "El código del vendedor es obligatorio.")
+            self.codigo_input.setFocus()
+            return
+        if not self.identificacion_input.text().strip():
+            QMessageBox.warning(self, "Dato requerido", "La identificación del vendedor es obligatoria.")
+            self.identificacion_input.setFocus()
             return
         self.accept()
 

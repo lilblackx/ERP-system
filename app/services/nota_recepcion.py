@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -59,7 +59,26 @@ class NotaRecepcionService:
         if oc.estado == "ANULADA":
             raise ValueError("No se puede recibir mercancia de una orden de compra anulada")
 
-        detalles_oc = {d.id_detalle: d for d in session.query(CompraOCDetalle).filter(CompraOCDetalle.id_oc == id_oc)}
+        # WITH (UPDLOCK, ROWLOCK): sin esto, dos recepciones concurrentes sobre la misma OC
+        # leen el mismo cantidad_pendiente (aun no comiteado por la otra), ambas validan
+        # "alcanza" contra ese valor stale, y ambas insertan -- el trigger recalcula
+        # cantidad_pendiente desde la suma real de nota_recepcion_detalle, asi que el
+        # resultado no queda inconsistente con lo insertado, pero SI puede quedar negativo
+        # (sobre-recepcion real: mas mercancia marcada como recibida de la que la OC pedia).
+        # El lock serializa: la segunda transaccion espera a que la primera comitee (y su
+        # trigger actualice cantidad_pendiente) antes de leer y validar. Orden por
+        # id_detalle, mismo criterio que VentaService.emitir_factura (sorted de items) para
+        # que dos NR concurrentes con lineas en distinto orden no crucen sus locks.
+        ids_solicitados = sorted({item["id_oc_detalle"] for item in items})
+        detalles_oc = {
+            d.id_detalle: d
+            for d in session.execute(
+                select(CompraOCDetalle)
+                .where(CompraOCDetalle.id_oc == id_oc, CompraOCDetalle.id_detalle.in_(ids_solicitados))
+                .order_by(CompraOCDetalle.id_detalle)
+                .with_hint(CompraOCDetalle, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalars()
+        }
 
         lineas_validadas = []
         for item in items:

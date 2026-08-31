@@ -57,6 +57,13 @@ ruff format --check .   # verify only, no changes (what CI runs)
 `pyrightconfig.json` exists for editor type-checking only, there's no `pyright` CLI
 step in the test/build flow.
 
+## Git
+
+**Never run `git commit` or `git push` unless the user explicitly asks for it in that
+message.** Finishing a task, the user saying "sí"/"dale"/"continua" to something else, or
+tests passing are not implicit requests to commit — wait for an explicit instruction
+each time.
+
 ## Architecture
 
 **Layering**: `schema_sqlserver.sql` (DB + triggers) → `app/db/models.py` (SQLAlchemy

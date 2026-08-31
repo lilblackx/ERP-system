@@ -273,13 +273,30 @@ class UsuarioFormDialog(QDialog):
         lbl_hint_clave.setWordWrap(True)
         grid.addWidget(lbl_hint_clave, 9, 0, 1, 2)
 
+        # Confirmar clave: sin esto, un typo al crear/editar un usuario deja una clave que
+        # nadie conoce hasta el primer intento de login fallido (auditoria de hallazgos
+        # medios, 2026-09-01) -- mismo campo que ya pide solicitar_codigo_dialog.py al
+        # restablecer, ausente aca hasta ahora.
+        texto_lbl_confirmar = (
+            "Confirmar clave" if self.usuario else "Confirmar clave <span style='color: #DC2626;'>*</span>"
+        )
+        lbl_confirmar_clave = QLabel(texto_lbl_confirmar)
+        lbl_confirmar_clave.setProperty("class", "FormLabel")
+        self.confirmar_clave_input = QLineEdit()
+        self.confirmar_clave_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirmar_clave_input.setPlaceholderText("Repita la clave" if self.usuario else "")
+        self.confirmar_clave_input.setFixedHeight(32)
+        self.confirmar_clave_input.setMaxLength(PASSWORD_MAX_BYTES)
+        grid.addWidget(lbl_confirmar_clave, 10, 0, 1, 2)
+        grid.addWidget(self.confirmar_clave_input, 11, 0, 1, 2)
+
         lbl_rol = QLabel("Rol <span style='color: #DC2626;'>*</span>")
         lbl_rol.setProperty("class", "FormLabel")
         self.rol_combo = ComboBoxSinScroll()
         self.rol_combo.setFixedHeight(32)
         self.rol_combo.currentIndexChanged.connect(self._toggle_vendedor)
-        grid.addWidget(lbl_rol, 10, 0, 1, 2)
-        grid.addWidget(self.rol_combo, 11, 0, 1, 2)
+        grid.addWidget(lbl_rol, 12, 0, 1, 2)
+        grid.addWidget(self.rol_combo, 13, 0, 1, 2)
 
         self.lbl_vendedor = QLabel("Vendedor vinculado")
         self.lbl_vendedor.setProperty("class", "FormLabel")
@@ -295,8 +312,8 @@ class UsuarioFormDialog(QDialog):
             politica = widget.sizePolicy()
             politica.setRetainSizeWhenHidden(True)
             widget.setSizePolicy(politica)
-        grid.addWidget(self.lbl_vendedor, 12, 0, 1, 2)
-        grid.addWidget(self.vendedor_combo, 13, 0, 1, 2)
+        grid.addWidget(self.lbl_vendedor, 14, 0, 1, 2)
+        grid.addWidget(self.vendedor_combo, 15, 0, 1, 2)
 
         card_layout.addLayout(grid)
         card_layout.addStretch()
@@ -393,6 +410,10 @@ class UsuarioFormDialog(QDialog):
         if not self.usuario and not self.clave_input.text():
             QMessageBox.warning(self, "Dato requerido", "La clave es obligatoria para un usuario nuevo.")
             self.clave_input.setFocus()
+            return
+        if self.clave_input.text() and self.clave_input.text() != self.confirmar_clave_input.text():
+            QMessageBox.warning(self, "Las claves no coinciden", "La clave y su confirmación deben ser iguales.")
+            self.confirmar_clave_input.setFocus()
             return
         self.accept()
 

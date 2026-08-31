@@ -435,6 +435,15 @@ class ConfigEmpresaPanel(QWidget):
                 QMessageBox.warning(self, "Error", "La imagen es muy pesada. Máximo 2MB.")
                 return
 
+            # Validar que sea una imagen decodificable ANTES de asignarla a self.logo_bytes
+            # -- sin esto, un archivo no-imagen (ej. un .txt renombrado a .png) quedaba
+            # asignado igual y se guardaba en la base al pulsar "Guardar", porque
+            # _mostrar_logo() solo aborta el *preview* si QImage.fromData() falla, sin
+            # impedir el guardado (hallazgo de auditoria, 2026-09-01).
+            if QImage.fromData(QByteArray(img_data)).isNull():
+                QMessageBox.warning(self, "Archivo inválido", "El archivo seleccionado no es una imagen válida.")
+                return
+
             self.logo_bytes = img_data
             self._mostrar_logo(img_data)
         except Exception:

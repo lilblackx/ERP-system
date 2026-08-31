@@ -59,10 +59,17 @@ class VendedorService:
         require_permiso(session, datos.get("creado_por"), "vendedores", "crear")
         if not datos.get("nombre_vendedor"):
             raise ValueError("nombre_vendedor es requerido")
-        if datos.get("codigo_vendedor"):
-            _validar_unico(session, "codigo_vendedor", datos["codigo_vendedor"])
-        if datos.get("identificacion_vendedor"):
-            _validar_unico(session, "identificacion_vendedor", datos["identificacion_vendedor"])
+        # codigo_vendedor/identificacion_vendedor pasaron a ser obligatorios (decision del
+        # usuario, 2026-09-01) -- mismo criterio que Cliente/Proveedor. El indice unico
+        # filtrado de migrations/0031 (WHERE campo IS NOT NULL) sigue siendo valido aunque
+        # ya no se esperen NULLs: no hace falta tocar el schema, el servicio es quien
+        # garantiza que nunca lleguen vacios, igual que ya hacia ClienteService.
+        if not datos.get("codigo_vendedor"):
+            raise ValueError("codigo_vendedor es requerido")
+        if not datos.get("identificacion_vendedor"):
+            raise ValueError("identificacion_vendedor es requerido")
+        _validar_unico(session, "codigo_vendedor", datos["codigo_vendedor"])
+        _validar_unico(session, "identificacion_vendedor", datos["identificacion_vendedor"])
 
         vendedor = Vendedor(**datos)
         session.add(vendedor)
@@ -87,6 +94,10 @@ class VendedorService:
 
         if "nombre_vendedor" in datos and not datos["nombre_vendedor"]:
             raise ValueError("nombre_vendedor es requerido")
+        if "codigo_vendedor" in datos and not datos["codigo_vendedor"]:
+            raise ValueError("codigo_vendedor es requerido")
+        if "identificacion_vendedor" in datos and not datos["identificacion_vendedor"]:
+            raise ValueError("identificacion_vendedor es requerido")
 
         nuevo_codigo = datos.get("codigo_vendedor")
         if nuevo_codigo and nuevo_codigo != vendedor.codigo_vendedor:

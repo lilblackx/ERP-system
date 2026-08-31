@@ -20,6 +20,7 @@ from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
 from app.db.models import ConfiguracionEmpresa, FacturaDetalle, FacturaVenta
 from app.ui.pago_linea_dialog import METODOS_PAGO
+from app.ui.styles import COLOR_BORDER, COLOR_DANGER, COLOR_PRIMARY, COLOR_TEXT_DARK, COLOR_TEXT_MUTED
 
 # Etiquetas de metodo de pago (venta) -- "mixto" es el sentinel que VentaService.
 # obtener_factura() usa cuando hubo mas de una forma de pago con metodo distinto (ver
@@ -33,9 +34,9 @@ _ETIQUETAS_METODO_VUELTO = {
     "transferencia": "Transferencia",
 }
 
-_PRIMARY = "#0D47A1"
-_MUTED = "#64748B"
-_BORDER = "#CBD5E1"
+_PRIMARY = COLOR_PRIMARY
+_MUTED = COLOR_TEXT_MUTED
+_BORDER = COLOR_BORDER
 _TD = f'style="padding:5pt 6pt;border-bottom:1pt solid {_BORDER};"'
 _TD_R = f'style="padding:5pt 6pt;border-bottom:1pt solid {_BORDER};text-align:right;"'
 _TH = f'style="padding:5pt 6pt;text-align:left;color:#FFFFFF;background-color:{_PRIMARY};"'
@@ -219,7 +220,7 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
     watermark = ""
     if factura.estado_factura == "ANULADA":
-        watermark = "<p style='color:#DC2626;font-weight:bold;font-size:13pt;'>*** FACTURA ANULADA ***</p>"
+        watermark = f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** FACTURA ANULADA ***</p>"
 
     observaciones_html = ""
     if factura.observaciones_factura:
@@ -254,7 +255,7 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     direccion_cliente = (cliente.direccion if cliente else None) or "—"
 
     return f"""
-    <html><body style="font-family: Arial, sans-serif; color:#1E293B; font-size:10pt;">
+    <html><body style="font-family: Arial, sans-serif; color:{COLOR_TEXT_DARK}; font-size:10pt;">
         <table width="100%" style="border-collapse:collapse;"><tr>
             <td width="62%" style="vertical-align:top;">
                 <table style="border-collapse:collapse;"><tr>

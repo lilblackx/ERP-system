@@ -7,7 +7,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import CompraOC, CompraOCDetalle, CompraOCEnmienda, Inventario, Proveedor
@@ -202,7 +202,16 @@ class CompraOCService:
         permisos (como si hacen descuentos/creditos/vueltos_bancarios via
         AutorizacionDialog) -- se deja para cuando este flujo tenga su propia pantalla."""
         require_permiso(session, id_usuario, "compras", "autorizar_enmienda_oc")
-        enmienda = session.get(CompraOCEnmienda, id_enmienda)
+        # WITH (UPDLOCK, ROWLOCK): sin esto, dos autorizaciones concurrentes de la MISMA
+        # enmienda pueden ambas leer estado_enmienda='PENDIENTE' antes de que la primera
+        # comitee -- si tipo_cambio='CANTIDAD', trg_compra_oc_enmienda_autorizar
+        # (migrations/0032) se dispara en ambos UPDATE y ajusta compra_oc.cantidad_solicitada
+        # dos veces. Mismo patron que CajaService.abrir_caja/cerrar_caja.
+        enmienda = session.execute(
+            select(CompraOCEnmienda)
+            .where(CompraOCEnmienda.id_enmienda == id_enmienda)
+            .with_hint(CompraOCEnmienda, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if enmienda is None:
             raise ValueError("Enmienda no encontrada")
         if enmienda.estado_enmienda != "PENDIENTE":

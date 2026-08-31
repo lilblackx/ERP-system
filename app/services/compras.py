@@ -42,8 +42,8 @@ def _validar_items(items: list[dict]) -> None:
             raise ValueError("Cada item requiere id_producto")
         if not item.get("cantidad") or Decimal(str(item["cantidad"])) <= 0:
             raise ValueError("Cada item requiere una cantidad mayor a cero")
-        if item.get("costo_unitario") is None:
-            raise ValueError("Cada item requiere costo_unitario")
+        if item.get("costo_unitario") is None or Decimal(str(item["costo_unitario"])) <= 0:
+            raise ValueError("Cada item requiere un costo_unitario mayor a cero")
 
 
 class CompraService:

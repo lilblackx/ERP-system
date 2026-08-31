@@ -284,6 +284,17 @@ class PagarComisionesDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
+        respuesta = QMessageBox.question(
+            self,
+            "Confirmar pago",
+            f"¿Confirma el pago de ${float(self.monto_pendiente):,.2f} a {self.nombre_vendedor}?\n"
+            "Esta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+
         try:
             self.pago_creado = PagoComisionService.pagar_comisiones_vendedor(
                 self.session,

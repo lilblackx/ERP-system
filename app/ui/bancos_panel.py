@@ -43,6 +43,7 @@ from app.ui.styles import (
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
@@ -136,7 +137,9 @@ class BancosPanel(QWidget):
         # Barra de busqueda unica: matchea nombre, identificacion, codigo
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar por nombre, identificación o código…")
-        self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_input.addAction(
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
         self.buscar_input.setFixedWidth(320)

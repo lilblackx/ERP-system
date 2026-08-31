@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from app.db.models import Usuario
 from app.ui.styles import (
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     TOPBAR_HEIGHT,
     TOPBAR_QSS,
@@ -69,7 +70,9 @@ class TopBar(QWidget):
 
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar en el sistema…")
-        self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_input.addAction(
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.buscar_input.setObjectName("TopBarSearch")
         self.buscar_input.setFixedWidth(240)
         self.buscar_input.setFixedHeight(36)
@@ -77,7 +80,7 @@ class TopBar(QWidget):
         layout.addWidget(self.buscar_input)
 
         btn_notif = QPushButton()
-        btn_notif.setIcon(qta.icon("fa5s.bell", color="#64748B"))
+        btn_notif.setIcon(qta.icon("fa5s.bell", color=COLOR_TEXT_MUTED))
         btn_notif.setIconSize(QSize(18, 18))
         btn_notif.setObjectName("TopBarBtn")
         btn_notif.setFixedSize(38, 38)

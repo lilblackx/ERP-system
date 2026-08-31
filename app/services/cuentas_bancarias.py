@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.models import CuentaBancaria
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+from app.services.tesoreria import _enmascarar_numero_cuenta
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 TIPOS_CUENTA_VALIDOS = {"AHORRO", "CORRIENTE"}
@@ -86,7 +87,7 @@ class CuentaBancariaService:
             id_usuario=cuenta.creado_por,
             accion="CREAR_CUENTA_BANCARIA",
             modulo="CUENTAS_BANCARIAS",
-            detalle={"id_cuenta": cuenta.id_cuenta, "numero_cuenta": cuenta.numero_cuenta},
+            detalle={"id_cuenta": cuenta.id_cuenta, "numero_cuenta": _enmascarar_numero_cuenta(cuenta.numero_cuenta)},
         )
         return cuenta
 

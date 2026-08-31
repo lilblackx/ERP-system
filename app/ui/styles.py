@@ -511,7 +511,7 @@ QTabBar::tab:selected {{
     border-bottom: 2px solid {COLOR_PRIMARY};
 }}
 QTabBar::tab:disabled {{
-    color: #CBD5E1;
+    color: {COLOR_BORDER};
 }}
 """
 

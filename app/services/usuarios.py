@@ -1,3 +1,5 @@
+import re
+
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Permiso, Rol, RolPermiso, Usuario, Vendedor
@@ -15,6 +17,11 @@ NOMBRE_MAX = 100
 APELLIDO_MAX = 100
 EMAIL_MAX = 150
 
+# Chequeo de forma, no de entregabilidad real (validar eso requeriria enviar un correo) --
+# suficiente para atrapar un typo obvio ("asdf", "juan@") antes de que el usuario quede sin
+# forma de recibir su codigo de desbloqueo/recuperacion (RecuperacionAccesoService).
+_EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 def _validar_longitudes(nombre_usuario: str, nombre: str | None, apellido: str | None, email: str | None) -> None:
     if len(nombre_usuario) > NOMBRE_USUARIO_MAX:
@@ -25,6 +32,8 @@ def _validar_longitudes(nombre_usuario: str, nombre: str | None, apellido: str |
         raise ValueError(f"apellido no puede superar {APELLIDO_MAX} caracteres")
     if email and len(email) > EMAIL_MAX:
         raise ValueError(f"email no puede superar {EMAIL_MAX} caracteres")
+    if email and not _EMAIL_REGEX.match(email):
+        raise ValueError(f"'{email}' no tiene un formato de correo valido")
 
 
 def _validar_nombre_usuario_unico(session: Session, nombre_usuario: str, excluir_id: int | None = None) -> None:

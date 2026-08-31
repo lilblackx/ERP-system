@@ -52,6 +52,7 @@ from app.ui.styles import (
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     COLORES_ESTADO_FACTURA,
     SEARCH_QSS,
@@ -196,7 +197,9 @@ class FacturacionPanel(QWidget):
         # en cual escribir cada dato.
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar por N° de factura, cliente o vendedor…")
-        self.buscar_input.addAction(qta.icon("fa5s.search", color="#94A3B8"), QLineEdit.ActionPosition.LeadingPosition)
+        self.buscar_input.addAction(
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
         self.buscar_input.setFixedWidth(320)

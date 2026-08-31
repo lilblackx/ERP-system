@@ -30,6 +30,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
 from app.ui.auditoria_panel import AuditoriaPanel
 from app.ui.bancos_panel import BancosPanel
+from app.ui.cajas_panel import CajasPanel
 from app.ui.clientes_panel import ClientesPanel
 from app.ui.comisiones_panel import ComisionesPanel
 from app.ui.compras import ComprasView
@@ -66,7 +67,7 @@ MODULOS_CONFIG = {
     "cuentas_bancarias": ("Cuentas Bancarias", CuentasBancariasPanel),
     "cuentas_por_cobrar": ("Cuentas por Cobrar", CuentasPorCobrarPanel),
     "cuentas_por_pagar": ("Cuentas por Pagar", CuentasPorPagarPanel),
-    "cajas": ("Cajas", None),
+    "cajas": ("Cajas", CajasPanel),
     "vendedores": ("Vendedores", VendedoresPanel),
     "comisiones": ("Comisiones", ComisionesPanel),
     "control_tasas": ("Control de Tasas", TasasPanel),

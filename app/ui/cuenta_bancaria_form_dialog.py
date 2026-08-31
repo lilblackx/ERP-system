@@ -222,6 +222,7 @@ class CuentaBancariaFormDialog(QDialog):
         lbl_num.setProperty("class", "FormLabel")
         self.numero_input = QLineEdit()
         self.numero_input.setPlaceholderText("Ej: 0134-0001-123456789")
+        self.numero_input.setMaxLength(30)
         self.numero_input.setFixedHeight(36)
         grid.addWidget(lbl_num, 2, 0, 1, 2)
         grid.addWidget(self.numero_input, 3, 0, 1, 2)
@@ -235,15 +236,18 @@ class CuentaBancariaFormDialog(QDialog):
         grid.addWidget(lbl_tipo, 4, 0)
         grid.addWidget(self.tipo_combo, 5, 0)
 
-        # Saldo Inicial
-        lbl_saldo = QLabel("Saldo Inicial")
-        lbl_saldo.setProperty("class", "FormLabel")
+        # Saldo Inicial -- solo editable al CREAR la cuenta. En edicion se deshabilita
+        # (ver _precargar): cambiarlo a mano ahi rompe la trazabilidad, porque no genera
+        # ningun BancoMovimiento que explique el ajuste -- BancoMovimientoService.crear()
+        # es el unico camino que debe modificar saldo_total_banco despues de la creacion.
+        self.lbl_saldo = QLabel("Saldo Inicial")
+        self.lbl_saldo.setProperty("class", "FormLabel")
         self.saldo_input = QDoubleSpinBox()
         self.saldo_input.setRange(0, 999999999.99)
         self.saldo_input.setDecimals(2)
         self.saldo_input.setPrefix("$ ")
         self.saldo_input.setFixedHeight(36)
-        grid.addWidget(lbl_saldo, 4, 1)
+        grid.addWidget(self.lbl_saldo, 4, 1)
         grid.addWidget(self.saldo_input, 5, 1)
 
         # Nombre del Titular
@@ -328,6 +332,9 @@ class CuentaBancariaFormDialog(QDialog):
         self.nombre_input.setText(cuenta.nombre_titular or "")
         self.identificacion_input.setText(cuenta.identificacion_titular or "")
         self.saldo_input.setValue(float(cuenta.saldo_total_banco or 0))
+        self.saldo_input.setEnabled(False)
+        self.saldo_input.setToolTip("El saldo se actualiza registrando movimientos bancarios, no editando este campo.")
+        self.lbl_saldo.setText("Saldo Actual (solo lectura)")
 
         # Seleccionar banco
         idx_banco = self.banco_combo.findData(cuenta.id_banco)
@@ -373,11 +380,17 @@ class CuentaBancariaFormDialog(QDialog):
         self.accept()
 
     def get_data(self) -> dict:
-        return {
+        datos = {
             "id_banco": self.banco_combo.currentData(),
             "numero_cuenta": self.numero_input.text().strip(),
             "tipo_cuenta_banco": self.tipo_combo.currentText(),
             "nombre_titular": self.nombre_input.text().strip(),
             "identificacion_titular": self.identificacion_input.text().strip(),
-            "saldo_total_banco": self.saldo_input.value(),
         }
+        # Solo se establece al CREAR -- en edicion el campo esta deshabilitado (ver
+        # _precargar) y no debe viajar en el dict de actualizar(), para que
+        # CuentaBancariaService.actualizar() nunca reciba un cambio de saldo sin el
+        # BancoMovimiento que lo explique.
+        if self.cuenta is None:
+            datos["saldo_total_banco"] = self.saldo_input.value()
+        return datos
