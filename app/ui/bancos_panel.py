@@ -174,7 +174,7 @@ class BancosPanel(QWidget):
                 1: Qt.AlignmentFlag.AlignLeft,
                 2: Qt.AlignmentFlag.AlignLeft,
                 3: Qt.AlignmentFlag.AlignLeft,
-                4: Qt.AlignmentFlag.AlignCenter,
+                4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignLeft,
                 6: Qt.AlignmentFlag.AlignLeft,
                 7: Qt.AlignmentFlag.AlignLeft,

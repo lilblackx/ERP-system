@@ -1,11 +1,16 @@
+import logging
+
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -15,19 +20,25 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Banco, Usuario
 from app.services.cuentas_bancarias import CuentaBancariaService
+from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.permisos import PermisoDenegadoError
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
     COLOR_PRIMARY,
-    COLOR_SUCCESS,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
+    aplicar_sombra,
 )
+from app.ui.toolbar_popups import BotonExportar
+
+logger = logging.getLogger(__name__)
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
+COLS_VISIBLES = ["ID", "Banco", "Número de Cuenta", "Tipo", "Titular", "Identificación", "Saldo", "Estado"]
 
 
 class CuentasBancariasPanel(QWidget):
@@ -127,19 +138,12 @@ class CuentasBancariasPanel(QWidget):
         btn_nuevo = QPushButton("Nueva Cuenta")
         btn_nuevo.setIcon(qta.icon("fa5s.plus", color="#FFFFFF"))
         btn_nuevo.setStyleSheet(BUTTON_PRIMARY_QSS)
-        btn_nuevo.setFixedHeight(40)
-        btn_nuevo.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_nuevo.clicked.connect(self._on_nueva_cuenta)
         toolbar_layout.addWidget(btn_nuevo)
 
         # Botón Exportar
-        btn_exportar = QPushButton("Exportar")
-        btn_exportar.setIcon(qta.icon("fa5s.file-excel", color=COLOR_PRIMARY))
-        btn_exportar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_exportar.setFixedHeight(40)
-        btn_exportar.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_exportar.clicked.connect(self._on_exportar)
-        toolbar_layout.addWidget(btn_exportar)
+        self.btn_exportar = BotonExportar(on_excel=self._exportar_excel, on_pdf=self._exportar_pdf)
+        toolbar_layout.addWidget(self.btn_exportar)
 
         layout.addWidget(toolbar)
 
@@ -153,7 +157,13 @@ class CuentasBancariasPanel(QWidget):
         self.table.setFixedHeight(400)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.table.horizontalHeader().setStretchLastSection(True)
+        aplicar_sombra(self.table)
         self.table.setColumnWidth(0, 60)
         self.table.setColumnWidth(1, 180)
         self.table.setColumnWidth(2, 150)
@@ -172,12 +182,11 @@ class CuentasBancariasPanel(QWidget):
         self.lbl_paginacion = QLabel("Mostrando 0 de 0 registros")
         self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
         footer_layout.addWidget(self.lbl_paginacion)
-        footer_layout.addStretch()
 
-        btn_anterior = QPushButton("Anterior")
+        btn_anterior = QPushButton()
+        btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
         btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_anterior.setFixedHeight(36)
-        btn_anterior.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_anterior.setFixedWidth(40)
         btn_anterior.clicked.connect(self._on_pagina_anterior)
         footer_layout.addWidget(btn_anterior)
 
@@ -185,27 +194,25 @@ class CuentasBancariasPanel(QWidget):
         self.lbl_pagina_actual.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 13px; font-weight: 600;")
         footer_layout.addWidget(self.lbl_pagina_actual)
 
-        btn_siguiente = QPushButton("Siguiente")
+        btn_siguiente = QPushButton()
+        btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
         btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_siguiente.setFixedHeight(36)
-        btn_siguiente.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_siguiente.setFixedWidth(40)
         btn_siguiente.clicked.connect(self._on_pagina_siguiente)
         footer_layout.addWidget(btn_siguiente)
 
+        footer_layout.addStretch()
+
         # Botones de acción
-        btn_editar = QPushButton("Editar")
-        btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_PRIMARY))
+        btn_editar = QPushButton("Editar seleccionado")
+        btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_editar.setFixedHeight(36)
-        btn_editar.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_editar.clicked.connect(self._on_editar)
         footer_layout.addWidget(btn_editar)
 
-        btn_cambiar_estado = QPushButton("Cambiar Estado")
-        btn_cambiar_estado.setIcon(qta.icon("fa5s.toggle-on", color=COLOR_SUCCESS))
+        btn_cambiar_estado = QPushButton("Cambiar estado")
+        btn_cambiar_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
         btn_cambiar_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_cambiar_estado.setFixedHeight(36)
-        btn_cambiar_estado.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_cambiar_estado.clicked.connect(self._on_cambiar_estado)
         footer_layout.addWidget(btn_cambiar_estado)
 
@@ -350,10 +357,91 @@ class CuentasBancariasPanel(QWidget):
             self._pagina_actual += 1
             self._cargar_datos()
 
-    def _on_exportar(self):
-        """Exporta los datos actuales a Excel (placeholder)."""
-        # TODO: Implementar exportación a Excel
-        pass
+    def _filas_para_exportar(self, session) -> list[list]:
+        estado_filtro = None if self._filtro_estado == "TODOS" else self._filtro_estado
+        resultado = CuentaBancariaService.listar(
+            session,
+            texto_busqueda=self._texto_busqueda or None,
+            estado_cuenta=estado_filtro,
+            id_banco=self._filtro_banco,
+            id_usuario=self.usuario.id_usuario,
+            pagina=1,
+            por_pagina=1_000_000,
+        )
+        cuentas = resultado["items"]
+        return [
+            [
+                cuenta.id_cuenta,
+                cuenta.banco.nombre_banco if cuenta.banco else None,
+                cuenta.numero_cuenta,
+                cuenta.tipo_cuenta_banco,
+                cuenta.nombre_titular,
+                cuenta.identificacion_titular,
+                float(cuenta.saldo_total_banco or 0),
+                cuenta.estado_cuenta,
+            ]
+            for cuenta in cuentas
+        ]
+
+    def _exportar_excel(self):
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar cuentas bancarias", "cuentas_bancarias.xlsx", "Excel (*.xlsx)"
+        )
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            filas = self._filas_para_exportar(session)
+            exportar_excel(ruta, COLS_VISIBLES, filas)
+            QMessageBox.information(
+                self, "Exportación completa", f"Se exportaron {len(filas)} cuentas bancarias a:\n{ruta}"
+            )
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
+        except Exception:
+            logger.exception("Fallo al exportar la lista de cuentas bancarias a Excel")
+            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
+        finally:
+            session.close()
+
+    def _exportar_pdf(self):
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar cuentas bancarias", "cuentas_bancarias.pdf", "PDF (*.pdf)"
+        )
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            filas = self._filas_para_exportar(session)
+
+            filtros = {}
+            texto_busqueda = self.search_input.text().strip()
+            filtros["Búsqueda"] = texto_busqueda if texto_busqueda else "Todos"
+            filtros["Banco"] = self.banco_combo.currentText()
+            filtros["Estado"] = self.estado_combo.currentText()
+
+            col_widths = [0.5, 1.5, 1.5, 1.0, 1.5, 1.3, 1.0, 1.0]
+
+            exportar_pdf(
+                ruta,
+                "Reporte de Cuentas Bancarias",
+                COLS_VISIBLES,
+                filas,
+                filtros=filtros,
+                col_widths=col_widths,
+            )
+            QMessageBox.information(
+                self, "Exportación completa", f"Se exportaron {len(filas)} cuentas bancarias a:\n{ruta}"
+            )
+        except PermisoDenegadoError:
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
+        except Exception:
+            logger.exception("Fallo al exportar la lista de cuentas bancarias a PDF")
+            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
+        finally:
+            session.close()
 
     def closeEvent(self, event):
         """Detiene el timer de auto-refresh cuando se cierra el panel."""

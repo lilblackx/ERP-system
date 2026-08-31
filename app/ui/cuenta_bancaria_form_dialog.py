@@ -141,7 +141,7 @@ class CuentaBancariaFormDialog(QDialog):
         self.session = session
         self.cuenta = cuenta
         self.setWindowTitle("Editar Cuenta Bancaria" if cuenta else "Nueva Cuenta Bancaria")
-        self.setFixedSize(800, 520)
+        self.setFixedWidth(800)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 

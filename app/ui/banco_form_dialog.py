@@ -127,7 +127,7 @@ class BancoFormDialog(QDialog):
         self.session = session
         self.banco = banco
         self.setWindowTitle("Editar Banco" if banco else "Nuevo Banco")
-        self.setFixedSize(800, 520)
+        self.setFixedWidth(800)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 

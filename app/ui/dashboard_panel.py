@@ -385,6 +385,7 @@ class DashboardPanel(QWidget):
     """Panel general: primera pantalla tras iniciar sesión."""
 
     nueva_factura_solicitada = Signal()
+    ver_facturas_solicitado = Signal()
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -575,11 +576,29 @@ class DashboardPanel(QWidget):
         fv.setSpacing(4)
         lbl_titulo = QLabel("Facturas recientes")
         lbl_titulo.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
+
+        btn_ver_mas = QPushButton(" Ver más")
+        btn_ver_mas.setIcon(qta.icon("fa5s.arrow-right", color=COLOR_PRIMARY))
+        btn_ver_mas.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ver_mas.setFlat(True)
+        btn_ver_mas.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none; color: {COLOR_PRIMARY};"
+            " font-size: 11px; font-weight: bold; }}"
+            " QPushButton:hover { text-decoration: underline; }"
+        )
+        btn_ver_mas.clicked.connect(self.ver_facturas_solicitado.emit)
+
+        header_facturas = QHBoxLayout()
+        header_facturas.setContentsMargins(0, 0, 0, 0)
+        header_facturas.addWidget(lbl_titulo)
+        header_facturas.addStretch()
+        header_facturas.addWidget(btn_ver_mas)
+
         lbl_subtitulo = QLabel("Últimos movimientos de ventas")
         lbl_subtitulo.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
         self.facturas_lista = QVBoxLayout()
         self.facturas_lista.setSpacing(0)
-        fv.addWidget(lbl_titulo)
+        fv.addLayout(header_facturas)
         fv.addWidget(lbl_subtitulo)
         fv.addLayout(self.facturas_lista)
         fv.addStretch()
