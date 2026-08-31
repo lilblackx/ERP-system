@@ -409,6 +409,17 @@ class ProductoFormDialog(QDialog):
         grid.addWidget(lbl_unidad, 3, 0, 1, 2)
         grid.addWidget(self.cantidad_unidad_input, 4, 0, 1, 2)
 
+        # Umbral para el reporte "Stock bajo minimo" (migrations/0037). 0 = sin minimo
+        # configurado, el producto no aparece en ese reporte.
+        lbl_minima = QLabel("Stock Mínimo (alerta)")
+        lbl_minima.setProperty("class", "FormLabel")
+        self.cantidad_minima_input = QDoubleSpinBox()
+        self.cantidad_minima_input.setRange(0, 999999.99)
+        self.cantidad_minima_input.setDecimals(2)
+        self.cantidad_minima_input.setFixedHeight(32)
+        grid.addWidget(lbl_minima, 5, 0, 1, 2)
+        grid.addWidget(self.cantidad_minima_input, 6, 0, 1, 2)
+
         layout.addLayout(grid)
         layout.addStretch()
         return card
@@ -496,6 +507,7 @@ class ProductoFormDialog(QDialog):
         self.descripcion_input.setText(producto.descripcion_producto or "")
         self.costo_input.setValue(float(producto.costo_producto or 0))
         self.cantidad_unidad_input.setValue(float(producto.cantidad_unidad or 0))
+        self.cantidad_minima_input.setValue(float(producto.cantidad_minima or 0))
 
         idx_categoria = self.categoria_combo.findData(producto.id_categoria)
         if idx_categoria >= 0:
@@ -534,6 +546,7 @@ class ProductoFormDialog(QDialog):
             "id_categoria": self.categoria_combo.currentData(),
             "costo_producto": self.costo_input.value(),
             "cantidad_unidad": self.cantidad_unidad_input.value(),
+            "cantidad_minima": self.cantidad_minima_input.value(),
             "fecha_vencimiento": (
                 self.vencimiento_input.date().toPython() if self.tiene_vencimiento_check.isChecked() else None
             ),

@@ -189,6 +189,9 @@ class Inventario(Base):
     descripcion_producto: Mapped[str | None] = mapped_column(String)
     cantidad_caja: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.000")
     cantidad_unidad: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.000")
+    # Umbral de "stock bajo minimo" para el reporte del mismo nombre (migrations/0037).
+    # 0.00 = sin minimo configurado para ese producto (no aparece en el reporte).
+    cantidad_minima: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.00")
     costo_producto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
     fecha_registro: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)

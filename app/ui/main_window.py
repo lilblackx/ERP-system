@@ -42,6 +42,7 @@ from app.ui.facturacion_panel import FacturacionPanel
 from app.ui.inventario_panel import InventarioPanel
 from app.ui.placeholder_view import PlaceholderView
 from app.ui.proveedores_panel import ProveedoresPanel
+from app.ui.reportes_panel import ReportesPanel
 from app.ui.sidebar import Sidebar
 from app.ui.styles import GLOBAL_QSS
 from app.ui.tasa_ticker import TasaTicker
@@ -69,12 +70,13 @@ MODULOS_CONFIG = {
     "vendedores": ("Vendedores", VendedoresPanel),
     "comisiones": ("Comisiones", ComisionesPanel),
     "control_tasas": ("Control de Tasas", TasasPanel),
-    # Placeholder a proposito -- ReporteService (app/services/reportes.py) ya tiene
-    # aging_cuentas_por_cobrar/arqueo_caja, pero el modulo de UI se desarrolla aparte
-    # (pedido del usuario, 2026-08-28). El recurso 'reportes' ya existe en el catalogo de
-    # permisos desde migrations/0016_catalogo_permisos_reportes.sql, sin asignar a ningun
-    # rol todavia -- un ADMIN lo otorga explicitamente cuando el modulo este listo.
-    "reportes": ("Reportes", None),
+    # ReportesPanel arranca con los dos reportes ya resueltos en ReporteService (aging CxC
+    # + arqueo de caja); el resto del catalogo (aging CxP, libro de ventas SENIAT, kardex,
+    # etc.) se agrega en pasos siguientes sobre esta misma pantalla. El recurso 'reportes'
+    # ya existe en el catalogo de permisos desde migrations/0016, sin asignar a ningun rol
+    # todavia -- un ADMIN lo otorga explicitamente por rol cuando corresponda (ADMIN mismo
+    # bypassa el RBAC, ver UsuarioService.verificar_permiso).
+    "reportes": ("Reportes", ReportesPanel),
     "config_empresa": ("Configuración", ConfigEmpresaPanel),
     "usuarios": ("Usuarios", UsuariosPanel),
     "auditoria": ("Auditoría", AuditoriaPanel),
@@ -233,6 +235,7 @@ class MainWindow(QMainWindow):
 
             if isinstance(panel, DashboardPanel):
                 panel.nueva_factura_solicitada.connect(lambda: self.navegar_a("facturacion"))
+                panel.ver_facturas_solicitado.connect(lambda: self.navegar_a("facturacion"))
             if isinstance(panel, TasasPanel):
                 panel.tasa_registrada.connect(self.ticker_tasas.cargar_tasa)
 

@@ -32,6 +32,18 @@ class EmpresaService:
         return True, config.iva_porcentaje or Decimal("0")
 
     @staticmethod
+    def obtener_datos_documento(session: Session) -> ConfiguracionEmpresa | None:
+        """Sin gate de permiso, a proposito -- mismo criterio que obtener_iva_vigente():
+        los datos de la empresa (razon social, RIF, direccion, telefono, logo) van
+        impresos en cualquier documento generado por el sistema (factura, y ahora todos
+        los reportes exportados a Excel/PDF via reportes_panel.py), sin importar si quien
+        exporta tiene el permiso 'empresa'/'ver' (que protege la *edicion* y consulta de
+        la pantalla de configuracion, no la impresion de esos mismos datos en un
+        documento). Exigirlo aca acoplaria el permiso 'reportes'/'ver' con 'empresa'/'ver'
+        sin necesidad."""
+        return session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
+
+    @staticmethod
     def guardar_configuracion(
         session: Session,
         rif: str | None,
