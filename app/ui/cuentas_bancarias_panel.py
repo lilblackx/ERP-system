@@ -24,6 +24,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import _enmascarar_numero_cuenta
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
+from app.ui.movimientos_cuenta_dialog import MovimientosCuentaDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -205,6 +206,12 @@ class CuentasBancariasPanel(QWidget):
         footer_layout.addStretch()
 
         # Botones de acción
+        btn_ver_movimientos = QPushButton("Ver movimientos")
+        btn_ver_movimientos.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_DARK))
+        btn_ver_movimientos.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_ver_movimientos.clicked.connect(self._on_ver_movimientos)
+        footer_layout.addWidget(btn_ver_movimientos)
+
         btn_editar = QPushButton("Editar seleccionado")
         btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
@@ -341,6 +348,22 @@ class CuentasBancariasPanel(QWidget):
             CuentaBancariaService.cambiar_estado(
                 session, cuenta.id_cuenta, nuevo_estado, id_usuario=self.usuario.id_usuario
             )
+            self._cargar_datos()
+        finally:
+            session.close()
+
+    def _on_ver_movimientos(self):
+        """Abre el diálogo para ver los movimientos de la cuenta seleccionada."""
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria para ver sus movimientos.")
+            return
+
+        cuenta = self._cuentas[row]
+        session = self.session_factory()
+        try:
+            dialog = MovimientosCuentaDialog(session, cuenta, self.usuario, parent=self)
+            dialog.exec()
             self._cargar_datos()
         finally:
             session.close()
