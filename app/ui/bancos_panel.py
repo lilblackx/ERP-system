@@ -61,7 +61,7 @@ ESTADOS_FILTRO = [
 
 COLORES_ESTADO_BANCO = {
     "ACTIVO": COLOR_SUCCESS,
-    "INACTIVO": COLOR_TEXT_MUTED,
+    "INACTIVO": "#dc3545",  # Rojo para estado inactivo
 }
 
 
@@ -216,6 +216,12 @@ class BancosPanel(QWidget):
         self.btn_eliminar.setEnabled(False)
         self.btn_eliminar.clicked.connect(self.eliminar_banco)
 
+        self.btn_cambiar_estado = QPushButton("Cambiar Estado")
+        self.btn_cambiar_estado.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_LIGHT))
+        self.btn_cambiar_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_cambiar_estado.setEnabled(False)
+        self.btn_cambiar_estado.clicked.connect(self.cambiar_estado_banco)
+
         self.btn_anterior = QPushButton("Anterior")
         self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_anterior.setEnabled(False)
@@ -230,6 +236,7 @@ class BancosPanel(QWidget):
         h.addStretch()
         h.addWidget(self.btn_editar)
         h.addWidget(self.btn_eliminar)
+        h.addWidget(self.btn_cambiar_estado)
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         return w
@@ -428,11 +435,45 @@ class BancosPanel(QWidget):
         finally:
             session.close()
 
+    def cambiar_estado_banco(self):
+        """Cambia el estado del banco seleccionado (ACTIVO <-> INACTIVO)."""
+        row = self.tabla.currentRow()
+        if row < 0:
+            return
+
+        item = self.tabla.item(row, COL_ID_INTERNO)
+        if item is None:
+            return
+
+        banco_id = int(item.text())
+        session = self.session_factory()
+        try:
+            banco = session.query(Banco).filter(Banco.id_banco == banco_id).first()
+            if banco:
+                nuevo_estado = "INACTIVO" if banco.estado_banco == "ACTIVO" else "ACTIVO"
+                reply = QMessageBox.question(
+                    self,
+                    "Confirmar cambio de estado",
+                    f"¿Cambiar el estado del banco '{banco.nombre_banco}' a {nuevo_estado}?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    banco.estado_banco = nuevo_estado
+                    banco.modificado_por = self.usuario.id_usuario
+                    session.commit()
+                    logger.info(f"Estado del banco cambiado: {banco.nombre_banco} -> {nuevo_estado}")
+                    self.cargar_bancos()
+        except Exception:
+            logger.exception("Error al cambiar estado del banco")
+        finally:
+            session.close()
+
     def _on_selection_changed(self):
-        """Habilita/deshabilita los botones de editar y eliminar según la selección."""
+        """Habilita/deshabilita los botones de editar, eliminar y cambiar estado según la selección."""
         has_selection = self.tabla.currentRow() >= 0
         self.btn_editar.setEnabled(has_selection)
         self.btn_eliminar.setEnabled(has_selection)
+        self.btn_cambiar_estado.setEnabled(has_selection)
 
     def _guardar_banco(self, session, data: dict):
         """Guarda un nuevo banco en la base de datos."""
