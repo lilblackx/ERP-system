@@ -35,6 +35,7 @@ from PySide6.QtWidgets import QApplication
 from app.config import validar_configuracion
 from app.db.migrar import verificar_migraciones_al_dia
 from app.logging_config import setup_logging
+from app.ui.geo_http import esperar_workers_pendientes
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
 from app.ui.styles import generar_iconos_qss
@@ -50,6 +51,10 @@ def main():
     # con el compositor de Chromium) -- hallazgo real, no un caso hipotetico.
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
+    # Ver app/ui/geo_http.py::esperar_workers_pendientes -- evita que cerrar la app
+    # mientras una busqueda/geolocalizacion en el mapa sigue en vuelo destruya un QThread
+    # todavia corriendo (fatal en Qt).
+    app.aboutToQuit.connect(esperar_workers_pendientes)
     # qtawesome necesita una QApplication ya creada para renderizar el PNG que usan las
     # flechas de QComboBox/QDateEdit (GLOBAL_QSS y los QSS locales de los dialogos) --
     # ver el comentario junto a generar_iconos_qss() en app/ui/styles.py.

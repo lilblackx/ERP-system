@@ -378,7 +378,7 @@ class RutaFormDialog(QDialog):
         self.mapa.dibujar_trazado(self._trazado_actual)
 
         self.lbl_calculando.setVisible(True)
-        self._worker_trazado = HttpWorker(functools.partial(calcular_ruta_por_calles, origen, destino), self)
+        self._worker_trazado = HttpWorker(functools.partial(calcular_ruta_por_calles, origen, destino))
         self._worker_trazado.resultado.connect(functools.partial(self._on_trazado_calculado, origen, destino))
         self._worker_trazado.start()
 

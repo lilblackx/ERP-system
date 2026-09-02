@@ -669,6 +669,31 @@ de servicio.
   Chromium) con `QTimer.singleShot(0, ...)` en vez de en `__init__`, para que el diálogo
   que lo contiene quede visible de inmediato en lugar de bloquear su apertura completa.
 
+- **Fixes de auditoría sobre Vendedores/Rutas/geolocalización (2026-09-02)**:
+  - `VendedorFormDialog` cargaba el combo de rutas con una query directa
+    (`session.query(Ruta)...`), sin pasar por `RutaService.listar()` — cualquier usuario
+    con permiso `vendedores/crear` o `vendedores/editar` veía el catálogo de rutas aunque
+    no tuviera `rutas/ver`. Ahora usa `RutaService.listar()` (requiere `id_usuario` nuevo
+    en el constructor del diálogo) y cae a una lista vacía ante `PermisoDenegadoError`.
+  - `VendedorService.crear()`/`actualizar()` validan que el `id_ruta` recibido exista y
+    esté `ACTIVO` (`_validar_ruta_activa()`) — antes solo la UI restringía el combo a
+    rutas activas, un llamado directo al servicio podía asignar una ruta desactivada sin
+    aviso.
+  - CAJERO tenía `vendedores/ver` (desde `migrations/0030`) pero nunca `rutas/ver`:
+    abría el módulo Vendedores pero las pestañas nuevas "Rutas"/"Mapa"
+    (`migrations/0038`) le tiraban "Sin permiso". `migrations/0041` se lo otorga.
+  - `HttpWorker` (`app/ui/geo_http.py`) se creaba con `parent=self` (el widget que lo
+    lanza, ej. `MapaWidget`/`RutaFormDialog`). Cerrar la app mientras una búsqueda/
+    geolocalización/cálculo de trazado sigue en vuelo (timeout de 5s) destruye un
+    `QThread` todavía corriendo al desmontar el árbol de widgets — fatal en Qt. Ahora los
+    workers no tienen padre Qt, se auto-registran en un set a nivel de módulo mientras
+    corren y se limpian solos al terminar (`_limpiar()`); `app/main.py` conecta
+    `QApplication.aboutToQuit` a `esperar_workers_pendientes()` para esperarlos antes de
+    cerrar.
+  - Cobertura de tests nueva: `id_ruta` obligatorio/válido/activo en
+    `tests/services/test_vendedores.py`, y `tests/ui/test_geo_http.py` (funciones puras
+    de `geo_http.py` mockeando `urllib.request.urlopen`, sin necesitar base de datos).
+
 ## 9. Pendiente / próximos pasos sugeridos
 
 - UI: cubiertos login, clientes, inventario, facturación, vendedores, config. de
@@ -918,3 +943,54 @@ de servicio.
     menor que tenia Clientes (`update_cliente` nunca se probaba re-validando duplicado al
     cambiar codigo/identificacion, solo el camino de `create_cliente`) cerrado en
     `tests/services/test_clientes.py`.
+
+- **Requerimientos nuevos del cliente (2026-09-01)** -- lista entregada para evaluar,
+  auditada contra el codigo actual. Tres necesitan una decision de negocio del equipo
+  antes de poder disenarlos (no son huecos tecnicos, son ambiguedad de alcance):
+  - **"Drop site de facturacion"**: sin equivalente en ningun lado del sistema (grep de
+    "drop"/"entrega"/"punto_entrega"/"direccion_entrega" en modelos y servicios de
+    cliente, cero resultados relevantes; `Cliente` solo tiene una `direccion` unica, sin
+    soporte de multiples direcciones/puntos de entrega). Falta que el equipo aclare que
+    es exactamente: ¿un punto de entrega distinto a la direccion registrada del cliente?
+    ¿una parada de ruta donde se agrupan pedidos de varios clientes? ¿otra cosa? Sin esa
+    definicion no se puede estimar si hace falta tabla nueva (probable) ni el diseño.
+  - **"Activacion por categorias por ruta"**: sin equivalente (cero reportes cruzan Ruta
+    con `CategoriaCliente` hoy). Tecnicamente viable sin migraciones nuevas -- Cliente ->
+    Vendedor -> Ruta y Cliente -> CategoriaCliente ya estan resueltos en otros lados del
+    sistema (`listar_clientes_por_ruta` en `clientes.py`) -- pero falta que el equipo
+    defina que significa "cliente activo" (¿compro en los ultimos 30 dias? ¿al menos 1
+    factura en el periodo actual? ¿otro criterio?).
+  - **"Asignacion de cuotas y entrega de ejecucion en curso y cierre graficado o
+    porcentual"**: el mas grande de la lista, sin nada construido (sin tabla, servicio ni
+    pantalla -- grep de "cuota"/"meta"/"objetivo"/"target" no da ningun hit real de
+    metas de venta). Preguntas pendientes con el equipo antes de disenarlo: ¿la cuota se
+    asigna a vendedor, a ruta, o a ambos? ¿en que unidad se mide (dolares facturados,
+    unidades, clientes activos)? ¿cada cuanto (mensual/quincenal/semanal)? ¿que
+    significa "cierre" exactamente (foto del cumplimiento al final del periodo,
+    comparada o no contra periodos anteriores)? ¿quien la asigna y de donde sale el
+    numero (carga manual por periodo, o alguna formula ej. % de crecimiento vs mes
+    anterior)? Los datos de ejecucion real (facturacion por vendedor/ruta/periodo) ya
+    existen -- lo que falta es la meta en si y como se compara.
+
+  Los otros tres puntos de la lista ya estan tecnicamente claros, sin nada que definir
+  con el equipo -- solo falta construirlos:
+  - **"Dolares totales facturados por ruta"**: no existe, pero es una extension directa
+    de `ReportesService.ventas_por_vendedor` (`reportes.py`) agrupando por
+    `Vendedor.id_ruta` en vez de por vendedor.
+  - **"Facturacion vs rentabilidad"**: ya existe a nivel de producto
+    (`ReportesService.margen_utilidad_productos`, compara ingreso vs costo por producto
+    en un rango de fechas, ordenado por margen). Extenderlo a ruta/vendedor es el mismo
+    patron de agrupacion que el punto anterior.
+  - **"Analisis de vencimiento" (saldo a favor + dias por factura + numero de
+    factura/nota + emision de notas de credito)**: ya existe casi todo, repartido en dos
+    reportes separados -- `ReporteService.aging_cuentas_por_cobrar` (dias vencidos y
+    numero de factura por fila) y `ReporteService.notas_credito_emitidas`
+    (`saldo_disponible` y numero de nota, correlativo fiscal); la emision de notas de
+    credito ya es automatica al anular una factura con pagos aplicados (ver
+    `NotaCreditoService` en la seccion 3/"Notas de credito automaticas"). Falta unificar
+    ambos reportes en una sola vista por cliente en vez de mirarlos por separado.
+  - **"Mapeo de ruta / geolocalizacion de cliente"**: completo (2026-09-01, ver
+    `app/ui/mapa_rutas_panel.py`, `app/ui/ruta_form_dialog.py`,
+    `migrations/0038`-`0040`) -- trazado real por calles (OSRM) entre origen y destino de
+    cada ruta, clientes geolocalizados pintados junto con su ruta, busqueda de cliente
+    que centra el mapa, toggle "Mostrar clientes".
