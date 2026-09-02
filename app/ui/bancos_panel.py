@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSpacerItem,
@@ -191,6 +192,7 @@ class BancosPanel(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         self.tabla.doubleClicked.connect(self.editar_banco)
+        self.tabla.itemSelectionChanged.connect(self._on_selection_changed)
         return self.tabla
 
     def _make_footer(self) -> QWidget:
@@ -201,6 +203,18 @@ class BancosPanel(QWidget):
 
         self.lbl_paginacion = QLabel("Página 1 de 1")
         self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
+
+        self.btn_editar = QPushButton("Editar")
+        self.btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_LIGHT))
+        self.btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_editar.setEnabled(False)
+        self.btn_editar.clicked.connect(self.editar_banco)
+
+        self.btn_eliminar = QPushButton("Eliminar")
+        self.btn_eliminar.setIcon(qta.icon("fa5s.trash", color=COLOR_TEXT_LIGHT))
+        self.btn_eliminar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_eliminar.setEnabled(False)
+        self.btn_eliminar.clicked.connect(self.eliminar_banco)
 
         self.btn_anterior = QPushButton("Anterior")
         self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
@@ -214,6 +228,8 @@ class BancosPanel(QWidget):
 
         h.addWidget(self.lbl_paginacion)
         h.addStretch()
+        h.addWidget(self.btn_editar)
+        h.addWidget(self.btn_eliminar)
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         return w
@@ -380,6 +396,43 @@ class BancosPanel(QWidget):
             logger.exception("Error al editar banco")
         finally:
             session.close()
+
+    def eliminar_banco(self):
+        """Elimina el banco seleccionado."""
+        row = self.tabla.currentRow()
+        if row < 0:
+            return
+
+        item = self.tabla.item(row, COL_ID_INTERNO)
+        if item is None:
+            return
+
+        banco_id = int(item.text())
+        session = self.session_factory()
+        try:
+            banco = session.query(Banco).filter(Banco.id_banco == banco_id).first()
+            if banco:
+                reply = QMessageBox.question(
+                    self,
+                    "Confirmar eliminación",
+                    f"¿Está seguro de eliminar el banco '{banco.nombre_banco}'?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    session.delete(banco)
+                    session.commit()
+                    logger.info(f"Banco eliminado: {banco.nombre_banco}")
+                    self.cargar_bancos()
+        except Exception:
+            logger.exception("Error al eliminar banco")
+        finally:
+            session.close()
+
+    def _on_selection_changed(self):
+        """Habilita/deshabilita los botones de editar y eliminar según la selección."""
+        has_selection = self.tabla.currentRow() >= 0
+        self.btn_editar.setEnabled(has_selection)
+        self.btn_eliminar.setEnabled(has_selection)
 
     def _guardar_banco(self, session, data: dict):
         """Guarda un nuevo banco en la base de datos."""
