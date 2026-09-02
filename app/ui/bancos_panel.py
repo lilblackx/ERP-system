@@ -33,6 +33,7 @@ from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
+    COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_LIGHT,
@@ -57,6 +58,11 @@ ESTADOS_FILTRO = [
     ("Inactivos", "INACTIVO"),
 ]
 
+COLORES_ESTADO_BANCO = {
+    "ACTIVO": COLOR_SUCCESS,
+    "INACTIVO": COLOR_TEXT_MUTED,
+}
+
 
 class BancosPanel(QWidget):
     """
@@ -72,10 +78,11 @@ class BancosPanel(QWidget):
         self.pagina_actual = 1
         self.total_paginas = 1
         self.bancos = []
+        self._search_timer = None
         self.setObjectName("ContentArea")
         self._setup_ui()
-        # Carga inicial diferida para no bloquear el arranque
-        QTimer.singleShot(100, self.cargar_bancos)
+        # Cargar bancos inmediatamente
+        self.cargar_bancos()
 
     def showEvent(self, event: QShowEvent) -> None:
         # MainWindow cachea el panel y lo reutiliza via QStackedWidget
@@ -217,15 +224,18 @@ class BancosPanel(QWidget):
         """Carga la lista de bancos desde la base de datos."""
         session = self.session_factory()
         try:
+            # Primero cargar todos los bancos sin filtros para depuración
             query = session.query(Banco)
 
             # Filtro de estado
             estado_filtro = self.estado_combo.currentData()
+            logger.info(f"Filtro de estado: {estado_filtro}")
             if estado_filtro:
                 query = query.filter(Banco.estado_banco == estado_filtro)
 
             # Filtro de búsqueda
             busqueda = self.buscar_input.text().strip()
+            logger.info(f"Búsqueda: '{busqueda}'")
             if busqueda:
                 like_pattern = f"%{busqueda}%"
                 query = query.filter(
@@ -236,11 +246,19 @@ class BancosPanel(QWidget):
                 )
 
             self.bancos = query.order_by(Banco.nombre_banco).all()
+            logger.info(f"Cargados {len(self.bancos)} bancos de la base de datos")
+            for banco in self.bancos:
+                logger.info(
+                    f"  - ID: {banco.id_banco}, Nombre: {banco.nombre_banco}, "
+                    f"Código: {banco.codigo_banco}, Estado: {banco.estado_banco}"
+                )
             self._actualizar_tabla()
             self._actualizar_paginacion()
-        except Exception:
-            logger.exception("Error al cargar bancos")
+        except Exception as e:
+            logger.exception(f"Error al cargar bancos: {e}")
             self.bancos = []
+            self._actualizar_tabla()
+            self._actualizar_paginacion()
         finally:
             session.close()
 
@@ -281,7 +299,8 @@ class BancosPanel(QWidget):
 
             # Estado
             estado = banco.estado_banco or "N/A"
-            estado_widget = EstadoBadge(estado)
+            color_estado = COLORES_ESTADO_BANCO.get(estado, COLOR_TEXT_MUTED)
+            estado_widget = EstadoBadge(estado, color_estado)
             self.tabla.setCellWidget(row, 7, estado_widget)
 
         self.lbl_total.setText(f"{len(self.bancos)} bancos")
@@ -343,7 +362,11 @@ class BancosPanel(QWidget):
         if row < 0:
             return
 
-        banco_id = int(self.tabla.item(row, COL_ID_INTERNO).text())
+        item = self.tabla.item(row, COL_ID_INTERNO)
+        if item is None:
+            return
+
+        banco_id = int(item.text())
         session = self.session_factory()
         try:
             banco = session.query(Banco).filter(Banco.id_banco == banco_id).first()
@@ -379,7 +402,6 @@ class BancosPanel(QWidget):
 
     def _actualizar_banco(self, session, banco: Banco, data: dict):
         """Actualiza un banco existente."""
-        from datetime import datetime
 
         banco.codigo_banco = data["codigo_banco"]
         banco.nombre_banco = data["nombre_banco"]
@@ -388,6 +410,5 @@ class BancosPanel(QWidget):
         banco.correo_banco = data["correo_banco"]
         banco.numero_telefono_banco = data["numero_telefono_banco"]
         banco.modificado_por = self.usuario.id_usuario
-        banco.fecha_modificacion = datetime.now()
         session.commit()
         logger.info(f"Banco actualizado: {data['nombre_banco']}")
