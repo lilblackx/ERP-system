@@ -61,6 +61,7 @@ from app.ui.styles import (
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     ICON_CHEVRON_UP_URL,
+    SEARCH_QSS,
     TABLE_QSS,
     EstadoBadge,
     aplicar_sombra,
@@ -367,8 +368,11 @@ class CuentasPorCobrarPanel(QWidget):
         self.usuario = usuario
         self.pagina_actual = 1
         self.total_paginas = 1
+        self.texto_busqueda = ""
+        self.filtro_vendedor = None
         self.setObjectName("ContentArea")
         self._setup_ui()
+        self._cargar_vendedores()
         QTimer.singleShot(100, self.cargar_cuentas)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -405,8 +409,16 @@ class CuentasPorCobrarPanel(QWidget):
             " padding: 3px 10px;"
         )
 
+        self.lbl_saldo_total = QLabel("$0.00")
+        self.lbl_saldo_total.setStyleSheet(
+            f"color: {COLOR_SUCCESS}; font-size: 13px; font-weight: bold;"
+            f" background-color: {COLOR_TABLE_HEADER}; border-radius: 10px;"
+            " padding: 3px 10px;"
+        )
+
         h.addWidget(lbl)
         h.addWidget(self.lbl_total)
+        h.addWidget(self.lbl_saldo_total)
         h.addStretch()
         return w
 
@@ -419,12 +431,29 @@ class CuentasPorCobrarPanel(QWidget):
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)
 
+        # Barra de búsqueda
+        self.buscar_input = QLineEdit()
+        self.buscar_input.setPlaceholderText("Buscar por cliente o número de factura…")
+        self.buscar_input.addAction(
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+        )
+        self.buscar_input.setObjectName("SearchInput")
+        self.buscar_input.setStyleSheet(SEARCH_QSS)
+        self.buscar_input.setFixedWidth(320)
+        self.buscar_input.textChanged.connect(self._busqueda_dinamica)
+
         self.estado_combo = QComboBox()
         for etiqueta, valor in ESTADOS_FILTRO:
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
-        self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
+        self.vendedor_combo = QComboBox()
+        self.vendedor_combo.addItem("Todos los vendedores", None)
+        self.vendedor_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
+
+        self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo), ("Vendedor", self.vendedor_combo)])
+
+        h.addWidget(self.buscar_input)
         h.addStretch()
         h.addWidget(self.btn_filtrar)
         return w
@@ -486,9 +515,32 @@ class CuentasPorCobrarPanel(QWidget):
 
     # ── Paginacion ───────────────────────────────────────────────────────
 
+    def _cargar_vendedores(self) -> None:
+        """Carga la lista de vendedores en el combo de filtro."""
+        session = self.session_factory()
+        try:
+            from app.db.models import Usuario
+            vendedores = session.query(Usuario).filter(Usuario.rol == "vendedor").all()
+            self.vendedor_combo.blockSignals(True)
+            self.vendedor_combo.clear()
+            self.vendedor_combo.addItem("Todos los vendedores", None)
+            for vendedor in vendedores:
+                self.vendedor_combo.addItem(vendedor.nombre, vendedor.id_usuario)
+            self.vendedor_combo.blockSignals(False)
+        except Exception:
+            logger.exception("Error al cargar vendedores")
+        finally:
+            session.close()
+
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
         self.cargar_cuentas()
+
+    def _busqueda_dinamica(self) -> None:
+        """Búsqueda en tiempo real con debounce."""
+        if hasattr(self, "_search_timer") and self._search_timer is not None:
+            self._search_timer.stop()
+        self._search_timer = QTimer.singleShot(300, self._buscar_desde_inicio)
 
     def _pagina_anterior(self) -> None:
         if self.pagina_actual > 1:
@@ -505,6 +557,9 @@ class CuentasPorCobrarPanel(QWidget):
     def cargar_cuentas(self) -> None:
         session = self.session_factory()
         try:
+            self.texto_busqueda = self.buscar_input.text().strip()
+            self.filtro_vendedor = self.vendedor_combo.currentData()
+
             resultado = PagoService.listar_cuentas_por_cobrar(
                 session,
                 estado=self.estado_combo.currentData(),
@@ -512,6 +567,41 @@ class CuentasPorCobrarPanel(QWidget):
                 por_pagina=POR_PAGINA,
                 id_usuario=self.usuario.id_usuario,
             )
+
+            # Aplicar filtros de búsqueda y vendedor manualmente
+            cuentas_filtradas = []
+            for cuenta in resultado["items"]:
+                try:
+                    # Filtro de vendedor
+                    if self.filtro_vendedor is not None:
+                        if cuenta.factura and cuenta.factura.id_vendedor != self.filtro_vendedor:
+                            continue
+
+                    # Filtro de búsqueda (cliente y número de factura)
+                    if self.texto_busqueda:
+                        cliente = None
+                        numero_factura = ""
+                        nombre = ""
+
+                        if cuenta.factura:
+                            numero_factura = cuenta.factura.numero_factura or ""
+                            if cuenta.factura.cliente:
+                                cliente = cuenta.factura.cliente
+                                nombre = cliente.nombre_razon_social or ""
+
+                        if (self.texto_busqueda.lower() not in nombre.lower() and
+                            self.texto_busqueda.lower() not in numero_factura.lower()):
+                            continue
+
+                    cuentas_filtradas.append(cuenta)
+                except AttributeError:
+                    # Si hay error al acceder a atributos, saltar esta cuenta
+                    continue
+
+            # Actualizar resultado con cuentas filtradas
+            resultado["items"] = cuentas_filtradas
+            resultado["total"] = len(cuentas_filtradas)
+
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas por cobrar.")
@@ -524,6 +614,8 @@ class CuentasPorCobrarPanel(QWidget):
     def _poblar_tabla(self, resultado: dict) -> None:
         cuentas: list[CuentaPorCobrar] = resultado["items"]
         self.tabla.setRowCount(len(cuentas))
+
+        saldo_total = 0.0
         for fila, cuenta in enumerate(cuentas):
             factura = cuenta.factura
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(cuenta.id_cuenta_por_cobrar)))
@@ -538,11 +630,14 @@ class CuentasPorCobrarPanel(QWidget):
             color = COLORES_ESTADO_CXC.get(estado_visual, COLOR_TEXT_MUTED)
             self.tabla.setCellWidget(fila, 5, EstadoBadge(estado_visual.capitalize(), color))
 
+            saldo_total += float(cuenta.saldo_pendiente)
+
         total = resultado["total"]
         self.total_paginas = max(1, -(-total // POR_PAGINA))
         self.pagina_actual = min(self.pagina_actual, self.total_paginas)
 
         self.lbl_total.setText(f"{total} cuenta{'s' if total != 1 else ''} por cobrar")
+        self.lbl_saldo_total.setText(f"${saldo_total:,.2f}")
         self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
         self.btn_anterior.setEnabled(self.pagina_actual > 1)
         self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
