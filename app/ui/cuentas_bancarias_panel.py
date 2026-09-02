@@ -30,10 +30,12 @@ from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
     COLOR_PRIMARY,
+    COLOR_SUCCESS,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
+    EstadoBadge,
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar
@@ -42,6 +44,11 @@ logger = logging.getLogger(__name__)
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 COLS_VISIBLES = ["ID", "Banco", "Número de Cuenta", "Tipo", "Titular", "Identificación", "Saldo", "Estado"]
+
+COLORES_ESTADO_CUENTA = {
+    "ACTIVO": COLOR_SUCCESS,
+    "INACTIVO": "#dc3545",  # Rojo para estado inactivo
+}
 
 
 class CuentasBancariasPanel(QWidget):
@@ -280,12 +287,10 @@ class CuentasBancariasPanel(QWidget):
             self.table.setItem(row, 5, QTableWidgetItem(cuenta.identificacion_titular or "N/A"))
             self.table.setItem(row, 6, QTableWidgetItem(f"${float(cuenta.saldo_total_banco):,.2f}"))
 
-            estado_item = QTableWidgetItem(cuenta.estado_cuenta)
-            if cuenta.estado_cuenta == "ACTIVO":
-                estado_item.setForeground(Qt.GlobalColor.darkGreen)
-            else:
-                estado_item.setForeground(Qt.GlobalColor.red)
-            self.table.setItem(row, 7, estado_item)
+            estado = cuenta.estado_cuenta or "N/A"
+            color_estado = COLORES_ESTADO_CUENTA.get(estado, COLOR_TEXT_MUTED)
+            estado_widget = EstadoBadge(estado, color_estado)
+            self.table.setCellWidget(row, 7, estado_widget)
 
     def _actualizar_paginacion(self):
         """Actualiza los controles de paginación."""
