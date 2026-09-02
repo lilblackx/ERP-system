@@ -9,14 +9,13 @@ import socket
 from datetime import datetime
 
 import qtawesome as qta
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QSpacerItem,
     QVBoxLayout,
@@ -264,6 +263,82 @@ class EtiquetasDiasSemana(QWidget):
         self._reposicionar()
 
 
+class ListaFilasAjustable(QWidget):
+    """Contenedor de una lista de filas (cajas/facturas/inventario) que oculta las que no
+    entran en el alto disponible, en vez de recortarlas contra el borde de la ventana o
+    mostrar un scrollbar. Se probaron ambas alternativas primero (2026-09-02): un
+    QScrollArea alrededor de todo el panel terminaba mostrando la barra siempre, incluso
+    en pantallas donde antes entraba todo; acotar la cantidad de filas al alto de la
+    *pantalla* (no de la ventana) tampoco alcanzaba -- en modo ventana (no maximizada) el
+    ancho/alto disponible es mucho menor que el de la pantalla completa, y las filas
+    seguian aplastandose. Esta clase resuelve el "ajuste en vivo" que pidio el usuario:
+    mide su propio alto en cada resize (con stretch=1 en el layout del padre, Qt le da
+    exactamente el espacio sobrante de la tarjeta) y oculta las filas que no entran,
+    mostrandolas de nuevo si la ventana crece -- sin volver a golpear la base de datos.
+
+    `sizeHint()`/`minimumSizeHint()` devuelven (0, 0) a proposito: sin esto, un QWidget
+    con un QVBoxLayout adentro reporta como minimo la suma del alto de TODOS sus hijos
+    (las 5 filas), y el layout del padre nunca lo dejaria bajar de ahi -- exactamente el
+    problema original. Al reportar 0, el padre (con stretch=1) es libre de darle
+    cualquier alto, incluso muy chico, y el ocultamiento de filas de abajo se encarga de
+    que nunca se vea nada aplastado o cortado a la mitad."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+        self._filas: list[QWidget] = []
+
+        # Debounce a 0ms (siguiente vuelta del event loop, no sincronico): un resize en
+        # vivo (arrastrando el borde de la ventana) dispara resizeEvent muchas veces por
+        # segundo, y recalcular sincronicamente dentro del propio resizeEvent -- mientras
+        # Qt todavia esta terminando de acomodar el resto del layout -- podia leer un
+        # self.height() todavia no definitivo.
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(0)
+        self._debounce.timeout.connect(self._ajustar_visibilidad)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (override de Qt)
+        return QSize(0, 0)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (override de Qt)
+        return QSize(0, 0)
+
+    def set_filas(self, widgets: list[QWidget]) -> None:
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._filas = widgets
+        for widget in widgets:
+            self._layout.addWidget(widget)
+        self._ajustar_visibilidad()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (override de Qt)
+        super().resizeEvent(event)
+        self._debounce.start()
+
+    def _ajustar_visibilidad(self) -> None:
+        if not self._filas:
+            return
+        disponible = self.height()
+        acumulado = 0
+        for i, widget in enumerate(self._filas):
+            alto_fila = widget.sizeHint().height()
+            # La primera fila siempre se muestra, aunque no entre entera -- en la ventana
+            # minima de la app (900x600, MainWindow.setMinimumSize) el resto del panel
+            # (grafico, KPIs) puede dejarle a esta tarjeta menos alto que el de una sola
+            # fila; preferible que se vea un poco recortada a que la tarjeta parezca
+            # vacia sin ningun indicio de que hay datos.
+            cabe = i == 0 or acumulado + alto_fila <= disponible
+            widget.setVisible(cabe)
+            if cabe:
+                acumulado += alto_fila
+
+
 class ListaVaciaLabel(QLabel):
     def __init__(self, texto: str, parent=None):
         super().__init__(texto, parent)
@@ -402,33 +477,9 @@ class DashboardPanel(QWidget):
         root.setSpacing(16)
 
         root.addWidget(self._make_header())
-
-        # Filas de KPIs/gráfico/facturas dentro de un QScrollArea (mismo patrón que
-        # config_empresa_panel.py: sin marco ni fondo propio, para que no se note como un
-        # widget aparte). Las tarjetas de "Facturas recientes"/"Inventario en alerta" son
-        # una pila de filas con alto mínimo propio (texto, no se puede comprimir más allá
-        # de lo que pide la fuente) -- en pantallas chicas (1366x768 y menores) ese mínimo
-        # combinado con el resto del panel no entraba en la ventana y, sin scroll, se
-        # recortaba silenciosamente contra el borde inferior sin ninguna forma de verlo
-        # (reportado por el usuario, 2026-09-02: "se corta más que todo la parte de las
-        # facturas"). En pantallas donde sí entra todo, el scroll nunca se activa y el
-        # layout se ve igual que antes -- los stretch=1 de abajo siguen repartiendo el
-        # espacio sobrante entre ambas filas.
-        contenido = QWidget()
-        contenido.setStyleSheet("background: transparent;")
-        cv = QVBoxLayout(contenido)
-        cv.setContentsMargins(0, 0, 0, 0)
-        cv.setSpacing(16)
-        cv.addWidget(self._make_fila_kpis())
-        cv.addWidget(self._make_fila_grafico_y_cajas(), stretch=1)
-        cv.addWidget(self._make_fila_facturas_e_inventario(), stretch=1)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent; border: none;")
-        scroll.setWidget(contenido)
-        root.addWidget(scroll, stretch=1)
+        root.addWidget(self._make_fila_kpis())
+        root.addWidget(self._make_fila_grafico_y_cajas(), stretch=1)
+        root.addWidget(self._make_fila_facturas_e_inventario(), stretch=1)
 
         self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
 
@@ -569,12 +620,10 @@ class DashboardPanel(QWidget):
         lbl_titulo_cajas.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
         lbl_subtitulo_cajas = QLabel("Estado de turnos abiertos hoy")
         lbl_subtitulo_cajas.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
-        self.cajas_lista = QVBoxLayout()
-        self.cajas_lista.setSpacing(0)
+        self.cajas_lista = ListaFilasAjustable()
         cv.addWidget(lbl_titulo_cajas)
         cv.addWidget(lbl_subtitulo_cajas)
-        cv.addLayout(self.cajas_lista)
-        cv.addStretch()
+        cv.addWidget(self.cajas_lista, stretch=1)
 
         card_grafico = _card(grafico_inner)
         card_cajas = _card(cajas_inner)
@@ -616,12 +665,10 @@ class DashboardPanel(QWidget):
 
         lbl_subtitulo = QLabel("Últimos movimientos de ventas")
         lbl_subtitulo.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
-        self.facturas_lista = QVBoxLayout()
-        self.facturas_lista.setSpacing(0)
+        self.facturas_lista = ListaFilasAjustable()
         fv.addLayout(header_facturas)
         fv.addWidget(lbl_subtitulo)
-        fv.addLayout(self.facturas_lista)
-        fv.addStretch()
+        fv.addWidget(self.facturas_lista, stretch=1)
 
         inventario_inner = QWidget()
         inventario_inner.setStyleSheet("background: transparent; border: none;")
@@ -632,12 +679,10 @@ class DashboardPanel(QWidget):
         lbl_titulo_inv.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
         lbl_subtitulo_inv = QLabel("Stock por debajo del mínimo")
         lbl_subtitulo_inv.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
-        self.inventario_lista = QVBoxLayout()
-        self.inventario_lista.setSpacing(0)
+        self.inventario_lista = ListaFilasAjustable()
         iv.addWidget(lbl_titulo_inv)
         iv.addWidget(lbl_subtitulo_inv)
-        iv.addLayout(self.inventario_lista)
-        iv.addStretch()
+        iv.addWidget(self.inventario_lista, stretch=1)
 
         card_facturas = _card(facturas_inner)
         card_inventario = _card(inventario_inner)
@@ -690,19 +735,11 @@ class DashboardPanel(QWidget):
             self.inventario_lista, datos["inventario_alerta"], FilaInventarioAlerta, "Sin alertas de inventario"
         )
 
-    def _poblar_lista(self, layout: QVBoxLayout, items: list[dict], clase_fila, texto_vacio: str) -> None:
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
+    def _poblar_lista(self, lista: ListaFilasAjustable, items: list[dict], clase_fila, texto_vacio: str) -> None:
         if not items:
-            layout.addWidget(ListaVaciaLabel(texto_vacio))
+            lista.set_filas([ListaVaciaLabel(texto_vacio)])
             return
-
-        for item in items:
-            layout.addWidget(clase_fila(item))
+        lista.set_filas([clase_fila(item) for item in items])
 
     def _mostrar_error(self, mensaje: str) -> None:
         logger.error("Fallo al cargar el panel general: %s", mensaje)
