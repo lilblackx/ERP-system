@@ -57,8 +57,6 @@ ESTADOS_FILTRO = [
     ("Inactivos", "INACTIVO"),
 ]
 
-logger = logging.getLogger(__name__)
-
 
 class BancosPanel(QWidget):
     """
@@ -256,7 +254,7 @@ class BancosPanel(QWidget):
 
         bancos_pagina = self.bancos[inicio:fin]
 
-        for idx, banco in enumerate(bancos_pagina):
+        for _idx, banco in enumerate(bancos_pagina):
             row = self.tabla.rowCount()
             self.tabla.insertRow(row)
 
