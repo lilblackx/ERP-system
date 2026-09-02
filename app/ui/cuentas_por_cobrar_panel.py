@@ -520,6 +520,7 @@ class CuentasPorCobrarPanel(QWidget):
         session = self.session_factory()
         try:
             from app.db.models import Usuario
+
             vendedores = session.query(Usuario).filter(Usuario.rol == "vendedor").all()
             self.vendedor_combo.blockSignals(True)
             self.vendedor_combo.clear()
@@ -589,8 +590,10 @@ class CuentasPorCobrarPanel(QWidget):
                                 cliente = cuenta.factura.cliente
                                 nombre = cliente.nombre_razon_social or ""
 
-                        if (self.texto_busqueda.lower() not in nombre.lower() and
-                            self.texto_busqueda.lower() not in numero_factura.lower()):
+                        if (
+                            self.texto_busqueda.lower() not in nombre.lower()
+                            and self.texto_busqueda.lower() not in numero_factura.lower()
+                        ):
                             continue
 
                     cuentas_filtradas.append(cuenta)
