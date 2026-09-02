@@ -185,7 +185,9 @@ class CajasPanel(QWidget):
         alinear_encabezados(
             self.tabla,
             {
+                0: Qt.AlignmentFlag.AlignLeft,
                 1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignCenter,
                 3: Qt.AlignmentFlag.AlignLeft,
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignRight,
@@ -246,23 +248,42 @@ class CajasPanel(QWidget):
     def _poblar_tabla(self, estados: list[dict]) -> None:
         self.tabla.setRowCount(len(estados))
         for fila, est in enumerate(estados):
-            self.tabla.setItem(fila, 0, QTableWidgetItem(str(est["id_caja"])))
-            self.tabla.setItem(fila, 1, QTableWidgetItem(est["nombre_caja"] or ""))
+            item_id = QTableWidgetItem(str(est["id_caja"]))
+            item_id.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 0, item_id)
+
+            item_nombre = QTableWidgetItem(est["nombre_caja"] or "")
+            item_nombre.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 1, item_nombre)
 
             color = COLOR_SUCCESS if est["estado"] == "ABIERTA" else COLOR_DANGER
             badge = EstadoBadge(est["estado"].capitalize(), color)
             self.tabla.setCellWidget(fila, 2, badge)
 
-            self.tabla.setItem(fila, 3, QTableWidgetItem(est["cajero"] or "—"))
+            item_cajero = QTableWidgetItem(est["cajero"] or "—")
+            item_cajero.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 3, item_cajero)
+
             apertura = est.get("fecha_apertura")
-            self.tabla.setItem(fila, 4, QTableWidgetItem(apertura.strftime("%d/%m/%Y %H:%M") if apertura else "—"))
+            item_apertura = QTableWidgetItem(apertura.strftime("%d/%m/%Y %H:%M") if apertura else "—")
+            item_apertura.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 4, item_apertura)
+
             saldo_apertura = est["saldo_apertura"]
-            self.tabla.setItem(
-                fila, 5, QTableWidgetItem(f"$ {saldo_apertura:,.2f}" if saldo_apertura is not None else "—")
-            )
+            item_saldo_apertura = QTableWidgetItem(f"$ {saldo_apertura:,.2f}" if saldo_apertura is not None else "—")
+            item_saldo_apertura.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 5, item_saldo_apertura)
+
             saldo_cierre = est["saldo_cierre"]
-            self.tabla.setItem(fila, 6, QTableWidgetItem(f"$ {saldo_cierre:,.2f}" if saldo_cierre is not None else "—"))
-            self.tabla.setItem(fila, 7, QTableWidgetItem(str(est["cantidad_movimientos"])))
+            item_saldo_cierre = QTableWidgetItem(f"$ {saldo_cierre:,.2f}" if saldo_cierre is not None else "—")
+            item_saldo_cierre.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 6, item_saldo_cierre)
+
+            item_movimientos = QTableWidgetItem(str(est["cantidad_movimientos"]))
+            item_movimientos.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 7, item_movimientos)
+
+        self.lbl_total.setText(f"{len(estados)} caja{'s' if len(estados) != 1 else ''}")
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
