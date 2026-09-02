@@ -32,14 +32,18 @@ from app.ui.movimientos_cuenta_dialog import MovimientosCuentaDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
-    COLOR_PRIMARY,
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_CONTENT_BG,
     COLOR_SUCCESS,
+    COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
     EstadoBadge,
+    alinear_encabezados,
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
@@ -48,6 +52,12 @@ logger = logging.getLogger(__name__)
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 COLS_VISIBLES = ["ID", "Banco", "Número de Cuenta", "Tipo", "Titular", "Identificación", "Saldo", "Estado"]
+
+ESTADOS_FILTRO = [
+    ("Todos los estados", None),
+    ("Activos", "ACTIVO"),
+    ("Inactivos", "INACTIVO"),
+]
 
 COLORES_ESTADO_CUENTA = {
     "ACTIVO": COLOR_SUCCESS,
