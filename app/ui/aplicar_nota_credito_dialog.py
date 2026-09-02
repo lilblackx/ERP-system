@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -25,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.db.models import NotaCreditoCliente
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -293,11 +293,11 @@ class AplicarNotaCreditoDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo aplicar la nota de crédito", str(exc))
+            MessageBox.warning(self, "No se pudo aplicar la nota de crédito", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tiene permiso para aplicar notas de crédito.")
+            MessageBox.warning(self, "Sin permiso", "No tiene permiso para aplicar notas de crédito.")
             return
 
         self.accept()

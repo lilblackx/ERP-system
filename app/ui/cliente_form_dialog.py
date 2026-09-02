@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.db.models import CategoriaCliente, Cliente, Vendedor
 from app.services.rutas import RutaService
 from app.ui.mapa_widget import MapaWidget
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -526,22 +527,22 @@ class ClienteFormDialog(QDialog):
 
     def _validar_y_aceptar(self):
         if not self.codigo_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El código del cliente es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El código del cliente es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El número de ID Fiscal / Identificación es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El número de ID Fiscal / Identificación es obligatorio.")
             self.identificacion_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "La razón social o nombre del cliente es obligatoria.")
+            MessageBox.warning(self, "Dato requerido", "La razón social o nombre del cliente es obligatoria.")
             self.nombre_input.setFocus()
             return
 
         lat_texto = self.latitud_input.text().strip()
         lng_texto = self.longitud_input.text().strip()
         if not lat_texto or not lng_texto:
-            QMessageBox.warning(
+            MessageBox.warning(
                 self,
                 "Dato requerido",
                 "La ubicación es obligatoria. Busca un lugar, hace click en el mapa o ingresa las coordenadas.",
@@ -549,13 +550,13 @@ class ClienteFormDialog(QDialog):
             return
         lat, lng = self._leer_coordenadas()
         if lat is None or lng is None:
-            QMessageBox.warning(self, "Dato inválido", "La latitud y la longitud deben ser números válidos.")
+            MessageBox.warning(self, "Dato inválido", "La latitud y la longitud deben ser números válidos.")
             return
         if not (-90 <= lat <= 90):
-            QMessageBox.warning(self, "Dato inválido", "La latitud debe estar entre -90 y 90.")
+            MessageBox.warning(self, "Dato inválido", "La latitud debe estar entre -90 y 90.")
             return
         if not (-180 <= lng <= 180):
-            QMessageBox.warning(self, "Dato inválido", "La longitud debe estar entre -180 y 180.")
+            MessageBox.warning(self, "Dato inválido", "La longitud debe estar entre -180 y 180.")
             return
 
         if not self._confirmar_cercania_a_ruta(lat, lng):
@@ -579,7 +580,7 @@ class ClienteFormDialog(QDialog):
         distancia = RutaService.distancia_a_trazado(ruta, lat, lng)
         if distancia is None or distancia <= UMBRAL_ALERTA_DISTANCIA_RUTA_KM:
             return True
-        respuesta = QMessageBox.question(
+        respuesta = MessageBox.question(
             self,
             "Ubicación alejada de la ruta",
             f"El punto marcado está a {distancia:.1f} km de la ruta '{ruta.nombre_ruta}' "

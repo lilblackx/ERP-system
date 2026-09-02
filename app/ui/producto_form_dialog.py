@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -27,6 +26,7 @@ from app.db.models import Inventario
 from app.services.categorias import CategoriaService
 from app.services.inventario import PrecioService
 from app.services.permisos import PermisoDenegadoError
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -463,7 +463,7 @@ class ProductoFormDialog(QDialog):
             # primero sin el segundo, sin este catch el PermisoDenegadoError explotaba en
             # medio de la construccion del dialogo (antes de que el usuario llegara a ver
             # nada) en vez de dar un mensaje que apunte al recurso real que falta.
-            QMessageBox.warning(
+            MessageBox.warning(
                 self,
                 "Sin permiso",
                 "No tienes permiso para consultar categorías ('categorias'/'ver'), "
@@ -486,7 +486,7 @@ class ProductoFormDialog(QDialog):
         try:
             categoria = CategoriaService.crear(self.session, nombre=nombre, creado_por=self.id_usuario)
         except Exception as exc:
-            QMessageBox.warning(self, "No se pudo crear la categoría", str(exc))
+            MessageBox.warning(self, "No se pudo crear la categoría", str(exc))
             return
         self._cargar_categorias(seleccionar_id=categoria.id_categoria)
 
@@ -528,15 +528,15 @@ class ProductoFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if not self.codigo_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El código del producto es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El código del producto es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El nombre del producto es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El nombre del producto es obligatorio.")
             self.nombre_input.setFocus()
             return
         if self.categoria_combo.currentData() is None:
-            QMessageBox.warning(self, "Dato requerido", "Seleccione o cree una categoría para el producto.")
+            MessageBox.warning(self, "Dato requerido", "Seleccione o cree una categoría para el producto.")
             return
         self.accept()
 

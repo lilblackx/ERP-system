@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -27,6 +26,7 @@ from app.services.recuperacion_acceso import (
     TIPO_RECUPERAR_CLAVE,
     RecuperacionAccesoService,
 )
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CONTENT_BG,
@@ -187,7 +187,7 @@ class SolicitarCodigoDialog(QDialog):
     def _enviar_codigo(self) -> None:
         nombre_usuario = self.usuario_input.text().strip()
         if not nombre_usuario:
-            QMessageBox.warning(self, "Dato requerido", "Ingrese el nombre de usuario.")
+            MessageBox.warning(self, "Dato requerido", "Ingrese el nombre de usuario.")
             return
 
         session = self.session_factory()
@@ -198,13 +198,13 @@ class SolicitarCodigoDialog(QDialog):
                 mensaje = RecuperacionAccesoService.solicitar_codigo_recuperacion(session, nombre_usuario)
         except Exception:
             logger.exception("Fallo al solicitar codigo (%s) para '%s'", self.tipo, nombre_usuario)
-            QMessageBox.critical(self, "Error", "No se pudo enviar el codigo. Intente nuevamente mas tarde.")
+            MessageBox.critical(self, "Error", "No se pudo enviar el codigo. Intente nuevamente mas tarde.")
             return
         finally:
             session.close()
 
         self._nombre_usuario_confirmado = nombre_usuario
-        QMessageBox.information(self, "Codigo enviado", mensaje)
+        MessageBox.information(self, "Codigo enviado", mensaje)
         self.stack.setCurrentIndex(1)
         self.codigo_input.setFocus()
 
@@ -275,33 +275,33 @@ class SolicitarCodigoDialog(QDialog):
     def _verificar_codigo(self) -> None:
         codigo = self.codigo_input.text().strip()
         if not codigo:
-            QMessageBox.warning(self, "Dato requerido", "Ingrese el codigo recibido.")
+            MessageBox.warning(self, "Dato requerido", "Ingrese el codigo recibido.")
             return
 
         if self.tipo == TIPO_RECUPERAR_CLAVE:
             nueva_clave = self.nueva_clave_input.text()
             if nueva_clave != self.confirmar_clave_input.text():
-                QMessageBox.warning(self, "Error", "Las claves no coinciden.")
+                MessageBox.warning(self, "Error", "Las claves no coinciden.")
                 return
 
         session = self.session_factory()
         try:
             if self.tipo == TIPO_DESBLOQUEO:
                 RecuperacionAccesoService.verificar_codigo_desbloqueo(session, self._nombre_usuario_confirmado, codigo)
-                QMessageBox.information(self, "Listo", "Cuenta desbloqueada. Ya puede iniciar sesion.")
+                MessageBox.information(self, "Listo", "Cuenta desbloqueada. Ya puede iniciar sesion.")
             else:
                 RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(
                     session, self._nombre_usuario_confirmado, codigo, nueva_clave
                 )
-                QMessageBox.information(self, "Listo", "Clave actualizada. Ya puede iniciar sesion.")
+                MessageBox.information(self, "Listo", "Clave actualizada. Ya puede iniciar sesion.")
         except ValueError as exc:
             # Mensajes ya pensados para el usuario final (codigo invalido/vencido,
             # politica de clave) -- no son un str(exc) tecnico, mismo criterio que C3.
-            QMessageBox.warning(self, "Error", str(exc))
+            MessageBox.warning(self, "Error", str(exc))
             return
         except Exception:
             logger.exception("Fallo al verificar codigo (%s) para '%s'", self.tipo, self._nombre_usuario_confirmado)
-            QMessageBox.critical(self, "Error", "Ocurrio un error inesperado. Intente nuevamente.")
+            MessageBox.critical(self, "Error", "Ocurrio un error inesperado. Intente nuevamente.")
             return
         finally:
             session.close()

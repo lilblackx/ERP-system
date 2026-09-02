@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -40,6 +39,7 @@ from app.db.models import Caja, Categoria, Cliente, CuentaBancaria, Inventario, 
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.reportes import ReporteService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     COLOR_BORDER,
@@ -2079,7 +2079,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_lv_input.date().toPython()
             fecha_hasta = self.fecha_hasta_lv_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2093,7 +2093,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_vp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_vp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2107,7 +2107,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_vc_input.date().toPython()
             fecha_hasta = self.fecha_hasta_vc_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2120,7 +2120,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_vv_input.date().toPython()
             fecha_hasta = self.fecha_hasta_vv_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2133,7 +2133,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_vr_input.date().toPython()
             fecha_hasta = self.fecha_hasta_vr_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2146,7 +2146,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_pv_input.date().toPython()
             fecha_hasta = self.fecha_hasta_pv_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2160,7 +2160,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_fa_input.date().toPython()
             fecha_hasta = self.fecha_hasta_fa_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2173,7 +2173,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_nc_input.date().toPython()
             fecha_hasta = self.fecha_hasta_nc_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2187,7 +2187,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_cc_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cc_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2200,7 +2200,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_mu_input.date().toPython()
             fecha_hasta = self.fecha_hasta_mu_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2213,7 +2213,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_cp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2227,7 +2227,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_cpv_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cpv_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2240,7 +2240,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_cpp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cpp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2261,7 +2261,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_cump_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cump_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2274,7 +2274,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_dp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_dp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2288,7 +2288,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_ncp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_ncp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2301,7 +2301,7 @@ class ReportesPanel(QWidget):
         elif modo == REPORTE_ARQUEO_CAJA:
             id_caja = self.caja_combo.currentData()
             if id_caja is None:
-                QMessageBox.information(self, "Sin cajas", "No hay cajas registradas para generar el arqueo.")
+                MessageBox.information(self, "Sin cajas", "No hay cajas registradas para generar el arqueo.")
                 return
             self._worker = QueryWorker(
                 self.session_factory, _tarea_arqueo_caja, id_usuario=self.usuario.id_usuario, id_caja=id_caja
@@ -2309,12 +2309,12 @@ class ReportesPanel(QWidget):
         elif modo == REPORTE_KARDEX:
             id_producto = self.producto_combo_kardex.currentData()
             if id_producto is None:
-                QMessageBox.information(self, "Sin productos", "No hay productos registrados para generar el kardex.")
+                MessageBox.information(self, "Sin productos", "No hay productos registrados para generar el kardex.")
                 return
             fecha_desde = self.fecha_desde_kardex_input.date().toPython()
             fecha_hasta = self.fecha_hasta_kardex_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2342,7 +2342,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_sm_input.date().toPython()
             fecha_hasta = self.fecha_hasta_sm_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2355,7 +2355,7 @@ class ReportesPanel(QWidget):
         elif modo == REPORTE_HISTORICO_PRECIOS:
             id_producto = self.producto_combo_hp.currentData()
             if id_producto is None:
-                QMessageBox.information(self, "Sin productos", "No hay productos registrados.")
+                MessageBox.information(self, "Sin productos", "No hay productos registrados.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2366,12 +2366,12 @@ class ReportesPanel(QWidget):
         elif modo == REPORTE_ESTADO_CTA_CLIENTE:
             id_cliente = self.cliente_combo_ecc.currentData()
             if id_cliente is None:
-                QMessageBox.information(self, "Sin clientes", "No hay clientes registrados.")
+                MessageBox.information(self, "Sin clientes", "No hay clientes registrados.")
                 return
             fecha_desde = self.fecha_desde_ecc_input.date().toPython()
             fecha_hasta = self.fecha_hasta_ecc_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2385,7 +2385,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_cbp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cbp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2413,12 +2413,12 @@ class ReportesPanel(QWidget):
         elif modo == REPORTE_ESTADO_CTA_PROVEEDOR:
             id_proveedor = self.proveedor_combo_ecp.currentData()
             if id_proveedor is None:
-                QMessageBox.information(self, "Sin proveedores", "No hay proveedores registrados.")
+                MessageBox.information(self, "Sin proveedores", "No hay proveedores registrados.")
                 return
             fecha_desde = self.fecha_desde_ecp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_ecp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2432,7 +2432,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_pp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_pp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2462,7 +2462,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_mcp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_mcp_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2477,7 +2477,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_cc_cajero_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cc_cajero_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2491,7 +2491,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_flujo_input.date().toPython()
             fecha_hasta = self.fecha_hasta_flujo_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2504,12 +2504,12 @@ class ReportesPanel(QWidget):
         elif modo == REPORTE_MOV_CUENTA_BANCARIA:
             id_cuenta_bancaria = self.cuenta_bancaria_combo_mcb.currentData()
             if id_cuenta_bancaria is None:
-                QMessageBox.information(self, "Sin cuentas", "No hay cuentas bancarias registradas.")
+                MessageBox.information(self, "Sin cuentas", "No hay cuentas bancarias registradas.")
                 return
             fecha_desde = self.fecha_desde_mcb_input.date().toPython()
             fecha_hasta = self.fecha_hasta_mcb_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2534,7 +2534,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_comv_input.date().toPython()
             fecha_hasta = self.fecha_hasta_comv_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2548,7 +2548,7 @@ class ReportesPanel(QWidget):
             fecha_desde = self.fecha_desde_cpp_com_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cpp_com_input.date().toPython()
             if fecha_desde > fecha_hasta:
-                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
                 return
             self._worker = QueryWorker(
                 self.session_factory,
@@ -2654,7 +2654,7 @@ class ReportesPanel(QWidget):
     def _mostrar_error(self, mensaje: str) -> None:
         self.btn_generar.setEnabled(True)
         logger.error("Fallo al generar el reporte: %s", mensaje)
-        QMessageBox.critical(self, "Error", "No se pudo generar el reporte.")
+        MessageBox.critical(self, "Error", "No se pudo generar el reporte.")
 
     # ── Resultados: aging CxC ────────────────────────────────────────────────
 
@@ -4323,7 +4323,7 @@ class ReportesPanel(QWidget):
 
     def _exportar_excel(self) -> None:
         if self._ultimo_resultado is None:
-            QMessageBox.information(self, "Sin datos", "Generá un reporte antes de exportarlo.")
+            MessageBox.information(self, "Sin datos", "Generá un reporte antes de exportarlo.")
             return
 
         nombre_sugerido, encabezados, filas = self._filas_para_exportar()
@@ -4335,14 +4335,14 @@ class ReportesPanel(QWidget):
             titulo, _filtros, _col_widths = self._info_pdf()
             config_empresa = self._obtener_config_empresa()
             exportar_excel(ruta, encabezados, filas, titulo=titulo, config_empresa=config_empresa)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} filas a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} filas a:\n{ruta}")
         except Exception:
             logger.exception("Fallo al exportar el reporte a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
 
     def _exportar_pdf(self) -> None:
         if self._ultimo_resultado is None:
-            QMessageBox.information(self, "Sin datos", "Generá un reporte antes de exportarlo.")
+            MessageBox.information(self, "Sin datos", "Generá un reporte antes de exportarlo.")
             return
 
         nombre_sugerido, encabezados, filas = self._filas_para_exportar()
@@ -4356,7 +4356,7 @@ class ReportesPanel(QWidget):
             exportar_pdf(
                 ruta, titulo, encabezados, filas, filtros=filtros, col_widths=col_widths, config_empresa=config_empresa
             )
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} filas a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} filas a:\n{ruta}")
         except Exception:
             logger.exception("Fallo al exportar el reporte a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")

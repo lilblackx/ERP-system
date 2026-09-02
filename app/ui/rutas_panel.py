@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from app.db.models import Ruta, Usuario
 from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
+from app.ui.message_box import MessageBox
 from app.ui.ruta_form_dialog import RutaFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -236,10 +237,10 @@ class RutasPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar rutas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar rutas.")
         except Exception:
             logger.exception("Fallo al cargar la lista de rutas")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de rutas.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de rutas.")
         finally:
             session.close()
 
@@ -268,7 +269,7 @@ class RutasPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona una ruta de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una ruta de la lista.")
             return None
         return int(self.tabla.item(filas[0].row(), 0).text())
 
@@ -283,17 +284,17 @@ class RutasPanel(QWidget):
                 self.cargar_rutas()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(self, "Dato duplicado", "Ya existe una ruta con ese nombre.")
+            MessageBox.warning(self, "Dato duplicado", "Ya existe una ruta con ese nombre.")
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear rutas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear rutas.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear ruta")
-            QMessageBox.critical(self, "Error", "No se pudo crear la ruta.")
+            MessageBox.critical(self, "Error", "No se pudo crear la ruta.")
         finally:
             session.close()
 
@@ -311,17 +312,17 @@ class RutasPanel(QWidget):
                 self.cargar_rutas()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(self, "Dato duplicado", "Ya existe una ruta con ese nombre.")
+            MessageBox.warning(self, "Dato duplicado", "Ya existe una ruta con ese nombre.")
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar rutas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar rutas.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar ruta")
-            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios de la ruta.")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios de la ruta.")
         finally:
             session.close()
 
@@ -336,7 +337,7 @@ class RutasPanel(QWidget):
             estado_actual = ruta.estado_ruta or "ACTIVO"
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
-            respuesta = QMessageBox.question(
+            respuesta = MessageBox.question(
                 self, "Confirmar", f"¿Cambiar el estado de la ruta '{ruta.nombre_ruta}' a {nuevo_estado}?"
             )
             if respuesta != QMessageBox.StandardButton.Yes:
@@ -346,10 +347,10 @@ class RutasPanel(QWidget):
             self.cargar_rutas()
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de rutas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de rutas.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado de la ruta %s", id_ruta)
-            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado de la ruta.")
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado de la ruta.")
         finally:
             session.close()

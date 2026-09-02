@@ -54,6 +54,7 @@ from app.services.nota_recepcion import NotaRecepcionService
 from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
 from app.services.usuarios import UsuarioService
+from app.ui.message_box import MessageBox
 from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
 from app.ui.styles import (
@@ -529,12 +530,12 @@ class OrdenCompraFormDialog(QDialog):
     def _agregar_item(self) -> None:
         id_producto = self.producto_combo.currentData()
         if id_producto is None:
-            QMessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
+            MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
             return
         cantidad = self.cantidad_input.value()
         precio = self.precio_input.value()
         if cantidad <= 0 or precio <= 0:
-            QMessageBox.warning(self, "Datos inválidos", "Cantidad y precio deben ser mayores a cero.")
+            MessageBox.warning(self, "Datos inválidos", "Cantidad y precio deben ser mayores a cero.")
             return
         nombre = self.producto_combo.currentText()
         existente = next((it for it in self.items if it["id_producto"] == id_producto), None)
@@ -573,10 +574,10 @@ class OrdenCompraFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if self.proveedor_combo.currentData() is None:
-            QMessageBox.warning(self, "Proveedor requerido", "Seleccione un proveedor.")
+            MessageBox.warning(self, "Proveedor requerido", "Seleccione un proveedor.")
             return
         if not self.items:
-            QMessageBox.warning(self, "Orden vacía", "Agregue al menos un producto.")
+            MessageBox.warning(self, "Orden vacía", "Agregue al menos un producto.")
             return
 
         self.btn_crear.setEnabled(False)
@@ -599,16 +600,16 @@ class OrdenCompraFormDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo crear la orden", str(exc))
+            MessageBox.warning(self, "No se pudo crear la orden", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear órdenes de compra.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear órdenes de compra.")
             return
         except Exception:
             self.session.rollback()
             logger.exception("Fallo al crear orden de compra")
-            QMessageBox.critical(self, "Error", "No se pudo crear la orden de compra.")
+            MessageBox.critical(self, "Error", "No se pudo crear la orden de compra.")
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -788,7 +789,7 @@ class EnmiendaOCDialog(QDialog):
     def _validar_y_aceptar(self) -> None:
         motivo = self.motivo_input.text().strip()
         if not motivo:
-            QMessageBox.warning(self, "Motivo requerido", "Indique el motivo de la enmienda.")
+            MessageBox.warning(self, "Motivo requerido", "Indique el motivo de la enmienda.")
             return
         tipo = self.tipo_combo.currentData()
 
@@ -807,16 +808,16 @@ class EnmiendaOCDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo crear la enmienda", str(exc))
+            MessageBox.warning(self, "No se pudo crear la enmienda", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para proponer enmiendas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para proponer enmiendas.")
             return
         except Exception:
             self.session.rollback()
             logger.exception("Fallo al crear enmienda de OC")
-            QMessageBox.critical(self, "Error", "No se pudo crear la enmienda.")
+            MessageBox.critical(self, "Error", "No se pudo crear la enmienda.")
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -829,7 +830,7 @@ class EnmiendaOCDialog(QDialog):
             self.session, self.id_usuario, "compras", "autorizar_enmienda_oc"
         )
         if puede_autorizar:
-            respuesta = QMessageBox.question(self, "Enmienda propuesta", "¿Autorizar esta enmienda ahora mismo?")
+            respuesta = MessageBox.question(self, "Enmienda propuesta", "¿Autorizar esta enmienda ahora mismo?")
             if respuesta == QMessageBox.StandardButton.Yes:
                 try:
                     CompraOCService.autorizar_enmienda(
@@ -841,7 +842,7 @@ class EnmiendaOCDialog(QDialog):
                 except Exception:
                     self.session.rollback()
                     logger.exception("Fallo al autorizar enmienda recien creada")
-                    QMessageBox.warning(self, "No se pudo autorizar", "La enmienda quedó pendiente, autorícela luego.")
+                    MessageBox.warning(self, "No se pudo autorizar", "La enmienda quedó pendiente, autorícela luego.")
 
         self.accept()
 
@@ -951,7 +952,7 @@ class NotaRecepcionFormDialog(QDialog):
                 }
             )
         if not items:
-            QMessageBox.warning(self, "Nada que recibir", "Ingrese al menos una cantidad recibida mayor a cero.")
+            MessageBox.warning(self, "Nada que recibir", "Ingrese al menos una cantidad recibida mayor a cero.")
             return
 
         self.btn_registrar.setEnabled(False)
@@ -966,16 +967,16 @@ class NotaRecepcionFormDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo registrar la recepción", str(exc))
+            MessageBox.warning(self, "No se pudo registrar la recepción", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para recibir mercancía.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para recibir mercancía.")
             return
         except Exception:
             self.session.rollback()
             logger.exception("Fallo al crear nota de recepcion")
-            QMessageBox.critical(self, "Error", "No se pudo registrar la recepción.")
+            MessageBox.critical(self, "Error", "No se pudo registrar la recepción.")
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -1083,7 +1084,7 @@ class NotaDevolucionFormDialog(QDialog):
                 continue
             items.append({"id_producto": detalle.id_producto, "cantidad_devuelta": cantidad})
         if not items:
-            QMessageBox.warning(self, "Nada que devolver", "Ingrese al menos una cantidad a devolver mayor a cero.")
+            MessageBox.warning(self, "Nada que devolver", "Ingrese al menos una cantidad a devolver mayor a cero.")
             return
 
         self.btn_registrar.setEnabled(False)
@@ -1098,16 +1099,16 @@ class NotaDevolucionFormDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo registrar la devolución", str(exc))
+            MessageBox.warning(self, "No se pudo registrar la devolución", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar devoluciones.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar devoluciones.")
             return
         except Exception:
             self.session.rollback()
             logger.exception("Fallo al crear nota de devolucion")
-            QMessageBox.critical(self, "Error", "No se pudo registrar la devolución.")
+            MessageBox.critical(self, "Error", "No se pudo registrar la devolución.")
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -1265,11 +1266,11 @@ class CompraDesdeOCFormDialog(QDialog):
                 continue
             items.append({"id_oc_detalle": detalle.id_detalle, "cantidad": spin.value()})
         if not items:
-            QMessageBox.warning(self, "Nada que facturar", "Ingrese al menos una cantidad a facturar mayor a cero.")
+            MessageBox.warning(self, "Nada que facturar", "Ingrese al menos una cantidad a facturar mayor a cero.")
             return
         es_contado = self.condicion_combo.currentData() == "contado"
         if es_contado and self.pago is None:
-            QMessageBox.warning(self, "Pago requerido", "Configure el pago de contado antes de registrar la factura.")
+            MessageBox.warning(self, "Pago requerido", "Configure el pago de contado antes de registrar la factura.")
             return
 
         self.btn_registrar.setEnabled(False)
@@ -1285,16 +1286,16 @@ class CompraDesdeOCFormDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo registrar la factura", str(exc))
+            MessageBox.warning(self, "No se pudo registrar la factura", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar compras.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar compras.")
             return
         except Exception:
             self.session.rollback()
             logger.exception("Fallo al crear compra desde OC")
-            QMessageBox.critical(self, "Error", "No se pudo registrar la factura.")
+            MessageBox.critical(self, "Error", "No se pudo registrar la factura.")
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -1429,7 +1430,7 @@ class ComprasView(QWidget):
     def _fila_seleccionada_id(self, tabla: QTableWidget) -> int | None:
         filas = tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona una fila de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una fila de la lista.")
             return None
         item = tabla.item(filas[0].row(), 0)
         return int(item.text()) if item is not None else None
@@ -1513,10 +1514,10 @@ class ComprasView(QWidget):
                 "oc", resultado["total"], self.lbl_pagina_oc, self.btn_oc_anterior, self.btn_oc_siguiente
             )
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar órdenes de compra.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar órdenes de compra.")
         except Exception as exc:
             logger.exception("Fallo al cargar ordenes de compra")
-            QMessageBox.critical(self, "Error", f"No se pudo cargar el listado de órdenes de compra: {exc}")
+            MessageBox.critical(self, "Error", f"No se pudo cargar el listado de órdenes de compra: {exc}")
         finally:
             session.close()
 
@@ -1526,9 +1527,9 @@ class ComprasView(QWidget):
             dialogo = OrdenCompraFormDialog(session, self.usuario.id_usuario, parent=self)
             if dialogo.exec() and dialogo.oc_creada is not None:
                 self.cargar_ocs()
-                QMessageBox.information(self, "Orden creada", f"ODC {dialogo.oc_creada.numero_oc} creada con éxito.")
+                MessageBox.information(self, "Orden creada", f"ODC {dialogo.oc_creada.numero_oc} creada con éxito.")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear órdenes de compra.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear órdenes de compra.")
         finally:
             session.close()
 
@@ -1565,12 +1566,12 @@ class ComprasView(QWidget):
             dialogo = OrdenCompraDetalleDialog(datos, parent=self)
             dialogo.exec()
         except ValueError as exc:
-            QMessageBox.warning(self, "Orden no encontrada", str(exc))
+            MessageBox.warning(self, "Orden no encontrada", str(exc))
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar esta orden de compra.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar esta orden de compra.")
         except Exception as exc:
             logger.exception("Fallo al abrir el detalle de la OC %s", id_oc)
-            QMessageBox.critical(self, "Error", f"No se pudo abrir el detalle de la orden de compra: {exc}")
+            MessageBox.critical(self, "Error", f"No se pudo abrir el detalle de la orden de compra: {exc}")
         finally:
             session.close()
 
@@ -1642,10 +1643,10 @@ class ComprasView(QWidget):
                 "nr", resultado["total"], self.lbl_pagina_nr, self.btn_nr_anterior, self.btn_nr_siguiente
             )
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar recepciones.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar recepciones.")
         except Exception:
             logger.exception("Fallo al cargar notas de recepcion")
-            QMessageBox.critical(self, "Error", "No se pudo cargar el listado de recepciones.")
+            MessageBox.critical(self, "Error", "No se pudo cargar el listado de recepciones.")
         finally:
             session.close()
 
@@ -1655,7 +1656,7 @@ class ComprasView(QWidget):
             resultado = CompraOCService.listar_ocs(session, por_pagina=200, id_usuario=self.usuario.id_usuario)
             candidatas = [oc for oc in resultado["items"] if oc.estado in ("PENDIENTE", "PARCIAL")]
             if not candidatas:
-                QMessageBox.information(
+                MessageBox.information(
                     self, "Sin órdenes pendientes", "No hay órdenes de compra con mercancía pendiente de recibir."
                 )
                 return
@@ -1673,11 +1674,11 @@ class ComprasView(QWidget):
             if dialogo.exec() and dialogo.nota_creada is not None:
                 self.cargar_nrs()
                 self.cargar_ocs()
-                QMessageBox.information(
+                MessageBox.information(
                     self, "Recepción registrada", f"NR {dialogo.nota_creada.numero_nr} registrada con éxito."
                 )
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para recibir mercancía.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para recibir mercancía.")
         finally:
             session.close()
 
@@ -1692,7 +1693,7 @@ class ComprasView(QWidget):
                 return
             dialogo = NotaDevolucionFormDialog(session, self.usuario.id_usuario, nr, parent=self)
             if dialogo.exec() and dialogo.devolucion_creada is not None:
-                QMessageBox.information(
+                MessageBox.information(
                     self,
                     "Devolución registrada",
                     f"Nota de devolución {dialogo.devolucion_creada.numero_nota_devolucion} registrada con éxito.",
@@ -1771,10 +1772,10 @@ class ComprasView(QWidget):
                 self.btn_compra_siguiente,
             )
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar compras.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar compras.")
         except Exception:
             logger.exception("Fallo al cargar compras desde OC")
-            QMessageBox.critical(self, "Error", "No se pudo cargar el listado de facturas.")
+            MessageBox.critical(self, "Error", "No se pudo cargar el listado de facturas.")
         finally:
             session.close()
 
@@ -1784,7 +1785,7 @@ class ComprasView(QWidget):
             resultado = CompraOCService.listar_ocs(session, por_pagina=200, id_usuario=self.usuario.id_usuario)
             candidatas = [oc for oc in resultado["items"] if oc.cantidad_recibida > oc.cantidad_facturada]
             if not candidatas:
-                QMessageBox.information(
+                MessageBox.information(
                     self, "Nada que facturar", "No hay órdenes de compra con mercancía recibida pendiente de facturar."
                 )
                 return
@@ -1802,11 +1803,11 @@ class ComprasView(QWidget):
             if dialogo.exec() and dialogo.compra_creada is not None:
                 self.cargar_compras()
                 self.cargar_ocs()
-                QMessageBox.information(
+                MessageBox.information(
                     self, "Factura registrada", f"Compra {dialogo.compra_creada.numero_compra} registrada con éxito."
                 )
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar compras.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar compras.")
         finally:
             session.close()
 

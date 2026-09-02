@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -24,6 +23,7 @@ from app.services.auth import PASSWORD_MAX_BYTES
 from app.services.permisos import PermisoDenegadoError, RolService
 from app.services.usuarios import APELLIDO_MAX, EMAIL_MAX, NOMBRE_MAX, NOMBRE_USUARIO_MAX
 from app.services.vendedores import VendedorService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -392,11 +392,11 @@ class UsuarioFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_usuario_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El nombre de usuario es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El nombre de usuario es obligatorio.")
             self.nombre_usuario_input.setFocus()
             return
         if not self.email_input.text().strip():
-            QMessageBox.warning(
+            MessageBox.warning(
                 self,
                 "Dato requerido",
                 "El correo electrónico es obligatorio: es a donde se envían los códigos de "
@@ -405,14 +405,14 @@ class UsuarioFormDialog(QDialog):
             self.email_input.setFocus()
             return
         if self.rol_combo.currentData() is None:
-            QMessageBox.warning(self, "Dato requerido", "Selecciona un rol.")
+            MessageBox.warning(self, "Dato requerido", "Selecciona un rol.")
             return
         if not self.usuario and not self.clave_input.text():
-            QMessageBox.warning(self, "Dato requerido", "La clave es obligatoria para un usuario nuevo.")
+            MessageBox.warning(self, "Dato requerido", "La clave es obligatoria para un usuario nuevo.")
             self.clave_input.setFocus()
             return
         if self.clave_input.text() and self.clave_input.text() != self.confirmar_clave_input.text():
-            QMessageBox.warning(self, "Las claves no coinciden", "La clave y su confirmación deben ser iguales.")
+            MessageBox.warning(self, "Las claves no coinciden", "La clave y su confirmación deben ser iguales.")
             self.confirmar_clave_input.setFocus()
             return
         self.accept()

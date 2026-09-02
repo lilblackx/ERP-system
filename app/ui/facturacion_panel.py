@@ -42,6 +42,7 @@ from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.factura_form_dialog import FacturaFormDialog
 from app.ui.factura_pdf import imprimir_factura
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -350,10 +351,10 @@ class FacturacionPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
         except Exception:
             logger.exception("Fallo al cargar el listado de facturas")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de facturas.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de facturas.")
         finally:
             session.close()
 
@@ -400,11 +401,11 @@ class FacturacionPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
             return None
         item = self.tabla.item(filas[0].row(), 0)
         if item is None:
-            QMessageBox.warning(self, "Error", "No se pudo obtener el ID de la factura seleccionada.")
+            MessageBox.warning(self, "Error", "No se pudo obtener el ID de la factura seleccionada.")
             return None
         return int(item.text())
 
@@ -459,7 +460,7 @@ class FacturacionPanel(QWidget):
 
     def nueva_factura(self) -> None:
         if not self._verificar_caja_abierta(ofrecer_apertura=True):
-            QMessageBox.information(
+            MessageBox.information(
                 self, "Caja requerida", "Debe abrir el turno de una caja para poder emitir facturas."
             )
             return
@@ -479,12 +480,12 @@ class FacturacionPanel(QWidget):
                 # La impresion se dispara en segundo plano (no bloquea este mensaje ni
                 # el resto de la UI) -- ver _disparar_impresion_automatica.
                 self._disparar_impresion_automatica(factura.id_factura)
-                QMessageBox.information(self, "Factura emitida", f"Factura {factura.numero_factura} emitida con éxito.")
+                MessageBox.information(self, "Factura emitida", f"Factura {factura.numero_factura} emitida con éxito.")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
         except Exception:
             logger.exception("Fallo al procesar la emision de la factura")
-            QMessageBox.critical(self, "Error", "No se pudo emitir la factura.")
+            MessageBox.critical(self, "Error", "No se pudo emitir la factura.")
         finally:
             session.close()
 
@@ -511,7 +512,7 @@ class FacturacionPanel(QWidget):
 
     def _on_impresion_automatica_error(self, mensaje: str) -> None:
         logger.warning("Fallo la impresion automatica de la factura: %s", mensaje)
-        QMessageBox.warning(
+        MessageBox.warning(
             self,
             "No se pudo imprimir",
             "La factura se emitió correctamente, pero no se pudo enviar a la impresora "
@@ -529,12 +530,12 @@ class FacturacionPanel(QWidget):
             dialogo = FacturaDetalleDialog(datos, session, self.usuario.id_usuario, parent=self)
             dialogo.exec()
         except ValueError as exc:
-            QMessageBox.warning(self, "No se pudo abrir la factura", str(exc))
+            MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
         except Exception:
             logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
-            QMessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
             session.close()
 
@@ -548,7 +549,7 @@ class FacturacionPanel(QWidget):
         if not ok or not motivo:
             return
 
-        respuesta = QMessageBox.question(
+        respuesta = MessageBox.question(
             self, "Confirmar", "¿Anular esta factura? Se repondrá el stock vendido y no se puede deshacer."
         )
         if respuesta != QMessageBox.StandardButton.Yes:
@@ -564,14 +565,14 @@ class FacturacionPanel(QWidget):
             self.cargar_facturas()
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "No se pudo anular la factura", str(exc))
+            MessageBox.warning(self, "No se pudo anular la factura", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para anular facturas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para anular facturas.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al anular la factura %s", id_factura)
-            QMessageBox.critical(self, "Error", "No se pudo anular la factura.")
+            MessageBox.critical(self, "Error", "No se pudo anular la factura.")
         finally:
             session.close()
 
@@ -594,7 +595,7 @@ class FacturacionPanel(QWidget):
             if nota is None or nota.saldo_disponible <= 0:
                 return
 
-            respuesta = QMessageBox.question(
+            respuesta = MessageBox.question(
                 self,
                 "Nota de crédito generada",
                 f"Se generó la nota de crédito {nota.numero_nota_credito} por "
@@ -646,12 +647,12 @@ class FacturacionPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
         except Exception:
             logger.exception("Fallo al exportar el listado de facturas a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
         finally:
             session.close()
 
@@ -664,11 +665,11 @@ class FacturacionPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_pdf(ruta, "Facturas de Venta", COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
         except Exception:
             logger.exception("Fallo al exportar el listado de facturas a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
         finally:
             session.close()

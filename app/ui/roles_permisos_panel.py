@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.services.permisos import PermisoDenegadoError, PermisoService, RolService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -199,10 +200,10 @@ class RolesPermisosPanel(QWidget):
                 self._rol_seleccionado_id = None
                 self._render_matriz([], None)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar roles y permisos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar roles y permisos.")
         except Exception:
             logger.exception("Fallo al cargar la lista de roles")
-            QMessageBox.critical(self, "Error", "No se pudo cargar la lista de roles.")
+            MessageBox.critical(self, "Error", "No se pudo cargar la lista de roles.")
         finally:
             session.close()
 
@@ -230,21 +231,21 @@ class RolesPermisosPanel(QWidget):
             self._cargar_roles()
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "No se pudo crear el rol", str(exc))
+            MessageBox.warning(self, "No se pudo crear el rol", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear roles.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear roles.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear el rol")
-            QMessageBox.critical(self, "Error", "No se pudo crear el rol.")
+            MessageBox.critical(self, "Error", "No se pudo crear el rol.")
         finally:
             session.close()
 
     def editar_rol(self) -> None:
         item = self.lista_roles.currentItem()
         if item is None:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un rol de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un rol de la lista.")
             return
         id_rol = item.data(Qt.ItemDataRole.UserRole)
 
@@ -259,26 +260,26 @@ class RolesPermisosPanel(QWidget):
             self._cargar_roles()
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "No se pudo editar el rol", str(exc))
+            MessageBox.warning(self, "No se pudo editar el rol", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar roles.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar roles.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar el rol %s", id_rol)
-            QMessageBox.critical(self, "Error", "No se pudo editar el rol.")
+            MessageBox.critical(self, "Error", "No se pudo editar el rol.")
         finally:
             session.close()
 
     def eliminar_rol(self) -> None:
         item = self.lista_roles.currentItem()
         if item is None:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un rol de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un rol de la lista.")
             return
         id_rol = item.data(Qt.ItemDataRole.UserRole)
         nombre = item.text()
 
-        respuesta = QMessageBox.question(self, "Confirmar", f"¿Eliminar el rol '{nombre}'? No se puede deshacer.")
+        respuesta = MessageBox.question(self, "Confirmar", f"¿Eliminar el rol '{nombre}'? No se puede deshacer.")
         if respuesta != QMessageBox.StandardButton.Yes:
             return
 
@@ -289,14 +290,14 @@ class RolesPermisosPanel(QWidget):
             self._cargar_roles()
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "No se pudo eliminar el rol", str(exc))
+            MessageBox.warning(self, "No se pudo eliminar el rol", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para eliminar roles.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para eliminar roles.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al eliminar el rol %s", id_rol)
-            QMessageBox.critical(self, "Error", "No se pudo eliminar el rol.")
+            MessageBox.critical(self, "Error", "No se pudo eliminar el rol.")
         finally:
             session.close()
 
@@ -308,10 +309,10 @@ class RolesPermisosPanel(QWidget):
             matriz = PermisoService.obtener_matriz_rol(session, id_rol, id_usuario=self.usuario.id_usuario)
             self._render_matriz(matriz, nombre_rol)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la matriz de permisos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la matriz de permisos.")
         except Exception:
             logger.exception("Fallo al cargar la matriz de permisos del rol %s", id_rol)
-            QMessageBox.critical(self, "Error", "No se pudo cargar la matriz de permisos.")
+            MessageBox.critical(self, "Error", "No se pudo cargar la matriz de permisos.")
         finally:
             session.close()
 
@@ -380,16 +381,16 @@ class RolesPermisosPanel(QWidget):
             PermisoService.establecer_permisos_rol(
                 session, self._rol_seleccionado_id, ids_marcados, id_usuario=self.usuario.id_usuario
             )
-            QMessageBox.information(self, "Permisos guardados", "La matriz de permisos se actualizó correctamente.")
+            MessageBox.information(self, "Permisos guardados", "La matriz de permisos se actualizó correctamente.")
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "No se pudo guardar", str(exc))
+            MessageBox.warning(self, "No se pudo guardar", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar la matriz de permisos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar la matriz de permisos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al guardar la matriz de permisos del rol %s", self._rol_seleccionado_id)
-            QMessageBox.critical(self, "Error", "No se pudo guardar la matriz de permisos.")
+            MessageBox.critical(self, "Error", "No se pudo guardar la matriz de permisos.")
         finally:
             session.close()

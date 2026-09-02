@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -22,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Banco, BancoMovimiento, CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -259,7 +259,7 @@ class ConciliacionBancosDialog(QDialog):
         """Agrega un movimiento manual."""
         id_cuenta = self.cuenta_combo.currentData()
         if id_cuenta is None:
-            QMessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
+            MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
             return
 
         dialog = MovimientoManualDialog(tipo, parent=self)
@@ -376,7 +376,7 @@ class ConciliacionBancosDialog(QDialog):
         """Marca el día como conciliado si la diferencia es 0."""
         id_cuenta = self.cuenta_combo.currentData()
         if id_cuenta is None:
-            QMessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
+            MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
             return
 
         # Verificar que la diferencia sea 0
@@ -440,7 +440,7 @@ class ConciliacionBancosDialog(QDialog):
         diferencia = saldo_calculado - saldo_final_manual
 
         if abs(diferencia) > 0.01:
-            QMessageBox.warning(
+            MessageBox.warning(
                 self,
                 "No se puede conciliar",
                 f"La conciliación presenta una diferencia de ${diferencia:,.2f}. "
@@ -450,7 +450,7 @@ class ConciliacionBancosDialog(QDialog):
 
         # Aquí se podría guardar en una tabla de conciliaciones si existe
         # Por ahora, mostramos un mensaje de éxito
-        QMessageBox.information(
+        MessageBox.information(
             self,
             "Conciliación Exitosa",
             f"El día {fecha.strftime('%d/%m/%Y')} ha sido marcado como conciliado.\n"
@@ -460,12 +460,12 @@ class ConciliacionBancosDialog(QDialog):
     def _guardar_movimientos(self):
         """Guarda los movimientos manuales en la base de datos."""
         if not self._movimientos_manuales:
-            QMessageBox.information(self, "Sin movimientos", "No hay movimientos manuales para guardar.")
+            MessageBox.information(self, "Sin movimientos", "No hay movimientos manuales para guardar.")
             return
 
         id_cuenta = self.cuenta_combo.currentData()
         if id_cuenta is None:
-            QMessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
+            MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
             return
 
         fecha = self._fecha_conciliacion.toPyDate()
@@ -493,12 +493,12 @@ class ConciliacionBancosDialog(QDialog):
             self._movimientos_manuales.clear()
             self._actualizar_tabla_manuales()
             self._calcular_conciliacion()
-            QMessageBox.information(
+            MessageBox.information(
                 self, "Movimientos Guardados", "Los movimientos manuales han sido guardados exitosamente."
             )
         except Exception as e:
             self.session.rollback()
-            QMessageBox.critical(self, "Error", f"Error al guardar movimientos: {str(e)}")
+            MessageBox.critical(self, "Error", f"Error al guardar movimientos: {str(e)}")
 
     def _calcular_conciliacion(self):
         """Calcula la conciliación bancaria."""
@@ -660,10 +660,10 @@ class MovimientoManualDialog(QDialog):
 
     def _validar_y_aceptar(self):
         if self.monto_input.value() <= 0:
-            QMessageBox.warning(self, "Dato requerido", "El monto debe ser mayor a 0.")
+            MessageBox.warning(self, "Dato requerido", "El monto debe ser mayor a 0.")
             return
         if not self.referencia_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "La referencia es obligatoria.")
+            MessageBox.warning(self, "Dato requerido", "La referencia es obligatoria.")
             return
         self.accept()
 

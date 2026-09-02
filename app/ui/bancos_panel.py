@@ -31,6 +31,7 @@ from app.db.models import Banco, Usuario
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService
 from app.ui.banco_form_dialog import BancoFormDialog
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -281,13 +282,13 @@ class BancosPanel(QWidget):
             self.bancos = []
             self._actualizar_tabla()
             self._actualizar_paginacion()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar bancos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar bancos.")
         except Exception:
             logger.exception("Fallo al cargar la lista de bancos")
             self.bancos = []
             self._actualizar_tabla()
             self._actualizar_paginacion()
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de bancos.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de bancos.")
         finally:
             session.close()
 
@@ -382,17 +383,17 @@ class BancosPanel(QWidget):
                 self.cargar_bancos()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(self, "Dato duplicado", "Ya existe un banco con esa identificación (RIF).")
+            MessageBox.warning(self, "Dato duplicado", "Ya existe un banco con esa identificación (RIF).")
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear bancos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear bancos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear banco")
-            QMessageBox.critical(self, "Error", "No se pudo crear el banco.")
+            MessageBox.critical(self, "Error", "No se pudo crear el banco.")
         finally:
             session.close()
 
@@ -414,17 +415,17 @@ class BancosPanel(QWidget):
                 self.cargar_bancos()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(self, "Dato duplicado", "Ya existe un banco con esa identificación (RIF).")
+            MessageBox.warning(self, "Dato duplicado", "Ya existe un banco con esa identificación (RIF).")
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar bancos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar bancos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar banco")
-            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios del banco.")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del banco.")
         finally:
             session.close()
 
@@ -440,7 +441,7 @@ class BancosPanel(QWidget):
             if banco is None:
                 return
             nuevo_estado = "INACTIVO" if banco.estado_banco == "ACTIVO" else "ACTIVO"
-            respuesta = QMessageBox.question(
+            respuesta = MessageBox.question(
                 self, "Confirmar", f"¿Cambiar el estado del banco '{banco.nombre_banco}' a {nuevo_estado}?"
             )
             if respuesta != QMessageBox.StandardButton.Yes:
@@ -450,18 +451,18 @@ class BancosPanel(QWidget):
             self.cargar_bancos()
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de bancos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de bancos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del banco %s", banco_id)
-            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del banco.")
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del banco.")
         finally:
             session.close()
 
     def _id_seleccionado(self) -> int | None:
         row = self.tabla.currentRow()
         if row < 0:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un banco de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un banco de la lista.")
             return None
         item = self.tabla.item(row, COL_ID_INTERNO)
         return int(item.text()) if item is not None else None

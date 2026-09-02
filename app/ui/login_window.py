@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -23,6 +22,7 @@ from app.db.models import ConfiguracionEmpresa
 from app.db.session import SessionLocal
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.recuperacion_acceso import TIPO_DESBLOQUEO, TIPO_RECUPERAR_CLAVE
+from app.ui.message_box import MessageBox
 from app.ui.solicitar_codigo_dialog import SolicitarCodigoDialog
 from app.ui.styles import (
     COLOR_BORDER,
@@ -233,7 +233,7 @@ class LoginWindow(QDialog):
             return
         except Exception:
             logger.exception("Fallo al autenticar al usuario '%s'", nombre_usuario)
-            QMessageBox.critical(self, "Error de conexión", "No se pudo conectar con el servidor. Intente nuevamente.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo conectar con el servidor. Intente nuevamente.")
             return
         finally:
             session.close()

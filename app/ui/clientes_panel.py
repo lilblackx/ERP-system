@@ -39,6 +39,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.historial_cliente_window import HistorialClienteWindow
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -352,10 +353,10 @@ class ClientesPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al cargar la lista de clientes")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de clientes.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de clientes.")
         finally:
             session.close()
 
@@ -452,12 +453,12 @@ class ClientesPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al exportar la lista de clientes a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
         finally:
             session.close()
 
@@ -496,23 +497,23 @@ class ClientesPanel(QWidget):
                 filtros=filtros,
                 col_widths=col_widths,
             )
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al exportar la lista de clientes a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
         finally:
             session.close()
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un cliente de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un cliente de la lista.")
             return None
         item = self.tabla.item(filas[0].row(), 0)
         if item is None:
-            QMessageBox.warning(self, "Error", "No se pudo obtener el ID del cliente seleccionado.")
+            MessageBox.warning(self, "Error", "No se pudo obtener el ID del cliente seleccionado.")
             return None
         return int(item.text())
 
@@ -527,21 +528,21 @@ class ClientesPanel(QWidget):
                 self.cargar_clientes()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Dato duplicado", "El código o la identificación ya están registrados en otro cliente."
             )
         except ValueError as exc:
             # Mensaje ya pensado para el usuario final ("codigo_cliente es requerido",
             # etc.) -- no es un str(exc) tecnico, mismo criterio que C3.
             session.rollback()
-            QMessageBox.warning(self, "Dato invalido", str(exc))
+            MessageBox.warning(self, "Dato invalido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear clientes.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear clientes.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear cliente")
-            QMessageBox.critical(self, "Error", "No se pudo crear el cliente.")
+            MessageBox.critical(self, "Error", "No se pudo crear el cliente.")
         finally:
             session.close()
 
@@ -559,19 +560,19 @@ class ClientesPanel(QWidget):
                 self.cargar_clientes()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Dato duplicado", "El código o la identificación ya están registrados en otro cliente."
             )
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato invalido", str(exc))
+            MessageBox.warning(self, "Dato invalido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar clientes.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar clientes.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar cliente")
-            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios del cliente.")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del cliente.")
         finally:
             session.close()
 
@@ -586,7 +587,7 @@ class ClientesPanel(QWidget):
             estado_actual = cliente.estado_cliente or "ACTIVO"
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
-            respuesta = QMessageBox.question(
+            respuesta = MessageBox.question(
                 self, "Confirmar", f"¿Cambiar el estado del cliente '{cliente.nombre_razon_social}' a {nuevo_estado}?"
             )
             if respuesta != QMessageBox.StandardButton.Yes:
@@ -596,11 +597,11 @@ class ClientesPanel(QWidget):
             self.cargar_clientes()
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de clientes.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de clientes.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del cliente %s", id_cliente)
-            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del cliente.")
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del cliente.")
         finally:
             session.close()
 
@@ -613,7 +614,7 @@ class ClientesPanel(QWidget):
         try:
             cliente = session.get(Cliente, id_cliente)
             if cliente is None:
-                QMessageBox.warning(self, "Cliente no encontrado", "El cliente seleccionado no existe.")
+                MessageBox.warning(self, "Cliente no encontrado", "El cliente seleccionado no existe.")
                 return
 
             dialogo = HistorialClienteWindow(
@@ -626,6 +627,6 @@ class ClientesPanel(QWidget):
             dialogo.exec()
         except Exception:
             logger.exception("Fallo al abrir el historial del cliente %s", id_cliente)
-            QMessageBox.critical(self, "Error", "No se pudo abrir el historial del cliente.")
+            MessageBox.critical(self, "Error", "No se pudo abrir el historial del cliente.")
         finally:
             session.close()

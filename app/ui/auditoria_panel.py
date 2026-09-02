@@ -39,6 +39,7 @@ from app.db.models import Auditoria, Usuario
 from app.services.auditoria import MODULOS_SUGERIDOS, AuditoriaService
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
     COLOR_BORDER,
@@ -586,10 +587,10 @@ class AuditoriaPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la auditoría.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la auditoría.")
         except Exception:
             logger.exception("Fallo al cargar la bitácora de auditoría")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la bitácora de auditoría.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la bitácora de auditoría.")
         finally:
             session.close()
 
@@ -618,7 +619,7 @@ class AuditoriaPanel(QWidget):
     def ver_detalle_seleccionado(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un evento de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un evento de la lista.")
             return
         evento = self._eventos_pagina[filas[0].row()]
         fecha_texto = evento.fecha_evento.strftime("%d/%m/%Y %H:%M:%S") if evento.fecha_evento else "—"
@@ -634,8 +635,8 @@ class AuditoriaPanel(QWidget):
             f"Acción: {evento.accion}\n\n"
             f"Detalle:\n{detalle_texto}"
         )
-        # QMessageBox.information() (metodo estatico) no permite fijar textFormat antes de
-        # mostrarse -- se arma el dialogo a mano para forzar PlainText: el `detalle` de un
+        # Se arma con QMessageBox nativo, no con MessageBox.information() (app/ui/message_box.py)
+        # -- este ultimo no expone textFormat, y hace falta forzar PlainText a mano: el `detalle` de un
         # evento viene de campos de texto libre (motivo, observaciones) que un usuario
         # pudo escribir con "<b>" o una etiqueta "<a href=...>", y por defecto Qt decide
         # con una heuristica (Qt::AutoText) si interpretarlo como HTML -- sin esto, ese

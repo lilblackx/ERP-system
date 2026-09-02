@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -16,6 +15,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import Banco, CuentaBancaria
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -362,19 +362,19 @@ class CuentaBancariaFormDialog(QDialog):
 
     def _validar_y_aceptar(self):
         if self.banco_combo.currentData() is None:
-            QMessageBox.warning(self, "Dato requerido", "Debe seleccionar un banco.")
+            MessageBox.warning(self, "Dato requerido", "Debe seleccionar un banco.")
             self.banco_combo.setFocus()
             return
         if not self.numero_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El número de cuenta es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El número de cuenta es obligatorio.")
             self.numero_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El nombre del titular es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El nombre del titular es obligatorio.")
             self.nombre_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "La identificación del titular es obligatoria.")
+            MessageBox.warning(self, "Dato requerido", "La identificación del titular es obligatoria.")
             self.identificacion_input.setFocus()
             return
         self.accept()

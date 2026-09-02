@@ -27,6 +27,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, _enmascarar_numero_cuenta
 from app.ui.conciliacion_bancos_dialog import ConciliacionBancosDialog
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
+from app.ui.message_box import MessageBox
 from app.ui.movimientos_cuenta_dialog import MovimientosCuentaDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -289,14 +290,14 @@ class CuentasBancariasPanel(QWidget):
             self._total_registros = 0
             self._actualizar_tabla()
             self._actualizar_paginacion()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
         except Exception:
             logger.exception("Fallo al cargar la lista de cuentas bancarias")
             self._cuentas = []
             self._total_registros = 0
             self._actualizar_tabla()
             self._actualizar_paginacion()
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de cuentas bancarias.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de cuentas bancarias.")
         finally:
             session.close()
 
@@ -358,19 +359,19 @@ class CuentasBancariasPanel(QWidget):
                 self._cargar_datos()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Dato inválido", "No se pudo guardar la cuenta bancaria: verifica el banco seleccionado."
             )
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear cuentas bancarias.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear cuentas bancarias.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear cuenta bancaria")
-            QMessageBox.critical(self, "Error", "No se pudo crear la cuenta bancaria.")
+            MessageBox.critical(self, "Error", "No se pudo crear la cuenta bancaria.")
         finally:
             session.close()
 
@@ -378,7 +379,7 @@ class CuentasBancariasPanel(QWidget):
         """Abre el diálogo para editar la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
-            QMessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
             return
 
         cuenta = self._cuentas[row]
@@ -391,19 +392,19 @@ class CuentasBancariasPanel(QWidget):
                 self._cargar_datos()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Dato inválido", "No se pudo guardar la cuenta bancaria: verifica el banco seleccionado."
             )
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar cuentas bancarias.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar cuentas bancarias.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar cuenta bancaria")
-            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios de la cuenta bancaria.")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios de la cuenta bancaria.")
         finally:
             session.close()
 
@@ -411,12 +412,12 @@ class CuentasBancariasPanel(QWidget):
         """Cambia el estado de la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
-            QMessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
             return
 
         cuenta = self._cuentas[row]
         nuevo_estado = "INACTIVO" if cuenta.estado_cuenta == "ACTIVO" else "ACTIVO"
-        respuesta = QMessageBox.question(
+        respuesta = MessageBox.question(
             self, "Confirmar", f"¿Cambiar el estado de la cuenta '{cuenta.numero_cuenta}' a {nuevo_estado}?"
         )
         if respuesta != QMessageBox.StandardButton.Yes:
@@ -430,11 +431,11 @@ class CuentasBancariasPanel(QWidget):
             self._cargar_datos()
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de cuentas bancarias.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de cuentas bancarias.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado de la cuenta bancaria %s", cuenta.id_cuenta)
-            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado de la cuenta bancaria.")
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado de la cuenta bancaria.")
         finally:
             session.close()
 
@@ -442,7 +443,7 @@ class CuentasBancariasPanel(QWidget):
         """Abre el diálogo para ver los movimientos de la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
-            QMessageBox.information(
+            MessageBox.information(
                 self, "Selección requerida", "Selecciona una cuenta bancaria para ver sus movimientos."
             )
             return
@@ -454,10 +455,10 @@ class CuentasBancariasPanel(QWidget):
             dialog.exec()
             self._cargar_datos()
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar movimientos bancarios.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar movimientos bancarios.")
         except Exception:
             logger.exception("Fallo al abrir los movimientos de la cuenta bancaria %s", cuenta.id_cuenta)
-            QMessageBox.critical(self, "Error", "No se pudo abrir los movimientos de la cuenta.")
+            MessageBox.critical(self, "Error", "No se pudo abrir los movimientos de la cuenta.")
         finally:
             session.close()
 
@@ -469,10 +470,10 @@ class CuentasBancariasPanel(QWidget):
             dialog.exec()
             self._cargar_datos()
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para conciliar bancos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para conciliar bancos.")
         except Exception:
             logger.exception("Fallo al abrir la conciliación de bancos")
-            QMessageBox.critical(self, "Error", "No se pudo abrir la conciliación de bancos.")
+            MessageBox.critical(self, "Error", "No se pudo abrir la conciliación de bancos.")
         finally:
             session.close()
 
@@ -525,14 +526,14 @@ class CuentasBancariasPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
-            QMessageBox.information(
+            MessageBox.information(
                 self, "Exportación completa", f"Se exportaron {len(filas)} cuentas bancarias a:\n{ruta}"
             )
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
         except Exception:
             logger.exception("Fallo al exportar la lista de cuentas bancarias a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
         finally:
             session.close()
 
@@ -563,14 +564,14 @@ class CuentasBancariasPanel(QWidget):
                 filtros=filtros,
                 col_widths=col_widths,
             )
-            QMessageBox.information(
+            MessageBox.information(
                 self, "Exportación completa", f"Se exportaron {len(filas)} cuentas bancarias a:\n{ruta}"
             )
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
         except Exception:
             logger.exception("Fallo al exportar la lista de cuentas bancarias a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
         finally:
             session.close()
 

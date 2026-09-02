@@ -35,6 +35,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.services.usuarios import UsuarioService
 from app.services.vendedores import VendedorService
+from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
@@ -280,17 +281,15 @@ class PagarComisionesDialog(QDialog):
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
         if origen is None:
-            QMessageBox.warning(self, "Origen requerido", "No hay ninguna caja/cuenta disponible para este método.")
+            MessageBox.warning(self, "Origen requerido", "No hay ninguna caja/cuenta disponible para este método.")
             return
         tipo_origen, id_origen = origen
 
-        respuesta = QMessageBox.question(
+        respuesta = MessageBox.question(
             self,
             "Confirmar pago",
             f"¿Confirma el pago de ${float(self.monto_pendiente):,.2f} a {self.nombre_vendedor}?\n"
             "Esta acción no se puede deshacer.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
         )
         if respuesta != QMessageBox.StandardButton.Yes:
             return
@@ -307,16 +306,16 @@ class PagarComisionesDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo registrar el pago", str(exc))
+            MessageBox.warning(self, "No se pudo registrar el pago", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para pagar comisiones.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para pagar comisiones.")
             return
         except Exception:
             self.session.rollback()
             logger.exception("Fallo al pagar comisiones")
-            QMessageBox.critical(self, "Error", "No se pudo registrar el pago.")
+            MessageBox.critical(self, "Error", "No se pudo registrar el pago.")
             return
 
         self.accept()
@@ -459,12 +458,12 @@ class ComisionesPanel(QWidget):
             else:
                 self._cargar_comisiones_propias(session)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar comisiones.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar comisiones.")
         except ValueError as exc:
-            QMessageBox.warning(self, "Error", str(exc))
+            MessageBox.warning(self, "Error", str(exc))
         except Exception:
             logger.exception("Fallo al cargar comisiones")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar las comisiones.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar las comisiones.")
         finally:
             session.close()
 
@@ -553,7 +552,7 @@ class ComisionesPanel(QWidget):
 
     def pagar_comisiones(self) -> None:
         if self.id_vendedor_actual is None:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un vendedor.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un vendedor.")
             return
 
         total_pendiente = sum(
@@ -561,7 +560,7 @@ class ComisionesPanel(QWidget):
             Decimal("0.00"),
         )
         if total_pendiente <= 0:
-            QMessageBox.information(self, "Sin comisiones", "No hay comisiones pendientes para este vendedor.")
+            MessageBox.information(self, "Sin comisiones", "No hay comisiones pendientes para este vendedor.")
             return
 
         nombre_vendedor = self.vendedor_combo.currentText()
@@ -572,7 +571,7 @@ class ComisionesPanel(QWidget):
             )
             if dialogo.exec() and dialogo.pago_creado is not None:
                 self._on_vendedor_cambiado()
-                QMessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
+                MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
         except Exception:
             logger.exception("Fallo al abrir dialogo de pago")
         finally:

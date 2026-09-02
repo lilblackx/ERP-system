@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -36,6 +35,7 @@ from app.db.models import Caja, Usuario
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.ui.caja_cierre_dialog import CajaCierreDialog
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -236,10 +236,10 @@ class CajasPanel(QWidget):
             estados = CajaService.obtener_estado_cajas(session, id_usuario=self.usuario.id_usuario)
             self._poblar_tabla(estados)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cajas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cajas.")
         except Exception:
             logger.exception("Fallo al cargar el estado de las cajas")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el estado de las cajas.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el estado de las cajas.")
         finally:
             session.close()
 
@@ -267,7 +267,7 @@ class CajasPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona una caja de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una caja de la lista.")
             return None
         item = self.tabla.item(filas[0].row(), 0)
         if item is None:
@@ -283,25 +283,25 @@ class CajasPanel(QWidget):
         try:
             caja = session.get(Caja, id_caja)
             if caja is None:
-                QMessageBox.warning(self, "Error", "Caja no encontrada.")
+                MessageBox.warning(self, "Error", "Caja no encontrada.")
                 return
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                QMessageBox.information(
+                MessageBox.information(
                     self, "Sin turno abierto", f"La caja '{caja.nombre_caja}' no tiene un turno abierto."
                 )
                 return
 
             dialogo = CajaCierreDialog(session, caja, self.usuario.id_usuario, parent=self)
             if dialogo.exec() and dialogo.cerrada:
-                QMessageBox.information(
+                MessageBox.information(
                     self, "Turno cerrado", f"El turno de '{caja.nombre_caja}' se cerró correctamente."
                 )
                 self.cargar_cajas()
         except PermisoDenegadoError as exc:
-            QMessageBox.warning(self, "Sin permiso", str(exc))
+            MessageBox.warning(self, "Sin permiso", str(exc))
         except Exception:
             logger.exception("Fallo al cerrar el turno de la caja %s", id_caja)
-            QMessageBox.critical(self, "Error", "No se pudo cerrar el turno de caja.")
+            MessageBox.critical(self, "Error", "No se pudo cerrar el turno de caja.")
         finally:
             session.close()
 
@@ -314,10 +314,10 @@ class CajasPanel(QWidget):
         try:
             caja = session.get(Caja, id_caja)
             if caja is None:
-                QMessageBox.warning(self, "Error", "Caja no encontrada.")
+                MessageBox.warning(self, "Error", "Caja no encontrada.")
                 return
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                QMessageBox.warning(
+                MessageBox.warning(
                     self, "Sin turno abierto", f"La caja '{caja.nombre_caja}' no tiene un turno abierto."
                 )
                 return
@@ -338,13 +338,13 @@ class CajasPanel(QWidget):
             self.cargar_cajas()
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar movimientos de caja.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar movimientos de caja.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al registrar movimiento manual de caja %s", id_caja)
-            QMessageBox.critical(self, "Error", "No se pudo registrar el movimiento de caja.")
+            MessageBox.critical(self, "Error", "No se pudo registrar el movimiento de caja.")
         finally:
             session.close()

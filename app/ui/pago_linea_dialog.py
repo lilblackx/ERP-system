@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -25,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -370,19 +370,19 @@ class PagoLineaDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if self.monto_input.value() <= 0:
-            QMessageBox.warning(self, "Monto requerido", "Ingrese un monto mayor a cero.")
+            MessageBox.warning(self, "Monto requerido", "Ingrese un monto mayor a cero.")
             return
         origen = self.origen_combo.currentData()
         if origen is None:
             metodo = self.metodo_combo.currentData()
             if metodo in METODOS_QUE_REQUIEREN_CAJA:
-                QMessageBox.warning(
+                MessageBox.warning(
                     self,
                     "Caja requerida",
                     "No hay ninguna caja con turno abierto. Cierre este formulario y verifique el turno de caja.",
                 )
             else:
-                QMessageBox.warning(
+                MessageBox.warning(
                     self, "Cuenta requerida", "No hay ninguna cuenta bancaria activa para este método de pago."
                 )
             return

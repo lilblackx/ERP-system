@@ -32,6 +32,7 @@ from app.db.models import Usuario
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     COLOR_BORDER,
@@ -250,10 +251,10 @@ class TasasPanel(QWidget):
             self._mostrar_tasa_actual(actual)
             self._poblar_tabla(historico)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
         except Exception:
             logger.exception("Fallo al cargar las tasas de cambio")
-            QMessageBox.critical(self, "Error de conexión", "No se pudieron cargar las tasas de cambio.")
+            MessageBox.critical(self, "Error de conexión", "No se pudieron cargar las tasas de cambio.")
         finally:
             session.close()
 
@@ -347,7 +348,7 @@ class TasasPanel(QWidget):
         saltos = self._saltos_bruscos(datos)
         if not saltos:
             return True
-        respuesta = QMessageBox.question(
+        respuesta = MessageBox.question(
             self,
             "Cambio brusco detectado",
             "La tasa nueva difiere mucho de la última registrada (" + ", ".join(saltos) + "). "
@@ -370,17 +371,17 @@ class TasasPanel(QWidget):
             TasaService.registrar_tasa(session, **datos, creado_por=self.usuario.id_usuario)
             self.cargar_datos()
             self.tasa_registrada.emit()
-            QMessageBox.information(self, "Tasa registrada", "La tasa del día se registró con éxito.")
+            MessageBox.information(self, "Tasa registrada", "La tasa del día se registró con éxito.")
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "No se pudo registrar la tasa", str(exc))
+            MessageBox.warning(self, "No se pudo registrar la tasa", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar tasas de cambio.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar tasas de cambio.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al registrar la tasa de cambio")
-            QMessageBox.critical(self, "Error", "No se pudo registrar la tasa de cambio.")
+            MessageBox.critical(self, "Error", "No se pudo registrar la tasa de cambio.")
         finally:
             session.close()
 
@@ -409,12 +410,12 @@ class TasasPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} tasas a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} tasas a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
         except Exception:
             logger.exception("Fallo al exportar el histórico de tasas a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")
         finally:
             session.close()
 
@@ -427,11 +428,11 @@ class TasasPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_pdf(ruta, "Histórico de Tasas de Cambio", COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} tasas a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} tasas a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
         except Exception:
             logger.exception("Fallo al exportar el histórico de tasas a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")
         finally:
             session.close()

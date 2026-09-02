@@ -10,12 +10,12 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -220,7 +220,7 @@ class TasaRegistroDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if self.bcv_input.value() <= 0:
-            QMessageBox.warning(self, "Dato requerido", "La tasa BCV es obligatoria y debe ser mayor a cero.")
+            MessageBox.warning(self, "Dato requerido", "La tasa BCV es obligatoria y debe ser mayor a cero.")
             self.bcv_input.setFocus()
             return
         self.accept()

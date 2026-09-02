@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Caja
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -211,7 +212,7 @@ class CajaCierreDialog(QDialog):
             )
             saldo_calculado = CajaService.calcular_saldo_actual(self.session, self.caja.id_caja)
         except (ValueError, PermisoDenegadoError) as exc:
-            QMessageBox.critical(self, "No se pudo cargar el arqueo", str(exc))
+            MessageBox.critical(self, "No se pudo cargar el arqueo", str(exc))
             self.reject()
             return
 
@@ -237,13 +238,11 @@ class CajaCierreDialog(QDialog):
             self.btn_cerrar.setText("Confirmar Cierre de Turno (sin movimientos)")
 
     def _confirmar_cierre(self) -> None:
-        respuesta = QMessageBox.question(
+        respuesta = MessageBox.question(
             self,
             "Confirmar cierre de turno",
             "Esta acción cierra el turno y fija el saldo de cierre mostrado arriba.\n"
             "No se puede deshacer desde la aplicación. ¿Confirma el cierre?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
         )
         if respuesta != QMessageBox.StandardButton.Yes:
             return
@@ -251,7 +250,7 @@ class CajaCierreDialog(QDialog):
         try:
             CajaService.cerrar_caja(self.session, self.caja.id_caja, self.id_usuario_actor)
         except (ValueError, PermisoDenegadoError) as exc:
-            QMessageBox.warning(self, "No se pudo cerrar la caja", str(exc))
+            MessageBox.warning(self, "No se pudo cerrar la caja", str(exc))
             return
 
         self.cerrada = True

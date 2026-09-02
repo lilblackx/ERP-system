@@ -41,6 +41,7 @@ from app.ui.cuentas_por_pagar_panel import CuentasPorPagarPanel
 from app.ui.dashboard_panel import DashboardPanel
 from app.ui.facturacion_panel import FacturacionPanel
 from app.ui.inventario_panel import InventarioPanel
+from app.ui.message_box import MessageBox
 from app.ui.placeholder_view import PlaceholderView
 from app.ui.proveedores_panel import ProveedoresPanel
 from app.ui.reportes_panel import ReportesPanel
@@ -261,7 +262,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _confirmar_cerrar_sesion(self) -> None:
-        respuesta = QMessageBox.question(self, "Cerrar sesión", "¿Cerrar la sesión actual?")
+        respuesta = MessageBox.question(self, "Cerrar sesión", "¿Cerrar la sesión actual?")
         if respuesta == QMessageBox.StandardButton.Yes:
             # Cerrar esta ventana hace que app.exec() retorne en app/main.py (es la unica
             # ventana top-level abierta) -- el bucle de main() vuelve a mostrar LoginWindow,

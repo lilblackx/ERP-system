@@ -35,6 +35,7 @@ from app.services.categorias import CategoriaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
+from app.ui.message_box import MessageBox
 from app.ui.producto_form_dialog import ProductoFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -308,10 +309,10 @@ class InventarioPanel(QWidget):
             self._poblar_tabla(resultado, precios)
             self._actualizar_alertas(session)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
         except Exception:
             logger.exception("Fallo al cargar el catálogo de inventario")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el catálogo de inventario.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el catálogo de inventario.")
         finally:
             session.close()
 
@@ -373,7 +374,7 @@ class InventarioPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un producto de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un producto de la lista.")
             return None
         return int(self.tabla.item(filas[0].row(), 0).text())
 
@@ -394,17 +395,17 @@ class InventarioPanel(QWidget):
                 self.cargar_productos()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(self, "Dato duplicado", "El código de producto ya está registrado.")
+            MessageBox.warning(self, "Dato duplicado", "El código de producto ya está registrado.")
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear productos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear productos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear producto")
-            QMessageBox.critical(self, "Error", "No se pudo crear el producto.")
+            MessageBox.critical(self, "Error", "No se pudo crear el producto.")
         finally:
             session.close()
 
@@ -429,17 +430,17 @@ class InventarioPanel(QWidget):
                 self.cargar_productos()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(self, "Dato duplicado", "El código de producto ya está registrado.")
+            MessageBox.warning(self, "Dato duplicado", "El código de producto ya está registrado.")
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar productos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar productos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar producto")
-            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios del producto.")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del producto.")
         finally:
             session.close()
 
@@ -454,7 +455,7 @@ class InventarioPanel(QWidget):
             estado_actual = producto.estado_producto or "ACTIVO"
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
-            respuesta = QMessageBox.question(
+            respuesta = MessageBox.question(
                 self, "Confirmar", f"¿Cambiar el estado del producto '{producto.nombre_producto}' a {nuevo_estado}?"
             )
             if respuesta != QMessageBox.StandardButton.Yes:
@@ -464,11 +465,11 @@ class InventarioPanel(QWidget):
             self.cargar_productos()
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de productos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de productos.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del producto %s", id_producto)
-            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del producto.")
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del producto.")
         finally:
             session.close()
 
@@ -508,12 +509,12 @@ class InventarioPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
         except Exception:
             logger.exception("Fallo al exportar el catálogo de inventario a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
         finally:
             session.close()
 
@@ -526,11 +527,11 @@ class InventarioPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
         except Exception:
             logger.exception("Fallo al exportar el catálogo de inventario a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
         finally:
             session.close()

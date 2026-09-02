@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -27,6 +26,7 @@ from app.db.models import Caja, Usuario
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -285,7 +285,7 @@ class CajaAperturaDialog(QDialog):
         nombre_usuario = self.usuario_input.text().strip()
         clave = self.clave_input.text()
         if not nombre_usuario or not clave:
-            QMessageBox.warning(self, "Credenciales requeridas", "Ingrese usuario y clave.")
+            MessageBox.warning(self, "Credenciales requeridas", "Ingrese usuario y clave.")
             return
 
         try:
@@ -297,24 +297,24 @@ class CajaAperturaDialog(QDialog):
                 accion_fallo="APERTURA_TURNO_CAJA_FALLIDA",
             )
         except CuentaBloqueadaError as exc:
-            QMessageBox.critical(self, "Cuenta bloqueada", str(exc))
+            MessageBox.critical(self, "Cuenta bloqueada", str(exc))
             return
 
         if usuario is None:
-            QMessageBox.warning(self, "Credenciales inválidas", "Usuario o clave incorrectos.")
+            MessageBox.warning(self, "Credenciales inválidas", "Usuario o clave incorrectos.")
             return
 
         try:
             cajas = CajaService.listar_cajas(self.session, id_usuario=usuario.id_usuario)
         except PermisoDenegadoError:
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Sin permiso", f"'{usuario.nombre_usuario}' no tiene permiso para abrir turnos de caja."
             )
             return
 
         cajas_cerradas = [c for c in cajas if c.fecha_apertura is None or c.fecha_cierre is not None]
         if not cajas_cerradas:
-            QMessageBox.warning(self, "Sin cajas disponibles", "No hay ninguna caja disponible para abrir.")
+            MessageBox.warning(self, "Sin cajas disponibles", "No hay ninguna caja disponible para abrir.")
             return
 
         self.usuario_autenticado = usuario
@@ -334,7 +334,7 @@ class CajaAperturaDialog(QDialog):
     def _abrir(self) -> None:
         id_caja = self.caja_combo.currentData()
         if id_caja is None:
-            QMessageBox.warning(self, "Caja requerida", "Seleccione una caja para abrir su turno.")
+            MessageBox.warning(self, "Caja requerida", "Seleccione una caja para abrir su turno.")
             return
         try:
             self.caja_abierta = CajaService.abrir_caja(
@@ -344,6 +344,6 @@ class CajaAperturaDialog(QDialog):
                 saldo_apertura=self.saldo_input.value(),
             )
         except (ValueError, PermisoDenegadoError) as exc:
-            QMessageBox.warning(self, "No se pudo abrir la caja", str(exc))
+            MessageBox.warning(self, "No se pudo abrir la caja", str(exc))
             return
         self.accept()
