@@ -14,7 +14,6 @@ from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen,
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSpacerItem,
@@ -24,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.services.dashboard import DashboardService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     CARD_QSS,
@@ -743,4 +743,4 @@ class DashboardPanel(QWidget):
 
     def _mostrar_error(self, mensaje: str) -> None:
         logger.error("Fallo al cargar el panel general: %s", mensaje)
-        QMessageBox.critical(self, "Error", "No se pudo cargar el panel general.")
+        MessageBox.critical(self, "Error", "No se pudo cargar el panel general.")

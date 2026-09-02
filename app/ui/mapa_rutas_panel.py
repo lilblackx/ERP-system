@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
@@ -33,6 +32,7 @@ from app.services.clientes import list_clientes, listar_clientes_por_ruta
 from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from app.ui.mapa_widget import MapaWidget
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -126,10 +126,10 @@ class MapaRutasPanel(QWidget):
             self.ruta_combo.blockSignals(False)
             self._cargar_mapa()
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar rutas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar rutas.")
         except Exception:
             logger.exception("Fallo al cargar el combo de rutas del mapa")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de rutas.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de rutas.")
         finally:
             session.close()
 
@@ -173,10 +173,10 @@ class MapaRutasPanel(QWidget):
             else:
                 self.lbl_info.setText(f"{total_clientes_ruta} cliente(s) geolocalizado(s).")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes o rutas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes o rutas.")
         except Exception:
             logger.exception("Fallo al cargar el mapa de la ruta %s", id_ruta)
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el mapa.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el mapa.")
         finally:
             session.close()
 
@@ -201,7 +201,7 @@ class MapaRutasPanel(QWidget):
             )
             candidatos = [c for c in resultado["items"] if c.latitud is not None and c.longitud is not None]
             if not candidatos:
-                QMessageBox.information(
+                MessageBox.information(
                     self, "Sin resultados", "Ningún cliente geolocalizado coincide con esa búsqueda."
                 )
                 return
@@ -213,9 +213,9 @@ class MapaRutasPanel(QWidget):
                     self.ruta_combo.setCurrentIndex(idx)  # dispara _cargar_mapa() via currentIndexChanged
             self.mapa.centrar(float(cliente.latitud), float(cliente.longitud), zoom=16)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al buscar cliente '%s' en el mapa de rutas", texto)
-            QMessageBox.critical(self, "Error de conexión", "No se pudo buscar el cliente.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo buscar el cliente.")
         finally:
             session.close()

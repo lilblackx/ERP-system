@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -17,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Vendedor
 from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -295,19 +295,19 @@ class VendedorFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El nombre del vendedor es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El nombre del vendedor es obligatorio.")
             self.nombre_input.setFocus()
             return
         if not self.codigo_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El código del vendedor es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El código del vendedor es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "La identificación del vendedor es obligatoria.")
+            MessageBox.warning(self, "Dato requerido", "La identificación del vendedor es obligatoria.")
             self.identificacion_input.setFocus()
             return
         if self.ruta_combo.currentData() is None:
-            QMessageBox.warning(
+            MessageBox.warning(
                 self,
                 "Dato requerido",
                 "La ruta es obligatoria. Cree una ruta primero desde la pestaña 'Rutas'.",

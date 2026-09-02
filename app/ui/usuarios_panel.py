@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from app.db.models import Usuario
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
+from app.ui.message_box import MessageBox
 from app.ui.roles_permisos_panel import RolesPermisosPanel
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -249,10 +250,10 @@ class UsuariosPanel(QWidget):
             )
             self._poblar_tabla(usuarios)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar usuarios.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar usuarios.")
         except Exception:
             logger.exception("Fallo al cargar la lista de usuarios")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de usuarios.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de usuarios.")
         finally:
             session.close()
 
@@ -276,7 +277,7 @@ class UsuariosPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un usuario de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un usuario de la lista.")
             return None
         return int(self.tabla.item(filas[0].row(), 0).text())
 
@@ -292,14 +293,14 @@ class UsuariosPanel(QWidget):
                 self.cargar_usuarios()
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear usuarios.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear usuarios.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear usuario")
-            QMessageBox.critical(self, "Error", "No se pudo crear el usuario.")
+            MessageBox.critical(self, "Error", "No se pudo crear el usuario.")
         finally:
             session.close()
 
@@ -312,7 +313,7 @@ class UsuariosPanel(QWidget):
         try:
             usuario = session.get(Usuario, id_usuario)
             if usuario is None:
-                QMessageBox.warning(self, "No encontrado", "El usuario seleccionado ya no existe.")
+                MessageBox.warning(self, "No encontrado", "El usuario seleccionado ya no existe.")
                 return
             dialogo = UsuarioFormDialog(session, self.usuario.id_usuario, usuario, parent=self)
             if dialogo.exec():
@@ -326,14 +327,14 @@ class UsuariosPanel(QWidget):
                 self.cargar_usuarios()
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar usuarios.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar usuarios.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar usuario %s", id_usuario)
-            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios del usuario.")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del usuario.")
         finally:
             session.close()
 
@@ -342,19 +343,19 @@ class UsuariosPanel(QWidget):
         if id_usuario is None:
             return
         if id_usuario == self.usuario.id_usuario:
-            QMessageBox.warning(self, "Acción no permitida", "No puedes cambiar el estado de tu propio usuario.")
+            MessageBox.warning(self, "Acción no permitida", "No puedes cambiar el estado de tu propio usuario.")
             return
 
         session = self.session_factory()
         try:
             usuario = session.get(Usuario, id_usuario)
             if usuario is None:
-                QMessageBox.warning(self, "No encontrado", "El usuario seleccionado ya no existe.")
+                MessageBox.warning(self, "No encontrado", "El usuario seleccionado ya no existe.")
                 return
             estado_actual = usuario.estado or "ACTIVO"
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
-            respuesta = QMessageBox.question(
+            respuesta = MessageBox.question(
                 self, "Confirmar", f"¿Cambiar el estado de '{usuario.nombre_usuario}' a {nuevo_estado}?"
             )
             if respuesta != QMessageBox.StandardButton.Yes:
@@ -364,14 +365,14 @@ class UsuariosPanel(QWidget):
             self.cargar_usuarios()
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "No se pudo cambiar el estado", str(exc))
+            MessageBox.warning(self, "No se pudo cambiar el estado", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de usuarios.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de usuarios.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del usuario %s", id_usuario)
-            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del usuario.")
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del usuario.")
         finally:
             session.close()
 
@@ -384,21 +385,21 @@ class UsuariosPanel(QWidget):
         try:
             usuario = session.get(Usuario, id_usuario)
             if usuario is None:
-                QMessageBox.warning(self, "No encontrado", "El usuario seleccionado ya no existe.")
+                MessageBox.warning(self, "No encontrado", "El usuario seleccionado ya no existe.")
                 return
             if usuario.bloqueado_desde is None:
-                QMessageBox.information(self, "Sin bloqueo", f"'{usuario.nombre_usuario}' no está bloqueado.")
+                MessageBox.information(self, "Sin bloqueo", f"'{usuario.nombre_usuario}' no está bloqueado.")
                 return
 
             UsuarioService.desbloquear_usuario(session, id_usuario, realizado_por=self.usuario.id_usuario)
-            QMessageBox.information(self, "Usuario desbloqueado", f"Se desbloqueó a '{usuario.nombre_usuario}'.")
+            MessageBox.information(self, "Usuario desbloqueado", f"Se desbloqueó a '{usuario.nombre_usuario}'.")
             self.cargar_usuarios()
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para desbloquear usuarios.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para desbloquear usuarios.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al desbloquear el usuario %s", id_usuario)
-            QMessageBox.critical(self, "Error", "No se pudo desbloquear el usuario.")
+            MessageBox.critical(self, "Error", "No se pudo desbloquear el usuario.")
         finally:
             session.close()

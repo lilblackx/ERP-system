@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
@@ -26,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Usuario
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.permisos import PermisoDenegadoError, require_permiso
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CONTENT_BG,
@@ -200,15 +200,15 @@ class AutorizacionDialog(QDialog):
         clave = self.clave_input.text()
 
         if not motivo:
-            QMessageBox.warning(self, "Motivo requerido", "Ingrese el motivo.")
+            MessageBox.warning(self, "Motivo requerido", "Ingrese el motivo.")
             return
         if len(motivo) < self.motivo_min_length:
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Motivo demasiado corto", f"Debe tener al menos {self.motivo_min_length} caracteres."
             )
             return
         if not nombre_usuario or not clave:
-            QMessageBox.warning(self, "Credenciales requeridas", "Ingrese usuario y clave del supervisor.")
+            MessageBox.warning(self, "Credenciales requeridas", "Ingrese usuario y clave del supervisor.")
             return
 
         try:
@@ -220,17 +220,17 @@ class AutorizacionDialog(QDialog):
                 accion_fallo=f"AUTORIZACION_{self.recurso.upper()}_FALLIDA",
             )
         except CuentaBloqueadaError as exc:
-            QMessageBox.critical(self, "Cuenta bloqueada", str(exc))
+            MessageBox.critical(self, "Cuenta bloqueada", str(exc))
             return
 
         if usuario is None:
-            QMessageBox.warning(self, "Credenciales invalidas", "Usuario o clave incorrectos.")
+            MessageBox.warning(self, "Credenciales invalidas", "Usuario o clave incorrectos.")
             return
 
         try:
             require_permiso(self.session, usuario.id_usuario, self.recurso, self.accion)
         except PermisoDenegadoError:
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Sin permiso", f"'{usuario.nombre_usuario}' no tiene permiso para autorizar esta acción."
             )
             return

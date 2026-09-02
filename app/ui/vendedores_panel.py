@@ -37,6 +37,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.vendedores import VendedorService
 from app.ui.mapa_rutas_panel import MapaRutasPanel
+from app.ui.message_box import MessageBox
 from app.ui.rutas_panel import RutasPanel
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -335,10 +336,10 @@ class VendedoresPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
         except Exception:
             logger.exception("Fallo al cargar la lista de vendedores")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de vendedores.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de vendedores.")
         finally:
             session.close()
 
@@ -401,12 +402,12 @@ class VendedoresPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} vendedores a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} vendedores a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
         except Exception:
             logger.exception("Fallo al exportar la lista de vendedores a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
         finally:
             session.close()
 
@@ -434,19 +435,19 @@ class VendedoresPanel(QWidget):
                 filtros=filtros,
                 col_widths=col_widths,
             )
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} vendedores a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} vendedores a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
         except Exception:
             logger.exception("Fallo al exportar la lista de vendedores a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
         finally:
             session.close()
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un vendedor de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un vendedor de la lista.")
             return None
         return int(self.tabla.item(filas[0].row(), 0).text())
 
@@ -461,19 +462,19 @@ class VendedoresPanel(QWidget):
                 self.cargar_vendedores()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Dato duplicado", "El código o la identificación ya están registrados en otro vendedor."
             )
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear vendedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear vendedores.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear vendedor")
-            QMessageBox.critical(self, "Error", "No se pudo crear el vendedor.")
+            MessageBox.critical(self, "Error", "No se pudo crear el vendedor.")
         finally:
             session.close()
 
@@ -493,19 +494,19 @@ class VendedoresPanel(QWidget):
                 self.cargar_vendedores()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Dato duplicado", "El código o la identificación ya están registrados en otro vendedor."
             )
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar vendedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar vendedores.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar vendedor")
-            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios del vendedor.")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del vendedor.")
         finally:
             session.close()
 
@@ -520,7 +521,7 @@ class VendedoresPanel(QWidget):
             estado_actual = vendedor.estado_vendedor or "ACTIVO"
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
-            respuesta = QMessageBox.question(
+            respuesta = MessageBox.question(
                 self, "Confirmar", f"¿Cambiar el estado del vendedor '{vendedor.nombre_vendedor}' a {nuevo_estado}?"
             )
             if respuesta != QMessageBox.StandardButton.Yes:
@@ -530,10 +531,10 @@ class VendedoresPanel(QWidget):
             self.cargar_vendedores()
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de vendedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de vendedores.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del vendedor %s", id_vendedor)
-            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del vendedor.")
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del vendedor.")
         finally:
             session.close()

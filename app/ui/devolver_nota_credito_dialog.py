@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -25,6 +24,7 @@ from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.autorizacion_dialog import AutorizacionDialog
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -331,7 +331,7 @@ class DevolverNotaCreditoDialog(QDialog):
         if nota is None:
             return
         if origen is None:
-            QMessageBox.warning(self, "Origen requerido", "No hay caja abierta ni cuenta bancaria activa disponible.")
+            MessageBox.warning(self, "Origen requerido", "No hay caja abierta ni cuenta bancaria activa disponible.")
             return
 
         metodo = self.metodo_combo.currentData()
@@ -372,11 +372,11 @@ class DevolverNotaCreditoDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo devolver la nota de crédito", str(exc))
+            MessageBox.warning(self, "No se pudo devolver la nota de crédito", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tiene permiso para devolver notas de crédito.")
+            MessageBox.warning(self, "Sin permiso", "No tiene permiso para devolver notas de crédito.")
             return
 
         self.accept()

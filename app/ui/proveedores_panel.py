@@ -35,6 +35,7 @@ from app.db.models import Proveedor, Usuario
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
+from app.ui.message_box import MessageBox
 from app.ui.proveedor_form_dialog import ProveedorFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -275,10 +276,10 @@ class ProveedoresPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
         except Exception:
             logger.exception("Fallo al cargar la lista de proveedores")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de proveedores.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de proveedores.")
         finally:
             session.close()
 
@@ -353,12 +354,12 @@ class ProveedoresPanel(QWidget):
         try:
             filas = self._filas_para_exportar(session)
             exportar_excel(ruta, COLS_VISIBLES, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} proveedores a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} proveedores a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
         except Exception:
             logger.exception("Fallo al exportar la lista de proveedores a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
         finally:
             session.close()
 
@@ -386,23 +387,23 @@ class ProveedoresPanel(QWidget):
                 filtros=filtros,
                 col_widths=col_widths,
             )
-            QMessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} proveedores a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} proveedores a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
         except Exception:
             logger.exception("Fallo al exportar la lista de proveedores a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
         finally:
             session.close()
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona un proveedor de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona un proveedor de la lista.")
             return None
         item = self.tabla.item(filas[0].row(), 0)
         if item is None:
-            QMessageBox.warning(self, "Error", "No se pudo obtener el ID del proveedor seleccionado.")
+            MessageBox.warning(self, "Error", "No se pudo obtener el ID del proveedor seleccionado.")
             return None
         return int(item.text())
 
@@ -417,19 +418,19 @@ class ProveedoresPanel(QWidget):
                 self.cargar_proveedores()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Dato duplicado", "El código o la identificación ya están registrados en otro proveedor."
             )
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear proveedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear proveedores.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear proveedor")
-            QMessageBox.critical(self, "Error", "No se pudo crear el proveedor.")
+            MessageBox.critical(self, "Error", "No se pudo crear el proveedor.")
         finally:
             session.close()
 
@@ -449,19 +450,19 @@ class ProveedoresPanel(QWidget):
                 self.cargar_proveedores()
         except IntegrityError:
             session.rollback()
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Dato duplicado", "El código o la identificación ya están registrados en otro proveedor."
             )
         except ValueError as exc:
             session.rollback()
-            QMessageBox.warning(self, "Dato inválido", str(exc))
+            MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar proveedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar proveedores.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar proveedor")
-            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios del proveedor.")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del proveedor.")
         finally:
             session.close()
 
@@ -476,7 +477,7 @@ class ProveedoresPanel(QWidget):
             estado_actual = proveedor.estado_proveedor or "ACTIVO"
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
-            respuesta = QMessageBox.question(
+            respuesta = MessageBox.question(
                 self,
                 "Confirmar",
                 f"¿Cambiar el estado del proveedor '{proveedor.nombre_razon_social}' a {nuevo_estado}?",
@@ -488,10 +489,10 @@ class ProveedoresPanel(QWidget):
             self.cargar_proveedores()
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de proveedores.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de proveedores.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del proveedor %s", id_proveedor)
-            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del proveedor.")
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del proveedor.")
         finally:
             session.close()

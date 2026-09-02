@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -34,6 +33,7 @@ from app.services.ventas import VentaService
 from app.ui.aplicar_nota_credito_dialog import AplicarNotaCreditoDialog
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -376,7 +376,7 @@ class HistorialClienteWindow(QDialog):
             # congelado, indistinguible de un cliente sin historial real -- un error de
             # conexion no debe verse igual que "sin facturas" (mismo criterio que
             # facturacion_panel.py: QMessageBox.critical en cada carga que puede fallar).
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el historial del cliente.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el historial del cliente.")
         finally:
             session.close()
 
@@ -423,7 +423,7 @@ class HistorialClienteWindow(QDialog):
                 session, self.id_usuario, self._notas_disponibles, self._facturas_pendientes, parent=self
             )
             if dialogo.exec() == QDialog.DialogCode.Accepted:
-                QMessageBox.information(self, "Nota de crédito aplicada", "La nota de crédito se aplicó con éxito.")
+                MessageBox.information(self, "Nota de crédito aplicada", "La nota de crédito se aplicó con éxito.")
                 self.cargar_historial()
         finally:
             session.close()
@@ -433,7 +433,7 @@ class HistorialClienteWindow(QDialog):
         try:
             dialogo = DevolverNotaCreditoDialog(session, self.id_usuario, self._notas_disponibles, parent=self)
             if dialogo.exec() == QDialog.DialogCode.Accepted:
-                QMessageBox.information(self, "Nota de crédito devuelta", "La devolución se registró con éxito.")
+                MessageBox.information(self, "Nota de crédito devuelta", "La devolución se registró con éxito.")
                 self.cargar_historial()
         finally:
             session.close()
@@ -533,10 +533,10 @@ class HistorialClienteWindow(QDialog):
                 return
 
             exportar_excel(ruta, COLS_HISTORIAL, filas)
-            QMessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
         except Exception:
             logger.exception("Fallo al exportar historial a Excel")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el historial a Excel.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el historial a Excel.")
         finally:
             session.close()
 
@@ -578,17 +578,17 @@ class HistorialClienteWindow(QDialog):
                 filas,
                 cliente_nombre=self.cliente.nombre_razon_social,
             )
-            QMessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
         except Exception:
             logger.exception("Fallo al exportar historial a PDF")
-            QMessageBox.critical(self, "Error", "No se pudo exportar el historial a PDF.")
+            MessageBox.critical(self, "Error", "No se pudo exportar el historial a PDF.")
         finally:
             session.close()
 
     def _fila_seleccionada_id_factura(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
             return None
         # El ID de factura está en la columna 1 (N° Factura) pero necesitamos el ID interno
         # Lo obtenemos del historial cargado usando el índice de la fila
@@ -615,11 +615,11 @@ class HistorialClienteWindow(QDialog):
             dialogo = FacturaDetalleDialog(datos, session, self.id_usuario, parent=self)
             dialogo.exec()
         except ValueError as exc:
-            QMessageBox.warning(self, "No se pudo abrir la factura", str(exc))
+            MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
         except Exception:
             logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
-            QMessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
             session.close()

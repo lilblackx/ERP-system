@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -44,6 +43,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
 from app.ui.autorizacion_dialog import AutorizacionDialog
+from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS, PagoLineaDialog
 from app.ui.styles import (
     COLOR_BORDER,
@@ -1163,15 +1163,15 @@ class FacturaFormDialog(QDialog):
     def _agregar_item(self) -> None:
         id_producto = self.producto_combo.currentData()
         if id_producto is None:
-            QMessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
+            MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
             return
         cantidad = self.cantidad_input.value()
         precio = self.precio_input.value()
         if cantidad <= 0:
-            QMessageBox.warning(self, "Cantidad inválida", "La cantidad debe ser mayor a cero.")
+            MessageBox.warning(self, "Cantidad inválida", "La cantidad debe ser mayor a cero.")
             return
         if precio <= 0:
-            QMessageBox.warning(self, "Precio inválido", "El precio unitario debe ser mayor a cero.")
+            MessageBox.warning(self, "Precio inválido", "El precio unitario debe ser mayor a cero.")
             return
 
         # Bloqueo proactivo de stock (hallazgo #5 de la auditoria de facturacion): el
@@ -1186,7 +1186,7 @@ class FacturaFormDialog(QDialog):
             cantidad_en_carrito = sum(it["cantidad"] for it in self.items if it["id_producto"] == id_producto)
             stock_disponible = float(producto_seleccionado.cantidad_unidad)
             if cantidad_en_carrito + cantidad > stock_disponible:
-                QMessageBox.warning(
+                MessageBox.warning(
                     self,
                     "Stock insuficiente",
                     f"Stock disponible de '{producto_seleccionado.nombre_producto}': {stock_disponible:,.2f}."
@@ -1302,13 +1302,13 @@ class FacturaFormDialog(QDialog):
         pasar a formas de pago, y lo primero que vuelve a validar "Facturar" (el carrito
         pudo cambiar mientras el usuario estaba en la otra pestana)."""
         if self.cliente_combo.currentData() is None:
-            QMessageBox.warning(self, "Cliente requerido", "Seleccione un cliente para la factura.")
+            MessageBox.warning(self, "Cliente requerido", "Seleccione un cliente para la factura.")
             return False
         if self.vendedor_combo.currentData() is None:
-            QMessageBox.warning(self, "Vendedor requerido", "Seleccione el vendedor de esta factura.")
+            MessageBox.warning(self, "Vendedor requerido", "Seleccione el vendedor de esta factura.")
             return False
         if not self.items:
-            QMessageBox.warning(self, "Factura vacía", "Agregue al menos un producto a la factura.")
+            MessageBox.warning(self, "Factura vacía", "Agregue al menos un producto a la factura.")
             return False
         return True
 
@@ -1349,13 +1349,13 @@ class FacturaFormDialog(QDialog):
         es_credito = self.condicion_combo.currentData() == "credito"
         if es_contado and not self.pagos:
             self.tabs.setCurrentIndex(self._idx_tab_pagos)
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Forma de pago requerida", "Agregue al menos una forma de pago para facturar de contado."
             )
             return
         if es_contado and not self._pagos_cubren_total():
             self.tabs.setCurrentIndex(self._idx_tab_pagos)
-            QMessageBox.warning(
+            MessageBox.warning(
                 self, "Pago incompleto", "Las formas de pago agregadas no cubren el total de la factura."
             )
             return
@@ -1415,7 +1415,7 @@ class FacturaFormDialog(QDialog):
                 origen_vuelto = self.origen_vuelto_combo.currentData()
                 if origen_vuelto is None:
                     self.tabs.setCurrentIndex(self._idx_tab_pagos)
-                    QMessageBox.warning(
+                    MessageBox.warning(
                         self,
                         "Origen de vuelto requerido",
                         "No hay caja abierta ni cuenta bancaria activa disponible para el vuelto.",
@@ -1459,16 +1459,16 @@ class FacturaFormDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo emitir la factura", str(exc))
+            MessageBox.warning(self, "No se pudo emitir la factura", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
             return
         except Exception:
             self.session.rollback()
             logger.exception("Fallo al emitir factura")
-            QMessageBox.critical(self, "Error", "No se pudo emitir la factura.")
+            MessageBox.critical(self, "Error", "No se pudo emitir la factura.")
             return
         finally:
             QApplication.restoreOverrideCursor()

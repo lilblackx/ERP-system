@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -17,6 +16,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import Proveedor
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -400,15 +400,15 @@ class ProveedorFormDialog(QDialog):
 
     def _validar_y_aceptar(self):
         if not self.codigo_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El código del proveedor es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El código del proveedor es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El número de ID Fiscal / Identificación es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El número de ID Fiscal / Identificación es obligatorio.")
             self.identificacion_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "La razón social o nombre del proveedor es obligatoria.")
+            MessageBox.warning(self, "Dato requerido", "La razón social o nombre del proveedor es obligatoria.")
             self.nombre_input.setFocus()
             return
         self.accept()

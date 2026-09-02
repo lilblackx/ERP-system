@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 from app.db.models import Ruta
 from app.ui.geo_http import HttpWorker, calcular_ruta_por_calles
 from app.ui.mapa_widget import MapaWidget
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -418,14 +418,14 @@ class RutaFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_input.text().strip():
-            QMessageBox.warning(self, "Dato requerido", "El nombre de la ruta es obligatorio.")
+            MessageBox.warning(self, "Dato requerido", "El nombre de la ruta es obligatorio.")
             self.nombre_input.setFocus()
             return
 
         origen = self._leer_origen()
         destino = self._leer_destino()
         if origen is None or destino is None:
-            QMessageBox.warning(
+            MessageBox.warning(
                 self,
                 "Dato requerido",
                 "El origen y el destino de la ruta son obligatorios. Marca ambos puntos en "
@@ -435,10 +435,10 @@ class RutaFormDialog(QDialog):
             return
         for etiqueta, (lat, lng) in (("origen", origen), ("destino", destino)):
             if not (-90 <= lat <= 90):
-                QMessageBox.warning(self, "Dato inválido", f"La latitud de {etiqueta} debe estar entre -90 y 90.")
+                MessageBox.warning(self, "Dato inválido", f"La latitud de {etiqueta} debe estar entre -90 y 90.")
                 return
             if not (-180 <= lng <= 180):
-                QMessageBox.warning(self, "Dato inválido", f"La longitud de {etiqueta} debe estar entre -180 y 180.")
+                MessageBox.warning(self, "Dato inválido", f"La longitud de {etiqueta} debe estar entre -180 y 180.")
                 return
 
         self.accept()

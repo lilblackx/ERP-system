@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QTextEdit,
@@ -30,6 +29,7 @@ from PySide6.QtWidgets import (
 from app.db.models import Usuario
 from app.services.empresa import _SENTINEL, EmpresaService
 from app.services.permisos import PermisoDenegadoError
+from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -432,7 +432,7 @@ class ConfigEmpresaPanel(QWidget):
 
             # Validar tamaño (opcional, por ej 2MB max)
             if len(img_data) > 2 * 1024 * 1024:
-                QMessageBox.warning(self, "Error", "La imagen es muy pesada. Máximo 2MB.")
+                MessageBox.warning(self, "Error", "La imagen es muy pesada. Máximo 2MB.")
                 return
 
             # Validar que sea una imagen decodificable ANTES de asignarla a self.logo_bytes
@@ -441,14 +441,14 @@ class ConfigEmpresaPanel(QWidget):
             # _mostrar_logo() solo aborta el *preview* si QImage.fromData() falla, sin
             # impedir el guardado (hallazgo de auditoria, 2026-09-01).
             if QImage.fromData(QByteArray(img_data)).isNull():
-                QMessageBox.warning(self, "Archivo inválido", "El archivo seleccionado no es una imagen válida.")
+                MessageBox.warning(self, "Archivo inválido", "El archivo seleccionado no es una imagen válida.")
                 return
 
             self.logo_bytes = img_data
             self._mostrar_logo(img_data)
         except Exception:
             logger.exception("Fallo al cargar el archivo de logo '%s'", file_path)
-            QMessageBox.warning(self, "Error al cargar logo", "No se pudo leer el archivo seleccionado.")
+            MessageBox.warning(self, "Error al cargar logo", "No se pudo leer el archivo seleccionado.")
 
     def borrar_logo(self) -> None:
         self.logo_bytes = None
@@ -481,7 +481,7 @@ class ConfigEmpresaPanel(QWidget):
                 impresora_predeterminada=self.impresora_combo.currentData(),
                 modificado_por=self.usuario.id_usuario,
             )
-            QMessageBox.information(self, "Éxito", "Configuración guardada correctamente.")
+            MessageBox.information(self, "Éxito", "Configuración guardada correctamente.")
 
             # Actualizamos también en la ventana principal (sidebar)
             main_window = self.window()
@@ -493,10 +493,10 @@ class ConfigEmpresaPanel(QWidget):
 
         except PermisoDenegadoError:
             session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar la configuración de empresa.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar la configuración de empresa.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al guardar la configuración de empresa")
-            QMessageBox.critical(self, "Error", "No se pudo guardar la configuración. Intente nuevamente.")
+            MessageBox.critical(self, "Error", "No se pudo guardar la configuración. Intente nuevamente.")
         finally:
             session.close()

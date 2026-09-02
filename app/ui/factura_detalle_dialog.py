@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -26,6 +25,7 @@ from app.services.empresa import EmpresaService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_pdf import generar_pdf_factura
+from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS
 from app.ui.styles import (
     COLOR_BORDER,
@@ -416,7 +416,7 @@ class FacturaDetalleDialog(QDialog):
                 f"Esta factura generó la nota de crédito {self.nota_credito.numero_nota_credito} — "
                 f"disponible ${float(self.nota_credito.saldo_disponible):,.2f}"
             )
-        QMessageBox.information(self, "Nota de crédito devuelta", "La devolución se registró con éxito.")
+        MessageBox.information(self, "Nota de crédito devuelta", "La devolución se registró con éxito.")
 
     def _make_tabla_items(self) -> QTableWidget:
         columnas = ["Producto", "Cantidad", "Precio Unitario", "Subtotal"]
@@ -523,9 +523,9 @@ class FacturaDetalleDialog(QDialog):
         try:
             config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario)
             generar_pdf_factura(self.datos, config_empresa, ruta)
-            QMessageBox.information(self, "Exportación completa", f"Factura exportada a:\n{ruta}")
+            MessageBox.information(self, "Exportación completa", f"Factura exportada a:\n{ruta}")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la configuración de empresa.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la configuración de empresa.")
         except Exception:
             logger.exception("Fallo al exportar la factura %s a PDF", self.factura.numero_factura)
-            QMessageBox.critical(self, "Error", "No se pudo exportar la factura a PDF.")
+            MessageBox.critical(self, "Error", "No se pudo exportar la factura a PDF.")

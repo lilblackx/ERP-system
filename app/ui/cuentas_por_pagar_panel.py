@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -37,6 +36,7 @@ from app.db.models import CuentaPorPagar, Usuario
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
+from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
@@ -317,7 +317,7 @@ class PagoProveedorDialog(QDialog):
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
         if origen is None:
-            QMessageBox.warning(self, "Origen requerido", "No hay ninguna caja/cuenta disponible para este método.")
+            MessageBox.warning(self, "Origen requerido", "No hay ninguna caja/cuenta disponible para este método.")
             return
         tipo_origen, id_origen = origen
 
@@ -334,16 +334,16 @@ class PagoProveedorDialog(QDialog):
             )
         except ValueError as exc:
             self.session.rollback()
-            QMessageBox.warning(self, "No se pudo registrar el pago", str(exc))
+            MessageBox.warning(self, "No se pudo registrar el pago", str(exc))
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar pagos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar pagos.")
             return
         except Exception:
             self.session.rollback()
             logger.exception("Fallo al registrar pago a proveedor")
-            QMessageBox.critical(self, "Error", "No se pudo registrar el pago.")
+            MessageBox.critical(self, "Error", "No se pudo registrar el pago.")
             return
 
         self.accept()
@@ -506,10 +506,10 @@ class CuentasPorPagarPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas por pagar.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas por pagar.")
         except Exception:
             logger.exception("Fallo al cargar el listado de cuentas por pagar")
-            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de cuentas por pagar.")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de cuentas por pagar.")
         finally:
             session.close()
 
@@ -541,7 +541,7 @@ class CuentasPorPagarPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Selección requerida", "Selecciona una cuenta por pagar de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una cuenta por pagar de la lista.")
             return None
         item = self.tabla.item(filas[0].row(), 0)
         return int(item.text()) if item is not None else None
@@ -556,13 +556,13 @@ class CuentasPorPagarPanel(QWidget):
             if cuenta is None:
                 return
             if cuenta.estado == "pagada":
-                QMessageBox.information(self, "Ya pagada", "Esta cuenta por pagar ya está saldada.")
+                MessageBox.information(self, "Ya pagada", "Esta cuenta por pagar ya está saldada.")
                 return
             dialogo = PagoProveedorDialog(session, self.usuario.id_usuario, cuenta, parent=self)
             if dialogo.exec() and dialogo.pago_creado is not None:
                 self.cargar_cuentas()
-                QMessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
+                MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
         except PermisoDenegadoError:
-            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar pagos.")
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar pagos.")
         finally:
             session.close()
