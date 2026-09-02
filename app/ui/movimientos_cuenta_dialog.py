@@ -153,8 +153,8 @@ class MovimientosCuentaDialog(QDialog):
             monto_str = f"${float(movimiento.monto_movimiento):,.2f}" if movimiento.monto_movimiento else "$0.00"
             self.table.setItem(row, 2, QTableWidgetItem(monto_str))
 
-            # Origen (Cliente, Proveedor, Comisión, Otro)
-            origen = "Otro"
+            # Origen (Cliente, Proveedor, Comisión, Manual, Otro)
+            origen = "Manual"
             if movimiento.id_pago_cobro:
                 origen = "Cliente"
             elif movimiento.id_pago_proveedor:
