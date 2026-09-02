@@ -72,6 +72,7 @@ REPORTE_LIBRO_VENTAS = "libro_ventas"
 REPORTE_VENTAS_PERIODO = "ventas_periodo"
 REPORTE_VENTAS_CLIENTE = "ventas_cliente"
 REPORTE_VENTAS_VENDEDOR = "ventas_vendedor"
+REPORTE_VENTAS_RUTA = "ventas_ruta"
 REPORTE_PRODUCTOS_VENDIDOS = "productos_vendidos"
 REPORTE_FACTURAS_ANULADAS = "facturas_anuladas"
 REPORTE_NC_EMITIDAS = "nc_emitidas"
@@ -122,7 +123,8 @@ COLS_LIBRO_VENTAS = [
 ]
 COLS_VENTAS_PERIODO = ["Fecha", "Facturas", "Total"]
 COLS_VENTAS_CLIENTE = ["Cliente", "Facturas", "Total"]
-COLS_VENTAS_VENDEDOR = ["Vendedor", "Facturas", "Total"]
+COLS_VENTAS_VENDEDOR = ["Vendedor", "Facturas", "Total", "Ticket Promedio"]
+COLS_VENTAS_RUTA = ["Ruta", "Facturas", "Total", "Ticket Promedio"]
 COLS_PRODUCTOS_VENDIDOS = ["Producto", "Cantidad", "Total"]
 COLS_FACTURAS_ANULADAS = ["N° Factura", "Cliente", "Vendedor", "Fecha", "Motivo"]
 COLS_NC_EMITIDAS = ["N° NC", "Cliente", "Factura Origen", "Fecha", "Monto", "Saldo Disp.", "Estado"]
@@ -401,6 +403,12 @@ def _tarea_ventas_cliente(session, id_usuario, fecha_desde, fecha_hasta):
 
 def _tarea_ventas_vendedor(session, id_usuario, fecha_desde, fecha_hasta):
     return ReporteService.ventas_por_vendedor(
+        session, id_usuario=id_usuario, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta
+    )
+
+
+def _tarea_ventas_ruta(session, id_usuario, fecha_desde, fecha_hasta):
+    return ReporteService.ventas_por_ruta(
         session, id_usuario=id_usuario, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta
     )
 
@@ -717,6 +725,7 @@ class ReportesPanel(QWidget):
         self.tipo_combo.addItem("Ventas por Período", REPORTE_VENTAS_PERIODO)
         self.tipo_combo.addItem("Ventas por Cliente", REPORTE_VENTAS_CLIENTE)
         self.tipo_combo.addItem("Ventas por Vendedor", REPORTE_VENTAS_VENDEDOR)
+        self.tipo_combo.addItem("Ventas por Ruta", REPORTE_VENTAS_RUTA)
         self.tipo_combo.addItem("Productos Más/Menos Vendidos", REPORTE_PRODUCTOS_VENDIDOS)
         self.tipo_combo.addItem("Facturas Anuladas", REPORTE_FACTURAS_ANULADAS)
         self.tipo_combo.addItem("Notas de Crédito Emitidas", REPORTE_NC_EMITIDAS)
@@ -789,6 +798,7 @@ class ReportesPanel(QWidget):
             REPORTE_VENTAS_PERIODO: self._make_filtros_ventas_periodo(),
             REPORTE_VENTAS_CLIENTE: self._make_filtros_ventas_cliente(),
             REPORTE_VENTAS_VENDEDOR: self._make_filtros_ventas_vendedor(),
+            REPORTE_VENTAS_RUTA: self._make_filtros_ventas_ruta(),
             REPORTE_PRODUCTOS_VENDIDOS: self._make_filtros_productos_vendidos(),
             REPORTE_FACTURAS_ANULADAS: self._make_filtros_facturas_anuladas(),
             REPORTE_NC_EMITIDAS: self._make_filtros_nc_emitidas(),
@@ -1041,6 +1051,27 @@ class ReportesPanel(QWidget):
         h.addWidget(self.fecha_desde_vv_input)
         h.addWidget(lbl_hasta)
         h.addWidget(self.fecha_hasta_vv_input)
+        return w
+
+    def _make_filtros_ventas_ruta(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+
+        lbl_desde = QLabel("Desde:")
+        lbl_desde.setStyleSheet(LABEL_QSS)
+        self.fecha_desde_vr_input = _crear_fecha_edit(dias_atras=30)
+
+        lbl_hasta = QLabel("Hasta:")
+        lbl_hasta.setStyleSheet(LABEL_QSS)
+        self.fecha_hasta_vr_input = _crear_fecha_edit()
+
+        h.addWidget(lbl_desde)
+        h.addWidget(self.fecha_desde_vr_input)
+        h.addWidget(lbl_hasta)
+        h.addWidget(self.fecha_hasta_vr_input)
         return w
 
     def _make_filtros_productos_vendidos(self) -> QWidget:
@@ -2098,6 +2129,19 @@ class ReportesPanel(QWidget):
                 fecha_desde=fecha_desde,
                 fecha_hasta=fecha_hasta,
             )
+        elif modo == REPORTE_VENTAS_RUTA:
+            fecha_desde = self.fecha_desde_vr_input.date().toPython()
+            fecha_hasta = self.fecha_hasta_vr_input.date().toPython()
+            if fecha_desde > fecha_hasta:
+                QMessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                return
+            self._worker = QueryWorker(
+                self.session_factory,
+                _tarea_ventas_ruta,
+                id_usuario=self.usuario.id_usuario,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+            )
         elif modo == REPORTE_PRODUCTOS_VENDIDOS:
             fecha_desde = self.fecha_desde_pv_input.date().toPython()
             fecha_hasta = self.fecha_hasta_pv_input.date().toPython()
@@ -2536,6 +2580,8 @@ class ReportesPanel(QWidget):
             self._mostrar_ventas_cliente(resultado)
         elif self._ultimo_modo == REPORTE_VENTAS_VENDEDOR:
             self._mostrar_ventas_vendedor(resultado)
+        elif self._ultimo_modo == REPORTE_VENTAS_RUTA:
+            self._mostrar_ventas_ruta(resultado)
         elif self._ultimo_modo == REPORTE_PRODUCTOS_VENDIDOS:
             self._mostrar_productos_vendidos(resultado)
         elif self._ultimo_modo == REPORTE_FACTURAS_ANULADAS:
@@ -2729,7 +2775,17 @@ class ReportesPanel(QWidget):
 
     # ── Resultados: ranking (cliente / vendedor / productos) ─────────────────
 
-    def _mostrar_ranking(self, resultado: dict, columnas: list[str], clave_nombre: str, clave_cantidad: str) -> None:
+    def _mostrar_ranking(
+        self,
+        resultado: dict,
+        columnas: list[str],
+        clave_nombre: str,
+        clave_cantidad: str,
+        clave_promedio: str | None = None,
+    ) -> None:
+        """`clave_promedio` agrega una 4ta columna (ej. "Ticket Promedio") cuando el
+        reporte la trae -- ventas por vendedor/ruta ("drop site", 2026-09-02: total
+        facturado en $ entre cantidad de facturas), no cliente/productos."""
         self._reset_tabla(columnas)
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
@@ -2739,6 +2795,8 @@ class ReportesPanel(QWidget):
             texto_cantidad = str(valor_cantidad) if isinstance(valor_cantidad, int) else f"{float(valor_cantidad):,.2f}"
             self.tabla.setItem(row, 1, QTableWidgetItem(texto_cantidad))
             self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['total']):,.2f}"))
+            if clave_promedio is not None:
+                self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f[clave_promedio]):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} fila{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -2751,7 +2809,14 @@ class ReportesPanel(QWidget):
         self._mostrar_ranking(resultado, COLS_VENTAS_CLIENTE, "cliente", "cantidad_facturas")
 
     def _mostrar_ventas_vendedor(self, resultado: dict) -> None:
-        self._mostrar_ranking(resultado, COLS_VENTAS_VENDEDOR, "vendedor", "cantidad_facturas")
+        self._mostrar_ranking(
+            resultado, COLS_VENTAS_VENDEDOR, "vendedor", "cantidad_facturas", clave_promedio="ticket_promedio"
+        )
+
+    def _mostrar_ventas_ruta(self, resultado: dict) -> None:
+        self._mostrar_ranking(
+            resultado, COLS_VENTAS_RUTA, "ruta", "cantidad_facturas", clave_promedio="ticket_promedio"
+        )
 
     def _mostrar_productos_vendidos(self, resultado: dict) -> None:
         self._mostrar_ranking(resultado, COLS_PRODUCTOS_VENDIDOS, "producto", "cantidad")
@@ -3523,9 +3588,17 @@ class ReportesPanel(QWidget):
 
         if self._ultimo_modo == REPORTE_VENTAS_VENDEDOR:
             filas = [
-                [f["vendedor"], f["cantidad_facturas"], float(f["total"])] for f in self._ultimo_resultado["filas"]
+                [f["vendedor"], f["cantidad_facturas"], float(f["total"]), float(f["ticket_promedio"])]
+                for f in self._ultimo_resultado["filas"]
             ]
             return "ventas_vendedor", COLS_VENTAS_VENDEDOR, filas
+
+        if self._ultimo_modo == REPORTE_VENTAS_RUTA:
+            filas = [
+                [f["ruta"], f["cantidad_facturas"], float(f["total"]), float(f["ticket_promedio"])]
+                for f in self._ultimo_resultado["filas"]
+            ]
+            return "ventas_ruta", COLS_VENTAS_RUTA, filas
 
         if self._ultimo_modo == REPORTE_PRODUCTOS_VENDIDOS:
             filas = [[f["producto"], float(f["cantidad"]), float(f["total"])] for f in self._ultimo_resultado["filas"]]
@@ -3939,7 +4012,15 @@ class ReportesPanel(QWidget):
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
-            return "Ventas por Vendedor", filtros, [2.0, 1.0, 1.2]
+            return "Ventas por Vendedor", filtros, [2.0, 1.0, 1.2, 1.3]
+
+        if self._ultimo_modo == REPORTE_VENTAS_RUTA:
+            filtros = {
+                "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
+                "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
+                "Total general": f"${float(resultado['total_general']):,.2f}",
+            }
+            return "Ventas por Ruta", filtros, [2.0, 1.0, 1.2, 1.3]
 
         if self._ultimo_modo == REPORTE_PRODUCTOS_VENDIDOS:
             filtros = {

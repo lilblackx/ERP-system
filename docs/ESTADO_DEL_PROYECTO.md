@@ -945,15 +945,8 @@ de servicio.
     `tests/services/test_clientes.py`.
 
 - **Requerimientos nuevos del cliente (2026-09-01)** -- lista entregada para evaluar,
-  auditada contra el codigo actual. Tres necesitan una decision de negocio del equipo
+  auditada contra el codigo actual. Dos necesitan una decision de negocio del equipo
   antes de poder disenarlos (no son huecos tecnicos, son ambiguedad de alcance):
-  - **"Drop site de facturacion"**: sin equivalente en ningun lado del sistema (grep de
-    "drop"/"entrega"/"punto_entrega"/"direccion_entrega" en modelos y servicios de
-    cliente, cero resultados relevantes; `Cliente` solo tiene una `direccion` unica, sin
-    soporte de multiples direcciones/puntos de entrega). Falta que el equipo aclare que
-    es exactamente: ¿un punto de entrega distinto a la direccion registrada del cliente?
-    ¿una parada de ruta donde se agrupan pedidos de varios clientes? ¿otra cosa? Sin esa
-    definicion no se puede estimar si hace falta tabla nueva (probable) ni el diseño.
   - **"Activacion por categorias por ruta"**: sin equivalente (cero reportes cruzan Ruta
     con `CategoriaCliente` hoy). Tecnicamente viable sin migraciones nuevas -- Cliente ->
     Vendedor -> Ruta y Cliente -> CategoriaCliente ya estan resueltos en otros lados del
@@ -972,11 +965,22 @@ de servicio.
     anterior)? Los datos de ejecucion real (facturacion por vendedor/ruta/periodo) ya
     existen -- lo que falta es la meta en si y como se compara.
 
-  Los otros tres puntos de la lista ya estan tecnicamente claros, sin nada que definir
+  Los otros cuatro puntos de la lista ya estan tecnicamente claros, sin nada que definir
   con el equipo -- solo falta construirlos:
   - **"Dolares totales facturados por ruta"**: no existe, pero es una extension directa
     de `ReportesService.ventas_por_vendedor` (`reportes.py`) agrupando por
     `Vendedor.id_ruta` en vez de por vendedor.
+  - **"Drop site de facturacion"**: resuelto (2026-09-02) -- el cliente aclaro que no es
+    un punto de entrega/logistica sino un KPI: **ticket promedio** (total facturado en $
+    dividido entre la cantidad de facturas). Definicion final:
+    - Desglosado por ruta y por vendedor (no un unico numero global) -- mismo patron de
+      agrupacion que "Dolares totales facturados por ruta" arriba, extendiendo
+      `ReportesService.ventas_por_vendedor` (agregar `total / cantidad_facturas` como
+      columna, agrupado tambien por `Vendedor.id_ruta`).
+    - Sobre un rango de fechas seleccionable por el usuario, igual que el resto de los
+      reportes (`aging_cuentas_por_cobrar`, `ventas_por_vendedor`).
+    - Excluye facturas `ANULADA`, mismo criterio que `DashboardService._total_ventas_del_dia`
+      y el resto de los KPIs de ventas del sistema.
   - **"Facturacion vs rentabilidad"**: ya existe a nivel de producto
     (`ReportesService.margen_utilidad_productos`, compara ingreso vs costo por producto
     en un rango de fechas, ordenado por margen). Extenderlo a ruta/vendedor es el mismo

@@ -33,6 +33,7 @@ from tests.factories import (
     crear_precio_producto,
     crear_producto,
     crear_proveedor,
+    crear_ruta,
     crear_usuario_admin,
     crear_vendedor,
     pago_contado,
@@ -346,6 +347,92 @@ def test_ventas_por_vendedor_agrupa_correctamente(db_session):
     assert por_vendedor["Vendedor A"]["cantidad_facturas"] == 2
     assert por_vendedor["Vendedor A"]["total"] == Decimal("25.00")
     assert por_vendedor["Vendedor B"]["total"] == Decimal("5.00")
+
+
+def test_ventas_por_vendedor_calcula_ticket_promedio(db_session):
+    """'drop site' pedido por el cliente (2026-09-02): total facturado en $ entre
+    cantidad de facturas."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    cliente = crear_cliente(db_session)
+
+    _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
+    _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "20.00")
+
+    resultado = ReporteService.ventas_por_vendedor(
+        db_session, id_usuario=admin.id_usuario, fecha_desde=date.today(), fecha_hasta=date.today()
+    )
+
+    fila = resultado["filas"][0]
+    assert fila["total"] == Decimal("30.00")
+    assert fila["cantidad_facturas"] == 2
+    assert fila["ticket_promedio"] == Decimal("15.00")
+
+
+# --- ventas_por_ruta --------------------------------------------------------------------
+
+
+def test_ventas_por_ruta_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        ReporteService.ventas_por_ruta(db_session, id_usuario=None, fecha_desde=date.today(), fecha_hasta=date.today())
+
+
+def test_ventas_por_ruta_fecha_desde_posterior_a_hasta_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="fecha_desde"):
+        ReporteService.ventas_por_ruta(
+            db_session,
+            id_usuario=admin.id_usuario,
+            fecha_desde=date.today(),
+            fecha_hasta=date.today() - timedelta(days=1),
+        )
+
+
+def test_ventas_por_ruta_agrupa_por_ruta_del_vendedor_y_calcula_ticket_promedio(db_session):
+    admin = crear_usuario_admin(db_session)
+    ruta_norte = crear_ruta(db_session, nombre_ruta="Ruta Norte")
+    ruta_sur = crear_ruta(db_session, nombre_ruta="Ruta Sur")
+    vendedor_norte = crear_vendedor(db_session, nombre_vendedor="Vendedor Norte", ruta=ruta_norte)
+    otro_vendedor_norte = crear_vendedor(db_session, nombre_vendedor="Otro Vendedor Norte", ruta=ruta_norte)
+    vendedor_sur = crear_vendedor(db_session, nombre_vendedor="Vendedor Sur", ruta=ruta_sur)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    cliente = crear_cliente(db_session)
+
+    _factura_contado(db_session, admin, cliente, vendedor_norte, producto, 1, "10.00")
+    _factura_contado(db_session, admin, cliente, otro_vendedor_norte, producto, 1, "20.00")
+    _factura_contado(db_session, admin, cliente, vendedor_sur, producto, 1, "5.00")
+
+    resultado = ReporteService.ventas_por_ruta(
+        db_session, id_usuario=admin.id_usuario, fecha_desde=date.today(), fecha_hasta=date.today()
+    )
+
+    por_ruta = {f["ruta"]: f for f in resultado["filas"]}
+    assert por_ruta["Ruta Norte"]["cantidad_facturas"] == 2
+    assert por_ruta["Ruta Norte"]["total"] == Decimal("30.00")
+    assert por_ruta["Ruta Norte"]["ticket_promedio"] == Decimal("15.00")
+    assert por_ruta["Ruta Sur"]["total"] == Decimal("5.00")
+    assert por_ruta["Ruta Sur"]["ticket_promedio"] == Decimal("5.00")
+    assert resultado["total_general"] == Decimal("35.00")
+
+
+def test_ventas_por_ruta_excluye_anuladas(db_session):
+    admin = crear_usuario_admin(db_session)
+    ruta = crear_ruta(db_session)
+    vendedor = crear_vendedor(db_session, ruta=ruta)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    cliente = crear_cliente(db_session)
+
+    _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
+    anulada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "100.00")
+    VentaService.anular_factura(db_session, anulada.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga")
+
+    resultado = ReporteService.ventas_por_ruta(
+        db_session, id_usuario=admin.id_usuario, fecha_desde=date.today(), fecha_hasta=date.today()
+    )
+
+    assert resultado["filas"][0]["cantidad_facturas"] == 1
+    assert resultado["filas"][0]["total"] == Decimal("10.00")
 
 
 # --- productos_mas_vendidos ------------------------------------------------------------
