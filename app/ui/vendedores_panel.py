@@ -453,7 +453,7 @@ class VendedoresPanel(QWidget):
     def nuevo_vendedor(self) -> None:
         session = self.session_factory()
         try:
-            dialogo = VendedorFormDialog(session, parent=self)
+            dialogo = VendedorFormDialog(session, id_usuario=self.usuario.id_usuario, parent=self)
             if dialogo.exec():
                 datos = dialogo.get_data()
                 datos["creado_por"] = self.usuario.id_usuario
@@ -485,7 +485,7 @@ class VendedoresPanel(QWidget):
         session = self.session_factory()
         try:
             vendedor = VendedorService.obtener(session, id_vendedor, id_usuario=self.usuario.id_usuario)
-            dialogo = VendedorFormDialog(session, vendedor, parent=self)
+            dialogo = VendedorFormDialog(session, vendedor, id_usuario=self.usuario.id_usuario, parent=self)
             if dialogo.exec():
                 VendedorService.actualizar(
                     session, id_vendedor, id_usuario=self.usuario.id_usuario, **dialogo.get_data()

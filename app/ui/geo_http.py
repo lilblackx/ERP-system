@@ -104,16 +104,46 @@ def calcular_ruta_por_calles(
         return None
 
 
+_workers_activos: set["HttpWorker"] = set()
+
+
+def esperar_workers_pendientes(timeout_ms: int = 6000) -> None:
+    """Conectar a `QApplication.aboutToQuit` (ver app/main.py). Un `HttpWorker` nunca
+    tiene un padre Qt (ver comentario en `__init__`), asi que nada mas lo destruye
+    automaticamente al cerrar la ventana -- sin este `wait()` explicito, cerrar la app
+    mientras una busqueda/geolocalizacion/calculo de trazado sigue en vuelo (timeout de
+    `_TIMEOUT_SEGUNDOS` cada una) desmonta el proceso con un QThread todavia corriendo,
+    lo cual Qt trata como fatal. En la practica hay 0 o 1 worker pendiente a la vez, asi
+    que este bloqueo es casi siempre instantaneo -- reportado como riesgo de crash en
+    auditoria, 2026-09-02."""
+    for worker in list(_workers_activos):
+        worker.wait(timeout_ms)
+
+
 class HttpWorker(QThread):
     """Ejecuta `funcion()` (sin argumentos, tipicamente `functools.partial` de una de las
     funciones de arriba) en un hilo aparte y emite su valor de retorno -- generico para
-    no duplicar el boilerplate de QThread entre las dos llamadas de este modulo."""
+    no duplicar el boilerplate de QThread entre las tres llamadas de este modulo."""
 
     resultado = Signal(object)
 
     def __init__(self, funcion: Callable[[], Any], parent=None):
         super().__init__(parent)
         self._funcion = funcion
+        # Sin padre Qt: los llamadores (MapaWidget, RutaFormDialog) ya NO pasan `self`
+        # como parent a proposito. Este worker puede seguir corriendo hasta 5s
+        # (_TIMEOUT_SEGUNDOS) despues de que el usuario cierre el dialogo que lo lanzo --
+        # si fuera hijo Qt de ese widget, Qt intentaria destruirlo junto con su padre
+        # mientras el hilo sigue activo, lo cual es fatal ("QThread: Destroyed while
+        # thread is still running"). Este set a nivel de modulo lo mantiene vivo con vida
+        # propia hasta que termina solo (ver _limpiar), sin importar que paso con quien lo
+        # creo -- hallazgo de auditoria, 2026-09-02.
+        _workers_activos.add(self)
+        self.finished.connect(self._limpiar)
+
+    def _limpiar(self) -> None:
+        _workers_activos.discard(self)
+        self.deleteLater()
 
     def run(self) -> None:
         self.resultado.emit(self._funcion())

@@ -518,7 +518,7 @@ class MapaWidget(QWidget):
 
     def _ejecutar_busqueda(self, texto: str, aplicar_primero: bool) -> None:
         self.btn_buscar.setEnabled(False)
-        self._worker_busqueda = HttpWorker(functools.partial(buscar_lugares, texto), self)
+        self._worker_busqueda = HttpWorker(functools.partial(buscar_lugares, texto))
         self._worker_busqueda.resultado.connect(
             functools.partial(self._on_resultados_busqueda, aplicar_primero=aplicar_primero)
         )
@@ -564,7 +564,7 @@ class MapaWidget(QWidget):
             self.coordenadas_cambiadas.emit(lat, lng)
 
     def _centrar_en_dispositivo(self) -> None:
-        self._worker_ubicacion = HttpWorker(obtener_ubicacion_dispositivo, self)
+        self._worker_ubicacion = HttpWorker(obtener_ubicacion_dispositivo)
         self._worker_ubicacion.resultado.connect(self._on_ubicacion_dispositivo)
         self._worker_ubicacion.start()
 

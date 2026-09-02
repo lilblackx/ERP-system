@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.services.permisos import PermisoDenegadoError
+from app.services.rutas import RutaService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
 from tests.factories import crear_cliente, crear_producto, crear_ruta, crear_usuario_admin, pago_contado
@@ -84,6 +85,59 @@ def test_crear_vendedor_requiere_identificacion(db_session):
     with pytest.raises(ValueError, match="identificacion_vendedor"):
         VendedorService.crear(
             db_session, **_datos_vendedor(db_session, identificacion_vendedor=None, creado_por=admin.id_usuario)
+        )
+
+
+def test_crear_vendedor_requiere_ruta(db_session):
+    """id_ruta paso a ser obligatorio (decision del usuario, 2026-09-01), mismo criterio
+    que codigo_vendedor/identificacion_vendedor -- sin test dedicado hasta esta auditoria
+    (2026-09-02)."""
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="id_ruta"):
+        VendedorService.crear(
+            db_session,
+            codigo_vendedor="VEN-001",
+            identificacion_vendedor="V-11111111",
+            nombre_vendedor="Vendedor de Prueba",
+            id_ruta=None,
+            creado_por=admin.id_usuario,
+        )
+
+
+def test_crear_vendedor_ruta_inexistente_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="no corresponde a una ruta existente"):
+        VendedorService.crear(db_session, **_datos_vendedor(db_session, id_ruta=999999, creado_por=admin.id_usuario))
+
+
+def test_crear_vendedor_ruta_inactiva_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    ruta = crear_ruta(db_session)
+    RutaService.cambiar_estado(db_session, ruta.id_ruta, "INACTIVO", id_usuario=admin.id_usuario)
+
+    with pytest.raises(ValueError, match="INACTIVA"):
+        VendedorService.crear(
+            db_session, **_datos_vendedor(db_session, id_ruta=ruta.id_ruta, creado_por=admin.id_usuario)
+        )
+
+
+def test_actualizar_vendedor_no_permite_vaciar_ruta(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(db_session, creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="id_ruta"):
+        VendedorService.actualizar(db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, id_ruta=None)
+
+
+def test_actualizar_vendedor_ruta_inactiva_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(db_session, creado_por=admin.id_usuario))
+    otra_ruta = crear_ruta(db_session)
+    RutaService.cambiar_estado(db_session, otra_ruta.id_ruta, "INACTIVO", id_usuario=admin.id_usuario)
+
+    with pytest.raises(ValueError, match="INACTIVA"):
+        VendedorService.actualizar(
+            db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, id_ruta=otra_ruta.id_ruta
         )
 
 

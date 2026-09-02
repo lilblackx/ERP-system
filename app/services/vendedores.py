@@ -3,7 +3,7 @@ from datetime import date
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.models import Cliente, FacturaVenta, Vendedor
+from app.db.models import Cliente, FacturaVenta, Ruta, Vendedor
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
@@ -16,6 +16,18 @@ def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | N
         query = query.filter(Vendedor.id_vendedor != excluir_id)
     if query.first() is not None:
         raise ValueError(f"Ya existe un vendedor con {campo}='{valor}'")
+
+
+def _validar_ruta_activa(session: Session, id_ruta: int) -> None:
+    """El combo de VendedorFormDialog solo ofrece rutas ACTIVO, pero eso no protege un
+    llamado directo al servicio (script, futura integracion) -- sin esto se podia asignar
+    un vendedor a una ruta ya desactivada sin ningun aviso (hallazgo de auditoria,
+    2026-09-02)."""
+    ruta = session.get(Ruta, id_ruta)
+    if ruta is None:
+        raise ValueError(f"id_ruta={id_ruta} no corresponde a una ruta existente")
+    if (ruta.estado_ruta or "ACTIVO") != "ACTIVO":
+        raise ValueError(f"La ruta '{ruta.nombre_ruta}' esta INACTIVA y no puede asignarse a un vendedor")
 
 
 class VendedorService:
@@ -74,6 +86,7 @@ class VendedorService:
         # este servicio es quien garantiza que nunca llegue vacio en una creacion nueva.
         if not datos.get("id_ruta"):
             raise ValueError("id_ruta es requerido")
+        _validar_ruta_activa(session, datos["id_ruta"])
         _validar_unico(session, "codigo_vendedor", datos["codigo_vendedor"])
         _validar_unico(session, "identificacion_vendedor", datos["identificacion_vendedor"])
 
@@ -106,6 +119,8 @@ class VendedorService:
             raise ValueError("identificacion_vendedor es requerido")
         if "id_ruta" in datos and not datos["id_ruta"]:
             raise ValueError("id_ruta es requerido")
+        if datos.get("id_ruta"):
+            _validar_ruta_activa(session, datos["id_ruta"])
 
         nuevo_codigo = datos.get("codigo_vendedor")
         if nuevo_codigo and nuevo_codigo != vendedor.codigo_vendedor:

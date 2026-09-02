@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import Ruta, Vendedor
+from app.db.models import Vendedor
+from app.services.permisos import PermisoDenegadoError
+from app.services.rutas import RutaService
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -106,10 +108,11 @@ class VendedorFormDialog(QDialog):
     ClienteFormDialog (app/ui/cliente_form_dialog.py), pero con una sola tarjeta
     porque el vendedor tiene muchos menos campos que un cliente."""
 
-    def __init__(self, session: Session, vendedor: Vendedor | None = None, parent=None):
+    def __init__(self, session: Session, vendedor: Vendedor | None = None, id_usuario: int | None = None, parent=None):
         super().__init__(parent)
         self.session = session
         self.vendedor = vendedor
+        self.id_usuario = id_usuario
         self.setWindowTitle("Editar Vendedor" if vendedor else "Nuevo Vendedor")
         self.setFixedSize(480, 470)
         self.setStyleSheet(DIALOG_STYLE)
@@ -221,7 +224,18 @@ class VendedorFormDialog(QDialog):
         lbl_ruta.setProperty("class", "FormLabel")
         self.ruta_combo = QComboBox()
         self.ruta_combo.setFixedHeight(32)
-        rutas = self.session.query(Ruta).filter(Ruta.estado_ruta == "ACTIVO").order_by(Ruta.nombre_ruta).all()
+        # Via RutaService.listar() (no una query directa a la tabla) para que respete
+        # require_permiso('rutas', 'ver') igual que el resto de la app -- una consulta
+        # cruda aca dejaba ver el catalogo de rutas a cualquiera con permiso de
+        # vendedores/crear-editar aunque no tuviera permiso propio sobre rutas (hallazgo
+        # de auditoria, 2026-09-02). Sin ese permiso el combo queda vacio -- el usuario ya
+        # no podra guardar (la ruta es obligatoria), consistente con negarle el acceso.
+        try:
+            rutas = RutaService.listar(
+                self.session, estado_ruta="ACTIVO", id_usuario=self.id_usuario, por_pagina=1_000_000
+            )["items"]
+        except PermisoDenegadoError:
+            rutas = []
         if self.vendedor is not None and self.vendedor.ruta is not None and self.vendedor.ruta.estado_ruta != "ACTIVO":
             # La ruta ya asignada puede haber sido desactivada despues -- se conserva en la
             # lista al editar para no perder el valor actual sin que el usuario lo pida.
