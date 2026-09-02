@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpacerItem,
     QVBoxLayout,
@@ -401,9 +402,33 @@ class DashboardPanel(QWidget):
         root.setSpacing(16)
 
         root.addWidget(self._make_header())
-        root.addWidget(self._make_fila_kpis())
-        root.addWidget(self._make_fila_grafico_y_cajas(), stretch=1)
-        root.addWidget(self._make_fila_facturas_e_inventario(), stretch=1)
+
+        # Filas de KPIs/gráfico/facturas dentro de un QScrollArea (mismo patrón que
+        # config_empresa_panel.py: sin marco ni fondo propio, para que no se note como un
+        # widget aparte). Las tarjetas de "Facturas recientes"/"Inventario en alerta" son
+        # una pila de filas con alto mínimo propio (texto, no se puede comprimir más allá
+        # de lo que pide la fuente) -- en pantallas chicas (1366x768 y menores) ese mínimo
+        # combinado con el resto del panel no entraba en la ventana y, sin scroll, se
+        # recortaba silenciosamente contra el borde inferior sin ninguna forma de verlo
+        # (reportado por el usuario, 2026-09-02: "se corta más que todo la parte de las
+        # facturas"). En pantallas donde sí entra todo, el scroll nunca se activa y el
+        # layout se ve igual que antes -- los stretch=1 de abajo siguen repartiendo el
+        # espacio sobrante entre ambas filas.
+        contenido = QWidget()
+        contenido.setStyleSheet("background: transparent;")
+        cv = QVBoxLayout(contenido)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(16)
+        cv.addWidget(self._make_fila_kpis())
+        cv.addWidget(self._make_fila_grafico_y_cajas(), stretch=1)
+        cv.addWidget(self._make_fila_facturas_e_inventario(), stretch=1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setWidget(contenido)
+        root.addWidget(scroll, stretch=1)
 
         self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
 
