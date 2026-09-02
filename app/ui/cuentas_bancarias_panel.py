@@ -35,7 +35,6 @@ from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
-    COLOR_DANGER,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
@@ -53,11 +52,17 @@ logger = logging.getLogger(__name__)
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 COLS_VISIBLES = ["ID", "Banco", "Número de Cuenta", "Tipo", "Titular", "Identificación", "Saldo", "Estado"]
+
 ESTADOS_FILTRO = [
     ("Todos los estados", None),
-    ("Activas", "ACTIVO"),
-    ("Inactivas", "INACTIVO"),
+    ("Activos", "ACTIVO"),
+    ("Inactivos", "INACTIVO"),
 ]
+
+COLORES_ESTADO_CUENTA = {
+    "ACTIVO": COLOR_SUCCESS,
+    "INACTIVO": "#dc3545",  # Rojo para estado inactivo
+}
 
 
 class CuentasBancariasPanel(QWidget):
@@ -315,12 +320,10 @@ class CuentasBancariasPanel(QWidget):
             self.table.setItem(row, 5, QTableWidgetItem(cuenta.identificacion_titular or "N/A"))
             self.table.setItem(row, 6, QTableWidgetItem(f"${float(cuenta.saldo_total_banco):,.2f}"))
 
-            estado = cuenta.estado_cuenta or "ACTIVO"
-            color_estado = COLOR_SUCCESS if estado == "ACTIVO" else COLOR_DANGER
-            badge = EstadoBadge(estado.capitalize(), color_estado)
-            self.table.setCellWidget(row, 7, badge)
-
-        self.lbl_total.setText(f"{self._total_registros} cuenta{'s' if self._total_registros != 1 else ''}")
+            estado = cuenta.estado_cuenta or "N/A"
+            color_estado = COLORES_ESTADO_CUENTA.get(estado, COLOR_TEXT_MUTED)
+            estado_widget = EstadoBadge(estado, color_estado)
+            self.table.setCellWidget(row, 7, estado_widget)
 
     def _actualizar_paginacion(self):
         """Actualiza los controles de paginación."""
