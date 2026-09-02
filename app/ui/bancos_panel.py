@@ -25,8 +25,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Banco, Usuario
+from app.services.permisos import PermisoDenegadoError
+from app.services.tesoreria import BancoService
 from app.ui.banco_form_dialog import BancoFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -204,84 +207,87 @@ class BancosPanel(QWidget):
         self.lbl_paginacion = QLabel("Página 1 de 1")
         self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
 
-        self.btn_editar = QPushButton("Editar")
-        self.btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_LIGHT))
+        self.btn_anterior = QPushButton()
+        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
+        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_anterior.setFixedWidth(40)
+        self.btn_anterior.setEnabled(False)
+        self.btn_anterior.clicked.connect(self.pagina_anterior)
+
+        self.btn_siguiente = QPushButton()
+        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_siguiente.setFixedWidth(40)
+        self.btn_siguiente.setEnabled(False)
+        self.btn_siguiente.clicked.connect(self.pagina_siguiente)
+
+        # Sin boton "Eliminar" a proposito -- igual que vendedores/rutas/cuentas
+        # bancarias, un banco nunca se borra fisicamente (ver BancoService.eliminar_banco,
+        # que siempre lanza ValueError). "Cambiar estado" es la unica forma de retirarlo
+        # de circulacion, preservando el historial de las cuentas bancarias que lo
+        # referencian.
+        self.btn_editar = QPushButton("Editar seleccionado")
+        self.btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         self.btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_editar.setEnabled(False)
         self.btn_editar.clicked.connect(self.editar_banco)
 
-        self.btn_eliminar = QPushButton("Eliminar")
-        self.btn_eliminar.setIcon(qta.icon("fa5s.trash", color=COLOR_TEXT_LIGHT))
-        self.btn_eliminar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_eliminar.setEnabled(False)
-        self.btn_eliminar.clicked.connect(self.eliminar_banco)
-
-        self.btn_cambiar_estado = QPushButton("Cambiar Estado")
-        self.btn_cambiar_estado.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_LIGHT))
+        self.btn_cambiar_estado = QPushButton("Cambiar estado")
+        self.btn_cambiar_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
         self.btn_cambiar_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_cambiar_estado.setEnabled(False)
         self.btn_cambiar_estado.clicked.connect(self.cambiar_estado_banco)
 
-        self.btn_anterior = QPushButton("Anterior")
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setEnabled(False)
-        self.btn_anterior.clicked.connect(self.pagina_anterior)
-
-        self.btn_siguiente = QPushButton("Siguiente")
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setEnabled(False)
-        self.btn_siguiente.clicked.connect(self.pagina_siguiente)
-
         h.addWidget(self.lbl_paginacion)
-        h.addStretch()
-        h.addWidget(self.btn_editar)
-        h.addWidget(self.btn_eliminar)
-        h.addWidget(self.btn_cambiar_estado)
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
+        h.addStretch()
+        h.addWidget(self.btn_editar)
+        h.addWidget(self.btn_cambiar_estado)
         return w
 
     # ── Carga de datos ─────────────────────────────────────────────────────
 
     def cargar_bancos(self):
-        """Carga la lista de bancos desde la base de datos."""
+        """Carga la lista de bancos via BancoService (antes hacia session.query(Banco)
+        directo, sin pasar por require_permiso -- cualquier usuario autenticado podia
+        ver/crear/editar/"eliminar" bancos sin importar su rol; hallazgo de auditoria,
+        2026-09-02). Bancos es un catalogo chico (a diferencia de clientes/vendedores),
+        asi que se sigue filtrando/paginando del lado de Python sobre la lista completa
+        en vez de sumarle paginacion al servicio."""
         session = self.session_factory()
         try:
-            # Primero cargar todos los bancos sin filtros para depuración
-            query = session.query(Banco)
+            bancos = BancoService.listar_bancos(session, id_usuario=self.usuario.id_usuario)
 
-            # Filtro de estado
             estado_filtro = self.estado_combo.currentData()
-            logger.info(f"Filtro de estado: {estado_filtro}")
             if estado_filtro:
-                query = query.filter(Banco.estado_banco == estado_filtro)
+                bancos = [b for b in bancos if b.estado_banco == estado_filtro]
 
-            # Filtro de búsqueda
-            busqueda = self.buscar_input.text().strip()
-            logger.info(f"Búsqueda: '{busqueda}'")
+            busqueda = self.buscar_input.text().strip().lower()
             if busqueda:
-                like_pattern = f"%{busqueda}%"
-                query = query.filter(
-                    (Banco.codigo_banco.ilike(like_pattern))
-                    | (Banco.nombre_banco.ilike(like_pattern))
-                    | (Banco.identificacion_banco.ilike(like_pattern))
-                    | (Banco.numero_telefono_banco.ilike(like_pattern))
-                )
+                bancos = [
+                    b
+                    for b in bancos
+                    if busqueda in (b.codigo_banco or "").lower()
+                    or busqueda in (b.nombre_banco or "").lower()
+                    or busqueda in (b.identificacion_banco or "").lower()
+                    or busqueda in (b.numero_telefono_banco or "").lower()
+                ]
 
-            self.bancos = query.order_by(Banco.nombre_banco).all()
-            logger.info(f"Cargados {len(self.bancos)} bancos de la base de datos")
-            for banco in self.bancos:
-                logger.info(
-                    f"  - ID: {banco.id_banco}, Nombre: {banco.nombre_banco}, "
-                    f"Código: {banco.codigo_banco}, Estado: {banco.estado_banco}"
-                )
+            self.bancos = bancos
             self._actualizar_tabla()
             self._actualizar_paginacion()
-        except Exception as e:
-            logger.exception(f"Error al cargar bancos: {e}")
+        except PermisoDenegadoError:
             self.bancos = []
             self._actualizar_tabla()
             self._actualizar_paginacion()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar bancos.")
+        except Exception:
+            logger.exception("Fallo al cargar la lista de bancos")
+            self.bancos = []
+            self._actualizar_tabla()
+            self._actualizar_paginacion()
+            QMessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de bancos.")
         finally:
             session.close()
 
@@ -321,9 +327,9 @@ class BancosPanel(QWidget):
             self.tabla.setItem(row, 6, QTableWidgetItem(banco.correo_banco or "N/A"))
 
             # Estado
-            estado = banco.estado_banco or "N/A"
+            estado = banco.estado_banco or "ACTIVO"
             color_estado = COLORES_ESTADO_BANCO.get(estado, COLOR_TEXT_MUTED)
-            estado_widget = EstadoBadge(estado, color_estado)
+            estado_widget = EstadoBadge(estado.capitalize(), color_estado)
             self.tabla.setCellWidget(row, 7, estado_widget)
 
         self.lbl_total.setText(f"{len(self.bancos)} bancos")
@@ -372,137 +378,96 @@ class BancosPanel(QWidget):
             dialog = BancoFormDialog(session, parent=self)
             if dialog.exec():
                 data = dialog.get_data()
-                self._guardar_banco(session, data)
+                BancoService.crear_banco(session, **data, creado_por=self.usuario.id_usuario)
                 self.cargar_bancos()
+        except IntegrityError:
+            session.rollback()
+            QMessageBox.warning(self, "Dato duplicado", "Ya existe un banco con esa identificación (RIF).")
+        except ValueError as exc:
+            session.rollback()
+            QMessageBox.warning(self, "Dato inválido", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para crear bancos.")
         except Exception:
-            logger.exception("Error al crear banco")
+            session.rollback()
+            logger.exception("Fallo al crear banco")
+            QMessageBox.critical(self, "Error", "No se pudo crear el banco.")
         finally:
             session.close()
 
     def editar_banco(self):
         """Abre el diálogo para editar el banco seleccionado."""
-        row = self.tabla.currentRow()
-        if row < 0:
+        banco_id = self._id_seleccionado()
+        if banco_id is None:
             return
 
-        item = self.tabla.item(row, COL_ID_INTERNO)
-        if item is None:
-            return
-
-        banco_id = int(item.text())
         session = self.session_factory()
         try:
-            banco = session.query(Banco).filter(Banco.id_banco == banco_id).first()
-            if banco:
-                dialog = BancoFormDialog(session, banco, parent=self)
-                if dialog.exec():
-                    data = dialog.get_data()
-                    self._actualizar_banco(session, banco, data)
-                    self.cargar_bancos()
+            banco = session.get(Banco, banco_id)
+            if banco is None:
+                return
+            dialog = BancoFormDialog(session, banco, parent=self)
+            if dialog.exec():
+                data = dialog.get_data()
+                BancoService.actualizar_banco(session, banco_id, id_usuario=self.usuario.id_usuario, **data)
+                self.cargar_bancos()
+        except IntegrityError:
+            session.rollback()
+            QMessageBox.warning(self, "Dato duplicado", "Ya existe un banco con esa identificación (RIF).")
+        except ValueError as exc:
+            session.rollback()
+            QMessageBox.warning(self, "Dato inválido", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para editar bancos.")
         except Exception:
-            logger.exception("Error al editar banco")
-        finally:
-            session.close()
-
-    def eliminar_banco(self):
-        """Elimina el banco seleccionado."""
-        row = self.tabla.currentRow()
-        if row < 0:
-            return
-
-        item = self.tabla.item(row, COL_ID_INTERNO)
-        if item is None:
-            return
-
-        banco_id = int(item.text())
-        session = self.session_factory()
-        try:
-            banco = session.query(Banco).filter(Banco.id_banco == banco_id).first()
-            if banco:
-                reply = QMessageBox.question(
-                    self,
-                    "Confirmar eliminación",
-                    f"¿Está seguro de eliminar el banco '{banco.nombre_banco}'?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    session.delete(banco)
-                    session.commit()
-                    logger.info(f"Banco eliminado: {banco.nombre_banco}")
-                    self.cargar_bancos()
-        except Exception:
-            logger.exception("Error al eliminar banco")
+            session.rollback()
+            logger.exception("Fallo al editar banco")
+            QMessageBox.critical(self, "Error", "No se pudo guardar los cambios del banco.")
         finally:
             session.close()
 
     def cambiar_estado_banco(self):
         """Cambia el estado del banco seleccionado (ACTIVO <-> INACTIVO)."""
-        row = self.tabla.currentRow()
-        if row < 0:
+        banco_id = self._id_seleccionado()
+        if banco_id is None:
             return
 
-        item = self.tabla.item(row, COL_ID_INTERNO)
-        if item is None:
-            return
-
-        banco_id = int(item.text())
         session = self.session_factory()
         try:
-            banco = session.query(Banco).filter(Banco.id_banco == banco_id).first()
-            if banco:
-                nuevo_estado = "INACTIVO" if banco.estado_banco == "ACTIVO" else "ACTIVO"
-                reply = QMessageBox.question(
-                    self,
-                    "Confirmar cambio de estado",
-                    f"¿Cambiar el estado del banco '{banco.nombre_banco}' a {nuevo_estado}?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    banco.estado_banco = nuevo_estado
-                    banco.modificado_por = self.usuario.id_usuario
-                    session.commit()
-                    logger.info(f"Estado del banco cambiado: {banco.nombre_banco} -> {nuevo_estado}")
-                    self.cargar_bancos()
+            banco = session.get(Banco, banco_id)
+            if banco is None:
+                return
+            nuevo_estado = "INACTIVO" if banco.estado_banco == "ACTIVO" else "ACTIVO"
+            respuesta = QMessageBox.question(
+                self, "Confirmar", f"¿Cambiar el estado del banco '{banco.nombre_banco}' a {nuevo_estado}?"
+            )
+            if respuesta != QMessageBox.StandardButton.Yes:
+                return
+
+            BancoService.cambiar_estado_banco(session, banco_id, nuevo_estado, id_usuario=self.usuario.id_usuario)
+            self.cargar_bancos()
+        except PermisoDenegadoError:
+            session.rollback()
+            QMessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de bancos.")
         except Exception:
-            logger.exception("Error al cambiar estado del banco")
+            session.rollback()
+            logger.exception("Fallo al cambiar el estado del banco %s", banco_id)
+            QMessageBox.critical(self, "Error", "No se pudo cambiar el estado del banco.")
         finally:
             session.close()
 
+    def _id_seleccionado(self) -> int | None:
+        row = self.tabla.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Selección requerida", "Selecciona un banco de la lista.")
+            return None
+        item = self.tabla.item(row, COL_ID_INTERNO)
+        return int(item.text()) if item is not None else None
+
     def _on_selection_changed(self):
-        """Habilita/deshabilita los botones de editar, eliminar y cambiar estado según la selección."""
+        """Habilita/deshabilita los botones de editar y cambiar estado según la selección."""
         has_selection = self.tabla.currentRow() >= 0
         self.btn_editar.setEnabled(has_selection)
-        self.btn_eliminar.setEnabled(has_selection)
         self.btn_cambiar_estado.setEnabled(has_selection)
-
-    def _guardar_banco(self, session, data: dict):
-        """Guarda un nuevo banco en la base de datos."""
-        from datetime import datetime
-
-        banco = Banco(
-            codigo_banco=data["codigo_banco"],
-            nombre_banco=data["nombre_banco"],
-            tipo_banco=data["tipo_banco"],
-            identificacion_banco=data["identificacion_banco"],
-            correo_banco=data["correo_banco"],
-            numero_telefono_banco=data["numero_telefono_banco"],
-            creado_por=self.usuario.id_usuario,
-            fecha_creacion=datetime.now(),
-            estado_banco="ACTIVO",
-        )
-        session.add(banco)
-        session.commit()
-        logger.info(f"Banco creado: {data['nombre_banco']}")
-
-    def _actualizar_banco(self, session, banco: Banco, data: dict):
-        """Actualiza un banco existente."""
-
-        banco.codigo_banco = data["codigo_banco"]
-        banco.nombre_banco = data["nombre_banco"]
-        banco.tipo_banco = data["tipo_banco"]
-        banco.identificacion_banco = data["identificacion_banco"]
-        banco.correo_banco = data["correo_banco"]
-        banco.numero_telefono_banco = data["numero_telefono_banco"]
-        banco.modificado_por = self.usuario.id_usuario
-        session.commit()
-        logger.info(f"Banco actualizado: {data['nombre_banco']}")

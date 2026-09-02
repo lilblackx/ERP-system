@@ -59,6 +59,7 @@ from app.db.models import (
     PagoCobro,
     PagoProveedor,
     Proveedor,
+    Vendedor,
 )
 from app.services.otros_movimientos import ESTADOS_CXC_OTRO
 from app.services.permisos import require_permiso
@@ -405,6 +406,58 @@ class ReporteService:
             )
             grupo["cantidad_facturas"] += 1
             grupo["total"] += total_factura
+
+        for grupo in grupos.values():
+            grupo["ticket_promedio"] = grupo["total"] / grupo["cantidad_facturas"]
+
+        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=True)
+        return {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "filas": filas,
+            "total_general": sum((f["total"] for f in filas), Decimal("0.00")),
+        }
+
+    @staticmethod
+    def ventas_por_ruta(session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date) -> dict:
+        """Mismo reporte que `ventas_por_vendedor`, agrupado por `Vendedor.id_ruta` en vez
+        de por vendedor -- cubre "Dolares totales facturados por ruta" y "ticket promedio
+        por ruta" (el 'drop site' pedido por el cliente, 2026-09-02: total facturado en $
+        entre cantidad de facturas) en un solo reporte, mismo criterio de agrupacion.
+        Una factura cuyo vendedor no tiene ruta asignada (o sin vendedor, caso legacy) cae
+        en el grupo 'Sin ruta' en vez de perderse del reporte."""
+        require_permiso(session, id_usuario, "reportes", "ver")
+        if fecha_desde > fecha_hasta:
+            raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
+        desde_dt = datetime.combine(fecha_desde, time.min)
+        hasta_dt = datetime.combine(fecha_hasta, time.max)
+
+        facturas = (
+            session.query(FacturaVenta)
+            .options(joinedload(FacturaVenta.vendedor).joinedload(Vendedor.ruta))
+            .filter(FacturaVenta.estado_factura != "ANULADA")
+            .filter(FacturaVenta.fecha_emision >= desde_dt)
+            .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .all()
+        )
+
+        grupos: dict[int | None, dict] = {}
+        for factura in facturas:
+            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
+            ruta = factura.vendedor.ruta if factura.vendedor else None
+            grupo = grupos.setdefault(
+                ruta.id_ruta if ruta else None,
+                {
+                    "ruta": ruta.nombre_ruta if ruta else "Sin ruta",
+                    "cantidad_facturas": 0,
+                    "total": Decimal("0.00"),
+                },
+            )
+            grupo["cantidad_facturas"] += 1
+            grupo["total"] += total_factura
+
+        for grupo in grupos.values():
+            grupo["ticket_promedio"] = grupo["total"] / grupo["cantidad_facturas"]
 
         filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=True)
         return {
