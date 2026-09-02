@@ -249,7 +249,8 @@ class BancosPanel(QWidget):
             logger.info(f"Cargados {len(self.bancos)} bancos de la base de datos")
             for banco in self.bancos:
                 logger.info(
-                    f"  - ID: {banco.id_banco}, Nombre: {banco.nombre_banco}, Código: {banco.codigo_banco}, Estado: {banco.estado_banco}"
+                    f"  - ID: {banco.id_banco}, Nombre: {banco.nombre_banco}, "
+                    f"Código: {banco.codigo_banco}, Estado: {banco.estado_banco}"
                 )
             self._actualizar_tabla()
             self._actualizar_paginacion()
@@ -401,7 +402,6 @@ class BancosPanel(QWidget):
 
     def _actualizar_banco(self, session, banco: Banco, data: dict):
         """Actualiza un banco existente."""
-        from datetime import datetime
 
         banco.codigo_banco = data["codigo_banco"]
         banco.nombre_banco = data["nombre_banco"]
