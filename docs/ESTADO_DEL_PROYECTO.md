@@ -27,7 +27,8 @@ están implementadas, qué decisiones de diseño se tomaron y qué queda pendien
 | Autenticación | `auth.py` | Hash/verify de contraseñas (bcrypt), `authenticate()` |
 | Clientes | `clientes.py` | CRUD, unicidad de código/identificación |
 | Proveedores | `proveedores.py` | CRUD, unicidad de código/RIF, límite y días de crédito |
-| Vendedores | `vendedores.py` | CRUD, desempeño mensual (ventas, facturas, clientes asignados) |
+| Vendedores | `vendedores.py` | CRUD, desempeño mensual (ventas, facturas, clientes asignados). `id_ruta` obligatorio al crear (2026-09-01, mismo criterio que código/identificación — ver sección 8) |
+| Rutas | `rutas.py` | CRUD de rutas de reparto/cobranza (1 ruta : N vendedores), punto de referencia opcional (`latitud`/`longitud`) para el mapa |
 | Categorías | `categorias.py` | CRUD, conteo de productos asociados |
 | Inventario y precios | `inventario.py` | CRUD de productos, alertas de stock/vencimiento, un precio de lista por producto (`obtener_precio`/`establecer_precio`, C14 2026-08-23 — antes hasta 3 tipos DETAL/MAYOR/ESPECIAL) con cálculo de margen |
 | Ventas | `ventas.py` | Emisión de factura (con validación de stock y de crédito), anulación de factura, listado con filtros |
@@ -620,6 +621,53 @@ de servicio.
   verdad cuando no hay ninguno.
 - **Crédito de proveedor en compras**: `registrar_compra()` aplica la misma validación
   simétrica sobre `proveedores.limite_credito`.
+- **Ruta obligatoria para vendedores (2026-09-01)**: `VendedorService.crear()` exige
+  `id_ruta` (no se puede crear un vendedor sin ruta asignada), pero la columna
+  `vendedores.id_ruta` sigue siendo `NULLABLE` en BD (`migrations/0038`) — mismo criterio
+  que `codigo_vendedor`/`identificacion_vendedor`: un entorno con vendedores ya cargados no
+  puede satisfacer un `NOT NULL` sin inventar una ruta genérica sobre datos reales. El
+  módulo Vendedores gano una pestaña "Rutas" (`app/ui/rutas_panel.py`) para administrar el
+  catálogo y un combobox de ruta en `VendedorFormDialog`.
+- **Geolocalización obligatoria (clientes y rutas, 2026-09-01)**: `clientes.latitud`/
+  `longitud` y `rutas.latitud`/`longitud` (`migrations/0039`, `DECIMAL(10,7)`, ambas
+  columnas NULLABLE en BD) fijan un punto de referencia por cliente y por ruta. Es
+  obligatoria a nivel de servicio (decisión de producto, revierte el diseño "opcional"
+  original del mismo día): `create_cliente()`/`RutaService.crear()` exigen `latitud`/
+  `longitud` (`is None`, no falsy — `0.0` es una coordenada legítima, ecuador/meridiano de
+  Greenwich), y `update_cliente()`/`RutaService.actualizar()` no permiten vaciarlas una vez
+  cargadas — mismo criterio "no permite vaciar" que `codigo_cliente`/`nombre_ruta`. La
+  columna sigue `NULLABLE` en BD por el motivo de siempre: no forzar un backfill sobre
+  clientes/rutas ya existentes.
+
+  La UI usa un mapa Leaflet + OpenStreetMap embebido vía `QWebEngineView`
+  (`app/ui/mapa_widget.py`, ya incluido en el wheel completo de PySide6 — no es
+  dependencia nueva), sin costo ni API key, comunicando JS→Python sin `QWebChannel`
+  (esquema de URL ficticio `mapaclick://`, ver docstring del módulo). Se usa en
+  `ClienteFormDialog`/`RutaFormDialog` (mapa editable, un solo marcador, campos
+  lat/lng con asterisco) y en la pestaña "Mapa" de Vendedores
+  (`app/ui/mapa_rutas_panel.py`, solo lectura, pinta los clientes geolocalizados de la
+  ruta seleccionada vía `ClienteService.listar_clientes_por_ruta` — el vínculo es
+  indirecto, Cliente → Vendedor → Ruta).
+
+  En modo editable el mapa agrega, vía `app/ui/geo_http.py` (llamadas HTTP livianas,
+  siempre en un `QThread` aparte — `HttpWorker` — para no congelar la UI, nunca lanzan:
+  cualquier fallo devuelve `None`/`[]`):
+  - Centrado inicial automático en la ubicación aproximada del dispositivo por IP
+    (`ipapi.co`, sin GPS ni permisos del SO) para no arrancar siempre en un punto fijo
+    lejano al usuario — solo centra/hace zoom, nunca fija una coordenada por sí solo.
+  - Búsqueda de lugares por nombre (Nominatim/OpenStreetMap) — funciona igual que un
+    click en el mapa: mueve el marcador y emite `coordenadas_cambiadas`.
+
+  Requiere conexión a internet para ver el mapa (decisión aceptada por el usuario a
+  cambio de no pagar ni gestionar API keys) — las tiles de OpenStreetMap y las llamadas
+  de `geo_http.py` no se pueden evitar. Leaflet en sí (JS/CSS + iconos de marcador) SÍ
+  está vendorizado en `app/ui/web/leaflet/` y se carga desde disco
+  (`QUrl.fromLocalFile`) en vez de su CDN público — cargarlo por red en cada apertura de
+  diálogo sumaba 1-2 round-trips (DNS+TLS+descarga) solo para la librería antes de poder
+  pintar nada (hallazgo de rendimiento, 2026-09-01: "la vista del mapa tarda en
+  cargar"). Además, `MapaWidget` dispara `setHtml()` (lo único lento: crear la página de
+  Chromium) con `QTimer.singleShot(0, ...)` en vez de en `__init__`, para que el diálogo
+  que lo contiene quede visible de inmediato en lugar de bloquear su apertura completa.
 
 ## 9. Pendiente / próximos pasos sugeridos
 

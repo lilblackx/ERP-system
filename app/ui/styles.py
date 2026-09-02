@@ -605,6 +605,45 @@ class EstadoBadge(QWidget):
         layout.addWidget(lbl)
 
 
+class LabelElidable(QLabel):
+    """QLabel para texto de largo variable (nombre de cliente/producto/cajero, etc.)
+    dentro de un espacio acotado -- ej. una fila de tarjeta con columnas de ancho fijo a
+    los lados (monto, badge de estado). Un QLabel comun con word-wrap apagado no reduce
+    su minimumSizeHint por debajo del ancho del texto completo sin cortar, asi que un
+    nombre largo empuja el ancho minimo de toda la fila/tarjeta mas alla del espacio
+    disponible -- en una pantalla chica eso fuerza a toda la fila mas angosta que su
+    minimo, y el resto de las columnas (monto, badge) terminan apretadas/pegadas contra
+    el texto (reportado por el usuario, 2026-09-01, "las facturas se ven cortadas y
+    pegadas" en una laptop de pantalla chica, ver app/ui/dashboard_panel.py::FilaFactura).
+    Trunca con "…" (Qt.TextElideMode.ElideRight) al ancho real disponible en vez de
+    dejar que el layout se ensanche o que el texto se recorte crudo sin aviso visual."""
+
+    def __init__(self, texto: str = "", parent=None):
+        super().__init__(parent)
+        self._texto_completo = texto
+        super().setText(texto)
+
+    def setText(self, texto: str) -> None:  # noqa: N802 (override de Qt)
+        self._texto_completo = texto
+        super().setText(self._elidido())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (override de Qt)
+        super().resizeEvent(event)
+        super().setText(self._elidido())
+
+    def _elidido(self) -> str:
+        return self.fontMetrics().elidedText(self._texto_completo, Qt.TextElideMode.ElideRight, self.width())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (override de Qt)
+        # Fijo y chico a proposito (no basado en el texto actual, ni siquiera elidido):
+        # es lo que le permite al layout comprimir esta columna libremente en pantallas
+        # chicas en vez de bloquear el ancho minimo de toda la fila -- el texto se sigue
+        # eliding en tiempo real via resizeEvent a cualquier ancho que el layout le
+        # termine dando.
+        ancho_minimo = self.fontMetrics().horizontalAdvance("…") + 4
+        return QSize(ancho_minimo, super().minimumSizeHint().height())
+
+
 class FlowLayout(QLayout):
     """Layout que acomoda sus widgets en filas, saltando a la siguiente cuando no entra
     mas en el ancho disponible -- Qt no trae uno propio (a diferencia de CSS flex-wrap),

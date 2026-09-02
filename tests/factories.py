@@ -21,6 +21,7 @@ from app.db.models import (
     Proveedor,
     Rol,
     RolPermiso,
+    Ruta,
     Usuario,
     Vendedor,
 )
@@ -183,11 +184,23 @@ def crear_caja(session: Session, **overrides) -> Caja:
     return caja
 
 
+def crear_ruta(session: Session, **overrides) -> Ruta:
+    datos = {"nombre_ruta": _siguiente("RUTA-")}
+    datos.update(overrides)
+    ruta = Ruta(**datos)
+    session.add(ruta)
+    session.commit()
+    session.refresh(ruta)
+    return ruta
+
+
 def crear_vendedor(session: Session, **overrides) -> Vendedor:
+    ruta = overrides.pop("ruta", None) or crear_ruta(session)
     datos = {
         "codigo_vendedor": _siguiente("VEN-"),
         "identificacion_vendedor": _siguiente("V-"),
         "nombre_vendedor": "Vendedor de prueba",
+        "id_ruta": ruta.id_ruta,
     }
     datos.update(overrides)
     vendedor = Vendedor(**datos)

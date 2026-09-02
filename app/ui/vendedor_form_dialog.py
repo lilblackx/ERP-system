@@ -1,6 +1,7 @@
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QGridLayout,
     QHBoxLayout,
@@ -11,8 +12,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy.orm import Session
 
-from app.db.models import Vendedor
+from app.db.models import Ruta, Vendedor
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -51,7 +53,7 @@ QLabel.SectionTitle {{
     letter-spacing: 0.8px;
     padding-bottom: 2px;
 }}
-QLineEdit {{
+QLineEdit, QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -60,7 +62,7 @@ QLineEdit {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus {{
+QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
     background-color: #FFFFFF;
 }}
@@ -104,11 +106,12 @@ class VendedorFormDialog(QDialog):
     ClienteFormDialog (app/ui/cliente_form_dialog.py), pero con una sola tarjeta
     porque el vendedor tiene muchos menos campos que un cliente."""
 
-    def __init__(self, vendedor: Vendedor | None = None, parent=None):
+    def __init__(self, session: Session, vendedor: Vendedor | None = None, parent=None):
         super().__init__(parent)
+        self.session = session
         self.vendedor = vendedor
         self.setWindowTitle("Editar Vendedor" if vendedor else "Nuevo Vendedor")
-        self.setFixedSize(480, 420)
+        self.setFixedSize(480, 470)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -214,13 +217,27 @@ class VendedorFormDialog(QDialog):
         grid.addWidget(lbl_email, 4, 1)
         grid.addWidget(self.email_input, 5, 1)
 
+        lbl_ruta = QLabel("Ruta <span style='color: #DC2626;'>*</span>")
+        lbl_ruta.setProperty("class", "FormLabel")
+        self.ruta_combo = QComboBox()
+        self.ruta_combo.setFixedHeight(32)
+        rutas = self.session.query(Ruta).filter(Ruta.estado_ruta == "ACTIVO").order_by(Ruta.nombre_ruta).all()
+        if self.vendedor is not None and self.vendedor.ruta is not None and self.vendedor.ruta.estado_ruta != "ACTIVO":
+            # La ruta ya asignada puede haber sido desactivada despues -- se conserva en la
+            # lista al editar para no perder el valor actual sin que el usuario lo pida.
+            rutas = [*rutas, self.vendedor.ruta]
+        for ruta in rutas:
+            self.ruta_combo.addItem(ruta.nombre_ruta, ruta.id_ruta)
+        grid.addWidget(lbl_ruta, 6, 0, 1, 2)
+        grid.addWidget(self.ruta_combo, 7, 0, 1, 2)
+
         lbl_dir = QLabel("Dirección")
         lbl_dir.setProperty("class", "FormLabel")
         self.direccion_input = QLineEdit()
         self.direccion_input.setPlaceholderText("Opcional")
         self.direccion_input.setFixedHeight(32)
-        grid.addWidget(lbl_dir, 6, 0, 1, 2)
-        grid.addWidget(self.direccion_input, 7, 0, 1, 2)
+        grid.addWidget(lbl_dir, 8, 0, 1, 2)
+        grid.addWidget(self.direccion_input, 9, 0, 1, 2)
 
         card_layout.addLayout(grid)
         card_layout.addStretch()
@@ -258,6 +275,9 @@ class VendedorFormDialog(QDialog):
         self.telefono_input.setText(vendedor.telefono_vendedor or "")
         self.email_input.setText(vendedor.email_vendedor or "")
         self.direccion_input.setText(vendedor.direccion_vendedor or "")
+        idx_ruta = self.ruta_combo.findData(vendedor.id_ruta)
+        if idx_ruta >= 0:
+            self.ruta_combo.setCurrentIndex(idx_ruta)
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_input.text().strip():
@@ -272,6 +292,14 @@ class VendedorFormDialog(QDialog):
             QMessageBox.warning(self, "Dato requerido", "La identificación del vendedor es obligatoria.")
             self.identificacion_input.setFocus()
             return
+        if self.ruta_combo.currentData() is None:
+            QMessageBox.warning(
+                self,
+                "Dato requerido",
+                "La ruta es obligatoria. Cree una ruta primero desde la pestaña 'Rutas'.",
+            )
+            self.ruta_combo.setFocus()
+            return
         self.accept()
 
     def get_data(self) -> dict:
@@ -282,4 +310,5 @@ class VendedorFormDialog(QDialog):
             "telefono_vendedor": self.telefono_input.text().strip() or None,
             "email_vendedor": self.email_input.text().strip() or None,
             "direccion_vendedor": self.direccion_input.text().strip() or None,
+            "id_ruta": self.ruta_combo.currentData(),
         }

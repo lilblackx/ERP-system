@@ -46,6 +46,34 @@ class Usuario(Base):
     rol = relationship("Rol")
 
 
+class Ruta(Base):
+    __tablename__ = "rutas"
+
+    id_ruta: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    nombre_ruta: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    descripcion_ruta: Mapped[str | None] = mapped_column(String(255))
+    estado_ruta: Mapped[str | None] = mapped_column(String(20), server_default="ACTIVO")
+    fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime, server_default=func.getdate())
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    # Origen del recorrido de la ruta (migrations/0039; el nombre de columna se conserva,
+    # ver migrations/0040). Obligatorio por decision de producto (2026-09-01), pero
+    # NULLABLE en BD -- mismo criterio que Vendedor.id_ruta mas abajo: RutaService.crear()
+    # es quien garantiza que toda ruta NUEVA siempre traiga coordenadas, sin forzar un
+    # backfill sobre datos existentes.
+    latitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
+    longitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
+    # Destino del recorrido (migrations/0040) -- junto con latitud/longitud (origen) arriba
+    # definen el trazado real de la ruta, en vez de un unico punto de referencia. Mismo
+    # criterio de obligatoriedad-por-servicio-no-por-schema que el origen.
+    destino_latitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
+    destino_longitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
+    # Trazado por calles entre origen y destino (JSON, lista [[lat,lng], ...]), calculado
+    # una vez en RutaFormDialog via OSRM (o linea recta si OSRM falla) y cacheado aca --
+    # ver app/ui/geo_http.py::calcular_ruta_por_calles. Asi ver el mapa general
+    # (app/ui/mapa_rutas_panel.py) nunca depende de la disponibilidad de OSRM.
+    trazado_geojson: Mapped[str | None] = mapped_column(String)
+
+
 class Vendedor(Base):
     __tablename__ = "vendedores"
 
@@ -59,6 +87,13 @@ class Vendedor(Base):
     fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime, server_default=func.getdate())
     estado_vendedor: Mapped[str | None] = mapped_column(String(20), server_default="ACTIVO")
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    # Nullable en BD a proposito, igual que codigo_vendedor/identificacion_vendedor: un
+    # entorno con vendedores ya cargados no puede satisfacer un NOT NULL sin inventar una
+    # ruta generica sobre datos reales. VendedorService.crear() es quien garantiza que todo
+    # vendedor NUEVO siempre traiga una ruta (migrations/0038).
+    id_ruta: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("rutas.id_ruta"))
+
+    ruta = relationship("Ruta")
 
 
 class CategoriaCliente(Base):
@@ -89,6 +124,13 @@ class Cliente(Base):
         BigInteger, ForeignKey("categorias_cliente.id_categoria_cliente")
     )
     estado_cliente: Mapped[str | None] = mapped_column(String(20), server_default="ACTIVO")
+    # Punto de referencia para pintar el cliente en el mapa (migrations/0039). Obligatorio
+    # por decision de producto (2026-09-01), pero NULLABLE en BD -- mismo criterio que
+    # codigo_cliente/identificacion_cliente: create_cliente() es quien garantiza que todo
+    # cliente NUEVO siempre traiga coordenadas, sin forzar un backfill sobre datos
+    # existentes.
+    latitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
+    longitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
 
     vendedor = relationship("Vendedor")
     categoria = relationship("CategoriaCliente")

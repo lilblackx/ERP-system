@@ -1,9 +1,10 @@
 """
-Panel completo del módulo Vendedores.
-Mismo patrón visual y de interacción que app/ui/clientes_panel.py (paleta y
-tipografía de app/ui/styles.py): barra de herramientas, tabla estilizada,
-alta/edición y activar/desactivar (nunca DELETE fisico, ver
-VendedorService.eliminar).
+Panel completo del módulo Vendedores: tres pestañas -- "Vendedores" (listado, alta/edición,
+activar/desactivar), "Rutas" (RutasPanel, catálogo de rutas de reparto/cobranza que se
+asignan a cada vendedor) y "Mapa" (MapaRutasPanel, geolocalización de clientes/rutas).
+Mismo patrón visual que app/ui/clientes_panel.py (paleta y tipografía de
+app/ui/styles.py), y mismo criterio de QTabWidget que app/ui/usuarios_panel.py (Usuarios +
+Roles y Permisos) -- nunca DELETE fisico, ver VendedorService.eliminar.
 """
 
 import logging
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QSpacerItem,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -34,6 +36,8 @@ from app.db.models import Usuario, Vendedor
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.vendedores import VendedorService
+from app.ui.mapa_rutas_panel import MapaRutasPanel
+from app.ui.rutas_panel import RutasPanel
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -48,6 +52,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     SEARCH_QSS,
     TABLE_QSS,
+    TABS_QSS,
     EstadoBadge,
     alinear_encabezados,
     aplicar_sombra,
@@ -57,7 +62,7 @@ from app.ui.vendedor_form_dialog import VendedorFormDialog
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "Nombre", "Código", "Identificación", "Teléfono", "Email", "Estado"]
+COLS_VISIBLES = ["ID", "Nombre", "Código", "Identificación", "Ruta", "Teléfono", "Email", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 
@@ -79,13 +84,25 @@ class VendedoresPanel(QWidget):
         self.usuario = usuario
         self.pagina_actual = 1
         self.total_paginas = 1
+        # None hasta que el usuario abre la sub-pestaña "Mapa" -- ver _asegurar_tab_mapa().
+        self.tab_mapa: MapaRutasPanel | None = None
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_vendedores)
 
     def showEvent(self, event: QShowEvent) -> None:
+        # Mismo motivo que en el resto de los paneles (ver DashboardPanel.showEvent):
+        # MainWindow cachea el panel via QStackedWidget, asi que sin esto volver a
+        # "Vendedores" desde otro modulo mostraba el listado viejo.
         super().showEvent(event)
         self.cargar_vendedores()
+        actual = self.tabs.currentWidget()
+        if actual is self.tab_rutas:
+            self.tab_rutas.cargar()
+        elif actual is self._mapa_placeholder:
+            self._asegurar_tab_mapa()
+        elif self.tab_mapa is not None and actual is self.tab_mapa:
+            self.tab_mapa.cargar()
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 
@@ -95,11 +112,57 @@ class VendedoresPanel(QWidget):
         root.setSpacing(16)
 
         root.addWidget(self._make_header())
-        root.addWidget(self._make_toolbar())
-        root.addWidget(self._make_table())
-        root.addWidget(self._make_footer())
+
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(TABS_QSS)
+        self.tab_vendedores = self._make_tab_vendedores()
+        self.tab_rutas = RutasPanel(self.session_factory, self.usuario)
+        self.tabs.addTab(self.tab_vendedores, "Vendedores")
+        self.tabs.addTab(self.tab_rutas, "Rutas")
+        # Placeholder vacio en vez de crear MapaRutasPanel (y su QWebEngineView) de una
+        # vez: lo primero que hace WebEngine al construirse es levantar el proceso de
+        # GPU/renderer de Chromium, lo que en esta maquina produce un parpadeo visible de
+        # toda la ventana -- reportado por el usuario, 2026-09-01, "al entrar a vendedores
+        # la app se cierra y abre rapido" (no era un crash real, solo el costo de ese
+        # arranque pagado sin que el usuario hubiera pedido ver el mapa todavia). Se
+        # construye recien al entrar efectivamente a esta pestaña, ver
+        # _asegurar_tab_mapa().
+        self._mapa_placeholder = QWidget()
+        self.tabs.addTab(self._mapa_placeholder, "Mapa")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        root.addWidget(self.tabs, stretch=1)
 
         self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+
+    def _asegurar_tab_mapa(self) -> None:
+        if self.tab_mapa is not None:
+            return
+        idx = self.tabs.indexOf(self._mapa_placeholder)
+        self.tab_mapa = MapaRutasPanel(self.session_factory, self.usuario)
+        self.tabs.removeTab(idx)
+        self.tabs.insertTab(idx, self.tab_mapa, "Mapa")
+        self.tabs.setCurrentIndex(idx)
+        self.tab_mapa.cargar()
+
+    def _on_tab_changed(self, indice: int) -> None:
+        widget = self.tabs.widget(indice)
+        if widget is self.tab_rutas:
+            self.tab_rutas.cargar()
+        elif widget is self._mapa_placeholder:
+            self._asegurar_tab_mapa()
+        elif self.tab_mapa is not None and widget is self.tab_mapa:
+            self.tab_mapa.cargar()
+
+    def _make_tab_vendedores(self) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(4, 12, 4, 4)
+        v.setSpacing(16)
+
+        v.addWidget(self._make_toolbar())
+        v.addWidget(self._make_table(), stretch=1)
+        v.addWidget(self._make_footer())
+        return w
 
     def _make_header(self) -> QWidget:
         w = QWidget()
@@ -174,7 +237,8 @@ class VendedoresPanel(QWidget):
                 3: Qt.AlignmentFlag.AlignLeft,
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignCenter,
+                6: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignCenter,
             },
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -186,8 +250,8 @@ class VendedoresPanel(QWidget):
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(6, 110)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(7, 110)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)
@@ -286,13 +350,14 @@ class VendedoresPanel(QWidget):
             self.tabla.setItem(fila, 1, QTableWidgetItem(v.nombre_vendedor or ""))
             self.tabla.setItem(fila, 2, QTableWidgetItem(v.codigo_vendedor or ""))
             self.tabla.setItem(fila, 3, QTableWidgetItem(v.identificacion_vendedor or ""))
-            self.tabla.setItem(fila, 4, QTableWidgetItem(v.telefono_vendedor or ""))
-            self.tabla.setItem(fila, 5, QTableWidgetItem(v.email_vendedor or ""))
+            self.tabla.setItem(fila, 4, QTableWidgetItem(v.ruta.nombre_ruta if v.ruta else ""))
+            self.tabla.setItem(fila, 5, QTableWidgetItem(v.telefono_vendedor or ""))
+            self.tabla.setItem(fila, 6, QTableWidgetItem(v.email_vendedor or ""))
 
             estado_vendedor = v.estado_vendedor or "ACTIVO"
             color_estado = COLOR_SUCCESS if estado_vendedor.upper() == "ACTIVO" else COLOR_DANGER
             badge = EstadoBadge(estado_vendedor.capitalize(), color_estado)
-            self.tabla.setCellWidget(fila, 6, badge)
+            self.tabla.setCellWidget(fila, 7, badge)
 
         total = resultado["total"]
         self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math
@@ -319,6 +384,7 @@ class VendedoresPanel(QWidget):
                 v.nombre_vendedor,
                 v.codigo_vendedor,
                 v.identificacion_vendedor,
+                v.ruta.nombre_ruta if v.ruta else "",
                 v.telefono_vendedor,
                 v.email_vendedor,
                 v.estado_vendedor,
@@ -358,7 +424,7 @@ class VendedoresPanel(QWidget):
             filtros["Búsqueda"] = texto_busqueda if texto_busqueda else "Todos"
             filtros["Estado"] = self.estado_combo.currentText()
 
-            col_widths = [0.5, 2.0, 1.0, 1.2, 1.3, 2.0, 1.0]
+            col_widths = [0.5, 2.0, 1.0, 1.2, 1.2, 1.3, 2.0, 1.0]
 
             exportar_pdf(
                 ruta,
@@ -387,7 +453,7 @@ class VendedoresPanel(QWidget):
     def nuevo_vendedor(self) -> None:
         session = self.session_factory()
         try:
-            dialogo = VendedorFormDialog(parent=self)
+            dialogo = VendedorFormDialog(session, parent=self)
             if dialogo.exec():
                 datos = dialogo.get_data()
                 datos["creado_por"] = self.usuario.id_usuario
@@ -419,7 +485,7 @@ class VendedoresPanel(QWidget):
         session = self.session_factory()
         try:
             vendedor = VendedorService.obtener(session, id_vendedor, id_usuario=self.usuario.id_usuario)
-            dialogo = VendedorFormDialog(vendedor, parent=self)
+            dialogo = VendedorFormDialog(session, vendedor, parent=self)
             if dialogo.exec():
                 VendedorService.actualizar(
                     session, id_vendedor, id_usuario=self.usuario.id_usuario, **dialogo.get_data()

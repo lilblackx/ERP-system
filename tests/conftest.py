@@ -79,6 +79,7 @@ TABLES_DELETE_ORDER = [
     "clientes",
     "proveedores",
     "vendedores",
+    "rutas",
     "categorias",
     "categorias_cliente",
     "control_de_tasas",

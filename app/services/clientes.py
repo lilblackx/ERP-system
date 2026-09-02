@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import Cliente
+from app.db.models import Cliente, Vendedor
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
@@ -14,6 +14,13 @@ def _validar_requeridos(datos: dict) -> None:
         raise ValueError("id_legal (tipo de identificación) es requerido")
     if not datos.get("identificacion_cliente"):
         raise ValueError("identificacion_cliente (número) es requerido")
+    # is None (no falsy) a proposito: latitud/longitud=0.0 son coordenadas legitimas
+    # (ecuador / meridiano de Greenwich) y `not 0.0` es True en Python -- un `not
+    # datos.get(...)` como el resto de los checks de arriba las rechazaria por error.
+    if datos.get("latitud") is None:
+        raise ValueError("latitud es requerida")
+    if datos.get("longitud") is None:
+        raise ValueError("longitud es requerida")
 
 
 def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | None = None) -> None:
@@ -22,6 +29,16 @@ def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | N
         query = query.filter(Cliente.id_cliente != excluir_id)
     if query.first() is not None:
         raise ValueError(f"Ya existe un cliente con {campo}='{valor}'")
+
+
+def _validar_rango_coordenadas(latitud, longitud) -> None:
+    """Solo el rango -- la obligatoriedad se valida aparte en cada callsite (mismo
+    criterio 'no permite vaciar' que codigo_cliente/identificacion_cliente): en creacion
+    via _validar_requeridos(), en edicion inline en update_cliente()."""
+    if latitud is not None and not (-90 <= float(latitud) <= 90):
+        raise ValueError("latitud debe estar entre -90 y 90")
+    if longitud is not None and not (-180 <= float(longitud) <= 180):
+        raise ValueError("longitud debe estar entre -180 y 180")
 
 
 def list_clientes(
@@ -80,6 +97,7 @@ def create_cliente(session: Session, **datos) -> Cliente:
     _validar_requeridos(datos)
     _validar_unico(session, "codigo_cliente", datos["codigo_cliente"])
     _validar_unico(session, "identificacion_cliente", datos["identificacion_cliente"])
+    _validar_rango_coordenadas(datos.get("latitud"), datos.get("longitud"))
     cliente = Cliente(**datos)
     session.add(cliente)
     session.commit()
@@ -107,6 +125,10 @@ def update_cliente(session: Session, id_cliente: int, id_usuario: int | None = N
         raise ValueError("id_legal (tipo de identificación) es requerido")
     if "identificacion_cliente" in datos and not datos["identificacion_cliente"]:
         raise ValueError("identificacion_cliente (número) es requerido")
+    if "latitud" in datos and datos["latitud"] is None:
+        raise ValueError("latitud es requerida")
+    if "longitud" in datos and datos["longitud"] is None:
+        raise ValueError("longitud es requerida")
 
     nuevo_codigo = datos.get("codigo_cliente")
     if nuevo_codigo and nuevo_codigo != cliente.codigo_cliente:
@@ -115,6 +137,10 @@ def update_cliente(session: Session, id_cliente: int, id_usuario: int | None = N
     nueva_identificacion = datos.get("identificacion_cliente")
     if nueva_identificacion and nueva_identificacion != cliente.identificacion_cliente:
         _validar_unico(session, "identificacion_cliente", nueva_identificacion, excluir_id=id_cliente)
+
+    nueva_latitud = datos["latitud"] if "latitud" in datos else cliente.latitud
+    nueva_longitud = datos["longitud"] if "longitud" in datos else cliente.longitud
+    _validar_rango_coordenadas(nueva_latitud, nueva_longitud)
 
     for campo, valor in datos.items():
         setattr(cliente, campo, valor)
@@ -167,3 +193,22 @@ def cambiar_estado_cliente(
         detalle={"id_cliente": cliente.id_cliente, "nuevo_estado": nuevo_estado},
     )
     return cliente
+
+
+def listar_clientes_por_ruta(session: Session, id_ruta: int, id_usuario: int | None = None) -> list[Cliente]:
+    """Clientes geolocalizados cuyo vendedor pertenece a la ruta dada -- para pintarlos
+    junto al punto de la ruta en el mapa general (app/ui/mapa_rutas_panel.py). El vinculo
+    es indirecto (Cliente -> Vendedor -> Ruta): un cliente no se asigna a una ruta
+    directamente, hereda la del vendedor que lo atiende."""
+    require_permiso(session, id_usuario, "clientes", "ver")
+    return (
+        session.query(Cliente)
+        .join(Vendedor, Cliente.vendedor_cliente == Vendedor.id_vendedor)
+        .filter(
+            Vendedor.id_ruta == id_ruta,
+            Cliente.latitud.isnot(None),
+            Cliente.longitud.isnot(None),
+        )
+        .order_by(Cliente.nombre_razon_social)
+        .all()
+    )

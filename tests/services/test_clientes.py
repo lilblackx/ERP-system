@@ -2,7 +2,7 @@ import pytest
 
 from app.services import clientes as clientes_service
 from app.services.permisos import PermisoDenegadoError
-from tests.factories import crear_usuario_admin
+from tests.factories import crear_cliente, crear_ruta, crear_usuario_admin, crear_vendedor
 
 
 def _datos_cliente(**overrides) -> dict:
@@ -11,6 +11,10 @@ def _datos_cliente(**overrides) -> dict:
         "id_legal": "V",
         "identificacion_cliente": "12345678",
         "nombre_razon_social": "Cliente de Prueba",
+        # latitud/longitud son obligatorias (decision de producto, 2026-09-01) -- default
+        # aca para no repetirlo en cada test que no le interesa la geolocalizacion en si.
+        "latitud": 10.4806,
+        "longitud": -66.9036,
     }
     datos.update(overrides)
     return datos
@@ -280,3 +284,119 @@ def test_cambiar_estado_cliente_sin_usuario_autorizado_falla(db_session):
 
     with pytest.raises(PermisoDenegadoError):
         clientes_service.cambiar_estado_cliente(db_session, cliente.id_cliente, "INACTIVO")
+
+
+# --- geolocalizacion (latitud/longitud) -----------------------------------------------
+
+
+def test_create_cliente_con_coordenadas(db_session):
+    admin = crear_usuario_admin(db_session)
+
+    cliente = clientes_service.create_cliente(
+        db_session, **_datos_cliente(creado_por=admin.id_usuario, latitud=10.4806, longitud=-66.9036)
+    )
+
+    assert float(cliente.latitud) == pytest.approx(10.4806)
+    assert float(cliente.longitud) == pytest.approx(-66.9036)
+
+
+def test_create_cliente_requiere_latitud(db_session):
+    """La ubicacion es obligatoria (decision de producto, 2026-09-01) -- no se puede
+    crear un cliente sin latitud/longitud."""
+    admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="latitud"):
+        clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario, latitud=None))
+
+
+def test_create_cliente_requiere_longitud(db_session):
+    admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="longitud"):
+        clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario, longitud=None))
+
+
+def test_create_cliente_latitud_fuera_de_rango_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="latitud"):
+        clientes_service.create_cliente(
+            db_session, **_datos_cliente(creado_por=admin.id_usuario, latitud=200, longitud=-66.9036)
+        )
+
+
+def test_create_cliente_longitud_fuera_de_rango_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="longitud"):
+        clientes_service.create_cliente(
+            db_session, **_datos_cliente(creado_por=admin.id_usuario, latitud=10.4806, longitud=200)
+        )
+
+
+def test_update_cliente_cambia_coordenadas(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
+
+    actualizado = clientes_service.update_cliente(
+        db_session, cliente.id_cliente, id_usuario=admin.id_usuario, latitud=11.0, longitud=-67.0
+    )
+
+    assert float(actualizado.latitud) == pytest.approx(11.0)
+
+
+def test_update_cliente_no_permite_vaciar_latitud(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="latitud"):
+        clientes_service.update_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario, latitud=None)
+
+
+def test_update_cliente_no_permite_vaciar_longitud(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="longitud"):
+        clientes_service.update_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario, longitud=None)
+
+
+def test_update_cliente_conserva_coordenadas_existentes_al_editar_otro_campo(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = clientes_service.create_cliente(
+        db_session, **_datos_cliente(creado_por=admin.id_usuario, latitud=10.4806, longitud=-66.9036)
+    )
+
+    actualizado = clientes_service.update_cliente(
+        db_session, cliente.id_cliente, id_usuario=admin.id_usuario, telefono="0212-1234567"
+    )
+
+    assert float(actualizado.latitud) == pytest.approx(10.4806)
+    assert float(actualizado.longitud) == pytest.approx(-66.9036)
+
+
+# --- listar_clientes_por_ruta ----------------------------------------------------------
+
+
+def test_listar_clientes_por_ruta(db_session):
+    admin = crear_usuario_admin(db_session)
+    ruta = crear_ruta(db_session)
+    otra_ruta = crear_ruta(db_session)
+    vendedor = crear_vendedor(db_session, ruta=ruta)
+    vendedor_otra_ruta = crear_vendedor(db_session, ruta=otra_ruta)
+
+    cliente_con_coords = crear_cliente(
+        db_session, vendedor_cliente=vendedor.id_vendedor, latitud=10.4806, longitud=-66.9036
+    )
+    crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor)  # sin coordenadas
+    crear_cliente(db_session, vendedor_cliente=vendedor_otra_ruta.id_vendedor, latitud=10.0, longitud=-66.0)
+
+    resultado = clientes_service.listar_clientes_por_ruta(db_session, ruta.id_ruta, id_usuario=admin.id_usuario)
+
+    assert [c.id_cliente for c in resultado] == [cliente_con_coords.id_cliente]
+
+
+def test_listar_clientes_por_ruta_sin_usuario_autorizado_falla(db_session):
+    ruta = crear_ruta(db_session)
+    with pytest.raises(PermisoDenegadoError):
+        clientes_service.listar_clientes_por_ruta(db_session, ruta.id_ruta)

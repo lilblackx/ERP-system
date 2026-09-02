@@ -38,6 +38,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
     COLORES_ESTADO_FACTURA,
+    LabelElidable,
     aplicar_sombra,
     color_con_alpha,
 )
@@ -66,27 +67,16 @@ def _card(inner: QWidget) -> QWidget:
 
 
 class _SeparadorKpi(QWidget):
-    """Linea vertical sutil entre KPIs, pintada a mano con un QPen cosmetico en vez de
-    un QLabel con background-color de 1px: bajo escalado de DPI fraccionario (125%,
-    150%...) un ancho fijo de 1px logico redondea a un numero distinto de pixeles
-    fisicos segun la posicion horizontal exacta del widget dentro del layout (que
-    depende del ancho acumulado de las tarjetas previas, distinto para cada una) --
-    por eso el primer separador se veia mas grueso que los demas (reportado por el
-    usuario, 2026-08-27). Un QPen cosmetico siempre dibuja exactamente 1px de
-    dispositivo sin importar la posicion ni el factor de escala."""
+    """Línea vertical divisoria sutil entre KPIs."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(1)
-        self.setFixedHeight(40)
+        self.setFixedHeight(50)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
         painter = QPainter(self)
-        pen = QPen(QColor(COLOR_BORDER))
-        pen.setCosmetic(True)
-        pen.setWidth(1)
-        painter.setPen(pen)
-        painter.drawLine(0, 0, 0, self.height())
+        painter.fillRect(self.rect(), QColor(COLOR_BORDER))
         painter.end()
 
 
@@ -95,13 +85,11 @@ class KpiCard(QWidget):
 
     def __init__(self, titulo: str, icono: str, color: str, parent=None):
         super().__init__(parent)
-        self.setObjectName("Card")
-        self.setStyleSheet(CARD_QSS)
-        aplicar_sombra(self)
+        self.setStyleSheet("background: transparent; border: none;")
 
         v = QVBoxLayout(self)
-        v.setContentsMargins(18, 16, 18, 16)
-        v.setSpacing(8)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(6)
 
         top = QHBoxLayout()
         lbl_titulo = QLabel(titulo)
@@ -292,11 +280,11 @@ class FilaCaja(QWidget):
 
         info = QVBoxLayout()
         info.setSpacing(0)
-        lbl_nombre = QLabel(caja["nombre_caja"])
+        lbl_nombre = LabelElidable(caja["nombre_caja"])
         lbl_nombre.setStyleSheet(
             f"font-size: 12px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
         )
-        lbl_cajero = QLabel(caja["cajero"] or "Sin cajero asignado")
+        lbl_cajero = LabelElidable(caja["cajero"] or "Sin cajero asignado")
         lbl_cajero.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; background: transparent; border: none;")
         info.addWidget(lbl_nombre)
         info.addWidget(lbl_cajero)
@@ -322,11 +310,11 @@ class FilaInventarioAlerta(QWidget):
 
         info = QVBoxLayout()
         info.setSpacing(0)
-        lbl_nombre = QLabel(producto["nombre_producto"])
+        lbl_nombre = LabelElidable(producto["nombre_producto"])
         lbl_nombre.setStyleSheet(
             f"font-size: 12px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
         )
-        lbl_categoria = QLabel(producto["categoria"] or "Sin categoría")
+        lbl_categoria = LabelElidable(producto["categoria"] or "Sin categoría")
         lbl_categoria.setStyleSheet(
             f"font-size: 11px; color: {COLOR_TEXT_MUTED}; background: transparent; border: none;"
         )
@@ -357,7 +345,7 @@ class FilaFactura(QWidget):
         )
         lbl_numero.setFixedWidth(90)
 
-        lbl_cliente = QLabel(factura["cliente"] or "Consumidor final")
+        lbl_cliente = LabelElidable(factura["cliente"] or "Consumidor final")
         lbl_cliente.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_DARK}; background: transparent; border: none;")
 
         lbl_total = QLabel(f"${float(factura['total_venta']):,.2f}")
@@ -503,18 +491,25 @@ class DashboardPanel(QWidget):
         w.setStyleSheet("background: transparent;")
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(14)
+        # 10px (antes 14) -- mismo motivo que el padding recortado en KpiCard: menos
+        # ancho minimo total para la fila de 4 tarjetas en pantallas chicas.
+        h.setSpacing(10)
 
         self.kpi_ventas_hoy = KpiCard("Ventas de hoy", "fa5s.chart-line", COLOR_PRIMARY)
         self.kpi_por_cobrar = KpiCard("Por cobrar", "fa5s.file-invoice-dollar", COLOR_INFO)
         self.kpi_por_pagar = KpiCard("Por pagar", "fa5s.hand-holding-usd", COLOR_WARNING)
-        self.kpi_productos_alerta = KpiCard("Productos en alerta", "fa5s.exclamation-triangle", COLOR_DANGER)
+        # "Stock bajo" en vez de "Productos en alerta" (2026-09-01): era, por lejos, la
+        # tarjeta mas ancha de las 4 (titulo largo, empujaba el ancho minimo de toda la
+        # fila) -- mismo significado, mucho mas corto; el icono (triangulo de alerta,
+        # color danger) y el detalle ("Bajo el minimo") ya dan el contexto completo.
+        self.kpi_productos_alerta = KpiCard("Stock bajo", "fa5s.exclamation-triangle", COLOR_DANGER)
 
         cards = (self.kpi_ventas_hoy, self.kpi_por_cobrar, self.kpi_por_pagar, self.kpi_productos_alerta)
         for i, card in enumerate(cards):
             if i > 0:
-                h.addWidget(_SeparadorKpi(), 0, Qt.AlignmentFlag.AlignVCenter)
-            h.addWidget(card)
+                sep = _SeparadorKpi()
+                h.addWidget(sep, 0, Qt.AlignmentFlag.AlignVCenter)
+            h.addWidget(card, 1)
         return w
 
     def _make_fila_grafico_y_cajas(self) -> QWidget:

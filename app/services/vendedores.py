@@ -68,6 +68,12 @@ class VendedorService:
             raise ValueError("codigo_vendedor es requerido")
         if not datos.get("identificacion_vendedor"):
             raise ValueError("identificacion_vendedor es requerido")
+        # id_ruta obligatorio por decision de producto (2026-09-01): un vendedor siempre
+        # pertenece a una ruta de reparto/cobranza. La columna sigue siendo NULLABLE en BD
+        # (migrations/0038, mismo motivo que codigo_vendedor/identificacion_vendedor) --
+        # este servicio es quien garantiza que nunca llegue vacio en una creacion nueva.
+        if not datos.get("id_ruta"):
+            raise ValueError("id_ruta es requerido")
         _validar_unico(session, "codigo_vendedor", datos["codigo_vendedor"])
         _validar_unico(session, "identificacion_vendedor", datos["identificacion_vendedor"])
 
@@ -98,6 +104,8 @@ class VendedorService:
             raise ValueError("codigo_vendedor es requerido")
         if "identificacion_vendedor" in datos and not datos["identificacion_vendedor"]:
             raise ValueError("identificacion_vendedor es requerido")
+        if "id_ruta" in datos and not datos["id_ruta"]:
+            raise ValueError("id_ruta es requerido")
 
         nuevo_codigo = datos.get("codigo_vendedor")
         if nuevo_codigo and nuevo_codigo != vendedor.codigo_vendedor:

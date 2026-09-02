@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import CategoriaCliente, Cliente, Vendedor
+from app.services.rutas import RutaService
+from app.ui.mapa_widget import MapaWidget
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -33,6 +35,12 @@ from app.ui.styles import (
     ICON_CHEVRON_UP_URL,
     aplicar_sombra,
 )
+
+# Umbral orientativo (no bloqueante) para la alerta de "punto lejos de la ruta del
+# vendedor" -- ver _validar_y_aceptar(). 3km: la geocodificacion (busqueda por nombre,
+# click a ojo en el mapa) tiene margen de error real, y puede haber clientes legitimos en
+# el borde de una ruta, asi que es una confirmacion explicita, no un bloqueo duro.
+UMBRAL_ALERTA_DISTANCIA_RUTA_KM = 3.0
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -157,7 +165,7 @@ class ClienteFormDialog(QDialog):
         self.session = session
         self.cliente = cliente
         self.setWindowTitle("Editar Cliente" if cliente else "Nuevo Cliente")
-        self.setFixedSize(860, 480)
+        self.setFixedSize(860, 740)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -376,6 +384,7 @@ class ClienteFormDialog(QDialog):
         content_layout.addWidget(card_col2, 1)
 
         root.addLayout(content_layout)
+        root.addWidget(self._make_card_ubicacion())
 
         # ── Footer con Botones de Acción ──
         footer_layout = QHBoxLayout()
@@ -403,6 +412,86 @@ class ClienteFormDialog(QDialog):
 
         root.addLayout(footer_layout)
 
+    def _make_card_ubicacion(self) -> QWidget:
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        # SIN aplicar_sombra() a proposito, a diferencia del resto de las tarjetas de
+        # este dialogo: QGraphicsDropShadowEffect (como cualquier QGraphicsEffect) obliga
+        # a Qt a renderizar el widget completo -- y todos sus descendientes -- en un
+        # buffer offscreen para componer el efecto, pero la ventana nativa de
+        # QWebEngineView (el mapa, mas abajo) no se puede capturar asi y directamente
+        # deja de pintarse. Diagnosticado 2026-09-01: el mapa cargaba bien
+        # (loadFinished=True) pero quedaba completamente en blanco solo dentro de este
+        # dialogo -- un test aislado sin esta sombra mostro el mapa perfecto.
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 12, 16, 14)
+        card_layout.setSpacing(8)
+
+        titulo = QLabel("UBICACIÓN <span style='color: #DC2626;'>*</span>")
+        titulo.setProperty("class", "SectionTitle")
+        titulo.setTextFormat(Qt.TextFormat.RichText)
+        card_layout.addWidget(titulo)
+
+        contenido = QHBoxLayout()
+        contenido.setSpacing(14)
+
+        self.mapa = MapaWidget(editable=True, centrar_en_dispositivo=self.cliente is None)
+        self.mapa.setMinimumSize(380, 230)
+        self.mapa.coordenadas_cambiadas.connect(self._on_mapa_click)
+        contenido.addWidget(self.mapa, 1)
+
+        campos = QVBoxLayout()
+        campos.setSpacing(8)
+
+        lbl_lat = QLabel("Latitud <span style='color: #DC2626;'>*</span>")
+        lbl_lat.setProperty("class", "FormLabel")
+        self.latitud_input = QLineEdit()
+        self.latitud_input.setPlaceholderText("Ej: 10.4806")
+        self.latitud_input.setFixedHeight(32)
+        self.latitud_input.editingFinished.connect(self._on_coordenadas_editadas)
+
+        lbl_lng = QLabel("Longitud <span style='color: #DC2626;'>*</span>")
+        lbl_lng.setProperty("class", "FormLabel")
+        self.longitud_input = QLineEdit()
+        self.longitud_input.setPlaceholderText("Ej: -66.9036")
+        self.longitud_input.setFixedHeight(32)
+        self.longitud_input.editingFinished.connect(self._on_coordenadas_editadas)
+
+        lbl_ayuda = QLabel("Busca un lugar por nombre, hace click en el mapa o ingresa las coordenadas manualmente.")
+        lbl_ayuda.setWordWrap(True)
+        lbl_ayuda.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
+
+        campos.addWidget(lbl_lat)
+        campos.addWidget(self.latitud_input)
+        campos.addWidget(lbl_lng)
+        campos.addWidget(self.longitud_input)
+        campos.addWidget(lbl_ayuda)
+        campos.addStretch()
+
+        contenido.addLayout(campos, 1)
+        card_layout.addLayout(contenido)
+        return card
+
+    def _on_mapa_click(self, lat: float, lng: float) -> None:
+        self.latitud_input.setText(f"{lat:.7f}")
+        self.longitud_input.setText(f"{lng:.7f}")
+        self.mapa.set_coordenadas(lat, lng)
+
+    def _on_coordenadas_editadas(self) -> None:
+        lat, lng = self._leer_coordenadas()
+        if lat is not None and lng is not None:
+            self.mapa.set_coordenadas(lat, lng)
+
+    def _leer_coordenadas(self) -> tuple[float | None, float | None]:
+        lat_texto = self.latitud_input.text().strip()
+        lng_texto = self.longitud_input.text().strip()
+        if not lat_texto and not lng_texto:
+            return None, None
+        try:
+            return float(lat_texto), float(lng_texto)
+        except ValueError:
+            return None, None
+
     def _precargar(self, cliente: Cliente):
         self.codigo_input.setText(cliente.codigo_cliente or "")
 
@@ -429,6 +518,12 @@ class ClienteFormDialog(QDialog):
         idx_categoria = self.categoria_combo.findData(cliente.id_categoria_cliente)
         self.categoria_combo.setCurrentIndex(idx_categoria if idx_categoria >= 0 else 0)
 
+        if cliente.latitud is not None and cliente.longitud is not None:
+            lat, lng = float(cliente.latitud), float(cliente.longitud)
+            self.latitud_input.setText(f"{lat:.7f}")
+            self.longitud_input.setText(f"{lng:.7f}")
+            self.mapa.set_coordenadas(lat, lng)
+
     def _validar_y_aceptar(self):
         if not self.codigo_input.text().strip():
             QMessageBox.warning(self, "Dato requerido", "El código del cliente es obligatorio.")
@@ -442,11 +537,60 @@ class ClienteFormDialog(QDialog):
             QMessageBox.warning(self, "Dato requerido", "La razón social o nombre del cliente es obligatoria.")
             self.nombre_input.setFocus()
             return
+
+        lat_texto = self.latitud_input.text().strip()
+        lng_texto = self.longitud_input.text().strip()
+        if not lat_texto or not lng_texto:
+            QMessageBox.warning(
+                self,
+                "Dato requerido",
+                "La ubicación es obligatoria. Busca un lugar, hace click en el mapa o ingresa las coordenadas.",
+            )
+            return
+        lat, lng = self._leer_coordenadas()
+        if lat is None or lng is None:
+            QMessageBox.warning(self, "Dato inválido", "La latitud y la longitud deben ser números válidos.")
+            return
+        if not (-90 <= lat <= 90):
+            QMessageBox.warning(self, "Dato inválido", "La latitud debe estar entre -90 y 90.")
+            return
+        if not (-180 <= lng <= 180):
+            QMessageBox.warning(self, "Dato inválido", "La longitud debe estar entre -180 y 180.")
+            return
+
+        if not self._confirmar_cercania_a_ruta(lat, lng):
+            return
+
         self.accept()
+
+    def _confirmar_cercania_a_ruta(self, lat: float, lng: float) -> bool:
+        """No bloqueante (ver UMBRAL_ALERTA_DISTANCIA_RUTA_KM): si el vendedor asignado
+        tiene una ruta con trazado y el punto marcado queda lejos de ella, pide
+        confirmacion explicita en vez de impedir el guardado -- la geocodificacion es
+        aproximada y puede haber clientes legitimos en el borde de una ruta. Devuelve
+        False solo si el usuario cancela ante la alerta."""
+        id_vendedor = self.vendedor_combo.currentData()
+        if id_vendedor is None:
+            return True
+        vendedor = self.session.get(Vendedor, id_vendedor)
+        ruta = vendedor.ruta if vendedor else None
+        if ruta is None:
+            return True
+        distancia = RutaService.distancia_a_trazado(ruta, lat, lng)
+        if distancia is None or distancia <= UMBRAL_ALERTA_DISTANCIA_RUTA_KM:
+            return True
+        respuesta = QMessageBox.question(
+            self,
+            "Ubicación alejada de la ruta",
+            f"El punto marcado está a {distancia:.1f} km de la ruta '{ruta.nombre_ruta}' "
+            f"asignada al vendedor. ¿Deseas guardarlo de todas formas?",
+        )
+        return respuesta == QMessageBox.StandardButton.Yes
 
     def get_data(self) -> dict:
         tipo = self.tipo_id_combo.currentText().strip()
         num = self.identificacion_input.text().strip()
+        lat, lng = self._leer_coordenadas()
 
         return {
             "codigo_cliente": self.codigo_input.text().strip() or None,
@@ -460,4 +604,6 @@ class ClienteFormDialog(QDialog):
             "dias_credito": self.dias_credito_input.value(),
             "vendedor_cliente": self.vendedor_combo.currentData(),
             "id_categoria_cliente": self.categoria_combo.currentData(),
+            "latitud": lat,
+            "longitud": lng,
         }
