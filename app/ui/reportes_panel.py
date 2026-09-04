@@ -73,6 +73,7 @@ REPORTE_VENTAS_PERIODO = "ventas_periodo"
 REPORTE_VENTAS_CLIENTE = "ventas_cliente"
 REPORTE_VENTAS_VENDEDOR = "ventas_vendedor"
 REPORTE_VENTAS_RUTA = "ventas_ruta"
+REPORTE_ACTIVACION_CLIENTES = "activacion_clientes"
 REPORTE_PRODUCTOS_VENDIDOS = "productos_vendidos"
 REPORTE_FACTURAS_ANULADAS = "facturas_anuladas"
 REPORTE_NC_EMITIDAS = "nc_emitidas"
@@ -125,6 +126,7 @@ COLS_VENTAS_PERIODO = ["Fecha", "Facturas", "Total"]
 COLS_VENTAS_CLIENTE = ["Cliente", "Facturas", "Total"]
 COLS_VENTAS_VENDEDOR = ["Vendedor", "Facturas", "Total", "Ticket Promedio"]
 COLS_VENTAS_RUTA = ["Ruta", "Facturas", "Total", "Ticket Promedio"]
+COLS_ACTIVACION_CLIENTES = ["Cliente", "Vendedor", "Facturas", "Meta", "Efectividad %"]
 COLS_PRODUCTOS_VENDIDOS = ["Producto", "Cantidad", "Total"]
 COLS_FACTURAS_ANULADAS = ["N° Factura", "Cliente", "Vendedor", "Fecha", "Motivo"]
 COLS_NC_EMITIDAS = ["N° NC", "Cliente", "Factura Origen", "Fecha", "Monto", "Saldo Disp.", "Estado"]
@@ -410,6 +412,16 @@ def _tarea_ventas_vendedor(session, id_usuario, fecha_desde, fecha_hasta):
 def _tarea_ventas_ruta(session, id_usuario, fecha_desde, fecha_hasta):
     return ReporteService.ventas_por_ruta(
         session, id_usuario=id_usuario, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta
+    )
+
+
+def _tarea_activacion_clientes(session, id_usuario, fecha_desde, fecha_hasta, id_vendedor):
+    return ReporteService.activacion_clientes(
+        session,
+        id_usuario=id_usuario,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        id_vendedor=id_vendedor,
     )
 
 
@@ -726,6 +738,7 @@ class ReportesPanel(QWidget):
         self.tipo_combo.addItem("Ventas por Cliente", REPORTE_VENTAS_CLIENTE)
         self.tipo_combo.addItem("Ventas por Vendedor", REPORTE_VENTAS_VENDEDOR)
         self.tipo_combo.addItem("Ventas por Ruta", REPORTE_VENTAS_RUTA)
+        self.tipo_combo.addItem("Activación de Clientes", REPORTE_ACTIVACION_CLIENTES)
         self.tipo_combo.addItem("Productos Más/Menos Vendidos", REPORTE_PRODUCTOS_VENDIDOS)
         self.tipo_combo.addItem("Facturas Anuladas", REPORTE_FACTURAS_ANULADAS)
         self.tipo_combo.addItem("Notas de Crédito Emitidas", REPORTE_NC_EMITIDAS)
@@ -799,6 +812,7 @@ class ReportesPanel(QWidget):
             REPORTE_VENTAS_CLIENTE: self._make_filtros_ventas_cliente(),
             REPORTE_VENTAS_VENDEDOR: self._make_filtros_ventas_vendedor(),
             REPORTE_VENTAS_RUTA: self._make_filtros_ventas_ruta(),
+            REPORTE_ACTIVACION_CLIENTES: self._make_filtros_activacion_clientes(),
             REPORTE_PRODUCTOS_VENDIDOS: self._make_filtros_productos_vendidos(),
             REPORTE_FACTURAS_ANULADAS: self._make_filtros_facturas_anuladas(),
             REPORTE_NC_EMITIDAS: self._make_filtros_nc_emitidas(),
@@ -1072,6 +1086,33 @@ class ReportesPanel(QWidget):
         h.addWidget(self.fecha_desde_vr_input)
         h.addWidget(lbl_hasta)
         h.addWidget(self.fecha_hasta_vr_input)
+        return w
+
+    def _make_filtros_activacion_clientes(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+
+        lbl_desde = QLabel("Desde:")
+        lbl_desde.setStyleSheet(LABEL_QSS)
+        self.fecha_desde_ac_input = _crear_fecha_edit(dias_atras=30)
+
+        lbl_hasta = QLabel("Hasta:")
+        lbl_hasta.setStyleSheet(LABEL_QSS)
+        self.fecha_hasta_ac_input = _crear_fecha_edit()
+
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(LABEL_QSS)
+        self.vendedor_combo_ac = _crear_combo(ancho=200)
+
+        h.addWidget(lbl_desde)
+        h.addWidget(self.fecha_desde_ac_input)
+        h.addWidget(lbl_hasta)
+        h.addWidget(self.fecha_hasta_ac_input)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_ac)
         return w
 
     def _make_filtros_productos_vendidos(self) -> QWidget:
@@ -1974,7 +2015,7 @@ class ReportesPanel(QWidget):
         session = self.session_factory()
         try:
             vendedores = session.query(Vendedor).order_by(Vendedor.nombre_vendedor).all()
-            for combo in (self.vendedor_combo_comv, self.vendedor_combo_cpp):
+            for combo in (self.vendedor_combo_comv, self.vendedor_combo_cpp, self.vendedor_combo_ac):
                 combo.clear()
                 combo.addItem("Todos los vendedores", None)
                 for vendedor in vendedores:
@@ -2141,6 +2182,20 @@ class ReportesPanel(QWidget):
                 id_usuario=self.usuario.id_usuario,
                 fecha_desde=fecha_desde,
                 fecha_hasta=fecha_hasta,
+            )
+        elif modo == REPORTE_ACTIVACION_CLIENTES:
+            fecha_desde = self.fecha_desde_ac_input.date().toPython()
+            fecha_hasta = self.fecha_hasta_ac_input.date().toPython()
+            if fecha_desde > fecha_hasta:
+                MessageBox.warning(self, "Rango inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                return
+            self._worker = QueryWorker(
+                self.session_factory,
+                _tarea_activacion_clientes,
+                id_usuario=self.usuario.id_usuario,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+                id_vendedor=self.vendedor_combo_ac.currentData(),
             )
         elif modo == REPORTE_PRODUCTOS_VENDIDOS:
             fecha_desde = self.fecha_desde_pv_input.date().toPython()
@@ -2582,6 +2637,8 @@ class ReportesPanel(QWidget):
             self._mostrar_ventas_vendedor(resultado)
         elif self._ultimo_modo == REPORTE_VENTAS_RUTA:
             self._mostrar_ventas_ruta(resultado)
+        elif self._ultimo_modo == REPORTE_ACTIVACION_CLIENTES:
+            self._mostrar_activacion_clientes(resultado)
         elif self._ultimo_modo == REPORTE_PRODUCTOS_VENDIDOS:
             self._mostrar_productos_vendidos(resultado)
         elif self._ultimo_modo == REPORTE_FACTURAS_ANULADAS:
@@ -2817,6 +2874,31 @@ class ReportesPanel(QWidget):
         self._mostrar_ranking(
             resultado, COLS_VENTAS_RUTA, "ruta", "cantidad_facturas", clave_promedio="ticket_promedio"
         )
+
+    def _mostrar_activacion_clientes(self, resultado: dict) -> None:
+        """Forma distinta a _mostrar_ranking: sin columnas en $ (facturas/meta son
+        conteos, efectividad es %), y meta/efectividad pueden venir None cuando el
+        vendedor del cliente no tiene cuota configurada (Vendedor.meta_activacion)."""
+        self._reset_tabla(COLS_ACTIVACION_CLIENTES)
+        filas = resultado["filas"]
+        self.tabla.setRowCount(len(filas))
+        for row, f in enumerate(filas):
+            self.tabla.setItem(row, 0, QTableWidgetItem(f["cliente"]))
+            self.tabla.setItem(row, 1, QTableWidgetItem(f["vendedor"] or "N/A"))
+            self.tabla.setItem(row, 2, QTableWidgetItem(str(f["cantidad_facturas"])))
+            self.tabla.setItem(row, 3, QTableWidgetItem(str(f["meta_activacion"]) if f["meta_activacion"] else "—"))
+            texto_efectividad = f"{f['efectividad_pct']:.2f}%" if f["efectividad_pct"] is not None else "—"
+            self.tabla.setItem(row, 4, QTableWidgetItem(texto_efectividad))
+
+        self.lbl_total.setText(f"{len(filas)} cliente{'s' if len(filas) != 1 else ''}")
+        self._limpiar_resumen()
+        self.resumen_layout.addWidget(self._chip(f"Clientes activos: {resultado['total_activos']}"))
+        efectividad_promedio = resultado["efectividad_promedio"]
+        texto_promedio = (
+            f"{efectividad_promedio:.2f}%" if efectividad_promedio is not None else "Sin metas configuradas"
+        )
+        self.resumen_layout.addWidget(self._chip(f"Efectividad promedio: {texto_promedio}", "#FFFFFF", COLOR_PRIMARY))
+        self.resumen_layout.addStretch()
 
     def _mostrar_productos_vendidos(self, resultado: dict) -> None:
         self._mostrar_ranking(resultado, COLS_PRODUCTOS_VENDIDOS, "producto", "cantidad")
@@ -3600,6 +3682,19 @@ class ReportesPanel(QWidget):
             ]
             return "ventas_ruta", COLS_VENTAS_RUTA, filas
 
+        if self._ultimo_modo == REPORTE_ACTIVACION_CLIENTES:
+            filas = [
+                [
+                    f["cliente"],
+                    f["vendedor"] or "N/A",
+                    f["cantidad_facturas"],
+                    f["meta_activacion"] or "",
+                    f["efectividad_pct"] if f["efectividad_pct"] is not None else "",
+                ]
+                for f in self._ultimo_resultado["filas"]
+            ]
+            return "activacion_clientes", COLS_ACTIVACION_CLIENTES, filas
+
         if self._ultimo_modo == REPORTE_PRODUCTOS_VENDIDOS:
             filas = [[f["producto"], float(f["cantidad"]), float(f["total"])] for f in self._ultimo_resultado["filas"]]
             return "productos_vendidos", COLS_PRODUCTOS_VENDIDOS, filas
@@ -4021,6 +4116,19 @@ class ReportesPanel(QWidget):
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
             return "Ventas por Ruta", filtros, [2.0, 1.0, 1.2, 1.3]
+
+        if self._ultimo_modo == REPORTE_ACTIVACION_CLIENTES:
+            efectividad_promedio = resultado["efectividad_promedio"]
+            filtros = {
+                "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
+                "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
+                "Vendedor": self.vendedor_combo_ac.currentText(),
+                "Clientes activos": f"{resultado['total_activos']} / {resultado['total_clientes']}",
+                "Efectividad promedio": (
+                    f"{efectividad_promedio:.2f}%" if efectividad_promedio is not None else "Sin metas configuradas"
+                ),
+            }
+            return "Activación de Clientes", filtros, [2.0, 1.5, 1.0, 1.0, 1.2]
 
         if self._ultimo_modo == REPORTE_PRODUCTOS_VENDIDOS:
             filtros = {

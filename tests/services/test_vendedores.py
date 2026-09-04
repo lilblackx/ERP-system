@@ -121,6 +121,52 @@ def test_crear_vendedor_ruta_inactiva_falla(db_session):
         )
 
 
+def test_crear_vendedor_meta_activacion_opcional(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(db_session, creado_por=admin.id_usuario))
+    assert vendedor.meta_activacion is None
+
+
+def test_crear_vendedor_con_meta_activacion(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(
+        db_session, **_datos_vendedor(db_session, meta_activacion=4, creado_por=admin.id_usuario)
+    )
+    assert vendedor.meta_activacion == 4
+
+
+def test_crear_vendedor_meta_activacion_cero_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="meta_activacion"):
+        VendedorService.crear(db_session, **_datos_vendedor(db_session, meta_activacion=0, creado_por=admin.id_usuario))
+
+
+def test_crear_vendedor_meta_activacion_negativa_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="meta_activacion"):
+        VendedorService.crear(
+            db_session, **_datos_vendedor(db_session, meta_activacion=-1, creado_por=admin.id_usuario)
+        )
+
+
+def test_actualizar_vendedor_meta_activacion(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(db_session, creado_por=admin.id_usuario))
+
+    VendedorService.actualizar(db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, meta_activacion=8)
+
+    db_session.refresh(vendedor)
+    assert vendedor.meta_activacion == 8
+
+
+def test_actualizar_vendedor_meta_activacion_invalida_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = VendedorService.crear(db_session, **_datos_vendedor(db_session, creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="meta_activacion"):
+        VendedorService.actualizar(db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, meta_activacion=0)
+
+
 def test_actualizar_vendedor_no_permite_vaciar_ruta(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = VendedorService.crear(db_session, **_datos_vendedor(db_session, creado_por=admin.id_usuario))

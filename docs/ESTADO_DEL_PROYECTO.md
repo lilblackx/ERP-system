@@ -696,21 +696,24 @@ de servicio.
 
 ## 9. Pendiente / próximos pasos sugeridos
 
-- UI: cubiertos login, clientes, inventario, facturación, vendedores, config. de
-  empresa, dashboard, ~~usuarios~~ (resuelto 2026-08-27, ver sección 7 "UI de Usuarios +
-  Roles/Permisos") y ~~control de tasas~~ (resuelto 2026-08-27: `app/ui/tasas_panel.py` +
+- ~~UI: faltan módulos de servicio sin pantalla propia~~ — resuelto. Todos los módulos
+  tienen pantalla propia hoy: login, clientes, inventario, facturación, vendedores,
+  config. de empresa, dashboard, usuarios (2026-08-27, ver sección 7 "UI de Usuarios +
+  Roles/Permisos"), control de tasas (2026-08-27: `app/ui/tasas_panel.py` +
   `app/ui/tasa_registro_dialog.py` — tasa vigente con delta vs. ayer, alta de una tasa
   nueva y el histórico exportable con selector de rango de días; sin edición/eliminación
-  porque `TasaService` no las tiene, cada registro es un snapshot histórico inmutable).
-  Falta el resto de los módulos de servicio ya implementados sin pantalla propia:
-  proveedores, compras, bancos, cuentas bancarias, cajas (cierre de turno diferido a
-  propósito, ver sección 9 más abajo), ~~comisiones~~ (resuelto, `ComisionesPanel` con
-  modo gestión para admin/cajero y modo "Mis Comisiones" de solo lectura para el
-  vendedor), ~~cuentas por pagar~~ y ~~cuentas por cobrar~~ (resuelto 2026-08-28:
-  `CuentasPorPagarPanel`/`CuentasPorCobrarPanel`, ambos con filtro de estado —incluida
-  "Vencida", derivada en el momento porque ninguna trigger persiste ese estado— y diálogo
-  de pago/cobro contra `PagoService`; `PagoService.listar_cuentas_por_cobrar()` es nuevo,
-  simétrico a `listar_cuentas_por_pagar()`).
+  porque `TasaService` no las tiene, cada registro es un snapshot histórico inmutable),
+  proveedores (`proveedores_panel.py`, 2026-08-28), compras (`compras.py`/`ComprasView`,
+  2026-08-28), bancos (`bancos_panel.py`, 2026-08-29), cuentas bancarias
+  (`cuentas_bancarias_panel.py`, 2026-08-29), cajas incluido el cierre de turno
+  (`cajas_panel.py`/`caja_cierre_dialog.py`, 2026-08-31 — el diferimiento a propósito que
+  decía esta sección quedó obsoleto ese día), comisiones (`ComisionesPanel` con modo
+  gestión para admin/cajero y modo "Mis Comisiones" de solo lectura para el vendedor), y
+  cuentas por pagar/cuentas por cobrar (resuelto 2026-08-28: `CuentasPorPagarPanel`/
+  `CuentasPorCobrarPanel`, ambos con filtro de estado —incluida "Vencida", derivada en el
+  momento porque ninguna trigger persiste ese estado— y diálogo de pago/cobro contra
+  `PagoService`; `PagoService.listar_cuentas_por_cobrar()` es nuevo, simétrico a
+  `listar_cuentas_por_pagar()`).
 - ~~RBAC modelado pero no aplicado~~ — resuelto (2026-08-22), ver sección 7. ~~Sigue
   pendiente extenderlo a operaciones de lectura~~ — también resuelto (2026-08-22, misma
   sección).
@@ -804,11 +807,11 @@ de servicio.
     ningún aviso). Ahora usa `QMessageBox.critical`, mismo patrón que
     `facturacion_panel.py`.
   - **[Alto] Sin UI para cerrar un turno de caja -- diferido a propósito (decisión del
-    usuario, 2026-08-26)**: `CajaService.cerrar_caja()` existe y funciona, pero el
-    módulo "Cajas" cae en `PlaceholderView` (`main_window.py`, `MODULOS_CONFIG`) --
-    solo hay apertura (`caja_apertura_dialog.py`, embebida en el gate de entrada a
-    Facturación). Falta una pantalla propia (listado de movimientos del turno, cuadre,
-    cierre): no es un ajuste puntual de Facturación, es un desarrollo aparte pendiente.
+    usuario, 2026-08-26)**: en ese momento `CajaService.cerrar_caja()` existía pero
+    funcionaba solo vía `PlaceholderView`, sin pantalla propia. ~~Resuelto 2026-08-31~~:
+    ver "Cajas" en la lista de módulos UI más abajo en esta sección --
+    `cajas_panel.py`/`caja_cierre_dialog.py` cubren listado de movimientos del turno,
+    cuadre y cierre.
   - **[Medio] Faltaba lock `WITH (UPDLOCK, ROWLOCK)` sobre `ComisionFactura` en
     `anular_factura`**: agregado, mismo patrón que
     `PagoComisionService.pagar_comisiones_vendedor` -- sin esto, un pago de comisiones
@@ -945,31 +948,55 @@ de servicio.
     `tests/services/test_clientes.py`.
 
 - **Requerimientos nuevos del cliente (2026-09-01)** -- lista entregada para evaluar,
-  auditada contra el codigo actual. Dos necesitan una decision de negocio del equipo
-  antes de poder disenarlos (no son huecos tecnicos, son ambiguedad de alcance):
-  - **"Activacion por categorias por ruta"**: sin equivalente (cero reportes cruzan Ruta
-    con `CategoriaCliente` hoy). Tecnicamente viable sin migraciones nuevas -- Cliente ->
-    Vendedor -> Ruta y Cliente -> CategoriaCliente ya estan resueltos en otros lados del
-    sistema (`listar_clientes_por_ruta` en `clientes.py`) -- pero falta que el equipo
-    defina que significa "cliente activo" (¿compro en los ultimos 30 dias? ¿al menos 1
-    factura en el periodo actual? ¿otro criterio?).
+  auditada contra el codigo actual. Dos necesitaban una decision de negocio del equipo
+  antes de poder disenarlos (no eran huecos tecnicos, era ambiguedad de alcance);
+  decision recibida el 2026-09-03:
+  - **"Activacion por categorias por ruta"**: resuelto como reporte (2026-09-03,
+    `ReporteService.activacion_clientes()` en `reportes.py` + pantalla en
+    `reportes_panel.py`, "Activación de Clientes"). Historia completa de la definicion:
+    la version original de "cliente activo" (compro al menos la unidad minima de venta
+    del sistema en el periodo) requeria un campo que no existe en `Inventario` (hay que
+    agregarlo -- ver mas abajo), asi que el equipo decidio una v1 mas simple para no
+    bloquear el reporte en eso ("vamos con v1 simple, si hace falta luego le agregamos lo
+    que haga falta"): activacion = cantidad de facturas del cliente en el rango
+    (cualquier factura cuenta, sin filtrar por tamaño de compra), comparada contra la
+    **cuota de activacion de su vendedor asignado** -- decision de negocio (2026-09-03):
+    la meta se define por **vendedor**, no por cliente/ruta/categoria (`Vendedor.
+    meta_activacion`, `migrations/0042_vendedor_meta_activacion.sql`, configurable desde
+    `VendedorFormDialog` -- "Meta de Activación (ventas/mes por cliente)", opcional,
+    `VendedorService._validar_meta_activacion()` exige positivo si se define). Por cada
+    cliente el reporte calcula `efectividad_pct` = facturas del cliente / meta de su
+    vendedor * 100 (None si el vendedor no tiene meta configurada -- sin eso no hay
+    contra que comparar), filtrable por vendedor, con resumen de clientes
+    activos/totales y efectividad promedio. Tests en `test_reportes.py`
+    (`test_activacion_clientes_*`) y `test_vendedores.py` (`test_*_meta_activacion*`).
+    Pendiente si el negocio lo pide despues: refinar el conteo para exigir la unidad
+    minima de venta por factura en vez de contar cualquier factura -- esa unidad NO
+    existe hoy como campo (confirmado revisando `producto_form_dialog.py`/`Inventario`
+    en `models.py`: `cantidad_caja`/`cantidad_unidad` son cantidades de stock, no una
+    unidad de venta configurable) y quedaria sin definir si es fija por producto (ej. 1
+    caja, 1 unidad suelta) o variable segun como se factura cada uno.
   - **"Asignacion de cuotas y entrega de ejecucion en curso y cierre graficado o
-    porcentual"**: el mas grande de la lista, sin nada construido (sin tabla, servicio ni
-    pantalla -- grep de "cuota"/"meta"/"objetivo"/"target" no da ningun hit real de
-    metas de venta). Preguntas pendientes con el equipo antes de disenarlo: ¿la cuota se
-    asigna a vendedor, a ruta, o a ambos? ¿en que unidad se mide (dolares facturados,
-    unidades, clientes activos)? ¿cada cuanto (mensual/quincenal/semanal)? ¿que
-    significa "cierre" exactamente (foto del cumplimiento al final del periodo,
-    comparada o no contra periodos anteriores)? ¿quien la asigna y de donde sale el
-    numero (carga manual por periodo, o alguna formula ej. % de crecimiento vs mes
-    anterior)? Los datos de ejecucion real (facturacion por vendedor/ruta/periodo) ya
-    existen -- lo que falta es la meta en si y como se compara.
+    porcentual"**: el mas grande de la lista (grep de "cuota"/"meta"/"objetivo"/"target"
+    no da ningun hit real de metas de venta). Decision de negocio (2026-09-03): la cuota
+    se carga a nivel de **Ruta** (no por vendedor individual); el sistema extrae los
+    resultados de ejecucion real (los datos de facturacion por ruta/periodo ya existen,
+    ver `ReportesService.ventas_por_ruta`) y esos resultados se expresan en un reporte
+    -- "en curso" (avance dentro del periodo) y "final" (cierre del periodo) -- al que
+    el negocio llama **"termometro de ventas"**. Preguntas que siguen abiertas antes de
+    disenarlo: ¿en que unidad se mide la cuota (dolares facturados, unidades, clientes
+    activos/efectividad del punto anterior)? ¿cada cuanto se asigna (mensual/quincenal/
+    semanal)? ¿quien carga el numero de la cuota y como (carga manual por periodo, o
+    formula ej. % de crecimiento vs mismo periodo anterior)? ¿el "termometro" es una
+    pantalla/reporte dentro de la app (gauge o barra de progreso) o solo el dato crudo
+    que el equipo comercial formatea aparte?
 
   Los otros cuatro puntos de la lista ya estan tecnicamente claros, sin nada que definir
-  con el equipo -- solo falta construirlos:
-  - **"Dolares totales facturados por ruta"**: no existe, pero es una extension directa
-    de `ReportesService.ventas_por_vendedor` (`reportes.py`) agrupando por
-    `Vendedor.id_ruta` en vez de por vendedor.
+  con el equipo:
+  - **"Dolares totales facturados por ruta"**: resuelto (2026-09-02) --
+    `ReportesService.ventas_por_ruta` (`reportes.py`), mismo reporte que
+    `ventas_por_vendedor` agrupado por `Vendedor.id_ruta` (factura sin vendedor/ruta cae
+    en el grupo "Sin ruta" en vez de perderse); expuesto en `reportes_panel.py`.
   - **"Drop site de facturacion"**: resuelto (2026-09-02) -- el cliente aclaro que no es
     un punto de entrega/logistica sino un KPI: **ticket promedio** (total facturado en $
     dividido entre la cantidad de facturas). Definicion final:

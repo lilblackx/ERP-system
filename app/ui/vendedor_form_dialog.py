@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -114,7 +115,7 @@ class VendedorFormDialog(QDialog):
         self.vendedor = vendedor
         self.id_usuario = id_usuario
         self.setWindowTitle("Editar Vendedor" if vendedor else "Nuevo Vendedor")
-        self.setFixedSize(480, 470)
+        self.setFixedSize(480, 530)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -253,6 +254,15 @@ class VendedorFormDialog(QDialog):
         grid.addWidget(lbl_dir, 8, 0, 1, 2)
         grid.addWidget(self.direccion_input, 9, 0, 1, 2)
 
+        lbl_meta = QLabel("Meta de Activación (ventas/mes por cliente)")
+        lbl_meta.setProperty("class", "FormLabel")
+        self.meta_activacion_input = QSpinBox()
+        self.meta_activacion_input.setRange(0, 999)
+        self.meta_activacion_input.setSpecialValueText("Sin meta")
+        self.meta_activacion_input.setFixedHeight(32)
+        grid.addWidget(lbl_meta, 10, 0, 1, 2)
+        grid.addWidget(self.meta_activacion_input, 11, 0, 1, 2)
+
         card_layout.addLayout(grid)
         card_layout.addStretch()
         root.addWidget(card, stretch=1)
@@ -292,6 +302,7 @@ class VendedorFormDialog(QDialog):
         idx_ruta = self.ruta_combo.findData(vendedor.id_ruta)
         if idx_ruta >= 0:
             self.ruta_combo.setCurrentIndex(idx_ruta)
+        self.meta_activacion_input.setValue(vendedor.meta_activacion or 0)
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_input.text().strip():
@@ -325,4 +336,5 @@ class VendedorFormDialog(QDialog):
             "email_vendedor": self.email_input.text().strip() or None,
             "direccion_vendedor": self.direccion_input.text().strip() or None,
             "id_ruta": self.ruta_combo.currentData(),
+            "meta_activacion": self.meta_activacion_input.value() or None,
         }

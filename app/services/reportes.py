@@ -468,6 +468,76 @@ class ReporteService:
         }
 
     @staticmethod
+    def activacion_clientes(
+        session: Session,
+        id_usuario: int | None,
+        fecha_desde: date,
+        fecha_hasta: date,
+        id_vendedor: int | None = None,
+    ) -> dict:
+        """Cuenta cuantas facturas tuvo cada cliente en el rango y lo compara contra la
+        cuota de activacion de SU vendedor asignado (Vendedor.meta_activacion,
+        migrations/0042) -- decision de negocio 2026-09-03: la meta de frecuencia se
+        configura por vendedor, no por cliente/ruta/categoria (VendedorFormDialog). Sin
+        meta configurada (None) el cliente aparece en el reporte pero sin
+        efectividad_pct -- no hay contra que comparar."""
+        require_permiso(session, id_usuario, "reportes", "ver")
+        if fecha_desde > fecha_hasta:
+            raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
+        desde_dt = datetime.combine(fecha_desde, time.min)
+        hasta_dt = datetime.combine(fecha_hasta, time.max)
+
+        query = (
+            session.query(Cliente)
+            .options(joinedload(Cliente.vendedor))
+            .filter(Cliente.estado_cliente == "ACTIVO")
+            .filter(Cliente.vendedor_cliente.isnot(None))
+        )
+        if id_vendedor is not None:
+            query = query.filter(Cliente.vendedor_cliente == id_vendedor)
+        clientes = query.order_by(Cliente.nombre_razon_social).all()
+
+        ids_cliente = [c.id_cliente for c in clientes]
+        conteo_facturas: dict[int, int] = {}
+        if ids_cliente:
+            facturas = (
+                session.query(FacturaVenta.id_cliente_factura)
+                .filter(FacturaVenta.id_cliente_factura.in_(ids_cliente))
+                .filter(FacturaVenta.estado_factura != "ANULADA")
+                .filter(FacturaVenta.fecha_emision >= desde_dt)
+                .filter(FacturaVenta.fecha_emision <= hasta_dt)
+                .all()
+            )
+            for (id_cliente,) in facturas:
+                conteo_facturas[id_cliente] = conteo_facturas.get(id_cliente, 0) + 1
+
+        filas = []
+        for cliente in clientes:
+            cantidad_facturas = conteo_facturas.get(cliente.id_cliente, 0)
+            meta = cliente.vendedor.meta_activacion if cliente.vendedor else None
+            efectividad_pct = round(cantidad_facturas / meta * 100, 2) if meta else None
+            filas.append(
+                {
+                    "cliente": cliente.nombre_razon_social,
+                    "vendedor": cliente.vendedor.nombre_vendedor if cliente.vendedor else None,
+                    "cantidad_facturas": cantidad_facturas,
+                    "meta_activacion": meta,
+                    "efectividad_pct": efectividad_pct,
+                    "activo": cantidad_facturas > 0,
+                }
+            )
+
+        efectividades = [f["efectividad_pct"] for f in filas if f["efectividad_pct"] is not None]
+        return {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "filas": filas,
+            "total_clientes": len(filas),
+            "total_activos": sum(1 for f in filas if f["activo"]),
+            "efectividad_promedio": round(sum(efectividades) / len(efectividades), 2) if efectividades else None,
+        }
+
+    @staticmethod
     def productos_mas_vendidos(
         session: Session,
         id_usuario: int | None,

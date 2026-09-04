@@ -92,6 +92,10 @@ class Vendedor(Base):
     # ruta generica sobre datos reales. VendedorService.crear() es quien garantiza que todo
     # vendedor NUEVO siempre traiga una ruta (migrations/0038).
     id_ruta: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("rutas.id_ruta"))
+    # Cuota de activacion (frecuencia de venta esperada por cliente, ej. 4 ventas/mes) --
+    # migrations/0042. NULL = sin meta configurada, ReporteService.activacion_clientes()
+    # no calcula efectividad para los clientes de ese vendedor en ese caso.
+    meta_activacion: Mapped[int | None] = mapped_column(Integer)
 
     ruta = relationship("Ruta")
 

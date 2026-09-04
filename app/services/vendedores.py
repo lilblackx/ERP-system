@@ -18,6 +18,14 @@ def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | N
         raise ValueError(f"Ya existe un vendedor con {campo}='{valor}'")
 
 
+def _validar_meta_activacion(meta_activacion: int | None) -> None:
+    """Cuota de activacion (migrations/0042): opcional (None = sin meta configurada),
+    pero si viene tiene que ser una frecuencia positiva -- 0 o negativo no representa
+    ninguna meta real y rompe la division en ReporteService.activacion_clientes()."""
+    if meta_activacion is not None and meta_activacion <= 0:
+        raise ValueError("meta_activacion debe ser un numero positivo")
+
+
 def _validar_ruta_activa(session: Session, id_ruta: int) -> None:
     """El combo de VendedorFormDialog solo ofrece rutas ACTIVO, pero eso no protege un
     llamado directo al servicio (script, futura integracion) -- sin esto se podia asignar
@@ -87,6 +95,7 @@ class VendedorService:
         if not datos.get("id_ruta"):
             raise ValueError("id_ruta es requerido")
         _validar_ruta_activa(session, datos["id_ruta"])
+        _validar_meta_activacion(datos.get("meta_activacion"))
         _validar_unico(session, "codigo_vendedor", datos["codigo_vendedor"])
         _validar_unico(session, "identificacion_vendedor", datos["identificacion_vendedor"])
 
@@ -121,6 +130,8 @@ class VendedorService:
             raise ValueError("id_ruta es requerido")
         if datos.get("id_ruta"):
             _validar_ruta_activa(session, datos["id_ruta"])
+        if "meta_activacion" in datos:
+            _validar_meta_activacion(datos["meta_activacion"])
 
         nuevo_codigo = datos.get("codigo_vendedor")
         if nuevo_codigo and nuevo_codigo != vendedor.codigo_vendedor:

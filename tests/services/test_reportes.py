@@ -435,6 +435,129 @@ def test_ventas_por_ruta_excluye_anuladas(db_session):
     assert resultado["filas"][0]["total"] == Decimal("10.00")
 
 
+# --- activacion_clientes ----------------------------------------------------------------
+
+
+def test_activacion_clientes_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        ReporteService.activacion_clientes(
+            db_session, id_usuario=None, fecha_desde=date.today(), fecha_hasta=date.today()
+        )
+
+
+def test_activacion_clientes_fecha_desde_posterior_a_hasta_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="fecha_desde"):
+        ReporteService.activacion_clientes(
+            db_session,
+            id_usuario=admin.id_usuario,
+            fecha_desde=date.today(),
+            fecha_hasta=date.today() - timedelta(days=1),
+        )
+
+
+def test_activacion_clientes_calcula_efectividad_contra_meta_del_vendedor(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session, meta_activacion=4)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    cliente = crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor)
+
+    _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
+    _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
+
+    resultado = ReporteService.activacion_clientes(
+        db_session, id_usuario=admin.id_usuario, fecha_desde=date.today(), fecha_hasta=date.today()
+    )
+
+    fila = next(f for f in resultado["filas"] if f["cliente"] == cliente.nombre_razon_social)
+    assert fila["cantidad_facturas"] == 2
+    assert fila["meta_activacion"] == 4
+    assert fila["efectividad_pct"] == 50.0
+    assert fila["activo"] is True
+    assert resultado["total_activos"] == 1
+    assert resultado["efectividad_promedio"] == 50.0
+
+
+def test_activacion_clientes_sin_compras_queda_inactivo(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session, meta_activacion=4)
+    crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor, nombre_razon_social="Cliente sin compras")
+
+    resultado = ReporteService.activacion_clientes(
+        db_session, id_usuario=admin.id_usuario, fecha_desde=date.today(), fecha_hasta=date.today()
+    )
+
+    fila = next(f for f in resultado["filas"] if f["cliente"] == "Cliente sin compras")
+    assert fila["cantidad_facturas"] == 0
+    assert fila["activo"] is False
+    assert fila["efectividad_pct"] == 0.0
+
+
+def test_activacion_clientes_sin_meta_configurada_no_calcula_efectividad(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    cliente = crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor)
+
+    _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
+
+    resultado = ReporteService.activacion_clientes(
+        db_session, id_usuario=admin.id_usuario, fecha_desde=date.today(), fecha_hasta=date.today()
+    )
+
+    fila = next(f for f in resultado["filas"] if f["cliente"] == cliente.nombre_razon_social)
+    assert fila["meta_activacion"] is None
+    assert fila["efectividad_pct"] is None
+    assert resultado["efectividad_promedio"] is None
+
+
+def test_activacion_clientes_excluye_anuladas(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session, meta_activacion=1)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    cliente = crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor)
+
+    anulada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
+    VentaService.anular_factura(db_session, anulada.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga")
+
+    resultado = ReporteService.activacion_clientes(
+        db_session, id_usuario=admin.id_usuario, fecha_desde=date.today(), fecha_hasta=date.today()
+    )
+
+    fila = next(f for f in resultado["filas"] if f["cliente"] == cliente.nombre_razon_social)
+    assert fila["cantidad_facturas"] == 0
+    assert fila["activo"] is False
+
+
+def test_activacion_clientes_filtra_por_vendedor(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor_a = crear_vendedor(db_session, meta_activacion=4)
+    vendedor_b = crear_vendedor(db_session, meta_activacion=4)
+    cliente_a = crear_cliente(db_session, vendedor_cliente=vendedor_a.id_vendedor, nombre_razon_social="Cliente A")
+    crear_cliente(db_session, vendedor_cliente=vendedor_b.id_vendedor, nombre_razon_social="Cliente B")
+
+    resultado = ReporteService.activacion_clientes(
+        db_session,
+        id_usuario=admin.id_usuario,
+        fecha_desde=date.today(),
+        fecha_hasta=date.today(),
+        id_vendedor=vendedor_a.id_vendedor,
+    )
+
+    assert [f["cliente"] for f in resultado["filas"]] == [cliente_a.nombre_razon_social]
+
+
+def test_activacion_clientes_ignora_clientes_sin_vendedor_asignado(db_session):
+    admin = crear_usuario_admin(db_session)
+    crear_cliente(db_session, vendedor_cliente=None, nombre_razon_social="Cliente huerfano")
+
+    resultado = ReporteService.activacion_clientes(
+        db_session, id_usuario=admin.id_usuario, fecha_desde=date.today(), fecha_hasta=date.today()
+    )
+
+    assert "Cliente huerfano" not in [f["cliente"] for f in resultado["filas"]]
+
+
 # --- productos_mas_vendidos ------------------------------------------------------------
 
 
