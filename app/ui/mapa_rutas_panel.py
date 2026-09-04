@@ -1,5 +1,5 @@
 """Tercera pestaña del módulo Vendedores: mapa general que pinta, para la ruta
-seleccionada, su trazado (origen -> destino por calles, migrations/0040) junto con los
+seleccionada, su zona de cobertura (poligono de vertices, migrations/0043) junto con los
 clientes geolocalizados que atiende -- el vinculo es indirecto (Cliente -> Vendedor ->
 Ruta), ver ClienteService.listar_clientes_por_ruta. Solo lectura (MapaWidget(editable=
 False)); fijar coordenadas se hace desde el formulario de cada cliente/ruta, no desde
@@ -71,8 +71,7 @@ class MapaRutasPanel(QWidget):
         # Cache de la ultima consulta de clientes de la ruta seleccionada -- el checkbox
         # "Mostrar clientes" repinta desde aca en vez de volver a golpear la BD.
         self._ultimos_clientes: list[tuple[float, float, str]] = []
-        self._ultimos_puntos_ruta: list[tuple[float, float, str]] = []
-        self._ultimo_trazado: list[tuple[float, float]] | None = None
+        self._ultima_zona: list[tuple[float, float]] | None = None
 
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
@@ -137,10 +136,9 @@ class MapaRutasPanel(QWidget):
         id_ruta = self.ruta_combo.currentData()
         if id_ruta is None:
             self._ultimos_clientes = []
-            self._ultimos_puntos_ruta = []
-            self._ultimo_trazado = None
+            self._ultima_zona = None
             self.mapa.mostrar_puntos([])
-            self.mapa.limpiar_trazado()
+            self.mapa.limpiar_zona()
             self.lbl_info.setText("No hay rutas registradas todavía.")
             return
 
@@ -156,20 +154,13 @@ class MapaRutasPanel(QWidget):
                 for c in clientes
                 if c.latitud is not None and c.longitud is not None
             ]
-            self._ultimos_puntos_ruta = []
-            if ruta.latitud is not None and ruta.longitud is not None:
-                self._ultimos_puntos_ruta.append((float(ruta.latitud), float(ruta.longitud), "Origen"))
-            if ruta.destino_latitud is not None and ruta.destino_longitud is not None:
-                self._ultimos_puntos_ruta.append(
-                    (float(ruta.destino_latitud), float(ruta.destino_longitud), f"Destino: {ruta.nombre_ruta}")
-                )
-            self._ultimo_trazado = json.loads(ruta.trazado_geojson) if ruta.trazado_geojson else None
+            self._ultima_zona = [tuple(v) for v in json.loads(ruta.zona_geojson)] if ruta.zona_geojson else None
 
             self._repintar_mapa()
 
             total_clientes_ruta = len(clientes)
-            if not self._ultimos_puntos_ruta:
-                self.lbl_info.setText(f"{total_clientes_ruta} cliente(s) geolocalizado(s). La ruta no tiene trazado.")
+            if not self._ultima_zona:
+                self.lbl_info.setText(f"{total_clientes_ruta} cliente(s) geolocalizado(s). La ruta no tiene zona.")
             else:
                 self.lbl_info.setText(f"{total_clientes_ruta} cliente(s) geolocalizado(s).")
         except PermisoDenegadoError:
@@ -182,13 +173,15 @@ class MapaRutasPanel(QWidget):
 
     def _repintar_mapa(self) -> None:
         """Redibuja desde la cache (self._ultimos_*) sin volver a consultar la BD -- usado
-        tanto al cargar una ruta como al togglear "Mostrar clientes"."""
-        clientes = self._ultimos_clientes if self.chk_mostrar_clientes.isChecked() else []
-        self.mapa.mostrar_puntos(clientes, self._ultimos_puntos_ruta)
-        if self._ultimo_trazado:
-            self.mapa.dibujar_trazado(self._ultimo_trazado)
+        tanto al cargar una ruta como al togglear "Mostrar clientes". Orden importa: la
+        zona primero (ajusta la vista a ella sola), los clientes despues (ajusta de nuevo,
+        ahora a la union de zona+clientes -- ver MapaWidget.ajustarVista)."""
+        if self._ultima_zona:
+            self.mapa.establecer_zona(self._ultima_zona)
         else:
-            self.mapa.limpiar_trazado()
+            self.mapa.limpiar_zona()
+        clientes = self._ultimos_clientes if self.chk_mostrar_clientes.isChecked() else []
+        self.mapa.mostrar_puntos(clientes)
 
     def _buscar_cliente(self) -> None:
         texto = self.busqueda_cliente_input.text().strip()

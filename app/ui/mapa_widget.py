@@ -33,11 +33,16 @@ En modo editable agrega ademas, por comodidad de UX (2026-09-01):
   que el usuario elige una) ademas de busqueda explicita (boton/Enter, que si aplica el
   primer resultado de una vez). Seleccionar una sugerencia funciona igual que un click en
   el mapa: mueve el marcador y emite `coordenadas_cambiadas`.
-- Un boton "Usar mi ubicacion" que pide la posicion precisa del dispositivo via
-  `navigator.geolocation` del propio Chromium embebido (WiFi/GPS del SO, mucho mas
-  preciso que el centrado por IP de arriba, que puede errar por decenas de km) y coloca
-  el marcador ahi mismo -- accion explicita del usuario, a diferencia del centrado por IP
-  que es automatico y nunca fija marcador.
+- Un boton "Usar mi ubicacion" que pide la posicion precisa del dispositivo y coloca el
+  marcador (o agrega un vertice, en modo "zona") ahi mismo -- accion explicita del
+  usuario, a diferencia del centrado por IP que es automatico y nunca fija nada. Usa el
+  Geolocator nativo de Windows (`app/ui/geo_windows.py`), NO `navigator.geolocation` de
+  Chromium (2026-09-03, hallazgo del usuario "el boton no esta funcionando bien"): los
+  builds de QtWebEngine no traen la clave de API de Google que ese API necesita en
+  desktop para su proveedor de ubicacion por red, asi que fallaba casi siempre con
+  POSITION_UNAVAILABLE. El Geolocator de Windows consulta al proveedor de ubicacion del
+  propio sistema operativo en cambio (GPS si el equipo lo tiene, o WiFi/red que Windows
+  ya resuelve) -- ver el docstring de geo_windows.py para el detalle completo.
 
 Ademas, `setHtml()` (lo unico lento del widget: crea la pagina de Chromium) se dispara
 con `QTimer.singleShot(0, ...)` en vez de en `__init__` -- el dialogo que contiene el
@@ -65,6 +70,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.geo_http import HttpWorker, buscar_lugares, obtener_ubicacion_dispositivo
+from app.ui.geo_windows import obtener_ubicacion_precisa_windows
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +82,43 @@ _CENTRO_DEFAULT_LNG = -66.9036
 _ZOOM_DEFAULT = 6
 _ZOOM_MARCADOR = 15
 
+# Bounding box aproximado de Venezuela (continental, sin islas remotas como Aves) --
+# la app opera solo en Venezuela, asi que un centrado automatico por IP que resuelva
+# fuera de este rango (VPN, proxy, geolocalizacion imprecisa del proveedor) se descarta
+# en vez de abrir el mapa en otro continente (reportado por el usuario, 2026-09-03: el
+# mapa abria centrado en Europa). No aplica a la busqueda de lugares (Nominatim), que ya
+# restringe por `countrycodes=ve` en app/ui/geo_http.py::buscar_lugares().
+_VE_LAT_MIN, _VE_LAT_MAX = 0.6, 12.6
+_VE_LNG_MIN, _VE_LNG_MAX = -73.4, -59.5
+
+
+def _dentro_de_venezuela(lat: float, lng: float) -> bool:
+    return _VE_LAT_MIN <= lat <= _VE_LAT_MAX and _VE_LNG_MIN <= lng <= _VE_LNG_MAX
+
+
 _HTML_BASE = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
 <link rel="stylesheet" href="leaflet.css" />
 <script src="leaflet.js"></script>
-<style>html, body, #mapa {{ height: 100%; margin: 0; padding: 0; }}</style>
+<style>
+html, body, #mapa {{ height: 100%; margin: 0; padding: 0; }}
+/* Numero de orden sobre cada vertice de la zona (redibujarZona) -- tooltip permanente
+   en vez del globo con flecha que Leaflet dibuja por defecto, para que se lea como una
+   etiqueta numerada, no como un mensaje emergente. */
+.zona-vertice-tooltip {{
+    background: #1D4ED8;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 8px;
+    padding: 0px 5px;
+    font-size: 11px;
+    font-weight: bold;
+    box-shadow: none;
+}}
+.zona-vertice-tooltip::before {{ display: none; }}
+</style>
 </head>
 <body>
 <div id="mapa"></div>
@@ -104,16 +140,9 @@ _HTML_BASE = """<!DOCTYPE html>
     // ("el mapa abre con el mundo entero, sin zoom").
 
     var marcadores = [];
-    var modoActual = {modo};
-    // Solo relevante en modoActual === 'ruta' (RutaFormDialog): que punto fija el
-    // proximo click/busqueda/ubicacion precisa. Origen y destino son un unico marcador
-    // mutable cada uno (se reemplaza, no se acumula) -- por eso viven fuera del arreglo
-    // `marcadores` de arriba, que es para el modo de muchos puntos (mapa general) y el
-    // modo de un solo punto (cliente).
-    var objetivoActivo = 'origen';
-    var marcadorOrigen = null;
-    var marcadorDestino = null;
-    var trazados = [];
+    var poligonoZona = null;
+    var verticesZona = [];
+    var marcadoresZona = [];
 
     function limpiarMarcadores() {{
         marcadores.forEach(function(m) {{ map.removeLayer(m); }});
@@ -134,48 +163,52 @@ _HTML_BASE = """<!DOCTYPE html>
         marcadores.push(m);
     }}
 
-    function agregarMarcadorRuta(lat, lng, etiqueta) {{
-        var m = L.circleMarker([lat, lng], {{
-            radius: 12, color: '#EA580C', fillColor: '#FB923C', fillOpacity: 0.9, weight: 2
-        }}).addTo(map);
-        if (etiqueta) {{ m.bindPopup(etiqueta); }}
-        marcadores.push(m);
+    // Zona de cobertura de una ruta (poligono de vertices marcados por click, migrations/
+    // 0043 -- reemplaza el antiguo par origen/destino + trazado por calles). El poligono
+    // se redibuja entero en cada cambio (agregar/deshacer/limpiar/establecer vertice) en
+    // vez de mutarse incrementalmente -- son listas cortas (una zona de reparto real no
+    // tiene cientos de vertices), no vale la pena la complejidad de un diff.
+    function redibujarZona() {{
+        if (poligonoZona) {{ map.removeLayer(poligonoZona); poligonoZona = null; }}
+        marcadoresZona.forEach(function(m) {{ map.removeLayer(m); }});
+        marcadoresZona = [];
+
+        // Un marcador numerado por vertice (1, 2, 3...) para identificarlos en vivo a
+        // medida que se marcan -- pedido del usuario, 2026-09-03: sin esto solo se veia
+        // el contorno del poligono, sin forma de distinguir el orden ni el punto exacto
+        // de cada click.
+        verticesZona.forEach(function(v, i) {{
+            var m = L.circleMarker(v, {{
+                radius: 6, color: '#1D4ED8', fillColor: '#3B82F6', fillOpacity: 1, weight: 2
+            }}).bindTooltip(String(i + 1), {{
+                permanent: true, direction: 'top', offset: [0, -6], className: 'zona-vertice-tooltip'
+            }}).addTo(map);
+            marcadoresZona.push(m);
+        }});
+
+        if (verticesZona.length >= 3) {{
+            poligonoZona = L.polygon(verticesZona, {{
+                color: '#2563EB', weight: 3, fillColor: '#3B82F6', fillOpacity: 0.25
+            }}).addTo(map);
+        }} else if (verticesZona.length === 2) {{
+            // Menos de 3 vertices todavia no es un poligono valido -- se muestra como
+            // linea punteada mientras el usuario sigue marcando, en vez de no mostrar
+            // nada (sin feedback visual de los primeros clicks). Con 1 solo vertice no
+            // hay linea que trazar -- el marcador numerado de arriba ya es suficiente
+            // feedback.
+            poligonoZona = L.polyline(verticesZona, {{ color: '#2563EB', weight: 3, dashArray: '6 6' }}).addTo(map);
+        }}
     }}
 
-    function setObjetivoActivo(rol) {{
-        objetivoActivo = rol;
+    function limpiarZona() {{
+        verticesZona = [];
+        redibujarZona();
     }}
 
-    function establecerOrigen(lat, lng) {{
-        if (marcadorOrigen) {{ map.removeLayer(marcadorOrigen); }}
-        marcadorOrigen = L.circleMarker([lat, lng], {{
-            radius: 10, color: '#15803D', fillColor: '#4ADE80', fillOpacity: 0.9, weight: 2
-        }}).bindPopup('Origen').addTo(map);
-        map.invalidateSize();
-        map.setView([lat, lng], Math.max(map.getZoom(), {zoom_marcador}));
-    }}
-
-    function establecerDestino(lat, lng) {{
-        if (marcadorDestino) {{ map.removeLayer(marcadorDestino); }}
-        marcadorDestino = L.circleMarker([lat, lng], {{
-            radius: 10, color: '#B91C1C', fillColor: '#F87171', fillOpacity: 0.9, weight: 2
-        }}).bindPopup('Destino').addTo(map);
-        map.invalidateSize();
-        map.setView([lat, lng], Math.max(map.getZoom(), {zoom_marcador}));
-    }}
-
-    function limpiarTrazado() {{
-        trazados.forEach(function(t) {{ map.removeLayer(t); }});
-        trazados = [];
-    }}
-
-    function dibujarTrazado(coords, color) {{
-        limpiarTrazado();
-        if (!coords || coords.length === 0) {{ return; }}
-        var linea = L.polyline(coords, {{ color: color || '#2563EB', weight: 4, opacity: 0.8 }}).addTo(map);
-        trazados.push(linea);
-        map.invalidateSize();
-        map.fitBounds(linea.getBounds().pad(0.15));
+    function establecerZona(vertices) {{
+        verticesZona = vertices.slice();
+        redibujarZona();
+        ajustarVista();
     }}
 
     function centrarSinMarcador(lat, lng, zoom) {{
@@ -184,41 +217,31 @@ _HTML_BASE = """<!DOCTYPE html>
     }}
 
     function ajustarVista() {{
-        if (marcadores.length === 0) {{ return; }}
+        // Une marcadores (clientes/punto unico), los marcadores numerados de la zona y
+        // el poligono de zona (si hay) en un solo encuadre -- MapaRutasPanel pinta
+        // clientes+zona juntos, y esto permite centrar ya desde el primer vertice
+        // marcado (antes de que exista poligono/linea que dibujar).
+        var capas = marcadores.concat(marcadoresZona);
+        if (poligonoZona) {{ capas.push(poligonoZona); }}
+        if (capas.length === 0) {{ return; }}
         map.invalidateSize();
-        if (marcadores.length === 1) {{
-            map.setView(marcadores[0].getLatLng(), {zoom_marcador});
+        if (capas.length === 1) {{
+            var capa = capas[0];
+            if (capa.getLatLng) {{
+                map.setView(capa.getLatLng(), {zoom_marcador});
+            }} else {{
+                map.fitBounds(capa.getBounds().pad(0.15));
+            }}
             return;
         }}
-        map.fitBounds(L.featureGroup(marcadores).getBounds().pad(0.2));
+        map.fitBounds(L.featureGroup(capas).getBounds().pad(0.2));
     }}
 
     if ({editable}) {{
         map.on('click', function(e) {{
-            var rol = (modoActual === 'ruta') ? ('&rol=' + objetivoActivo) : '';
             document.getElementById('canal-click').src =
-                'mapaclick://set?lat=' + e.latlng.lat + '&lng=' + e.latlng.lng + rol;
+                'mapaclick://set?lat=' + e.latlng.lat + '&lng=' + e.latlng.lng;
         }});
-    }}
-
-    function solicitarUbicacionPrecisa() {{
-        if (!navigator.geolocation) {{
-            document.getElementById('canal-click').src =
-                'mapaclick://geoerror?msg=' + encodeURIComponent('no-soportado');
-            return;
-        }}
-        navigator.geolocation.getCurrentPosition(
-            function(pos) {{
-                var rol = (modoActual === 'ruta') ? ('&rol=' + objetivoActivo) : '';
-                document.getElementById('canal-click').src =
-                    'mapaclick://set?lat=' + pos.coords.latitude + '&lng=' + pos.coords.longitude + rol;
-            }},
-            function(err) {{
-                document.getElementById('canal-click').src =
-                    'mapaclick://geoerror?msg=' + encodeURIComponent(err.message || String(err.code));
-            }},
-            {{ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }}
-        );
     }}
 </script>
 </body>
@@ -228,16 +251,13 @@ _HTML_BASE = """<!DOCTYPE html>
 
 class _MapaPage(QWebEnginePage):
     """QWebEnginePage que intercepta el esquema `mapaclick://` para recibir clicks del
-    mapa y resultados de geolocalizacion precisa sin necesitar QWebChannel (ver
-    docstring del modulo). `mapaclick://set?...` (click o GPS/WiFi exitoso) llama
-    on_click con un `rol` opcional ('origen'/'destino', solo en modo "ruta" de
-    MapaWidget -- `None` en modo "punto"); `mapaclick://geoerror?...` (geolocalizacion
-    denegada/fallida) llama on_geoerror -- distinguidos por el host de la URL ficticia."""
+    mapa sin necesitar QWebChannel (ver docstring del modulo). `mapaclick://set?...`
+    (solo clicks -- la geolocalizacion precisa del boton "Mi ubicacion" ya NO pasa por
+    esta pagina, ver `app/ui/geo_windows.py`) llama on_click."""
 
-    def __init__(self, on_click, on_geoerror, parent=None):
+    def __init__(self, on_click, parent=None):
         super().__init__(parent)
         self._on_click = on_click
-        self._on_geoerror = on_geoerror
         # La pagina se sirve desde file:// (Leaflet vendorizado en disco, ver docstring
         # del modulo) -- por defecto Chromium bloquea que una pagina file:// pida
         # recursos a un host remoto, asi que sin esto las tiles de OpenStreetMap
@@ -246,34 +266,22 @@ class _MapaPage(QWebEnginePage):
         # standalone que mostro los controles de Leaflet pintando bien pero las tiles en
         # blanco/gris.
         self.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-        # navigator.geolocation (usada por "Usar mi ubicacion", mas precisa que la
-        # geolocalizacion por IP porque Chromium consulta el servicio de ubicacion del
-        # SO -- WiFi/GPS en vez de solo la IP) pide permiso explicito por pagina. Se
-        # otorga automatico: es nuestra propia pagina local (file://), no contenido de
-        # terceros, y el usuario ya dispara la solicitud con una accion explicita (click
-        # en el boton) -- Windows sigue pudiendo denegar la ubicacion a nivel de SO, en
-        # cuyo caso el callback de error de JS reporta el motivo igual.
+        # Nada en esta pagina pide permisos de navegador hoy (la geolocalizacion precisa
+        # se resuelve nativamente en Python, no via navigator.geolocation -- ver
+        # geo_windows.py); se deniega cualquier solicitud por defecto como resguardo.
         self.permissionRequested.connect(self._on_permission_requested)
 
     def _on_permission_requested(self, permission: QWebEnginePermission) -> None:
-        if permission.permissionType() == QWebEnginePermission.PermissionType.Geolocation:
-            permission.grant()
-        else:
-            permission.deny()
+        permission.deny()
 
     def acceptNavigationRequest(self, url: QUrl, tipo, es_frame_principal: bool) -> bool:  # noqa: N802 (override de Qt)
         if url.scheme() == "mapaclick":
             query = QUrlQuery(url)
-            if url.host() == "geoerror":
-                msg = query.queryItemValue("msg")
-                QTimer.singleShot(0, lambda: self._on_geoerror(msg))
-                return False
             try:
                 lat = float(query.queryItemValue("lat"))
                 lng = float(query.queryItemValue("lng"))
             except ValueError:
                 return False
-            rol = query.queryItemValue("rol") or None
             # Diferido a la siguiente vuelta del event loop (QTimer.singleShot(0, ...)),
             # no invocado en el momento: on_click termina emitiendo una señal que un
             # dialogo (ClienteFormDialog/RutaFormDialog) escucha para llamar de vuelta a
@@ -286,7 +294,7 @@ class _MapaPage(QWebEnginePage):
             # ubicación" -- mismo mecanismo que un click normal, ver docstring de la
             # clase). Diferir un tick deja que Chromium termine de resolver esta
             # navegacion antes de que corra cualquier JS nuevo.
-            QTimer.singleShot(0, lambda: self._on_click(lat, lng, rol))
+            QTimer.singleShot(0, lambda: self._on_click(lat, lng))
             return False
         return super().acceptNavigationRequest(url, tipo, es_frame_principal)
 
@@ -301,21 +309,27 @@ class MapaWidget(QWidget):
     precisa SI dibujan el marcador ellos mismos ademas de emitir la señal -- mismo
     resultado final, solo cambia quien lo dispara.
 
-    En modo editable con `modo="ruta"` (`RutaFormDialog`): dos marcadores fijos
-    (origen/destino, ver `set_origen()`/`set_destino()`) en vez de uno solo. Cada
-    click/busqueda/ubicacion precisa se aplica al punto activo (`set_objetivo_activo()`,
-    default `"origen"`; fijar el origen por click avanza el activo a `"destino"`
-    automaticamente) y emite `punto_ruta_cambiado(rol, lat, lng)` en vez de
-    `coordenadas_cambiadas`. `dibujar_trazado()`/`limpiar_trazado()` pintan el recorrido
-    por calles entre ambos puntos (linea, capa aparte de los marcadores).
+    En modo editable con `modo="zona"` (`RutaFormDialog`, migrations/0043): cada click
+    acumula un vertice del poligono de la zona de cobertura de la ruta en vez de mover un
+    marcador unico, y emite `vertice_zona_agregado(lat, lng)` en vez de
+    `coordenadas_cambiadas` -- el llamador mantiene la lista de vertices y llama
+    `establecer_zona()`/`limpiar_zona()` para reflejarla en el mapa (mismo criterio que
+    modo "punto": el dialogo es dueño del estado, MapaWidget solo dibuja lo que se le
+    pide). `establecer_zona()` reemplaza el poligono COMPLETO en cada llamada -- no hay
+    un "agregar un vertice" incremental: RutaFormDialog reordena los vertices por angulo
+    antes de cada redibujado para que el poligono nunca quede auto-intersectado (ver
+    ruta_form_dialog.py::_ordenar_por_angulo), asi que la lista entera puede cambiar de
+    orden con cada click, no solo crecer. Buscar un lugar en este modo solo re-centra el
+    mapa (no agrega un vertice): con varios vertices en juego, no hay "el punto activo"
+    al que aplicarle un resultado de busqueda.
 
     En modo solo-lectura (`editable=False`, mapa general de rutas): `mostrar_puntos()`
-    pinta muchos clientes de una vez mas, opcionalmente, el punto de la ruta;
-    `dibujar_trazado()` pinta el recorrido guardado de la ruta seleccionada.
+    pinta muchos clientes de una vez; `establecer_zona()` pinta la zona de cobertura de la
+    ruta seleccionada junto con ellos (`ajustarVista()` encuadra la union de ambos).
     """
 
     coordenadas_cambiadas = Signal(float, float)
-    punto_ruta_cambiado = Signal(str, float, float)
+    vertice_zona_agregado = Signal(float, float)
 
     def __init__(
         self,
@@ -327,11 +341,11 @@ class MapaWidget(QWidget):
         super().__init__(parent)
         self.editable = editable
         self.modo = modo
-        self._objetivo_activo = "origen"
         self._cargado = False
         self._pendientes: list[str] = []
         self._worker_ubicacion = None
         self._worker_busqueda = None
+        self._worker_ubicacion_precisa = None
 
         # Debounce de 450ms para las sugerencias en vivo mientras el usuario escribe (ver
         # _on_texto_busqueda_cambiado): sin esto cada tecla dispararia una llamada a
@@ -396,7 +410,7 @@ class MapaWidget(QWidget):
         # problema -- confirmado en 2026-09-01: loadFinished(ok=True) en el log pero el
         # mapa seguia sin pintarse en pantalla.
         self.view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
-        pagina = _MapaPage(self._on_click_js, self._on_geoerror_js, self.view)
+        pagina = _MapaPage(self._on_click_js, self.view)
         pagina.renderProcessTerminated.connect(self._on_render_process_terminated)
         self.view.setPage(pagina)
         self.view.loadFinished.connect(self._on_load_finished)
@@ -419,7 +433,6 @@ class MapaWidget(QWidget):
             zoom=_ZOOM_DEFAULT,
             zoom_marcador=_ZOOM_MARCADOR,
             editable="true" if self.editable else "false",
-            modo=json.dumps(self.modo),
         )
         self.view.setHtml(html, _LEAFLET_BASE_URL)
 
@@ -549,16 +562,12 @@ class MapaWidget(QWidget):
     def _aplicar_punto(self, lat: float, lng: float) -> None:
         """Punto de entrada comun para busqueda (aplicar_primero) y seleccion de
         sugerencia: en modo "punto" dibuja el marcador unico y emite
-        `coordenadas_cambiadas` (igual que siempre); en modo "ruta" lo aplica al
-        objetivo activo (origen/destino) y emite `punto_ruta_cambiado`."""
-        if self.modo == "ruta":
-            rol = self._objetivo_activo
-            if rol == "origen":
-                self.set_origen(lat, lng)
-                self.set_objetivo_activo("destino")
-            else:
-                self.set_destino(lat, lng)
-            self.punto_ruta_cambiado.emit(rol, lat, lng)
+        `coordenadas_cambiadas` (igual que siempre); en modo "zona" solo re-centra el
+        mapa ahi -- con varios vertices en juego no hay "el punto activo" al que
+        aplicarle un resultado de busqueda, a diferencia de un click (que si acumula un
+        vertice, ver _on_click_js)."""
+        if self.modo == "zona":
+            self.centrar(lat, lng, zoom=_ZOOM_MARCADOR)
         else:
             self.set_coordenadas(lat, lng)
             self.coordenadas_cambiadas.emit(lat, lng)
@@ -572,28 +581,47 @@ class MapaWidget(QWidget):
         if resultado is None:
             return
         lat, lng = resultado
+        if not _dentro_de_venezuela(lat, lng):
+            # Se mantiene el centro Venezuela por defecto del HTML base en vez de saltar
+            # a donde haya resuelto la IP -- ver _VE_LAT_MIN/etc. arriba.
+            return
         self.centrar(lat, lng, zoom=12)
 
     def _usar_ubicacion_precisa(self) -> None:
         self.btn_ubicacion_precisa.setEnabled(False)
         self.lbl_estado.setVisible(False)
-        self._ejecutar("solicitarUbicacionPrecisa();")
+        # Geolocator nativo de Windows (app/ui/geo_windows.py), no navigator.geolocation
+        # de Chromium -- ver docstring del modulo y de geo_windows.py para el porque.
+        self._worker_ubicacion_precisa = HttpWorker(obtener_ubicacion_precisa_windows)
+        self._worker_ubicacion_precisa.resultado.connect(self._on_ubicacion_precisa)
+        self._worker_ubicacion_precisa.start()
 
-    def _mostrar_estado_temporal(self, texto: str) -> None:
+    def _on_ubicacion_precisa(self, resultado: dict) -> None:
+        self.btn_ubicacion_precisa.setEnabled(True)
+        error = resultado.get("error")
+        if error:
+            logger.info("MapaWidget: geolocalización precisa falló (%s)", error)
+            textos_error = {
+                "denied": "Ubicación denegada. Habilítala en Configuración de Windows > Privacidad > Ubicación.",
+                "timeout": "No se pudo obtener tu ubicación a tiempo. Intenta de nuevo.",
+                "unavailable": "No se pudo obtener tu ubicación precisa.",
+            }
+            self._mostrar_estado_temporal(textos_error.get(error, textos_error["unavailable"]), color="#B45309")
+            return
+
+        lat, lng, precision_m = resultado["lat"], resultado["lng"], resultado["accuracy"]
+        # setEnabled(True) ya ocurrio arriba; _on_click_js es el mismo camino que un click
+        # real en el mapa (dibuja el marcador o agrega un vertice de zona segun el modo,
+        # ver su docstring) -- asi el resultado de "Mi ubicacion" se comporta igual que si
+        # el usuario hubiera clickeado ahi mismo.
+        self._on_click_js(lat, lng)
+        self._mostrar_estado_temporal(f"Ubicación fijada (precisión: ±{precision_m:,.0f} m).", color="#15803D")
+
+    def _mostrar_estado_temporal(self, texto: str, color: str = "#B45309") -> None:
+        self.lbl_estado.setStyleSheet(f"color: {color}; font-size: 11px;")
         self.lbl_estado.setText(texto)
         self.lbl_estado.setVisible(True)
         QTimer.singleShot(6000, lambda: self.lbl_estado.setVisible(False))
-
-    def _on_geoerror_js(self, msg: str) -> None:
-        self.btn_ubicacion_precisa.setEnabled(True)
-        logger.info("MapaWidget: geolocalización precisa falló (%s)", msg)
-        if "denied" in msg.lower() or "denegad" in msg.lower():
-            texto = "Ubicación denegada. Habilítala en Configuración de Windows > Privacidad > Ubicación."
-        elif "timeout" in msg.lower():
-            texto = "No se pudo obtener tu ubicación a tiempo. Intenta de nuevo."
-        else:
-            texto = "No se pudo obtener tu ubicación precisa."
-        self._mostrar_estado_temporal(texto)
 
     def _on_load_finished(self, ok: bool) -> None:
         logger.info("MapaWidget: carga de pagina %s", "OK" if ok else "FALLO")
@@ -642,64 +670,44 @@ class MapaWidget(QWidget):
         else:
             self._pendientes.append(js)
 
-    def _on_click_js(self, lat: float, lng: float, rol: str | None = None) -> None:
-        # setEnabled(True) es un no-op para un click normal en el mapa (el boton ya
-        # estaba habilitado) -- solo importa cuando este callback llega desde
-        # solicitarUbicacionPrecisa() (mismo canal que un click, ver _MapaPage).
-        self.btn_ubicacion_precisa.setEnabled(True)
-        if self.modo == "ruta" and rol:
-            # A diferencia de _aplicar_punto() (busqueda/ubicacion precisa), el click NO
-            # dibuja el marcador aca -- mismo criterio que el modo "punto": es el
-            # formulario (RutaFormDialog) quien llama set_origen()/set_destino() al
-            # recibir punto_ruta_cambiado, igual que ClienteFormDialog/RutaFormDialog ya
-            # hacen con coordenadas_cambiadas. Si avanza a "destino" igual, es puro
-            # estado de interaccion del mapa (que apunta el proximo click), no dibujo.
-            if rol == "origen":
-                self.set_objetivo_activo("destino")
-            self.punto_ruta_cambiado.emit(rol, lat, lng)
+    def _on_click_js(self, lat: float, lng: float) -> None:
+        # Tambien llamado directamente (no solo desde un click real en el mapa) por
+        # _on_ubicacion_precisa() al resolver la geolocalizacion nativa -- mismo efecto
+        # que si el usuario hubiera clickeado ahi mismo.
+        if self.modo == "zona":
+            # A diferencia de _aplicar_punto() (busqueda), el click NO dibuja el vertice
+            # aca -- mismo criterio que el modo "punto": es el formulario (RutaFormDialog)
+            # quien mantiene la lista de vertices y llama establecer_zona() al recibir
+            # esta señal.
+            self.vertice_zona_agregado.emit(lat, lng)
         else:
             self.coordenadas_cambiadas.emit(lat, lng)
 
     def set_coordenadas(self, lat: float, lng: float) -> None:
         self._ejecutar(f"establecerMarcadorUnico({lat}, {lng});")
 
-    def set_origen(self, lat: float, lng: float) -> None:
-        self._ejecutar(f"establecerOrigen({lat}, {lng});")
+    def limpiar_zona(self) -> None:
+        self._ejecutar("limpiarZona();")
 
-    def set_destino(self, lat: float, lng: float) -> None:
-        self._ejecutar(f"establecerDestino({lat}, {lng});")
-
-    def set_objetivo_activo(self, rol: str) -> None:
-        """Cual de los dos marcadores (modo "ruta") recibe el proximo click/busqueda/
-        ubicacion precisa. RutaFormDialog la llama desde su control "Marcando:
-        Origen/Destino"; MapaWidget tambien la usa internamente para avanzar de origen a
-        destino despues de fijar el origen."""
-        self._objetivo_activo = rol
-        self._ejecutar(f"setObjetivoActivo({json.dumps(rol)});")
-
-    def dibujar_trazado(self, puntos: list[tuple[float, float]], color: str = "#2563EB") -> None:
-        self._ejecutar(f"dibujarTrazado({json.dumps(puntos)}, {json.dumps(color)});")
-
-    def limpiar_trazado(self) -> None:
-        self._ejecutar("limpiarTrazado();")
+    def establecer_zona(self, vertices: list[tuple[float, float]]) -> None:
+        """Reemplaza el poligono de zona completo -- unico punto de entrada para
+        dibujarla (RutaFormDialog llama esto en cada click, no solo al precargar una
+        ruta existente: los vertices se reordenan por angulo antes de cada redibujado
+        para que el poligono nunca quede auto-intersectado, ver
+        ruta_form_dialog.py::_ordenar_por_angulo -- asi que la lista completa cambia en
+        cada paso, no solo el ultimo punto). Tambien usado por MapaRutasPanel (mapa
+        general, modo solo-lectura)."""
+        self._ejecutar(f"establecerZona({json.dumps(vertices)});")
 
     def centrar(self, lat: float, lng: float, zoom: int = _ZOOM_DEFAULT) -> None:
         """Centra/hace zoom sin tocar marcadores -- para el centrado por ubicacion del
         dispositivo, que nunca debe fijar una coordenada por si solo."""
         self._ejecutar(f"centrarSinMarcador({lat}, {lng}, {zoom});")
 
-    def mostrar_puntos(
-        self,
-        clientes: list[tuple[float, float, str]],
-        puntos_ruta: list[tuple[float, float, str]] | None = None,
-    ) -> None:
-        """Modo solo-lectura (mapa general de rutas): `puntos_ruta` son los puntos
-        propios de la ruta (origen/destino) a pintar junto con sus clientes -- una lista,
-        no un solo punto, desde que una ruta paso a ser un recorrido (migrations/0040)."""
+    def mostrar_puntos(self, clientes: list[tuple[float, float, str]]) -> None:
+        """Modo solo-lectura (mapa general de rutas): pinta muchos clientes de una vez."""
         partes = ["limpiarMarcadores();"]
         for lat, lng, etiqueta in clientes:
             partes.append(f"agregarMarcadorCliente({lat}, {lng}, {json.dumps(etiqueta)});")
-        for lat, lng, etiqueta in puntos_ruta or []:
-            partes.append(f"agregarMarcadorRuta({lat}, {lng}, {json.dumps(etiqueta)});")
         partes.append("ajustarVista();")
         self._ejecutar(" ".join(partes))

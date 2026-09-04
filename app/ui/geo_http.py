@@ -10,12 +10,6 @@
   en el mapa. Politica de uso de Nominatim (max ~1 req/seg, User-Agent identificando la
   app): https://operations.osmfoundation.org/policies/nominatim/ -- uso interactivo
   (un usuario, un click) esta dentro de esa politica.
-- `calcular_ruta_por_calles(origen, destino)`: trazado real (siguiendo calles) entre dos
-  puntos via OSRM (router.project-osrm.org), usado por RutaFormDialog para dibujar y
-  guardar el recorrido de una ruta (migrations/0040). Es la demo publica de OSRM: gratuita
-  pero sin SLA -- decision aceptada por el usuario 2026-09-01 a cambio de no pagar ni
-  gestionar un servicio de ruteo propio. Si falla, el llamador cae a una linea recta entre
-  origen y destino (ver RutaFormDialog) en vez de dejar la ruta sin trazado.
 
 Todas las funciones son bloqueantes y **nunca deben llamarse desde el hilo de GUI**: usar
 `HttpWorker` (QThread) para correrlas aparte, mismo motivo que
@@ -41,7 +35,6 @@ _TIMEOUT_SEGUNDOS = 5
 
 _URL_IP_GEOLOCALIZACION = "https://ipwho.is/"
 _URL_NOMINATIM_BUSQUEDA = "https://nominatim.openstreetmap.org/search"
-_URL_OSRM_RUTA = "https://router.project-osrm.org/route/v1/driving"
 
 
 def _get_json(url: str) -> Any:
@@ -81,29 +74,6 @@ def buscar_lugares(texto: str) -> list[dict]:
     ]
 
 
-def calcular_ruta_por_calles(
-    origen: tuple[float, float], destino: tuple[float, float]
-) -> list[tuple[float, float]] | None:
-    """Trazado por calles entre `origen` y `destino` (ambos (lat, lng)) via OSRM, como
-    lista de (lat, lng). `None` ante cualquier fallo -- sin ruta encontrada, timeout,
-    servicio caido -- el llamador debe caer a una linea recta en ese caso."""
-    lat1, lng1 = origen
-    lat2, lng2 = destino
-    query = urllib.parse.urlencode({"overview": "full", "geometries": "geojson"})
-    url = f"{_URL_OSRM_RUTA}/{lng1},{lat1};{lng2},{lat2}?{query}"
-    try:
-        datos = _get_json(url)
-        if datos.get("code") != "Ok" or not datos.get("routes"):
-            return None
-        # GeoJSON trae [lng, lat] -- se invierte al formato (lat, lng) usado en todo el
-        # resto del proyecto (Cliente.latitud/longitud, Ruta.latitud/longitud, etc.).
-        coordenadas = datos["routes"][0]["geometry"]["coordinates"]
-        return [(lat, lng) for lng, lat in coordenadas]
-    except Exception:
-        logger.info("Falló el cálculo de ruta por calles (%s -> %s)", origen, destino, exc_info=True)
-        return None
-
-
 _workers_activos: set["HttpWorker"] = set()
 
 
@@ -123,7 +93,7 @@ def esperar_workers_pendientes(timeout_ms: int = 6000) -> None:
 class HttpWorker(QThread):
     """Ejecuta `funcion()` (sin argumentos, tipicamente `functools.partial` de una de las
     funciones de arriba) en un hilo aparte y emite su valor de retorno -- generico para
-    no duplicar el boilerplate de QThread entre las tres llamadas de este modulo."""
+    no duplicar el boilerplate de QThread entre las llamadas de este modulo."""
 
     resultado = Signal(object)
 

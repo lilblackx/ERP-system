@@ -1,10 +1,9 @@
-import functools
 import json
+import math
 
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -15,7 +14,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.models import Ruta
-from app.ui.geo_http import HttpWorker, calcular_ruta_por_calles
 from app.ui.mapa_widget import MapaWidget
 from app.ui.message_box import MessageBox
 from app.ui.styles import (
@@ -101,26 +99,59 @@ QPushButton#BtnSecondary:hover {{
     background-color: {COLOR_TABLE_HEADER};
     color: {COLOR_TEXT_DARK};
 }}
+QPushButton#BtnZona {{
+    background-color: #FFFFFF;
+    color: {COLOR_TEXT_DARK};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QPushButton#BtnZona:hover {{
+    background-color: {COLOR_TABLE_HEADER};
+}}
 """
+
+
+def _ordenar_por_angulo(vertices: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Reordena los vertices alrededor de su centroide (angulo respecto al centro) para
+    que el poligono quede siempre sin auto-intersecciones sin importar en que orden el
+    usuario los haya clickeado -- sin esto, clickear fuera del orden del perimetro
+    producia una figura en forma de moño en vez de una zona con area limpia (reportado
+    por el usuario, 2026-09-03). Con menos de 3 vertices no hay nada que reordenar (una
+    linea entre 1-2 puntos no puede auto-intersectarse)."""
+    if len(vertices) < 3:
+        return list(vertices)
+    centro_lat = sum(v[0] for v in vertices) / len(vertices)
+    centro_lng = sum(v[1] for v in vertices) / len(vertices)
+    return sorted(vertices, key=lambda v: math.atan2(v[0] - centro_lat, v[1] - centro_lng))
 
 
 class RutaFormDialog(QDialog):
     """Dialogo de alta/edicion de rutas -- mismo patron visual que
     VendedorFormDialog (app/ui/vendedor_form_dialog.py). Nombre + descripcion (opcional)
-    mas el recorrido real de la ruta: origen y destino marcados en el mapa
-    (MapaWidget(modo="ruta"), migrations/0040), con el trazado por calles entre ambos
-    calculado automaticamente (ver _recalcular_trazado) y guardado junto con la ruta."""
+    mas la zona de cobertura de la ruta: un poligono marcado con clicks en el mapa
+    (MapaWidget(modo="zona"), migrations/0043) -- decision de negocio 2026-09-03: "una
+    ruta no es un punto A/B, es una zona donde todos los clientes dentro de ella son
+    atendidos por su vendedor", reemplazando el modelo anterior de origen/destino/
+    trazado por calles (migrations/0039/0040)."""
 
     def __init__(self, ruta: Ruta | None = None, parent=None):
         super().__init__(parent)
         self.ruta = ruta
-        # [[lat,lng], ...] del ultimo trazado calculado (real por calles, o linea recta
-        # de respaldo) -- ver _recalcular_trazado(). None hasta que origen y destino
-        # esten ambos fijos.
-        self._trazado_actual: list[tuple[float, float]] | None = None
-        self._worker_trazado = None
+        # [(lat,lng), ...] vertices de la zona en el orden en que se marcaron (o se
+        # cargaron al editar) -- es la fuente de verdad para "Deshacer ultimo punto"
+        # (siempre quita el ultimo click, sin importar como se vea reordenado en el
+        # mapa). Lo que se dibuja y se persiste como zona_geojson es
+        # _ordenar_por_angulo(self._vertices), NUNCA esta lista cruda -- ver
+        # _vertices_ordenados().
+        self._vertices: list[tuple[float, float]] = []
         self.setWindowTitle("Editar Ruta" if ruta else "Nueva Ruta")
-        self.setFixedSize(460, 700)
+        # Mas ancho/alto que el resto de los dialogos de este tamaño (VendedorFormDialog,
+        # etc.) a proposito -- pedido del usuario 2026-09-03: la zona se marca a puro
+        # click sobre el mapa, asi que mas area de mapa hace la tarea mas facil.
+        self.setFixedSize(620, 780)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -140,7 +171,7 @@ class RutaFormDialog(QDialog):
         header_layout.setSpacing(12)
 
         icon_lbl = QLabel()
-        fa_icon_name = "fa5s.edit" if self.ruta else "fa5s.route"
+        fa_icon_name = "fa5s.edit" if self.ruta else "fa5s.draw-polygon"
         icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
@@ -156,7 +187,7 @@ class RutaFormDialog(QDialog):
         lbl_titulo = QLabel(titulo_text)
         lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
-        lbl_subtitulo = QLabel("Ruta de reparto/cobranza para asignar a los vendedores.")
+        lbl_subtitulo = QLabel("Zona de cobertura para asignar a los vendedores.")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
 
         titles_layout.addWidget(lbl_titulo)
@@ -209,53 +240,54 @@ class RutaFormDialog(QDialog):
         card_mapa_layout.setContentsMargins(16, 12, 16, 14)
         card_mapa_layout.setSpacing(8)
 
-        lbl_ubicacion = QLabel("RECORRIDO (ORIGEN → DESTINO) <span style='color: #DC2626;'>*</span>")
-        lbl_ubicacion.setProperty("class", "SectionTitle")
-        lbl_ubicacion.setTextFormat(Qt.TextFormat.RichText)
-        card_mapa_layout.addWidget(lbl_ubicacion)
+        lbl_zona = QLabel("ZONA DE COBERTURA <span style='color: #DC2626;'>*</span>")
+        lbl_zona.setProperty("class", "SectionTitle")
+        lbl_zona.setTextFormat(Qt.TextFormat.RichText)
+        card_mapa_layout.addWidget(lbl_zona)
 
-        # Control segmentado: que punto recibe el proximo click/busqueda/ubicacion
-        # precisa en el mapa (modo="ruta" de MapaWidget). Arranca en "Origen"; al fijarlo
-        # el propio mapa avanza el objetivo a "Destino" (ver _on_punto_ruta_cambiado),
-        # asi que este toggle se sincroniza reflejando ese avance, no solo disparandolo.
-        objetivo_layout = QHBoxLayout()
-        objetivo_layout.setSpacing(6)
-        lbl_marcando = QLabel("Marcando:")
-        lbl_marcando.setProperty("class", "FormLabel")
-        self.btn_origen_activo = QPushButton("📍 Origen")
-        self.btn_origen_activo.setCheckable(True)
-        self.btn_origen_activo.setChecked(True)
-        self.btn_destino_activo = QPushButton("🏁 Destino")
-        self.btn_destino_activo.setCheckable(True)
-        for btn in (self.btn_origen_activo, self.btn_destino_activo):
-            btn.setFixedHeight(28)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._grupo_objetivo = QButtonGroup(self)
-        self._grupo_objetivo.setExclusive(True)
-        self._grupo_objetivo.addButton(self.btn_origen_activo)
-        self._grupo_objetivo.addButton(self.btn_destino_activo)
-        self.btn_origen_activo.toggled.connect(lambda marcado: marcado and self.mapa.set_objetivo_activo("origen"))
-        self.btn_destino_activo.toggled.connect(lambda marcado: marcado and self.mapa.set_objetivo_activo("destino"))
-        objetivo_layout.addWidget(lbl_marcando)
-        objetivo_layout.addWidget(self.btn_origen_activo)
-        objetivo_layout.addWidget(self.btn_destino_activo)
-        objetivo_layout.addStretch()
-        card_mapa_layout.addLayout(objetivo_layout)
+        lbl_instrucciones = QLabel("Haz clic en el mapa para marcar los vértices del contorno de la zona (mínimo 3).")
+        lbl_instrucciones.setWordWrap(True)
+        lbl_instrucciones.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
+        card_mapa_layout.addWidget(lbl_instrucciones)
 
-        self.mapa = MapaWidget(editable=True, modo="ruta", centrar_en_dispositivo=self.ruta is None)
-        self.mapa.setMinimumHeight(200)
-        self.mapa.punto_ruta_cambiado.connect(self._on_punto_ruta_cambiado)
+        self.mapa = MapaWidget(editable=True, modo="zona", centrar_en_dispositivo=self.ruta is None)
+        self.mapa.setMinimumHeight(340)
+        self.mapa.vertice_zona_agregado.connect(self._on_vertice_agregado)
         card_mapa_layout.addWidget(self.mapa)
 
-        self.lbl_calculando = QLabel("Calculando trazado por calles…")
-        self.lbl_calculando.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
-        self.lbl_calculando.setVisible(False)
-        card_mapa_layout.addWidget(self.lbl_calculando)
+        # Fila de botones y contador en dos filas separadas (no una sola con stretch) --
+        # con las etiquetas completas ("Deshacer último punto", "Limpiar zona") mas el
+        # contador todo en una fila, el ancho fijo del dialogo (460px) no alcanzaba y Qt
+        # recortaba el texto de los botones a la mitad (reportado por el usuario,
+        # 2026-09-03). Textos mas cortos + contador en su propia fila deja margen de
+        # sobra sin importar cuanto crezca el numero de verticces.
+        acciones_layout = QHBoxLayout()
+        acciones_layout.setSpacing(8)
 
-        card_mapa_layout.addWidget(self._make_fila_coordenadas("Origen", "origen"))
-        card_mapa_layout.addWidget(self._make_fila_coordenadas("Destino", "destino"))
+        self.btn_deshacer = QPushButton("↩ Deshacer")
+        self.btn_deshacer.setObjectName("BtnZona")
+        self.btn_deshacer.setFixedHeight(28)
+        self.btn_deshacer.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_deshacer.clicked.connect(self._deshacer_vertice)
+
+        self.btn_limpiar = QPushButton("🗑 Limpiar")
+        self.btn_limpiar.setObjectName("BtnZona")
+        self.btn_limpiar.setFixedHeight(28)
+        self.btn_limpiar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_limpiar.clicked.connect(self._limpiar_zona)
+
+        acciones_layout.addWidget(self.btn_deshacer)
+        acciones_layout.addWidget(self.btn_limpiar)
+        acciones_layout.addStretch()
+        card_mapa_layout.addLayout(acciones_layout)
+
+        self.lbl_contador = QLabel()
+        self.lbl_contador.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
+        card_mapa_layout.addWidget(self.lbl_contador)
 
         root.addWidget(card_mapa, stretch=1)
+
+        self._actualizar_contador()
 
         footer_layout = QHBoxLayout()
         footer_layout.setContentsMargins(0, 4, 0, 0)
@@ -282,139 +314,41 @@ class RutaFormDialog(QDialog):
         footer_layout.addWidget(self.btn_guardar)
         root.addLayout(footer_layout)
 
-    def _make_fila_coordenadas(self, etiqueta: str, prefijo: str) -> QWidget:
-        """Fila "Origen"/"Destino" con sus inputs de lat/lng -- guarda los QLineEdit como
-        self.<prefijo>_lat_input/self.<prefijo>_lng_input para que el resto del dialogo
-        (precargar, validar, get_data) los use por nombre."""
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(2)
+    def _vertices_ordenados(self) -> list[tuple[float, float]]:
+        return _ordenar_por_angulo(self._vertices)
 
-        lbl = QLabel(f"{etiqueta} <span style='color: #DC2626;'>*</span>")
-        lbl.setProperty("class", "FormLabel")
-        lbl.setTextFormat(Qt.TextFormat.RichText)
-        v.addWidget(lbl)
+    def _redibujar_zona(self) -> None:
+        self.mapa.establecer_zona(self._vertices_ordenados())
+        self._actualizar_contador()
 
-        fila = QHBoxLayout()
-        fila.setSpacing(8)
+    def _on_vertice_agregado(self, lat: float, lng: float) -> None:
+        self._vertices.append((lat, lng))
+        self._redibujar_zona()
 
-        lat_input = QLineEdit()
-        lat_input.setPlaceholderText("Latitud, ej: 10.4806")
-        lat_input.setFixedHeight(32)
-
-        lng_input = QLineEdit()
-        lng_input.setPlaceholderText("Longitud, ej: -66.9036")
-        lng_input.setFixedHeight(32)
-
-        if prefijo == "origen":
-            self.origen_lat_input, self.origen_lng_input = lat_input, lng_input
-            lat_input.editingFinished.connect(self._on_origen_editado)
-            lng_input.editingFinished.connect(self._on_origen_editado)
-        else:
-            self.destino_lat_input, self.destino_lng_input = lat_input, lng_input
-            lat_input.editingFinished.connect(self._on_destino_editado)
-            lng_input.editingFinished.connect(self._on_destino_editado)
-
-        fila.addWidget(lat_input)
-        fila.addWidget(lng_input)
-        v.addLayout(fila)
-        return w
-
-    def _leer_par(self, lat_input: QLineEdit, lng_input: QLineEdit) -> tuple[float, float] | None:
-        lat_texto = lat_input.text().strip()
-        lng_texto = lng_input.text().strip()
-        if not lat_texto or not lng_texto:
-            return None
-        try:
-            return float(lat_texto), float(lng_texto)
-        except ValueError:
-            return None
-
-    def _leer_origen(self) -> tuple[float, float] | None:
-        return self._leer_par(self.origen_lat_input, self.origen_lng_input)
-
-    def _leer_destino(self) -> tuple[float, float] | None:
-        return self._leer_par(self.destino_lat_input, self.destino_lng_input)
-
-    def _on_punto_ruta_cambiado(self, rol: str, lat: float, lng: float) -> None:
-        if rol == "origen":
-            self.origen_lat_input.setText(f"{lat:.7f}")
-            self.origen_lng_input.setText(f"{lng:.7f}")
-            self.mapa.set_origen(lat, lng)
-            # Espeja el auto-avance que ya hizo MapaWidget internamente (ver
-            # MapaWidget._on_click_js/_aplicar_punto) -- sin esto el toggle se queda
-            # marcado en "Origen" mientras el mapa ya esta esperando el destino.
-            self.btn_destino_activo.setChecked(True)
-        else:
-            self.destino_lat_input.setText(f"{lat:.7f}")
-            self.destino_lng_input.setText(f"{lng:.7f}")
-            self.mapa.set_destino(lat, lng)
-        self._recalcular_trazado()
-
-    def _on_origen_editado(self) -> None:
-        origen = self._leer_origen()
-        if origen is not None:
-            self.mapa.set_origen(*origen)
-        self._recalcular_trazado()
-
-    def _on_destino_editado(self) -> None:
-        destino = self._leer_destino()
-        if destino is not None:
-            self.mapa.set_destino(*destino)
-        self._recalcular_trazado()
-
-    def _recalcular_trazado(self) -> None:
-        origen = self._leer_origen()
-        destino = self._leer_destino()
-        if origen is None or destino is None:
-            self.mapa.limpiar_trazado()
-            self._trazado_actual = None
+    def _deshacer_vertice(self) -> None:
+        if not self._vertices:
             return
-        # Linea recta de inmediato -- nunca deja el trazado vacio mientras se calcula el
-        # real por calles (OSRM es un servicio publico sin SLA, puede tardar o fallar).
-        # Se reemplaza sola si _on_trazado_calculado llega a tiempo con una respuesta.
-        self._trazado_actual = [origen, destino]
-        self.mapa.dibujar_trazado(self._trazado_actual)
+        self._vertices.pop()
+        self._redibujar_zona()
 
-        self.lbl_calculando.setVisible(True)
-        self._worker_trazado = HttpWorker(functools.partial(calcular_ruta_por_calles, origen, destino))
-        self._worker_trazado.resultado.connect(functools.partial(self._on_trazado_calculado, origen, destino))
-        self._worker_trazado.start()
+    def _limpiar_zona(self) -> None:
+        self._vertices = []
+        self.mapa.limpiar_zona()
+        self._actualizar_contador()
 
-    def _on_trazado_calculado(
-        self, origen: tuple[float, float], destino: tuple[float, float], puntos: list[tuple[float, float]] | None
-    ) -> None:
-        self.lbl_calculando.setVisible(False)
-        # Si el usuario ya siguio editando origen/destino mientras esta respuesta viajaba
-        # por la red, descartarla -- ya no corresponde al par de puntos actual (uno mas
-        # reciente ya disparo su propio calculo).
-        if self._leer_origen() != origen or self._leer_destino() != destino:
-            return
-        if puntos:
-            self._trazado_actual = puntos
-            self.mapa.dibujar_trazado(self._trazado_actual)
+    def _actualizar_contador(self) -> None:
+        n = len(self._vertices)
+        texto = f"{n} vértice{'s' if n != 1 else ''} marcado{'s' if n != 1 else ''}"
+        if n < 3:
+            texto += " (mínimo 3)"
+        self.lbl_contador.setText(texto)
 
     def _precargar(self, ruta: Ruta) -> None:
         self.nombre_input.setText(ruta.nombre_ruta or "")
         self.descripcion_input.setText(ruta.descripcion_ruta or "")
-        if ruta.latitud is not None and ruta.longitud is not None:
-            lat, lng = float(ruta.latitud), float(ruta.longitud)
-            self.origen_lat_input.setText(f"{lat:.7f}")
-            self.origen_lng_input.setText(f"{lng:.7f}")
-            self.mapa.set_origen(lat, lng)
-        if ruta.destino_latitud is not None and ruta.destino_longitud is not None:
-            lat, lng = float(ruta.destino_latitud), float(ruta.destino_longitud)
-            self.destino_lat_input.setText(f"{lat:.7f}")
-            self.destino_lng_input.setText(f"{lng:.7f}")
-            self.mapa.set_destino(lat, lng)
-        # Dibuja el trazado ya guardado en vez de recalcularlo -- llamar a OSRM de nuevo
-        # solo porque se abrio el dialogo para editar/ver seria una llamada de red
-        # innecesaria (RutaFormDialog._recalcular_trazado solo se dispara cuando el
-        # usuario efectivamente cambia origen o destino).
-        if ruta.trazado_geojson:
-            self._trazado_actual = [tuple(p) for p in json.loads(ruta.trazado_geojson)]
-            self.mapa.dibujar_trazado(self._trazado_actual)
+        if ruta.zona_geojson:
+            self._vertices = [tuple(p) for p in json.loads(ruta.zona_geojson)]
+            self._redibujar_zona()
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_input.text().strip():
@@ -422,36 +356,19 @@ class RutaFormDialog(QDialog):
             self.nombre_input.setFocus()
             return
 
-        origen = self._leer_origen()
-        destino = self._leer_destino()
-        if origen is None or destino is None:
+        if len(self._vertices) < 3:
             MessageBox.warning(
                 self,
-                "Dato requerido",
-                "El origen y el destino de la ruta son obligatorios. Marca ambos puntos en "
-                "el mapa (busca un lugar, hace click o usa tu ubicación) o ingresa las "
-                "coordenadas.",
+                "Zona incompleta",
+                "Marca al menos 3 vértices en el mapa para definir el contorno de la zona de cobertura.",
             )
             return
-        for etiqueta, (lat, lng) in (("origen", origen), ("destino", destino)):
-            if not (-90 <= lat <= 90):
-                MessageBox.warning(self, "Dato inválido", f"La latitud de {etiqueta} debe estar entre -90 y 90.")
-                return
-            if not (-180 <= lng <= 180):
-                MessageBox.warning(self, "Dato inválido", f"La longitud de {etiqueta} debe estar entre -180 y 180.")
-                return
 
         self.accept()
 
     def get_data(self) -> dict:
-        origen = self._leer_origen()
-        destino = self._leer_destino()
         return {
             "nombre_ruta": self.nombre_input.text().strip(),
             "descripcion_ruta": self.descripcion_input.text().strip() or None,
-            "latitud": origen[0] if origen else None,
-            "longitud": origen[1] if origen else None,
-            "destino_latitud": destino[0] if destino else None,
-            "destino_longitud": destino[1] if destino else None,
-            "trazado_geojson": json.dumps(self._trazado_actual) if self._trazado_actual else None,
+            "zona_geojson": json.dumps(self._vertices_ordenados()),
         }

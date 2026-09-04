@@ -643,11 +643,12 @@ de servicio.
   (`app/ui/mapa_widget.py`, ya incluido en el wheel completo de PySide6 — no es
   dependencia nueva), sin costo ni API key, comunicando JS→Python sin `QWebChannel`
   (esquema de URL ficticio `mapaclick://`, ver docstring del módulo). Se usa en
-  `ClienteFormDialog`/`RutaFormDialog` (mapa editable, un solo marcador, campos
-  lat/lng con asterisco) y en la pestaña "Mapa" de Vendedores
-  (`app/ui/mapa_rutas_panel.py`, solo lectura, pinta los clientes geolocalizados de la
-  ruta seleccionada vía `ClienteService.listar_clientes_por_ruta` — el vínculo es
-  indirecto, Cliente → Vendedor → Ruta).
+  `ClienteFormDialog` (mapa editable, un solo marcador, campos lat/lng con asterisco),
+  en `RutaFormDialog` (mapa editable, modo `"zona"` — ver "Zona de cobertura de ruta"
+  más abajo) y en la pestaña "Mapa" de Vendedores (`app/ui/mapa_rutas_panel.py`, solo
+  lectura, pinta los clientes geolocalizados de la ruta seleccionada vía
+  `ClienteService.listar_clientes_por_ruta` — el vínculo es indirecto, Cliente →
+  Vendedor → Ruta — junto con la zona de cobertura de esa ruta).
 
   En modo editable el mapa agrega, vía `app/ui/geo_http.py` (llamadas HTTP livianas,
   siempre en un `QThread` aparte — `HttpWorker` — para no congelar la UI, nunca lanzan:
@@ -693,6 +694,105 @@ de servicio.
   - Cobertura de tests nueva: `id_ruta` obligatorio/válido/activo en
     `tests/services/test_vendedores.py`, y `tests/ui/test_geo_http.py` (funciones puras
     de `geo_http.py` mockeando `urllib.request.urlopen`, sin necesitar base de datos).
+
+- **Zona de cobertura de ruta reemplaza origen/destino/trazado (2026-09-03,
+  `migrations/0043_rutas_zona_poligono.sql`)**: decisión de negocio del usuario -- "una
+  ruta para un vendedor no es un punto A/B, es una zona donde todos los clientes dentro
+  de esa zona son atendidos por ese vendedor". Reemplazo completo (no conviven ambos
+  modelos): se eliminaron `rutas.latitud`/`longitud`/`destino_latitud`/
+  `destino_longitud`/`trazado_geojson` (migrations/0039/0040) y se agregó
+  `rutas.zona_geojson` -- igual que su antecesor, NO es GeoJSON real, es una lista plana
+  JSON `[[lat,lng], ...]`, ahora los vértices de un polígono en vez de dos puntos.
+  `RutaService.crear()`/`actualizar()` exigen al menos 3 vértices (`_validar_zona()`,
+  cada uno con lat/lng en rango) -- mismo criterio "obligatorio por servicio, NULLABLE en
+  BD" que el resto de este módulo. Se quitó por completo la dependencia de OSRM
+  (`geo_http.py::calcular_ruta_por_calles()` y su test eliminados -- ya no hace falta
+  calcular un trazado por calles) y con ella cualquier llamada de red al guardar una
+  ruta; solo Nominatim (buscar lugar) e ipwho.is (centrado inicial) siguen en uso.
+  - **Dibujo del polígono**: `app/ui/mapa_widget.py` gana `modo="zona"` (reemplaza
+    `modo="ruta"`) -- cada click en el mapa acumula un vértice (`vertice_zona_agregado`
+    Signal) en vez de mover un marcador único; el dialogo (`RutaFormDialog`) es dueño de
+    la lista de vértices y llama `agregar_vertice_zona()`/`deshacer_vertice_zona()`/
+    `limpiar_zona()`/`establecer_zona()` para reflejarla -- mismo patrón "el mapa solo
+    dibuja lo que se le pide" que ya usaba `modo="punto"`. El polígono se redibuja
+    completo en cada cambio (listas cortas, no vale la pena diffear) -- menos de 3
+    vértices se ve como línea punteada (feedback visual de los primeros clicks, todavía
+    no es un polígono válido). `RutaFormDialog` quitó el toggle "Marcando: Origen/
+    Destino", las dos filas de coordenadas manuales y el label "Calculando trazado por
+    calles…" -- v1 sin edición manual de coordenadas de vértice, solo clicks en el mapa
+    + "Deshacer último punto"/"Limpiar zona".
+  - **`RutaService.contiene_punto(ruta, lat, lng)`**: point-in-polygon por ray casting
+    (`_punto_en_poligono()`, aproximación planar -- suficiente para el tamaño de una
+    zona de reparto local, no pensada para polígonos que crucen el antimeridiano/un
+    polo). `RutaService.sugerir_ruta_por_ubicacion(session, lat, lng)` devuelve la
+    primera ruta ACTIVA (por `nombre_ruta`) cuya zona contiene el punto, o `None`.
+  - **Sugerencia de vendedor por geografía en `ClienteFormDialog`** (decisión de negocio
+    2026-09-03: "puede ser automática por geografía pero debe poder asignarse manual si
+    el usuario no acepta la sugerencia"): reemplaza el antiguo
+    `_confirmar_cercania_a_ruta()` (alerta bloqueante de "punto lejos del trazado",
+    basada en `RutaService.distancia_a_trazado()` -- eliminado junto con el resto del
+    modelo de trazado). `_sugerir_vendedor_por_ubicacion()` corre en cada cambio de
+    coordenada (click/edición manual/precarga al editar) y consulta
+    `sugerir_ruta_por_ubicacion()`: si la zona resuelta tiene exactamente un vendedor
+    ACTIVO, lo **preselecciona** en el combo -- pero solo si el cliente es NUEVO y el
+    combo todavía está en "Sin asignar" (nunca reasigna un cliente existente ni pisa una
+    elección manual ya hecha); con cero o varios vendedores en la zona, o sin zona que
+    contenga el punto, solo se actualiza un label informativo (`lbl_sugerencia_ruta`),
+    sin tocar el combo. Nunca bloquea el guardado.
+  - **Mapa general de rutas** (`mapa_rutas_panel.py`): pinta la zona de la ruta
+    seleccionada (`establecer_zona()`) junto con sus clientes geolocalizados
+    (`mostrar_puntos()`, ya no recibe `puntos_ruta` -- no hay más marcadores de origen/
+    destino que pintar). `MapaWidget.ajustarVista()` (JS) ahora encuadra la unión de
+    marcadores + polígono de zona en vez de solo marcadores.
+  - Tests: `tests/services/test_rutas.py` reescrito para el modelo de zona (validación
+    de vértices, `contiene_punto`, `sugerir_ruta_por_ubicacion`); los tests de
+    `calcular_ruta_por_calles` se quitaron de `tests/ui/test_geo_http.py` junto con la
+    función.
+
+- **Seguimientos a la zona de cobertura (mismo día, 2026-09-03)**:
+  - **Marcadores numerados por vértice + orden por ángulo**: cada clic ahora deja un
+    circleMarker azul numerado (1, 2, 3...) además del contorno (`redibujarZona()` en
+    `mapa_widget.py`, tooltip permanente con clase CSS `.zona-vertice-tooltip`) --
+    feedback en vivo de cada punto marcado, no solo del polígono final. Clickear fuera
+    del orden del perímetro producía una figura auto-intersectada ("moño") en vez de un
+    área limpia -- `RutaFormDialog._ordenar_por_angulo()` reordena los vértices por
+    ángulo alrededor de su centroide antes de cada redibujado, así el polígono nunca
+    queda cruzado sin importar el orden de clic. El orden de clic real se conserva
+    aparte (`self._vertices`) solo para que "Deshacer último punto" siga quitando el
+    clic más reciente (no el que quede último tras reordenar); lo que se dibuja y se
+    persiste como `zona_geojson` es siempre `_ordenar_por_angulo(self._vertices)`. Los
+    números mostrados en el mapa reflejan el orden del contorno resultante, no el de
+    clic -- pueden "correrse" al agregar un punto nuevo, tradeoff aceptado a cambio de
+    que el polígono se vea siempre limpio.
+  - **Geolocalización nativa de Windows para "Mi ubicación"** (`app/ui/geo_windows.py`,
+    nuevo): reemplaza `navigator.geolocation` de Chromium/QtWebEngine, que en desktop sin
+    GPS depende del proveedor de ubicación por red de Chromium -- que necesita una clave
+    de API de Google que los builds de QtWebEngine no traen configurada, así que
+    `getCurrentPosition()` fallaba casi siempre con `POSITION_UNAVAILABLE` (hallazgo del
+    usuario: "el botón no está funcionando bien"). Ahora usa el `Geolocator` nativo de
+    WinRT (paquetes `winrt-Windows.Devices.Geolocation`/`winrt-Windows.Foundation`/
+    `winrt-Windows.Foundation.Collections`, `requirements.txt`/`requirements-lock.txt`
+    con marcador `; sys_platform == "win32"` -- no rompe instalación en Linux/Mac/CI),
+    que consulta el proveedor de ubicación del propio Windows (Configuración >
+    Privacidad > Ubicación -- GPS si el equipo lo tiene, o WiFi/red que Windows ya
+    resuelve) sin depender de ninguna clave de terceros. Nota de dependencia: `winsdk`
+    (el paquete "clásico" para esto) ya no tiene wheels para Python 3.13+ y falla al
+    compilar desde código fuente en este entorno -- `winrt-Windows.*` es su sucesor
+    (paquetes por namespace) y sí tiene wheels hasta cp313/cp314. Probado end-to-end
+    2026-09-03: `Geolocator.request_access_async()` devuelve `ALLOWED` y
+    `get_geoposition_async()` devuelve lat/lng/accuracy reales en este equipo, y el
+    flujo completo `HttpWorker` (QThread) + `asyncio.run()` dentro corriendo junto al
+    loop de eventos de Qt no bloquea ni cuelga (script de prueba standalone, sin la
+    GUI completa). La UI ahora también muestra la precisión lograda ("Ubicación fijada
+    (precisión: ±N m)") en vez de solo fijar el punto a ciegas -- en un equipo sin
+    WiFi/GPS puede caer a resolución por IP (decenas de km, mismo orden de magnitud que
+    cualquier otro método sin hardware dedicado, no es un bug). `_MapaPage` perdió el
+    canal `mapaclick://geoerror` y el permiso de Geolocation del navegador (ya no los
+    usa nadie -- todo el flujo de "Mi ubicación" es Python nativo ahora, no JS).
+  - **Diálogos de Ruta/Cliente agrandados** (pedido del usuario, más espacio para
+    marcar la geolocalización con precisión): `RutaFormDialog` 460×680 → 620×780 (mapa
+    mín. 230→340px alto); `ClienteFormDialog` 860×740 → 920×800 (mapa mín.
+    380×230→440×300).
 
 ## 9. Pendiente / próximos pasos sugeridos
 
@@ -1021,7 +1121,9 @@ de servicio.
     `NotaCreditoService` en la seccion 3/"Notas de credito automaticas"). Falta unificar
     ambos reportes en una sola vista por cliente en vez de mirarlos por separado.
   - **"Mapeo de ruta / geolocalizacion de cliente"**: completo (2026-09-01, ver
-    `app/ui/mapa_rutas_panel.py`, `app/ui/ruta_form_dialog.py`,
-    `migrations/0038`-`0040`) -- trazado real por calles (OSRM) entre origen y destino de
-    cada ruta, clientes geolocalizados pintados junto con su ruta, busqueda de cliente
-    que centra el mapa, toggle "Mostrar clientes".
+    `app/ui/mapa_rutas_panel.py`, `app/ui/ruta_form_dialog.py`, `migrations/0038`-`0040`)
+    -- clientes geolocalizados pintados junto con su ruta, busqueda de cliente que centra
+    el mapa, toggle "Mostrar clientes". El modelo de ruta en si (originalmente origen ->
+    destino con trazado real por calles via OSRM) fue reemplazado 2026-09-03 por una zona
+    de cobertura (poligono de vertices, `migrations/0043`) -- ver "Zona de cobertura de
+    ruta reemplaza origen/destino/trazado" mas arriba en esta seccion.

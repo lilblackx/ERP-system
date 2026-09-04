@@ -28,3 +28,7 @@ reportlab==4.2.0
 shiboken6==6.11.2
 SQLAlchemy==2.0.52
 typing_extensions==4.16.0
+winrt_Windows.Devices.Geolocation==3.2.1; sys_platform == "win32"
+winrt_Windows.Foundation==3.2.1; sys_platform == "win32"
+winrt_Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
+winrt_runtime==3.2.1; sys_platform == "win32"

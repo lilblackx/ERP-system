@@ -55,23 +55,15 @@ class Ruta(Base):
     estado_ruta: Mapped[str | None] = mapped_column(String(20), server_default="ACTIVO")
     fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime, server_default=func.getdate())
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
-    # Origen del recorrido de la ruta (migrations/0039; el nombre de columna se conserva,
-    # ver migrations/0040). Obligatorio por decision de producto (2026-09-01), pero
-    # NULLABLE en BD -- mismo criterio que Vendedor.id_ruta mas abajo: RutaService.crear()
-    # es quien garantiza que toda ruta NUEVA siempre traiga coordenadas, sin forzar un
-    # backfill sobre datos existentes.
-    latitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
-    longitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
-    # Destino del recorrido (migrations/0040) -- junto con latitud/longitud (origen) arriba
-    # definen el trazado real de la ruta, en vez de un unico punto de referencia. Mismo
-    # criterio de obligatoriedad-por-servicio-no-por-schema que el origen.
-    destino_latitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
-    destino_longitud: Mapped[decimal.Decimal | None] = mapped_column(Numeric(10, 7))
-    # Trazado por calles entre origen y destino (JSON, lista [[lat,lng], ...]), calculado
-    # una vez en RutaFormDialog via OSRM (o linea recta si OSRM falla) y cacheado aca --
-    # ver app/ui/geo_http.py::calcular_ruta_por_calles. Asi ver el mapa general
-    # (app/ui/mapa_rutas_panel.py) nunca depende de la disponibilidad de OSRM.
-    trazado_geojson: Mapped[str | None] = mapped_column(String)
+    # Zona de cobertura de la ruta (migrations/0043, reemplaza el modelo anterior de
+    # origen->destino de migrations/0039/0040): poligono de vertices, JSON como lista
+    # plana [[lat,lng], ...] -- no un objeto GeoJSON real, misma convencion que ya tenia
+    # el extinto trazado_geojson. Los clientes dentro de esta zona son atendidos por el/
+    # los vendedor(es) de la ruta (decision de negocio, 2026-09-03). Obligatorio (al menos
+    # 3 vertices) por decision de producto, pero NULLABLE en BD -- mismo criterio que
+    # Vendedor.id_ruta mas abajo: RutaService.crear() es quien garantiza que toda ruta
+    # NUEVA siempre traiga una zona valida, sin forzar un backfill sobre datos existentes.
+    zona_geojson: Mapped[str | None] = mapped_column(String)
 
 
 class Vendedor(Base):

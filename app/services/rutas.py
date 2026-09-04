@@ -1,5 +1,4 @@
 import json
-import math
 
 from sqlalchemy.orm import Session
 
@@ -8,8 +7,6 @@ from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
-
-_RADIO_TIERRA_KM = 6371.0
 
 
 def _validar_unico(session: Session, nombre_ruta: str, excluir_id: int | None = None) -> None:
@@ -20,24 +17,44 @@ def _validar_unico(session: Session, nombre_ruta: str, excluir_id: int | None = 
         raise ValueError(f"Ya existe una ruta con nombre_ruta='{nombre_ruta}'")
 
 
-def _validar_rango_coordenadas(latitud, longitud, etiqueta: str = "") -> None:
-    """Solo el rango -- la obligatoriedad se valida aparte en cada callsite (mismo
-    criterio 'no permite vaciar' que nombre_ruta). `etiqueta` distingue origen/destino en
-    el mensaje de error sin duplicar la funcion."""
-    prefijo = f"{etiqueta} " if etiqueta else ""
-    if latitud is not None and not (-90 <= float(latitud) <= 90):
-        raise ValueError(f"{prefijo}latitud debe estar entre -90 y 90")
-    if longitud is not None and not (-180 <= float(longitud) <= 180):
-        raise ValueError(f"{prefijo}longitud debe estar entre -180 y 180")
+def _validar_zona(zona_geojson: str) -> list[list[float]]:
+    """Parsea y valida la zona de cobertura: JSON de al menos 3 vertices [lat,lng] (menos
+    de 3 no forma un poligono real, ver decision de negocio 2026-09-03 en
+    migrations/0043). Devuelve la lista ya parseada para que el caller no tenga que
+    volver a json.loads()."""
+    try:
+        vertices = json.loads(zona_geojson)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("zona_geojson debe ser un JSON valido") from exc
+    if not isinstance(vertices, list) or len(vertices) < 3:
+        raise ValueError("La zona de cobertura debe tener al menos 3 vertices")
+    for vertice in vertices:
+        if not (isinstance(vertice, list | tuple) and len(vertice) == 2):
+            raise ValueError("Cada vertice de la zona debe ser un par [latitud, longitud]")
+        lat, lng = vertice
+        if not (-90 <= float(lat) <= 90):
+            raise ValueError("La latitud de un vertice de la zona debe estar entre -90 y 90")
+        if not (-180 <= float(lng) <= 180):
+            raise ValueError("La longitud de un vertice de la zona debe estar entre -180 y 180")
+    return vertices
 
 
-def _distancia_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    """Haversine -- distancia en linea recta entre dos puntos, sin considerar calles."""
-    rad_lat1, rad_lat2 = math.radians(lat1), math.radians(lat2)
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
-    a = math.sin(d_lat / 2) ** 2 + math.cos(rad_lat1) * math.cos(rad_lat2) * math.sin(d_lng / 2) ** 2
-    return 2 * _RADIO_TIERRA_KM * math.asin(math.sqrt(a))
+def _punto_en_poligono(lat: float, lng: float, vertices: list[tuple[float, float]]) -> bool:
+    """Ray casting -- True si (lat,lng) cae dentro del poligono `vertices` (se asume
+    cerrado implicitamente uniendo el ultimo vertice con el primero, igual que lo dibuja
+    Leaflet). Aproximacion planar (trata lat/lng como coordenadas cartesianas): valida
+    para el tamaño de una zona de reparto local, no pensada para poligonos que crucen el
+    antimeridiano o un polo."""
+    dentro = False
+    n = len(vertices)
+    j = n - 1
+    for i in range(n):
+        lat_i, lng_i = vertices[i]
+        lat_j, lng_j = vertices[j]
+        if (lng_i > lng) != (lng_j > lng) and lat < (lat_j - lat_i) * (lng - lng_i) / (lng_j - lng_i) + lat_i:
+            dentro = not dentro
+        j = i
+    return dentro
 
 
 class RutaService:
@@ -73,19 +90,10 @@ class RutaService:
         require_permiso(session, datos.get("creado_por"), "rutas", "crear")
         if not datos.get("nombre_ruta"):
             raise ValueError("nombre_ruta es requerido")
-        # is None (no falsy) a proposito: latitud/longitud=0.0 son coordenadas legitimas
-        # (ecuador / meridiano de Greenwich).
-        if datos.get("latitud") is None:
-            raise ValueError("latitud (origen) es requerida")
-        if datos.get("longitud") is None:
-            raise ValueError("longitud (origen) es requerida")
-        if datos.get("destino_latitud") is None:
-            raise ValueError("destino_latitud es requerida")
-        if datos.get("destino_longitud") is None:
-            raise ValueError("destino_longitud es requerida")
+        if not datos.get("zona_geojson"):
+            raise ValueError("zona_geojson (zona de cobertura) es requerida")
         _validar_unico(session, datos["nombre_ruta"])
-        _validar_rango_coordenadas(datos.get("latitud"), datos.get("longitud"), etiqueta="origen:")
-        _validar_rango_coordenadas(datos.get("destino_latitud"), datos.get("destino_longitud"), etiqueta="destino:")
+        _validar_zona(datos["zona_geojson"])
 
         ruta = Ruta(**datos)
         session.add(ruta)
@@ -110,26 +118,15 @@ class RutaService:
 
         if "nombre_ruta" in datos and not datos["nombre_ruta"]:
             raise ValueError("nombre_ruta es requerido")
-        if "latitud" in datos and datos["latitud"] is None:
-            raise ValueError("latitud (origen) es requerida")
-        if "longitud" in datos and datos["longitud"] is None:
-            raise ValueError("longitud (origen) es requerida")
-        if "destino_latitud" in datos and datos["destino_latitud"] is None:
-            raise ValueError("destino_latitud es requerida")
-        if "destino_longitud" in datos and datos["destino_longitud"] is None:
-            raise ValueError("destino_longitud es requerida")
+        if "zona_geojson" in datos and not datos["zona_geojson"]:
+            raise ValueError("zona_geojson (zona de cobertura) es requerida")
 
         nuevo_nombre = datos.get("nombre_ruta")
         if nuevo_nombre and nuevo_nombre != ruta.nombre_ruta:
             _validar_unico(session, nuevo_nombre, excluir_id=id_ruta)
 
-        nueva_latitud = datos["latitud"] if "latitud" in datos else ruta.latitud
-        nueva_longitud = datos["longitud"] if "longitud" in datos else ruta.longitud
-        _validar_rango_coordenadas(nueva_latitud, nueva_longitud, etiqueta="origen:")
-
-        nuevo_destino_lat = datos["destino_latitud"] if "destino_latitud" in datos else ruta.destino_latitud
-        nuevo_destino_lng = datos["destino_longitud"] if "destino_longitud" in datos else ruta.destino_longitud
-        _validar_rango_coordenadas(nuevo_destino_lat, nuevo_destino_lng, etiqueta="destino:")
+        nueva_zona = datos["zona_geojson"] if "zona_geojson" in datos else ruta.zona_geojson
+        _validar_zona(nueva_zona)
 
         for campo, valor in datos.items():
             setattr(ruta, campo, valor)
@@ -181,17 +178,36 @@ class RutaService:
         return ruta
 
     @staticmethod
-    def distancia_a_trazado(ruta: Ruta, lat: float, lng: float) -> float | None:
-        """Distancia en km (Haversine) de (lat, lng) al vertice mas cercano del trazado de
-        la ruta -- no es una proyeccion punto-segmento exacta, pero el trazado de OSRM trae
-        vertices muy juntos siguiendo la calle, asi que la aproximacion es suficiente para
-        una alerta orientativa (ver ClienteFormDialog._validar_y_aceptar) sin necesitar
-        geometria de segmentos. `None` si la ruta no tiene trazado calculado -- no hay nada
-        contra que comparar. No necesita Session: opera sobre el objeto Ruta ya cargado
-        (ej. via Vendedor.ruta)."""
-        if not ruta.trazado_geojson:
-            return None
-        puntos = json.loads(ruta.trazado_geojson)
-        if not puntos:
-            return None
-        return min(_distancia_km(lat, lng, p_lat, p_lng) for p_lat, p_lng in puntos)
+    def contiene_punto(ruta: Ruta, lat: float, lng: float) -> bool:
+        """True si (lat,lng) cae dentro de la zona de cobertura de la ruta. False si la
+        ruta no tiene zona cargada (o con menos de 3 vertices) -- no hay poligono contra
+        el cual comparar. No necesita Session: opera sobre el objeto Ruta ya cargado."""
+        if not ruta.zona_geojson:
+            return False
+        vertices = json.loads(ruta.zona_geojson)
+        if len(vertices) < 3:
+            return False
+        return _punto_en_poligono(lat, lng, [tuple(v) for v in vertices])
+
+    @staticmethod
+    def sugerir_ruta_por_ubicacion(
+        session: Session, lat: float, lng: float, id_usuario: int | None = None
+    ) -> Ruta | None:
+        """Primera ruta ACTIVA cuya zona de cobertura contiene (lat,lng), o None si
+        ninguna la contiene -- usado para SUGERIR (nunca forzar) el vendedor de un
+        cliente nuevo segun donde se geolocaliza (ClienteFormDialog, decision de negocio
+        2026-09-03: la asignacion puede ser automatica por geografia pero siempre editable
+        a mano). Si dos zonas se superponen devuelve la primera por nombre_ruta -- caso de
+        borde que el negocio deberia evitar dibujando zonas sin solape, no algo que este
+        metodo intente resolver."""
+        require_permiso(session, id_usuario, "rutas", "ver")
+        rutas = (
+            session.query(Ruta)
+            .filter(Ruta.estado_ruta == "ACTIVO", Ruta.zona_geojson.isnot(None))
+            .order_by(Ruta.nombre_ruta)
+            .all()
+        )
+        for ruta in rutas:
+            if RutaService.contiene_punto(ruta, lat, lng):
+                return ruta
+        return None

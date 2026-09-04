@@ -57,25 +57,3 @@ def test_buscar_lugares_sin_resultados():
 def test_buscar_lugares_falla_devuelve_lista_vacia():
     with patch("urllib.request.urlopen", side_effect=OSError("timeout")):
         assert geo_http.buscar_lugares("Caracas") == []
-
-
-# --- calcular_ruta_por_calles ------------------------------------------------------------
-
-
-def test_calcular_ruta_por_calles_ok_invierte_lng_lat_a_lat_lng():
-    """OSRM devuelve [lng, lat] (GeoJSON) -- la funcion debe invertirlo a (lat, lng),
-    el formato usado en todo el resto del proyecto."""
-    payload = {"code": "Ok", "routes": [{"geometry": {"coordinates": [[-66.9, 10.5], [-66.8, 10.6]]}}]}
-    with patch("urllib.request.urlopen", return_value=_mock_response(payload)):
-        puntos = geo_http.calcular_ruta_por_calles((10.5, -66.9), (10.6, -66.8))
-    assert puntos == [(10.5, -66.9), (10.6, -66.8)]
-
-
-def test_calcular_ruta_por_calles_sin_rutas_devuelve_none():
-    with patch("urllib.request.urlopen", return_value=_mock_response({"code": "NoRoute", "routes": []})):
-        assert geo_http.calcular_ruta_por_calles((10.5, -66.9), (10.6, -66.8)) is None
-
-
-def test_calcular_ruta_por_calles_falla_devuelve_none():
-    with patch("urllib.request.urlopen", side_effect=OSError("timeout")):
-        assert geo_http.calcular_ruta_por_calles((10.5, -66.9), (10.6, -66.8)) is None

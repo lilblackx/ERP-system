@@ -6,18 +6,15 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from tests.factories import crear_usuario_admin
 
+# Cuadrado simple alrededor de Caracas -- suficiente para probar el poligono sin
+# necesitar coordenadas reales de calles.
+_ZONA_EJEMPLO = [[10.40, -67.00], [10.40, -66.80], [10.60, -66.80], [10.60, -67.00]]
+
 
 def _datos_ruta(**overrides) -> dict:
     datos = {
         "nombre_ruta": "Ruta Centro",
-        # latitud/longitud (origen) y destino_latitud/destino_longitud son obligatorias
-        # (decision de producto, 2026-09-01; destino agregado en migrations/0040) --
-        # default aca para no repetirlo en cada test que no le interesa la geolocalizacion
-        # en si.
-        "latitud": 10.4806,
-        "longitud": -66.9036,
-        "destino_latitud": 10.5000,
-        "destino_longitud": -66.8500,
+        "zona_geojson": json.dumps(_ZONA_EJEMPLO),
     }
     datos.update(overrides)
     return datos
@@ -216,168 +213,147 @@ def test_cambiar_estado_ruta_sin_usuario_autorizado_falla(db_session):
         RutaService.cambiar_estado(db_session, ruta.id_ruta, "INACTIVO")
 
 
-# --- geolocalizacion (latitud/longitud) -----------------------------------------------
+# --- zona de cobertura (migrations/0043) -----------------------------------------------
 
 
-def test_crear_ruta_con_coordenadas(db_session):
+def test_crear_ruta_con_zona(db_session):
     admin = crear_usuario_admin(db_session)
 
-    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, latitud=10.4806, longitud=-66.9036))
+    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
 
-    assert float(ruta.latitud) == pytest.approx(10.4806)
-    assert float(ruta.longitud) == pytest.approx(-66.9036)
+    assert json.loads(ruta.zona_geojson) == _ZONA_EJEMPLO
 
 
-def test_crear_ruta_requiere_latitud(db_session):
-    """La ubicacion es obligatoria (decision de producto, 2026-09-01) -- no se puede
-    crear una ruta sin latitud/longitud."""
+def test_crear_ruta_requiere_zona(db_session):
     admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="zona_geojson"):
+        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, zona_geojson=None))
+
+
+def test_crear_ruta_zona_con_menos_de_3_vertices_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="al menos 3 vertices"):
+        RutaService.crear(
+            db_session,
+            **_datos_ruta(creado_por=admin.id_usuario, zona_geojson=json.dumps([[10.4, -66.9], [10.5, -66.8]])),
+        )
+
+
+def test_crear_ruta_zona_json_invalido_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+
+    with pytest.raises(ValueError, match="JSON"):
+        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, zona_geojson="no es json"))
+
+
+def test_crear_ruta_zona_vertice_latitud_fuera_de_rango_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    zona = [[200, -66.9], [10.5, -66.8], [10.6, -66.7]]
 
     with pytest.raises(ValueError, match="latitud"):
-        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, latitud=None))
+        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, zona_geojson=json.dumps(zona)))
 
 
-def test_crear_ruta_requiere_longitud(db_session):
+def test_crear_ruta_zona_vertice_longitud_fuera_de_rango_falla(db_session):
     admin = crear_usuario_admin(db_session)
+    zona = [[10.4, -200], [10.5, -66.8], [10.6, -66.7]]
 
     with pytest.raises(ValueError, match="longitud"):
-        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, longitud=None))
+        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, zona_geojson=json.dumps(zona)))
 
 
-def test_crear_ruta_latitud_fuera_de_rango_falla(db_session):
-    admin = crear_usuario_admin(db_session)
-
-    with pytest.raises(ValueError, match="latitud"):
-        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, latitud=200, longitud=-66.9036))
-
-
-def test_crear_ruta_longitud_fuera_de_rango_falla(db_session):
-    admin = crear_usuario_admin(db_session)
-
-    with pytest.raises(ValueError, match="longitud"):
-        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, latitud=10.4806, longitud=200))
-
-
-def test_actualizar_ruta_cambia_coordenadas(db_session):
+def test_actualizar_ruta_cambia_zona(db_session):
     admin = crear_usuario_admin(db_session)
     ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
+    nueva_zona = [[11.0, -67.0], [11.0, -66.9], [11.1, -66.9]]
 
     actualizada = RutaService.actualizar(
-        db_session, ruta.id_ruta, id_usuario=admin.id_usuario, latitud=11.0, longitud=-67.0
+        db_session, ruta.id_ruta, id_usuario=admin.id_usuario, zona_geojson=json.dumps(nueva_zona)
     )
 
-    assert float(actualizada.latitud) == pytest.approx(11.0)
+    assert json.loads(actualizada.zona_geojson) == nueva_zona
 
 
-def test_actualizar_ruta_no_permite_vaciar_latitud(db_session):
+def test_actualizar_ruta_no_permite_vaciar_zona(db_session):
     admin = crear_usuario_admin(db_session)
     ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
 
-    with pytest.raises(ValueError, match="latitud"):
-        RutaService.actualizar(db_session, ruta.id_ruta, id_usuario=admin.id_usuario, latitud=None)
+    with pytest.raises(ValueError, match="zona_geojson"):
+        RutaService.actualizar(db_session, ruta.id_ruta, id_usuario=admin.id_usuario, zona_geojson=None)
 
 
-def test_actualizar_ruta_no_permite_vaciar_longitud(db_session):
+def test_actualizar_ruta_conserva_zona_existente_al_editar_otro_campo(db_session):
     admin = crear_usuario_admin(db_session)
     ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
-
-    with pytest.raises(ValueError, match="longitud"):
-        RutaService.actualizar(db_session, ruta.id_ruta, id_usuario=admin.id_usuario, longitud=None)
-
-
-def test_actualizar_ruta_conserva_coordenadas_existentes_al_editar_otro_campo(db_session):
-    admin = crear_usuario_admin(db_session)
-    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, latitud=10.4806, longitud=-66.9036))
 
     actualizada = RutaService.actualizar(
         db_session, ruta.id_ruta, id_usuario=admin.id_usuario, descripcion_ruta="Zona metropolitana"
     )
 
-    assert float(actualizada.latitud) == pytest.approx(10.4806)
-    assert float(actualizada.longitud) == pytest.approx(-66.9036)
+    assert json.loads(actualizada.zona_geojson) == _ZONA_EJEMPLO
 
 
-# --- destino / trazado (migrations/0040) ----------------------------------------------
+# --- contiene_punto / sugerir_ruta_por_ubicacion ----------------------------------------
 
 
-def test_crear_ruta_con_destino(db_session):
+def test_contiene_punto_dentro_de_la_zona(db_session):
     admin = crear_usuario_admin(db_session)
+    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
 
-    ruta = RutaService.crear(
-        db_session, **_datos_ruta(creado_por=admin.id_usuario, destino_latitud=11.0, destino_longitud=-67.0)
+    assert RutaService.contiene_punto(ruta, 10.50, -66.90) is True
+
+
+def test_contiene_punto_fuera_de_la_zona(db_session):
+    admin = crear_usuario_admin(db_session)
+    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
+
+    assert RutaService.contiene_punto(ruta, 20.0, -66.90) is False
+
+
+def test_contiene_punto_sin_zona_devuelve_false(db_session):
+    admin = crear_usuario_admin(db_session)
+    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
+    ruta.zona_geojson = None
+
+    assert RutaService.contiene_punto(ruta, 10.50, -66.90) is False
+
+
+def test_sugerir_ruta_por_ubicacion_encuentra_la_zona_correcta(db_session):
+    admin = crear_usuario_admin(db_session)
+    RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
+    otra_zona = [[20.0, -67.0], [20.0, -66.8], [20.1, -66.8]]
+    otra = RutaService.crear(
+        db_session,
+        **_datos_ruta(nombre_ruta="Ruta Norte", zona_geojson=json.dumps(otra_zona), creado_por=admin.id_usuario),
     )
 
-    assert float(ruta.destino_latitud) == pytest.approx(11.0)
-    assert float(ruta.destino_longitud) == pytest.approx(-67.0)
+    sugerida = RutaService.sugerir_ruta_por_ubicacion(db_session, 20.02, -66.9, id_usuario=admin.id_usuario)
+
+    assert sugerida is not None
+    assert sugerida.id_ruta == otra.id_ruta
 
 
-def test_crear_ruta_requiere_destino_latitud(db_session):
+def test_sugerir_ruta_por_ubicacion_sin_zona_que_contenga_el_punto(db_session):
     admin = crear_usuario_admin(db_session)
+    RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
 
-    with pytest.raises(ValueError, match="destino_latitud"):
-        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, destino_latitud=None))
+    sugerida = RutaService.sugerir_ruta_por_ubicacion(db_session, 0.0, 0.0, id_usuario=admin.id_usuario)
 
-
-def test_crear_ruta_requiere_destino_longitud(db_session):
-    admin = crear_usuario_admin(db_session)
-
-    with pytest.raises(ValueError, match="destino_longitud"):
-        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, destino_longitud=None))
+    assert sugerida is None
 
 
-def test_crear_ruta_destino_latitud_fuera_de_rango_falla(db_session):
-    admin = crear_usuario_admin(db_session)
-
-    with pytest.raises(ValueError, match="latitud"):
-        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, destino_latitud=200))
-
-
-def test_crear_ruta_destino_longitud_fuera_de_rango_falla(db_session):
-    admin = crear_usuario_admin(db_session)
-
-    with pytest.raises(ValueError, match="longitud"):
-        RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario, destino_longitud=200))
-
-
-def test_actualizar_ruta_no_permite_vaciar_destino_latitud(db_session):
+def test_sugerir_ruta_por_ubicacion_ignora_rutas_inactivas(db_session):
     admin = crear_usuario_admin(db_session)
     ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
+    RutaService.cambiar_estado(db_session, ruta.id_ruta, "INACTIVO", id_usuario=admin.id_usuario)
 
-    with pytest.raises(ValueError, match="destino_latitud"):
-        RutaService.actualizar(db_session, ruta.id_ruta, id_usuario=admin.id_usuario, destino_latitud=None)
+    sugerida = RutaService.sugerir_ruta_por_ubicacion(db_session, 10.50, -66.90, id_usuario=admin.id_usuario)
 
-
-def test_actualizar_ruta_no_permite_vaciar_destino_longitud(db_session):
-    admin = crear_usuario_admin(db_session)
-    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
-
-    with pytest.raises(ValueError, match="destino_longitud"):
-        RutaService.actualizar(db_session, ruta.id_ruta, id_usuario=admin.id_usuario, destino_longitud=None)
+    assert sugerida is None
 
 
-def test_distancia_a_trazado_sin_trazado_devuelve_none(db_session):
-    admin = crear_usuario_admin(db_session)
-    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
-
-    assert RutaService.distancia_a_trazado(ruta, 10.4806, -66.9036) is None
-
-
-def test_distancia_a_trazado_punto_sobre_el_trazado_es_cercano(db_session):
-    admin = crear_usuario_admin(db_session)
-    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
-    ruta.trazado_geojson = json.dumps([[10.4806, -66.9036], [10.5000, -66.8500]])
-
-    distancia = RutaService.distancia_a_trazado(ruta, 10.4806, -66.9036)
-
-    assert distancia == pytest.approx(0.0, abs=1e-6)
-
-
-def test_distancia_a_trazado_punto_lejano_devuelve_distancia_grande(db_session):
-    admin = crear_usuario_admin(db_session)
-    ruta = RutaService.crear(db_session, **_datos_ruta(creado_por=admin.id_usuario))
-    ruta.trazado_geojson = json.dumps([[10.4806, -66.9036], [10.5000, -66.8500]])
-
-    # ~1100km al norte -- lejos de cualquier vertice del trazado de arriba.
-    distancia = RutaService.distancia_a_trazado(ruta, 20.0, -66.9036)
-
-    assert distancia > 100
+def test_sugerir_ruta_por_ubicacion_sin_usuario_autorizado_falla(db_session):
+    with pytest.raises(PermisoDenegadoError):
+        RutaService.sugerir_ruta_por_ubicacion(db_session, 10.50, -66.90)

@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -36,12 +35,6 @@ from app.ui.styles import (
     ICON_CHEVRON_UP_URL,
     aplicar_sombra,
 )
-
-# Umbral orientativo (no bloqueante) para la alerta de "punto lejos de la ruta del
-# vendedor" -- ver _validar_y_aceptar(). 3km: la geocodificacion (busqueda por nombre,
-# click a ojo en el mapa) tiene margen de error real, y puede haber clientes legitimos en
-# el borde de una ruta, asi que es una confirmacion explicita, no un bloqueo duro.
-UMBRAL_ALERTA_DISTANCIA_RUTA_KM = 3.0
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -166,7 +159,9 @@ class ClienteFormDialog(QDialog):
         self.session = session
         self.cliente = cliente
         self.setWindowTitle("Editar Cliente" if cliente else "Nuevo Cliente")
-        self.setFixedSize(860, 740)
+        # Un poco mas ancho/alto que antes (860x740) -- pedido del usuario 2026-09-03:
+        # mas area de mapa hace mas facil marcar la ubicacion con precision.
+        self.setFixedSize(920, 800)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -437,7 +432,7 @@ class ClienteFormDialog(QDialog):
         contenido.setSpacing(14)
 
         self.mapa = MapaWidget(editable=True, centrar_en_dispositivo=self.cliente is None)
-        self.mapa.setMinimumSize(380, 230)
+        self.mapa.setMinimumSize(440, 300)
         self.mapa.coordenadas_cambiadas.connect(self._on_mapa_click)
         contenido.addWidget(self.mapa, 1)
 
@@ -462,11 +457,20 @@ class ClienteFormDialog(QDialog):
         lbl_ayuda.setWordWrap(True)
         lbl_ayuda.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
 
+        # Sugerencia (no forzada) de vendedor segun la zona de ruta que contiene el punto
+        # marcado -- ver _sugerir_vendedor_por_ubicacion(). Oculta hasta que haya una
+        # coordenada que evaluar.
+        self.lbl_sugerencia_ruta = QLabel()
+        self.lbl_sugerencia_ruta.setWordWrap(True)
+        self.lbl_sugerencia_ruta.setStyleSheet(f"font-size: 11px; color: {COLOR_PRIMARY}; font-weight: 600;")
+        self.lbl_sugerencia_ruta.setVisible(False)
+
         campos.addWidget(lbl_lat)
         campos.addWidget(self.latitud_input)
         campos.addWidget(lbl_lng)
         campos.addWidget(self.longitud_input)
         campos.addWidget(lbl_ayuda)
+        campos.addWidget(self.lbl_sugerencia_ruta)
         campos.addStretch()
 
         contenido.addLayout(campos, 1)
@@ -477,11 +481,13 @@ class ClienteFormDialog(QDialog):
         self.latitud_input.setText(f"{lat:.7f}")
         self.longitud_input.setText(f"{lng:.7f}")
         self.mapa.set_coordenadas(lat, lng)
+        self._sugerir_vendedor_por_ubicacion(lat, lng)
 
     def _on_coordenadas_editadas(self) -> None:
         lat, lng = self._leer_coordenadas()
         if lat is not None and lng is not None:
             self.mapa.set_coordenadas(lat, lng)
+            self._sugerir_vendedor_por_ubicacion(lat, lng)
 
     def _leer_coordenadas(self) -> tuple[float | None, float | None]:
         lat_texto = self.latitud_input.text().strip()
@@ -524,6 +530,7 @@ class ClienteFormDialog(QDialog):
             self.latitud_input.setText(f"{lat:.7f}")
             self.longitud_input.setText(f"{lng:.7f}")
             self.mapa.set_coordenadas(lat, lng)
+            self._sugerir_vendedor_por_ubicacion(lat, lng)
 
     def _validar_y_aceptar(self):
         if not self.codigo_input.text().strip():
@@ -559,34 +566,45 @@ class ClienteFormDialog(QDialog):
             MessageBox.warning(self, "Dato inválido", "La longitud debe estar entre -180 y 180.")
             return
 
-        if not self._confirmar_cercania_a_ruta(lat, lng):
-            return
-
         self.accept()
 
-    def _confirmar_cercania_a_ruta(self, lat: float, lng: float) -> bool:
-        """No bloqueante (ver UMBRAL_ALERTA_DISTANCIA_RUTA_KM): si el vendedor asignado
-        tiene una ruta con trazado y el punto marcado queda lejos de ella, pide
-        confirmacion explicita en vez de impedir el guardado -- la geocodificacion es
-        aproximada y puede haber clientes legitimos en el borde de una ruta. Devuelve
-        False solo si el usuario cancela ante la alerta."""
-        id_vendedor = self.vendedor_combo.currentData()
-        if id_vendedor is None:
-            return True
-        vendedor = self.session.get(Vendedor, id_vendedor)
-        ruta = vendedor.ruta if vendedor else None
+    def _sugerir_vendedor_por_ubicacion(self, lat: float, lng: float) -> None:
+        """Sugiere (nunca fuerza) el vendedor segun en que zona de ruta cae el punto
+        marcado -- decision de negocio 2026-09-03: la asignacion puede ser automatica por
+        geografia, pero siempre editable a mano. Solo PRESELECCIONA el combo cuando se
+        esta creando un cliente NUEVO y el usuario todavia no eligio vendedor a mano (el
+        combo sigue en "Sin asignar") -- en edicion, o si ya se eligio uno, nunca
+        reasigna solo: aca solo se actualiza el texto informativo."""
+        ruta = RutaService.sugerir_ruta_por_ubicacion(self.session, lat, lng)
         if ruta is None:
-            return True
-        distancia = RutaService.distancia_a_trazado(ruta, lat, lng)
-        if distancia is None or distancia <= UMBRAL_ALERTA_DISTANCIA_RUTA_KM:
-            return True
-        respuesta = MessageBox.question(
-            self,
-            "Ubicación alejada de la ruta",
-            f"El punto marcado está a {distancia:.1f} km de la ruta '{ruta.nombre_ruta}' "
-            f"asignada al vendedor. ¿Deseas guardarlo de todas formas?",
+            self.lbl_sugerencia_ruta.setVisible(False)
+            return
+
+        vendedores_zona = (
+            self.session.query(Vendedor)
+            .filter(Vendedor.id_ruta == ruta.id_ruta, Vendedor.estado_vendedor == "ACTIVO")
+            .order_by(Vendedor.nombre_vendedor)
+            .all()
         )
-        return respuesta == QMessageBox.StandardButton.Yes
+        if len(vendedores_zona) == 1:
+            vendedor = vendedores_zona[0]
+            self.lbl_sugerencia_ruta.setText(
+                f"📍 Dentro de la zona '{ruta.nombre_ruta}' — vendedor sugerido: {vendedor.nombre_vendedor}."
+            )
+            if self.cliente is None and self.vendedor_combo.currentData() is None:
+                idx = self.vendedor_combo.findData(vendedor.id_vendedor)
+                if idx >= 0:
+                    self.vendedor_combo.setCurrentIndex(idx)
+        elif vendedores_zona:
+            nombres = ", ".join(v.nombre_vendedor for v in vendedores_zona)
+            self.lbl_sugerencia_ruta.setText(
+                f"📍 Dentro de la zona '{ruta.nombre_ruta}', con varios vendedores asignados ({nombres}) — elige uno."
+            )
+        else:
+            self.lbl_sugerencia_ruta.setText(
+                f"📍 Dentro de la zona '{ruta.nombre_ruta}', sin vendedor asignado todavía."
+            )
+        self.lbl_sugerencia_ruta.setVisible(True)
 
     def get_data(self) -> dict:
         tipo = self.tipo_id_combo.currentText().strip()

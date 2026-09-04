@@ -9,3 +9,11 @@ bcrypt==5.0.0
 qtawesome==1.4.2
 openpyxl==3.1.5
 reportlab==4.2.0
+# Geolocalizacion precisa nativa de Windows (app/ui/geo_windows.py, boton "Mi ubicacion"
+# de app/ui/mapa_widget.py) -- solo Windows, marcador de entorno para que `pip install`
+# no falle en Linux/Mac/CI (esta app corre solo en Windows de todos modos, ver README).
+# winrt-Windows.Foundation/Collections son dependencias transitivas de WinRT que pip no
+# resuelve solas (paquetes por namespace, sin declararse entre si).
+winrt-Windows.Devices.Geolocation==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
