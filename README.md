@@ -15,6 +15,12 @@ La app (`app/main.py`) es una aplicacion de escritorio PySide6, no corre dentro 
 Docker: solo la base de datos SQL Server se levanta en contenedor. La app corre nativa
 contra ese contenedor por `localhost,14330`.
 
+**La app en si (la GUI) solo corre en Windows** -- la geolocalizacion precisa del mapa
+(boton "Mi ubicacion" en Clientes/Rutas, `app/ui/geo_windows.py`) usa el Geolocator
+nativo de Windows (paquetes `winrt-Windows.*` en `requirements.txt`, marcados
+`sys_platform == "win32"` para no romper `pip install` en Linux/Mac). El resto del
+codigo (servicios, tests, lint) es multiplataforma.
+
 **Nota**: el contenedor publica el puerto **14330** (no el 1433 por defecto) porque en
 Windows es comun tener ya una instancia nativa de SQL Server escuchando en 1433 (p. ej.
 si se instalo SQL Server Express); usar otro puerto evita el choque. Si tu maquina no
@@ -31,7 +37,9 @@ lee como si `Cobeca2026` fuera el nombre de otra variable). Evita el caracter `$
 ```bash
 cp .env.example .env
 # Editar .env si se quiere otra contrasena (debe coincidir con la que usa el contenedor,
-# ver nota arriba sobre el caracter $).
+# ver nota arriba sobre el caracter $). Las variables SMTP_* son opcionales -- solo hacen
+# falta para el envio de codigos de desbloqueo/recuperacion de clave (app/services/
+# email_service.py); sin configurar, el resto de la app funciona igual.
 
 docker compose up -d
 ```
@@ -57,9 +65,18 @@ docker exec -i distribuidora_dj_sqlserver /opt/mssql-tools18/bin/sqlcmd \
   < schema_sqlserver.sql
 ```
 
+`schema_sqlserver.sql` es un baseline congelado (se auto-registra como la migracion
+`0000_baseline`) -- todo lo agregado despues (tablas de rutas/vendedores, columnas
+nuevas, triggers, etc.) vive en `migrations/*.sql`, asi que hace falta aplicarlas para
+terminar de armar la base:
+
+```bash
+python -m app.db.migrar
+```
+
 A partir de aca, cualquier cambio de schema (nuevo trigger, `ALTER TABLE`, etc.) se
-aplica con `python -m app.db.migrar` en vez de volver a correr `schema_sqlserver.sql`
-completo (no es idempotente para triggers/constraints) -- ver `migrations/README.md`.
+aplica de la misma forma en vez de volver a correr `schema_sqlserver.sql` completo (no es
+idempotente para triggers/constraints) -- ver `migrations/README.md`.
 
 (Opcional) correr las pruebas de triggers para validar que todo quedo bien:
 
@@ -88,8 +105,14 @@ directas. Para una instalacion 100% reproducible (incluye dependencias transitiv
 `requirements-lock.txt` (o `requirements-dev-lock.txt` para correr los tests) en vez de
 los archivos de arriba -- ver el comentario de cada uno para como regenerarlos.
 
-Lint/formato (`ruff`, instalado con `requirements-dev.txt`, config en `pyproject.toml`,
-corre en CI):
+Para lint, tests y el hook de pre-commit hace falta ademas instalar las dependencias de
+desarrollo (agrega `pytest`/`ruff`/`pre-commit` sobre las de `requirements.txt`):
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Lint/formato (`ruff`, config en `pyproject.toml`, corre en CI):
 
 ```bash
 ruff check .            # lint
@@ -97,7 +120,17 @@ ruff format .           # formatea en el lugar
 ruff format --check .   # solo verifica, no modifica (lo que corre CI)
 ```
 
-Para que esto se corra solo antes de cada commit (en vez de enterarse recien cuando falla
+Tests (necesitan el contenedor de SQL Server arriba -- `docker compose up -d` del paso 1;
+`tests/conftest.py` crea sola la base `distribuidora_dj_test` y le aplica el schema
+completo la primera vez que corren):
+
+```bash
+pytest                                          # suite completa
+pytest tests/services/test_ventas.py            # un archivo
+pytest tests/services/test_ventas.py::test_xyz  # un test puntual
+```
+
+Para que ruff se corra solo antes de cada commit (en vez de enterarse recien cuando falla
 CI despues del push), instalar el hook de pre-commit una vez por clon:
 
 ```bash
