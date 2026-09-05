@@ -393,6 +393,7 @@ class CuentasBancariasPanel(QWidget):
         session = self.session_factory()
         try:
             from app.db.models import CuentaBancaria
+
             cuenta = session.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == cuenta_id).first()
             if cuenta is None:
                 MessageBox.warning(self, "No encontrado", "La cuenta bancaria no existe.")
@@ -436,6 +437,7 @@ class CuentasBancariasPanel(QWidget):
         session = self.session_factory()
         try:
             from app.db.models import CuentaBancaria
+
             cuenta = session.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == cuenta_id).first()
             if cuenta is None:
                 MessageBox.warning(self, "No encontrado", "La cuenta bancaria no existe.")
