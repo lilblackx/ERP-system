@@ -312,6 +312,7 @@ class FacturaVenta(Base):
     )
     monto_iva: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False, server_default="0.00")
     estado_factura: Mapped[str] = mapped_column(String(20), server_default="EMITIDA")
+    estado_pago: Mapped[str | None] = mapped_column(String(20))
     id_tasa_factura: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
     condicion_pago: Mapped[str] = mapped_column(String(10), nullable=False)
     fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
