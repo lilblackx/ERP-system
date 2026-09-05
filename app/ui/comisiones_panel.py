@@ -35,6 +35,8 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.services.usuarios import UsuarioService
 from app.services.vendedores import VendedorService
+from app.services.ventas import VentaService
+from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.styles import (
@@ -425,6 +427,7 @@ class ComisionesPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabla.doubleClicked.connect(self.ver_detalle_factura)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
@@ -574,5 +577,45 @@ class ComisionesPanel(QWidget):
                 MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
         except Exception:
             logger.exception("Fallo al abrir dialogo de pago")
+        finally:
+            session.close()
+
+    def _fila_seleccionada_id_factura(self) -> int | None:
+        """Obtiene el ID de la factura de la fila seleccionada en la tabla."""
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            MessageBox.information(self, "Selección requerida", "Selecciona una comisión de la lista.")
+            return None
+
+        fila = filas[0].row()
+        if fila < 0 or fila >= len(self.comisiones_cargadas):
+            return None
+
+        comision = self.comisiones_cargadas[fila]
+        try:
+            if comision.detalle and comision.detalle.factura:
+                return comision.detalle.factura.id_factura
+        except Exception:
+            pass
+        return None
+
+    def ver_detalle_factura(self) -> None:
+        """Abre el diálogo de detalle de la factura seleccionada."""
+        id_factura = self._fila_seleccionada_id_factura()
+        if id_factura is None:
+            return
+
+        session = self.session_factory()
+        try:
+            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.usuario.id_usuario)
+            dialogo = FacturaDetalleDialog(datos, session, self.usuario.id_usuario, parent=self)
+            dialogo.exec()
+        except ValueError as exc:
+            MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+        except Exception:
+            logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
+            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
             session.close()
