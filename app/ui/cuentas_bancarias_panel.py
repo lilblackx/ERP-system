@@ -385,9 +385,19 @@ class CuentasBancariasPanel(QWidget):
             MessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
             return
 
-        cuenta = self._cuentas[row]
+        item = self.table.item(row, 0)
+        if item is None:
+            return
+
+        cuenta_id = int(item.text())
         session = self.session_factory()
         try:
+            from app.db.models import CuentaBancaria
+            cuenta = session.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == cuenta_id).first()
+            if cuenta is None:
+                MessageBox.warning(self, "No encontrado", "La cuenta bancaria no existe.")
+                return
+
             dialog = CuentaBancariaFormDialog(session, cuenta, parent=self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 datos = dialog.get_data()
@@ -418,16 +428,26 @@ class CuentasBancariasPanel(QWidget):
             MessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
             return
 
-        cuenta = self._cuentas[row]
-        nuevo_estado = "INACTIVO" if cuenta.estado_cuenta == "ACTIVO" else "ACTIVO"
-        respuesta = MessageBox.question(
-            self, "Confirmar", f"¿Cambiar el estado de la cuenta '{cuenta.numero_cuenta}' a {nuevo_estado}?"
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
+        item = self.table.item(row, 0)
+        if item is None:
             return
 
+        cuenta_id = int(item.text())
         session = self.session_factory()
         try:
+            from app.db.models import CuentaBancaria
+            cuenta = session.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == cuenta_id).first()
+            if cuenta is None:
+                MessageBox.warning(self, "No encontrado", "La cuenta bancaria no existe.")
+                return
+
+            nuevo_estado = "INACTIVO" if cuenta.estado_cuenta == "ACTIVO" else "ACTIVO"
+            respuesta = MessageBox.question(
+                self, "Confirmar", f"¿Cambiar el estado de la cuenta '{cuenta.numero_cuenta}' a {nuevo_estado}?"
+            )
+            if respuesta != QMessageBox.StandardButton.Yes:
+                return
+
             CuentaBancariaService.cambiar_estado(
                 session, cuenta.id_cuenta, nuevo_estado, id_usuario=self.usuario.id_usuario
             )
