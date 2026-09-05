@@ -323,6 +323,13 @@ class HistorialClienteWindow(QDialog):
         # QWidget contenedor), la regla en cascada #BtnPrimary no pintaba su
         # background-color en Windows (aunque el borde y el texto si se veian) -- fijar
         # el QSS completo en el propio boton evita depender de esa cascada.
+        btn_ver_pagos = QPushButton("Ver Pagos")
+        btn_ver_pagos.setIcon(qta.icon("fa5s.list", color=COLOR_PRIMARY))
+        btn_ver_pagos.setObjectName("BtnSecondary")
+        btn_ver_pagos.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ver_pagos.setAutoDefault(False)
+        btn_ver_pagos.clicked.connect(self.ver_detalle_pagos)
+
         btn_cerrar = QPushButton("Cerrar")
         btn_cerrar.setIcon(qta.icon("fa5s.times", color=COLOR_PRIMARY))
         btn_cerrar.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -344,6 +351,7 @@ class HistorialClienteWindow(QDialog):
         btn_cerrar.clicked.connect(self.accept)
 
         h.addWidget(btn_detalle)
+        h.addWidget(btn_ver_pagos)
         h.addWidget(self.btn_aplicar_nota)
         h.addWidget(self.btn_devolver_nota)
         h.addWidget(btn_exportar_excel)
@@ -621,5 +629,90 @@ class HistorialClienteWindow(QDialog):
         except Exception:
             logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
             MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+        finally:
+            session.close()
+
+    def ver_detalle_pagos(self) -> None:
+        """Muestra un diálogo con el detalle de pagos de la factura seleccionada."""
+        id_factura = self._fila_seleccionada_id_factura()
+        if id_factura is None:
+            return
+
+        session = self.session_factory()
+        try:
+            from app.services.historial_cliente import obtener_historial_cliente
+            historial = obtener_historial_cliente(session, self.id_cliente)
+
+            # Encontrar la factura seleccionada en el historial
+            factura_seleccionada = None
+            for item in historial:
+                if item["id_factura"] == id_factura:
+                    factura_seleccionada = item
+                    break
+
+            if not factura_seleccionada:
+                MessageBox.warning(self, "No encontrado", "No se encontró la factura en el historial.")
+                return
+
+            pagos = factura_seleccionada["pagos_detalle"]
+            if not pagos:
+                MessageBox.information(self, "Sin pagos", "Esta factura no tiene pagos registrados.")
+                return
+
+            # Crear diálogo para mostrar detalle de pagos
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Detalle de Pagos - {factura_seleccionada['numero_factura']}")
+            dialog.setMinimumSize(700, 400)
+            dialog.setStyleSheet(DIALOG_STYLE)
+
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(20, 20, 20, 20)
+            layout.setSpacing(16)
+
+            # Header
+            header = QLabel(f"Pagos de Factura {factura_seleccionada['numero_factura']}")
+            header.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+            layout.addWidget(header)
+
+            # Tabla de pagos
+            tabla = QTableWidget(len(pagos), 6)
+            tabla.setHorizontalHeaderLabels(["Método", "Monto", "Moneda", "Referencia", "Fecha", "Origen"])
+            tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+            tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+            tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            tabla.setAlternatingRowColors(True)
+            tabla.setShowGrid(False)
+            tabla.verticalHeader().setVisible(False)
+            tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            tabla.setStyleSheet(TABLE_QSS)
+            aplicar_sombra(tabla)
+            tabla.verticalHeader().setDefaultSectionSize(40)
+
+            for fila, pago in enumerate(pagos):
+                tabla.setItem(fila, 0, QTableWidgetItem(pago["metodo_pago"]))
+                tabla.setItem(fila, 1, QTableWidgetItem(f"${float(pago['monto']):,.2f}"))
+                tabla.setItem(fila, 2, QTableWidgetItem(pago["moneda"]))
+                tabla.setItem(fila, 3, QTableWidgetItem(pago["referencia"] or "—"))
+                tabla.setItem(fila, 4, QTableWidgetItem(pago["fecha_pago"]))
+                tabla.setItem(fila, 5, QTableWidgetItem(pago["origen"] or "—"))
+
+            layout.addWidget(tabla)
+
+            # Footer con botón cerrar
+            footer = QHBoxLayout()
+            footer.addStretch()
+            btn_cerrar = QPushButton("Cerrar")
+            btn_cerrar.setObjectName("BtnSecondary")
+            btn_cerrar.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_cerrar.setAutoDefault(False)
+            btn_cerrar.clicked.connect(dialog.accept)
+            footer.addWidget(btn_cerrar)
+            layout.addLayout(footer)
+
+            dialog.exec()
+
+        except Exception:
+            logger.exception("Fallo al cargar el detalle de pagos de la factura %s", id_factura)
+            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de pagos.")
         finally:
             session.close()

@@ -8,6 +8,18 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models import CuentaPorCobrar, FacturaVenta, PagoCobro
 
 
+class PagoDetalle(TypedDict):
+    """Representa el detalle de un pago individual."""
+
+    id_pago: int
+    metodo_pago: str
+    monto: Decimal
+    moneda: str
+    referencia: str | None
+    fecha_pago: str
+    origen: str | None  # Caja o cuenta bancaria
+
+
 class HistorialItem(TypedDict):
     """Representa un item del historial del cliente."""
 
@@ -26,6 +38,7 @@ class HistorialItem(TypedDict):
     metodo_pago: str | None
     monto_vuelto: Decimal
     metodo_vuelto: str | None
+    pagos_detalle: list[PagoDetalle]
 
 
 def obtener_historial_cliente(session: Session, id_cliente: int) -> list[HistorialItem]:
@@ -54,13 +67,42 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         # Obtener cuenta por cobrar de esta factura
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
 
-        # Obtener pagos realizados para esta cuenta por cobrar
+        # Obtener pagos realizados para esta cuenta por cobrar con sus relaciones
         pagos: list[PagoCobro] = []
         if cxc:
-            pagos = session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar).all()
+            pagos = (
+                session.query(PagoCobro)
+                .options(joinedload(PagoCobro.cuenta_bancaria), joinedload(PagoCobro.caja))
+                .filter(PagoCobro.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar)
+                .all()
+            )
 
         # Calcular total pagado
         total_pagado = Decimal(sum(pago.monto for pago in pagos))
+
+        # Construir detalle de pagos
+        pagos_detalle: list[PagoDetalle] = []
+        for pago in pagos:
+            origen = None
+            if pago.cuenta_bancaria:
+                banco = pago.cuenta_bancaria.banco
+                nombre_banco = banco.nombre_banco if banco else "N/A"
+                ultimos_digitos = pago.cuenta_bancaria.numero_cuenta[-4:]
+                origen = f"Cuenta: {nombre_banco} - ...{ultimos_digitos}"
+            elif pago.caja:
+                origen = f"Caja: {pago.caja.nombre_caja or 'N/A'}"
+
+            pagos_detalle.append(
+                {
+                    "id_pago": pago.id_pago_cobro,
+                    "metodo_pago": pago.metodo_pago,
+                    "monto": pago.monto,
+                    "moneda": pago.moneda,
+                    "referencia": pago.referencia,
+                    "fecha_pago": pago.fecha_pago.strftime("%Y-%m-%d %H:%M") if pago.fecha_pago else "",
+                    "origen": origen,
+                }
+            )
 
         # Saldo pendiente (si no hay CxC, es el total de la factura)
         if cxc:
@@ -106,6 +148,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "metodo_pago": metodo_pago,
             "monto_vuelto": factura.monto_vuelto,
             "metodo_vuelto": factura.metodo_vuelto,
+            "pagos_detalle": pagos_detalle,
         }
 
         historial.append(item)
