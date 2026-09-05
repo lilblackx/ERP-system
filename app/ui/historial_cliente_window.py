@@ -641,6 +641,7 @@ class HistorialClienteWindow(QDialog):
         session = self.session_factory()
         try:
             from app.services.historial_cliente import obtener_historial_cliente
+
             historial = obtener_historial_cliente(session, self.id_cliente)
 
             # Encontrar la factura seleccionada en el historial
