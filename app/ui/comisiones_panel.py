@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -31,6 +32,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ComisionFactura, Usuario
 from app.services.comisiones import ComisionService, PagoComisionService
+from app.services.empresa import EmpresaService
+from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.services.usuarios import UsuarioService
@@ -45,6 +48,7 @@ from app.ui.styles import (
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
@@ -59,18 +63,20 @@ from app.ui.styles import (
     EstadoBadge,
     aplicar_sombra,
 )
-from app.ui.toolbar_popups import BotonFiltros
+from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 
 logger = logging.getLogger(__name__)
 
 COLORES_ESTADO_COMISION = {
     "pendiente": COLOR_PRIMARY,
+    "liberada": COLOR_INFO,
     "pagada": COLOR_SUCCESS,
 }
 
 ESTADOS_FILTRO = [
     ("Todos los estados", None),
     ("Pendiente", "pendiente"),
+    ("Liberada", "liberada"),
     ("Pagada", "pagada"),
 ]
 
@@ -344,6 +350,9 @@ class ComisionesPanel(QWidget):
 
         self.id_vendedor_actual: int | None = None
         self.comisiones_cargadas: list[ComisionFactura] = []
+        self.comisiones_filtradas: list[ComisionFactura] = []
+        self.total_pendiente = Decimal("0.00")
+        self.total_liberada = Decimal("0.00")
 
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_datos)
@@ -358,8 +367,7 @@ class ComisionesPanel(QWidget):
         root.setSpacing(16)
 
         root.addWidget(self._make_header())
-        if self.modo_gestion:
-            root.addWidget(self._make_toolbar())
+        root.addWidget(self._make_toolbar())
         root.addWidget(self._make_table())
         if self.modo_gestion:
             root.addWidget(self._make_footer())
@@ -397,11 +405,14 @@ class ComisionesPanel(QWidget):
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)
 
-        lbl_vendedor = QLabel("Vendedor:")
-        lbl_vendedor.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
-        self.vendedor_combo = QComboBox()
-        self.vendedor_combo.setFixedWidth(250)
-        self.vendedor_combo.currentIndexChanged.connect(self._on_vendedor_cambiado)
+        if self.modo_gestion:
+            lbl_vendedor = QLabel("Vendedor:")
+            lbl_vendedor.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
+            self.vendedor_combo = QComboBox()
+            self.vendedor_combo.setFixedWidth(250)
+            self.vendedor_combo.currentIndexChanged.connect(self._on_vendedor_cambiado)
+            h.addWidget(lbl_vendedor)
+            h.addWidget(self.vendedor_combo)
 
         self.estado_combo = QComboBox()
         for etiqueta, valor in ESTADOS_FILTRO:
@@ -409,10 +420,11 @@ class ComisionesPanel(QWidget):
         self.estado_combo.currentIndexChanged.connect(self._aplicar_filtro_estado)
         self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
-        h.addWidget(lbl_vendedor)
-        h.addWidget(self.vendedor_combo)
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel, on_pdf=self.exportar_pdf)
+
         h.addStretch()
         h.addWidget(self.btn_filtrar)
+        h.addWidget(self.btn_exportar)
         return w
 
     def _make_table(self) -> QTableWidget:
@@ -492,7 +504,7 @@ class ComisionesPanel(QWidget):
         try:
             comisiones = ComisionService.listar_mis_comisiones(session, self.usuario.id_usuario)
             self.comisiones_cargadas = comisiones
-            self._poblar_tabla(comisiones)
+            self._aplicar_filtro_estado()
         except ValueError:
             self.tabla.setRowCount(0)
             self.lbl_total.setText("Sin datos")
@@ -524,7 +536,9 @@ class ComisionesPanel(QWidget):
 
     def _poblar_tabla(self, comisiones: list[ComisionFactura]) -> None:
         self.tabla.setRowCount(len(comisiones))
+        self.comisiones_filtradas = comisiones
         total_pendiente = Decimal("0.00")
+        total_liberada = Decimal("0.00")
 
         for fila, comision in enumerate(comisiones):
             factura_num = ""
@@ -548,35 +562,116 @@ class ComisionesPanel(QWidget):
 
             if estado == "pendiente":
                 total_pendiente += comision.monto_comision
+            elif estado == "liberada":
+                total_liberada += comision.monto_comision
 
-        self.lbl_total.setText(f"Pendiente: ${float(total_pendiente):,.2f}")
+        self.total_pendiente = total_pendiente
+        self.total_liberada = total_liberada
+        self.lbl_total.setText(
+            f"Por cobrar: ${float(total_pendiente):,.2f}  ·  Liberada: ${float(total_liberada):,.2f}"
+        )
         if self.modo_gestion:
-            self.btn_pagar.setEnabled(self.id_vendedor_actual is not None and total_pendiente > 0)
+            self.btn_pagar.setEnabled(self.id_vendedor_actual is not None and total_liberada > 0)
 
     def pagar_comisiones(self) -> None:
         if self.id_vendedor_actual is None:
             MessageBox.information(self, "Selección requerida", "Selecciona un vendedor.")
             return
 
-        total_pendiente = sum(
-            (c.monto_comision for c in self.comisiones_cargadas if c.estado_pago == "pendiente"),
+        total_liberada = sum(
+            (c.monto_comision for c in self.comisiones_cargadas if c.estado_pago == "liberada"),
             Decimal("0.00"),
         )
-        if total_pendiente <= 0:
-            MessageBox.information(self, "Sin comisiones", "No hay comisiones pendientes para este vendedor.")
+        if total_liberada <= 0:
+            MessageBox.information(self, "Sin comisiones", "No hay comisiones liberadas para pagar a este vendedor.")
             return
 
         nombre_vendedor = self.vendedor_combo.currentText()
         session = self.session_factory()
         try:
             dialogo = PagarComisionesDialog(
-                session, self.usuario.id_usuario, self.id_vendedor_actual, total_pendiente, nombre_vendedor, parent=self
+                session, self.usuario.id_usuario, self.id_vendedor_actual, total_liberada, nombre_vendedor, parent=self
             )
             if dialogo.exec() and dialogo.pago_creado is not None:
                 self._on_vendedor_cambiado()
                 MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
         except Exception:
             logger.exception("Fallo al abrir dialogo de pago")
+        finally:
+            session.close()
+
+    def _datos_para_exportar(self) -> tuple[list[str], list[list]]:
+        encabezados = ["Factura", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado"]
+        filas = []
+        for comision in self.comisiones_filtradas:
+            factura_num = ""
+            try:
+                if comision.detalle and comision.detalle.factura:
+                    factura_num = comision.detalle.factura.numero_factura or ""
+            except Exception:
+                pass
+            fecha_str = comision.fecha_calculo.strftime("%d/%m/%Y") if comision.fecha_calculo else ""
+            filas.append(
+                [
+                    factura_num,
+                    fecha_str,
+                    float(comision.monto_base_comision or 0),
+                    float(comision.monto_venta_comision or 0),
+                    float(comision.monto_comision),
+                    (comision.estado_pago or "pendiente").capitalize(),
+                ]
+            )
+        return encabezados, filas
+
+    def _filtros_para_exportar(self) -> dict:
+        filtros = {
+            "Vendedor": self.vendedor_combo.currentText() if self.modo_gestion else self.usuario.nombre_usuario,
+            "Estado": self.estado_combo.currentText(),
+            "Por cobrar": f"${float(self.total_pendiente):,.2f}",
+            "Liberada": f"${float(self.total_liberada):,.2f}",
+        }
+        return filtros
+
+    def _obtener_config_empresa(self, session: Session):
+        return EmpresaService.obtener_datos_documento(session)
+
+    def exportar_excel(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar comisiones", "comisiones.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+        session = self.session_factory()
+        try:
+            encabezados, filas = self._datos_para_exportar()
+            config_empresa = self._obtener_config_empresa(session)
+            exportar_excel(ruta, encabezados, filas, titulo="Comisiones", config_empresa=config_empresa)
+            MessageBox.information(self, "Exportación completa", f"Se exportó a:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar comisiones a Excel")
+            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+        finally:
+            session.close()
+
+    def exportar_pdf(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar comisiones", "comisiones.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+        session = self.session_factory()
+        try:
+            encabezados, filas = self._datos_para_exportar()
+            config_empresa = self._obtener_config_empresa(session)
+            exportar_pdf(
+                ruta,
+                "Comisiones",
+                encabezados,
+                filas,
+                filtros=self._filtros_para_exportar(),
+                col_widths=[1.4, 1.0, 1.0, 1.0, 1.0, 1.0],
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(self, "Exportación completa", f"Se exportó a:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar comisiones a PDF")
+            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
         finally:
             session.close()
 

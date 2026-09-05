@@ -47,6 +47,7 @@ from app.ui.styles import (
     COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_FIELD_BG,
+    COLOR_INFO,
     COLOR_PRIMARY,
     COLOR_PRIMARY_LIGHT,
     COLOR_SUCCESS,
@@ -195,7 +196,7 @@ COLS_MOV_CUENTA_BANCARIA = ["Fecha", "Tipo", "Referencia", "Descripción", "Mont
 COLS_CONCILIACION_BANCARIA = ["Cuenta", "Pendiente", "Cant. Pendiente", "Conciliado", "Cant. Conciliada"]
 COLS_SALDO_CONSOLIDADO = ["Banco", "Cuenta", "Tipo", "Titular", "Saldo"]
 COLS_COMISIONES_VENDEDOR = ["Vendedor", "Facturas", "Comisión"]
-COLS_COMISIONES_PAGADAS_PENDIENTES = ["Vendedor", "Pagado", "Pendiente"]
+COLS_COMISIONES_PAGADAS_PENDIENTES = ["Vendedor", "Pagado", "Liberada", "Pendiente"]
 
 ETIQUETAS_ESTADO_NC = {"disponible": "Disponible", "aplicada": "Aplicada", "devuelta": "Devuelta"}
 ETIQUETAS_ESTADO_OC = {"PENDIENTE": "Pendiente", "PARCIAL": "Parcial", "COMPLETA": "Completa", "ANULADA": "Anulada"}
@@ -3585,13 +3586,17 @@ class ReportesPanel(QWidget):
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["vendedor"] or "N/A"))
             self.tabla.setItem(row, 1, QTableWidgetItem(f"${float(f['pagado']):,.2f}"))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['pendiente']):,.2f}"))
+            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['liberada']):,.2f}"))
+            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['pendiente']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} vendedor{'es' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Pagado: ${float(resultado['total_pagado']):,.2f}", COLOR_SUCCESS))
         self.resumen_layout.addWidget(
-            self._chip(f"Pendiente: ${float(resultado['total_pendiente']):,.2f}", COLOR_WARNING)
+            self._chip(f"Liberada (no pagada): ${float(resultado['total_liberada']):,.2f}", COLOR_INFO)
+        )
+        self.resumen_layout.addWidget(
+            self._chip(f"Pendiente por cobrar: ${float(resultado['total_pendiente']):,.2f}", COLOR_WARNING)
         )
         self.resumen_layout.addStretch()
 
@@ -4052,7 +4057,10 @@ class ReportesPanel(QWidget):
             ]
             return "comisiones_vendedor", COLS_COMISIONES_VENDEDOR, filas
 
-        filas = [[f["vendedor"], float(f["pagado"]), float(f["pendiente"])] for f in self._ultimo_resultado["filas"]]
+        filas = [
+            [f["vendedor"], float(f["pagado"]), float(f["liberada"]), float(f["pendiente"])]
+            for f in self._ultimo_resultado["filas"]
+        ]
         return "comisiones_pagadas_pendientes", COLS_COMISIONES_PAGADAS_PENDIENTES, filas
 
     def _info_pdf(self) -> tuple[str, dict, list[float]]:
@@ -4418,9 +4426,10 @@ class ReportesPanel(QWidget):
             "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y") if resultado["fecha_hasta"] else "N/A",
             "Vendedor": self.vendedor_combo_cpp.currentText(),
             "Pagado": f"${float(resultado['total_pagado']):,.2f}",
+            "Liberada": f"${float(resultado['total_liberada']):,.2f}",
             "Pendiente": f"${float(resultado['total_pendiente']):,.2f}",
         }
-        return "Comisiones Pagadas vs. Pendientes", filtros, [2.0, 1.2, 1.2]
+        return "Comisiones Pagadas vs. Pendientes", filtros, [1.8, 1.0, 1.0, 1.0]
 
     def _obtener_config_empresa(self):
         session = self.session_factory()

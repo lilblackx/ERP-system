@@ -77,13 +77,18 @@ class ComisionService:
             if monto_comision <= 0:
                 continue
 
+            # Contado: la factura se cobra completa al emitir (nunca hay cuentas_por_cobrar
+            # de por medio) -- la comision nace 'liberada' directo. Credito: nace 'pendiente'
+            # y trg_cxc_libera_comisiones (migrations/0045) la libera cuando la cuenta por
+            # cobrar de esta factura llega a 'pagada'.
+            estado_inicial = "liberada" if factura.condicion_pago == "contado" else "pendiente"
             comision = ComisionFactura(
                 id_factura_detalle=detalle.id_factura_detalle,
                 id_vendedor=factura.id_vendedor,
                 monto_base_comision=monto_base,
                 monto_venta_comision=monto_venta,
                 monto_comision=monto_comision,
-                estado_pago="pendiente",
+                estado_pago=estado_inicial,
                 fecha_calculo=datetime.now(),
                 creado_por=id_usuario,
             )
@@ -132,11 +137,14 @@ class PagoComisionService:
         referencia: str | None = None,
         id_usuario: int | None = None,
     ) -> PagoComision:
-        """Paga en un solo batch TODAS las comisiones 'pendiente' con monto_comision > 0
-        de ese vendedor -- un pago de comision liquida lo acumulado de una vez, no hay
-        pago parcial de una linea individual. Sin trigger INSTEAD OF INSERT (a diferencia
-        de PagoCobro/PagoProveedor): no hay saldo_pendiente parcial que proteger, asi que
-        el BancoMovimiento/CajaMovimiento se crea directo aca, en la misma transaccion."""
+        """Paga en un solo batch TODAS las comisiones 'liberada' con monto_comision > 0
+        de ese vendedor -- 'liberada' es el cliente ya pago la factura, el vendedor
+        todavia no cobro esa comision (ver migrations/0045_comisiones_estado_liberada.sql).
+        Las 'pendiente' (cliente no ha pagado) nunca son pagables aca. Un pago de comision
+        liquida lo acumulado de una vez, no hay pago parcial de una linea individual. Sin
+        trigger INSTEAD OF INSERT (a diferencia de PagoCobro/PagoProveedor): no hay
+        saldo_pendiente parcial que proteger, asi que el BancoMovimiento/CajaMovimiento se
+        crea directo aca, en la misma transaccion."""
         require_permiso(session, id_usuario, "comisiones", "crear")
         if (id_cuenta_bancaria is None) == (id_caja is None):
             raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
@@ -159,12 +167,12 @@ class PagoComisionService:
         # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18/C22/C24 -- bloquea las filas
         # hasta el commit para que un segundo pago concurrente sobre el mismo vendedor no
         # alcance a pagar dos veces las mismas comisiones.
-        comisiones_pendientes = (
+        comisiones_liberadas = (
             session.execute(
                 select(ComisionFactura)
                 .where(
                     ComisionFactura.id_vendedor == id_vendedor,
-                    ComisionFactura.estado_pago == "pendiente",
+                    ComisionFactura.estado_pago == "liberada",
                     ComisionFactura.monto_comision > 0,
                 )
                 .with_hint(ComisionFactura, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
@@ -172,10 +180,10 @@ class PagoComisionService:
             .scalars()
             .all()
         )
-        if not comisiones_pendientes:
-            raise ValueError("No hay comisiones pendientes para este vendedor")
+        if not comisiones_liberadas:
+            raise ValueError("No hay comisiones liberadas para pagar a este vendedor")
 
-        monto_total = sum((c.monto_comision for c in comisiones_pendientes), Decimal("0.00"))
+        monto_total = sum((c.monto_comision for c in comisiones_liberadas), Decimal("0.00"))
 
         pago = PagoComision(
             id_vendedor=id_vendedor,
@@ -190,7 +198,7 @@ class PagoComisionService:
         session.add(pago)
         session.flush()
 
-        for comision in comisiones_pendientes:
+        for comision in comisiones_liberadas:
             comision.estado_pago = "pagada"
             comision.id_pago_comision = pago.id_pago_comision
 
@@ -231,7 +239,7 @@ class PagoComisionService:
             "Comisiones pagadas: vendedor=%s monto=%s cantidad_comisiones=%s usuario=%s",
             id_vendedor,
             monto_total,
-            len(comisiones_pendientes),
+            len(comisiones_liberadas),
             id_usuario,
         )
 
@@ -243,7 +251,7 @@ class PagoComisionService:
             detalle={
                 "id_vendedor": id_vendedor,
                 "monto": str(monto_total),
-                "cantidad_comisiones": len(comisiones_pendientes),
+                "cantidad_comisiones": len(comisiones_liberadas),
             },
         )
         return pago

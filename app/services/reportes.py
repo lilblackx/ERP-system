@@ -2409,20 +2409,24 @@ class ReporteService:
                     "id_vendedor": c.id_vendedor,
                     "vendedor": vendedor.nombre_vendedor if vendedor else None,
                     "pagado": Decimal("0.00"),
+                    "liberada": Decimal("0.00"),
                     "pendiente": Decimal("0.00"),
                 },
             )
             monto = c.monto_comision or Decimal("0.00")
             if c.estado_pago == "pagada":
                 entrada["pagado"] += monto
+            elif c.estado_pago == "liberada":
+                entrada["liberada"] += monto
             else:
                 entrada["pendiente"] += monto
 
-        filas = sorted(por_vendedor.values(), key=lambda f: f["pendiente"], reverse=True)
+        filas = sorted(por_vendedor.values(), key=lambda f: f["liberada"], reverse=True)
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
             "total_pagado": sum((f["pagado"] for f in filas), Decimal("0.00")),
+            "total_liberada": sum((f["liberada"] for f in filas), Decimal("0.00")),
             "total_pendiente": sum((f["pendiente"] for f in filas), Decimal("0.00")),
         }

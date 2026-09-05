@@ -2449,12 +2449,13 @@ def test_comisiones_pagadas_vs_pendientes_sin_comisiones(db_session):
     assert resultado["filas"] == []
 
 
-def test_comisiones_pagadas_vs_pendientes_separa_pagado_de_pendiente(db_session):
+def test_comisiones_pagadas_vs_pendientes_separa_pagado_de_liberada(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
 
-    _crear_comision(db_session, admin, vendedor, Decimal("1.00"), Decimal("2.00"), Decimal("3"))  # pagada
-    _crear_comision(db_session, admin, vendedor, Decimal("1.00"), Decimal("4.00"), Decimal("2"))  # pendiente
+    # Contado: la comision nace 'liberada' directo (ver migrations/0045).
+    _crear_comision(db_session, admin, vendedor, Decimal("1.00"), Decimal("2.00"), Decimal("3"))  # -> pagada
+    _crear_comision(db_session, admin, vendedor, Decimal("1.00"), Decimal("4.00"), Decimal("2"))  # -> pagada
 
     caja = crear_caja(db_session)
     PagoComisionService.pagar_comisiones_vendedor(
@@ -2464,9 +2465,9 @@ def test_comisiones_pagadas_vs_pendientes_separa_pagado_de_pendiente(db_session)
         id_caja=caja.id_caja,
         id_usuario=admin.id_usuario,
     )
-    # pagar_comisiones_vendedor liquida TODO lo pendiente del vendedor de una vez (C14) --
+    # pagar_comisiones_vendedor liquida TODO lo liberado del vendedor de una vez (C14) --
     # asi que la segunda comision, creada ANTES del pago, tambien quedo pagada. Se agrega
-    # una tercera comision DESPUES del pago para tener una fila realmente pendiente.
+    # una tercera comision DESPUES del pago para tener una fila realmente liberada (no pagada).
     _crear_comision(db_session, admin, vendedor, Decimal("1.00"), Decimal("6.00"), Decimal("1"))
 
     resultado = ReporteService.comisiones_pagadas_vs_pendientes(db_session, id_usuario=admin.id_usuario)
@@ -2474,6 +2475,42 @@ def test_comisiones_pagadas_vs_pendientes_separa_pagado_de_pendiente(db_session)
     assert len(resultado["filas"]) == 1
     fila = resultado["filas"][0]
     assert fila["pagado"] == Decimal("9.00")
-    assert fila["pendiente"] == Decimal("5.00")
+    assert fila["liberada"] == Decimal("5.00")
+    assert fila["pendiente"] == Decimal("0.00")
     assert resultado["total_pagado"] == Decimal("9.00")
-    assert resultado["total_pendiente"] == Decimal("5.00")
+    assert resultado["total_liberada"] == Decimal("5.00")
+    assert resultado["total_pendiente"] == Decimal("0.00")
+
+
+def test_comisiones_pagadas_vs_pendientes_credito_sin_cobrar_cuenta_como_pendiente(db_session):
+    """Una comision sobre una venta a credito que el cliente todavia no pago cuenta en el
+    bucket 'pendiente' del reporte, distinto de 'liberada' (cliente ya pago, vendedor no
+    cobro) -- ver migrations/0045_comisiones_estado_liberada.sql."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "1.00")
+    cliente = crear_cliente(db_session, limite_credito=Decimal("100.00"))
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "2.00"}],
+    )
+    id_factura_detalle = (
+        db_session.query(FacturaDetalle.id_factura_detalle).filter_by(id_factura=factura.id_factura).scalar()
+    )
+    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=id_factura_detalle).one()
+    assert comision.estado_pago == "pendiente"
+
+    resultado = ReporteService.comisiones_pagadas_vs_pendientes(db_session, id_usuario=admin.id_usuario)
+
+    assert len(resultado["filas"]) == 1
+    fila = resultado["filas"][0]
+    assert fila["pendiente"] == Decimal("2.00")
+    assert fila["liberada"] == Decimal("0.00")
+    assert fila["pagado"] == Decimal("0.00")
+    assert resultado["total_pendiente"] == Decimal("2.00")

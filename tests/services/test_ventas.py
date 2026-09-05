@@ -850,7 +850,7 @@ def test_emitir_factura_con_vendedor_calcula_comision_sobre_diferencia(db_sessio
     assert comision.monto_base_comision == Decimal("3.00")  # 1.00 (lista) * 3
     assert comision.monto_venta_comision == Decimal("6.00")  # 2.00 (real) * 3
     assert comision.monto_comision == Decimal("3.00")  # diferencia
-    assert comision.estado_pago == "pendiente"
+    assert comision.estado_pago == "liberada"  # contado: se cobra completo al emitir
 
 
 def test_emitir_factura_precio_igual_al_de_lista_comision_cero(db_session):

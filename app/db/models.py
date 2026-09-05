@@ -612,6 +612,10 @@ class NotaDevolucionDetalle(Base):
 
 class CuentaPorCobrar(Base):
     __tablename__ = "cuentas_por_cobrar"
+    # trg_cxc_libera_comisiones (migrations/0045_comisiones_estado_liberada.sql) es un
+    # AFTER UPDATE sobre esta tabla -- SQL Server no permite OUTPUT inserted.* en un UPDATE
+    # sobre una tabla con triggers.
+    __table_args__ = {"implicit_returning": False}
 
     id_cuenta_por_cobrar: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
