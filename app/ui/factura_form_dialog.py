@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import FacturaVenta, Usuario
 from app.services.clientes import list_clientes
+from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
@@ -1454,8 +1455,8 @@ class FacturaFormDialog(QDialog):
         self.btn_emitir.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            self.factura_emitida = VentaService.emitir_factura(
-                self.session, id_usuario=self.id_usuario, **self.get_data()
+            self.factura_emitida = reintentar_en_deadlock(
+                lambda: VentaService.emitir_factura(self.session, id_usuario=self.id_usuario, **self.get_data())
             )
         except ValueError as exc:
             self.session.rollback()

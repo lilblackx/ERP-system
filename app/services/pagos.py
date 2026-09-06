@@ -16,6 +16,7 @@ from app.db.models import (
     PagoProveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.db_utils import _es_deadlock
 from app.services.permisos import require_permiso
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,17 @@ class PagoService:
             creado_por=id_usuario,
         )
         session.add(pago)
-        session.flush()
+        try:
+            session.flush()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if "exactamente un origen" in str(e).lower():
+                raise ValueError("Indique exactamente un método de pago (efectivo/transferencia/cheque)") from e
+            elif "saldo" in str(e).lower() and "monto" in str(e).lower():
+                raise ValueError("El pago excede el saldo pendiente") from e
+            raise ValueError(f"Error al registrar pago: {str(e)}") from e
         return pago
 
     @staticmethod
@@ -147,7 +158,13 @@ class PagoService:
         )
         cuenta = session.get(CuentaPorCobrar, id_cuenta_por_cobrar)
         assert cuenta is not None  # ya validada por _aplicar_pago_cobro, no puede ser None aca
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            raise ValueError(f"Error al registrar pago de cobro: {str(e)}") from e
         session.refresh(pago)
         session.refresh(cuenta)
 
@@ -196,7 +213,15 @@ class PagoService:
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
 
-        cuenta = session.get(CuentaPorPagar, id_cuenta_por_pagar)
+        # WITH (UPDLOCK, ROWLOCK): evita race condition -- dos pagos concurrentes contra
+        # la misma cuenta por pagar podrían ambos leer el mismo saldo_pendiente antes de
+        # que ninguno commitee, pasar la validación cada uno por separado y sobreguirar
+        # la cuenta. El lock serializa la segunda transacción hasta que la primera commitee.
+        cuenta = session.execute(
+            select(CuentaPorPagar)
+            .where(CuentaPorPagar.id_cuenta == id_cuenta_por_pagar)
+            .with_hint(CuentaPorPagar, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if cuenta is None:
             raise ValueError("Cuenta por pagar no encontrada")
         if monto > cuenta.saldo_pendiente:
@@ -239,7 +264,13 @@ class PagoService:
             creado_por=id_usuario,
         )
         session.add(pago)
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            raise ValueError(f"Error al registrar pago a proveedor: {str(e)}") from e
         session.refresh(pago)
         session.refresh(cuenta)
 

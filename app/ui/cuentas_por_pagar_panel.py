@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import CuentaPorPagar, Usuario
+from app.services.db_utils import reintentar_en_deadlock
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
@@ -321,16 +322,19 @@ class PagoProveedorDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
+        self.btn_pagar.setEnabled(False)
         try:
-            self.pago_creado = PagoService.registrar_pago_proveedor(
-                self.session,
-                id_cuenta_por_pagar=self.cuenta.id_cuenta,
-                monto=self.monto_input.value(),
-                metodo_pago=self.metodo_combo.currentData(),
-                id_caja=id_origen if tipo_origen == "caja" else None,
-                id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
-                referencia=self.referencia_input.text().strip() or None,
-                id_usuario=self.id_usuario,
+            self.pago_creado = reintentar_en_deadlock(
+                lambda: PagoService.registrar_pago_proveedor(
+                    self.session,
+                    id_cuenta_por_pagar=self.cuenta.id_cuenta,
+                    monto=self.monto_input.value(),
+                    metodo_pago=self.metodo_combo.currentData(),
+                    id_caja=id_origen if tipo_origen == "caja" else None,
+                    id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
+                    referencia=self.referencia_input.text().strip() or None,
+                    id_usuario=self.id_usuario,
+                )
             )
         except ValueError as exc:
             self.session.rollback()
@@ -345,6 +349,8 @@ class PagoProveedorDialog(QDialog):
             logger.exception("Fallo al registrar pago a proveedor")
             MessageBox.critical(self, "Error", "No se pudo registrar el pago.")
             return
+        finally:
+            self.btn_pagar.setEnabled(True)
 
         self.accept()
 

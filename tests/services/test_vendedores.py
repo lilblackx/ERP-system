@@ -8,7 +8,14 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
-from tests.factories import crear_cliente, crear_producto, crear_ruta, crear_usuario_admin, pago_contado
+from tests.factories import (
+    crear_cliente,
+    crear_precio_producto,
+    crear_producto,
+    crear_ruta,
+    crear_usuario_admin,
+    pago_contado,
+)
 
 
 def _datos_vendedor(db_session: Session, **overrides) -> dict:
@@ -439,6 +446,7 @@ def test_desempeno_mes_suma_ventas_y_excluye_anuladas(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = VendedorService.crear(db_session, **_datos_vendedor(db_session, creado_por=admin.id_usuario))
     producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente = crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor)
 
     VentaService.emitir_factura(

@@ -218,17 +218,17 @@ class CajasPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
         h.addStretch()
 
-        btn_movimiento = QPushButton("Movimiento Manual")
-        btn_movimiento.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_DARK))
-        btn_movimiento.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_movimiento.clicked.connect(self.registrar_movimiento_manual)
+        self.btn_movimiento = QPushButton("Movimiento Manual")
+        self.btn_movimiento.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_DARK))
+        self.btn_movimiento.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_movimiento.clicked.connect(self.registrar_movimiento_manual)
 
         btn_cerrar = QPushButton("Cerrar Turno")
         btn_cerrar.setIcon(qta.icon("fa5s.lock", color="white"))
         btn_cerrar.setStyleSheet(BUTTON_PRIMARY_QSS)
         btn_cerrar.clicked.connect(self.cerrar_turno_seleccionado)
 
-        h.addWidget(btn_movimiento)
+        h.addWidget(self.btn_movimiento)
         h.addWidget(btn_cerrar)
         return w
 
@@ -331,6 +331,7 @@ class CajasPanel(QWidget):
         if id_caja is None:
             return
 
+        self.btn_movimiento.setEnabled(False)
         session = self.session_factory()
         try:
             caja = session.get(Caja, id_caja)
@@ -369,3 +370,4 @@ class CajasPanel(QWidget):
             MessageBox.critical(self, "Error", "No se pudo registrar el movimiento de caja.")
         finally:
             session.close()
+            self.btn_movimiento.setEnabled(True)

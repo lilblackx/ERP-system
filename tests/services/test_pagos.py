@@ -20,6 +20,7 @@ from tests.factories import (
     crear_caja,
     crear_cliente,
     crear_cuenta_bancaria,
+    crear_precio_producto,
     crear_producto,
     crear_proveedor,
     crear_usuario_admin,
@@ -33,6 +34,7 @@ def _crear_cxc(session, saldo: Decimal):
     admin = crear_usuario_admin(session)
     vendedor = crear_vendedor(session)
     producto = crear_producto(session, cantidad_unidad=100)
+    crear_precio_producto(session, producto, str(saldo))
     cliente = crear_cliente(session, limite_credito=saldo * 2)
     factura = VentaService.emitir_factura(
         session,

@@ -18,6 +18,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.db_utils import _es_deadlock
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
@@ -96,6 +97,16 @@ class CompraService:
         if condicion_pago == "credito":
             if pago is not None:
                 raise ValueError("Una compra a credito no admite pago -- se paga despues contra la cuenta por pagar")
+            # WITH (UPDLOCK, ROWLOCK): mismo patron que VentaService.emitir_factura con
+            # Cliente -- sin esto, dos compras a credito concurrentes al MISMO proveedor
+            # pueden ambas leer la misma deuda_actual antes de que ninguna haya
+            # commiteado su propia CuentaPorPagar, pasar la validacion cada una por
+            # separado, y juntas superar limite_credito.
+            session.execute(
+                select(Proveedor)
+                .where(Proveedor.id_proveedor == id_proveedor)
+                .with_hint(Proveedor, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one()
             deuda_actual = (
                 session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0))
                 .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
@@ -226,7 +237,13 @@ class CompraService:
                     fecha=compra.fecha_emision,
                 )
 
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            raise ValueError(f"Error al registrar compra: {str(e)}") from e
         session.refresh(compra)
 
         logger.info(

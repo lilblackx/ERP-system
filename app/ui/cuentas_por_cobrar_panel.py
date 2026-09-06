@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import CuentaPorCobrar, Usuario
+from app.services.db_utils import reintentar_en_deadlock
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
@@ -330,16 +331,19 @@ class PagoCobroDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
+        self.btn_cobrar.setEnabled(False)
         try:
-            self.pago_creado = PagoService.registrar_pago_cobro(
-                self.session,
-                id_cuenta_por_cobrar=self.cuenta.id_cuenta_por_cobrar,
-                monto=self.monto_input.value(),
-                metodo_pago=self.metodo_combo.currentData(),
-                id_caja=id_origen if tipo_origen == "caja" else None,
-                id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
-                referencia=self.referencia_input.text().strip() or None,
-                id_usuario=self.id_usuario,
+            self.pago_creado = reintentar_en_deadlock(
+                lambda: PagoService.registrar_pago_cobro(
+                    self.session,
+                    id_cuenta_por_cobrar=self.cuenta.id_cuenta_por_cobrar,
+                    monto=self.monto_input.value(),
+                    metodo_pago=self.metodo_combo.currentData(),
+                    id_caja=id_origen if tipo_origen == "caja" else None,
+                    id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
+                    referencia=self.referencia_input.text().strip() or None,
+                    id_usuario=self.id_usuario,
+                )
             )
         except ValueError as exc:
             self.session.rollback()
@@ -354,6 +358,8 @@ class PagoCobroDialog(QDialog):
             logger.exception("Fallo al registrar cobro de cliente")
             MessageBox.critical(self, "Error", "No se pudo registrar el cobro.")
             return
+        finally:
+            self.btn_cobrar.setEnabled(True)
 
         self.accept()
 

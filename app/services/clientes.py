@@ -7,6 +7,13 @@ from app.services.permisos import require_permiso
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
+def _escapar_like(texto: str) -> str:
+    """Escapa caracteres especiales en búsquedas LIKE: % y _ son wildcards,
+    necesitan escape para búsquedas literales. Sin esto, una búsqueda de '%' devuelve
+    todos los registros, '%_' devuelve cualquier registro con N caracteres, etc."""
+    return texto.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+
+
 def _validar_requeridos(datos: dict) -> None:
     if not datos.get("codigo_cliente"):
         raise ValueError("codigo_cliente es requerido")
@@ -35,10 +42,20 @@ def _validar_rango_coordenadas(latitud, longitud) -> None:
     """Solo el rango -- la obligatoriedad se valida aparte en cada callsite (mismo
     criterio 'no permite vaciar' que codigo_cliente/identificacion_cliente): en creacion
     via _validar_requeridos(), en edicion inline en update_cliente()."""
-    if latitud is not None and not (-90 <= float(latitud) <= 90):
-        raise ValueError("latitud debe estar entre -90 y 90")
-    if longitud is not None and not (-180 <= float(longitud) <= 180):
-        raise ValueError("longitud debe estar entre -180 y 180")
+    if latitud is not None:
+        try:
+            latitud_valor = float(latitud)
+        except (TypeError, ValueError) as e:
+            raise ValueError("latitud debe ser un número válido") from e
+        if not (-90 <= latitud_valor <= 90):
+            raise ValueError("latitud debe estar entre -90 y 90")
+    if longitud is not None:
+        try:
+            longitud_valor = float(longitud)
+        except (TypeError, ValueError) as e:
+            raise ValueError("longitud debe ser un número válido") from e
+        if not (-180 <= longitud_valor <= 180):
+            raise ValueError("longitud debe estar entre -180 y 180")
 
 
 def list_clientes(
@@ -67,18 +84,18 @@ def list_clientes(
         # telefono -- en vez de exigir que el usuario sepa en cual de dos cajas separadas
         # escribir. `identificacion` (abajo) se mantiene aparte para uso programatico/
         # selectores que si necesiten un filtro AND preciso solo por ese campo.
-        like = f"%{texto_busqueda}%"
+        like = f"%{_escapar_like(texto_busqueda)}%"
         query = query.filter(
-            Cliente.nombre_razon_social.ilike(like)
-            | Cliente.id_legal.ilike(like)
-            | Cliente.codigo_cliente.ilike(like)
-            | Cliente.identificacion_cliente.ilike(like)
-            | Cliente.email.ilike(like)
-            | Cliente.telefono.ilike(like)
+            Cliente.nombre_razon_social.ilike(like, escape="\\")
+            | Cliente.id_legal.ilike(like, escape="\\")
+            | Cliente.codigo_cliente.ilike(like, escape="\\")
+            | Cliente.identificacion_cliente.ilike(like, escape="\\")
+            | Cliente.email.ilike(like, escape="\\")
+            | Cliente.telefono.ilike(like, escape="\\")
         )
     if identificacion:
-        like = f"%{identificacion}%"
-        query = query.filter(Cliente.identificacion_cliente.ilike(like))
+        like = f"%{_escapar_like(identificacion)}%"
+        query = query.filter(Cliente.identificacion_cliente.ilike(like, escape="\\"))
     if estado_cliente:
         query = query.filter(Cliente.estado_cliente == estado_cliente)
     if id_vendedor:

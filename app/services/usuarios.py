@@ -176,7 +176,12 @@ class UsuarioService:
         if nuevo_email and nuevo_email != usuario.email:
             _validar_email_unico(session, nuevo_email, excluir_id=id_usuario)
 
+        # Whitelist explícito de campos editables: previene modificación accidental/malintencionada
+        # de campos sensibles como bloqueado_desde, intentos_fallidos, estado, etc.
+        CAMPOS_EDITABLES = {"nombre_usuario", "nombre", "apellido", "email", "id_rol", "id_vendedor_usuario"}
         for campo, valor in datos.items():
+            if campo not in CAMPOS_EDITABLES:
+                raise ValueError(f"No se puede editar el campo '{campo}'")
             setattr(usuario, campo, valor)
 
         if "id_rol" in datos or "id_vendedor_usuario" in datos:

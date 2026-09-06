@@ -24,6 +24,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.comisiones import ComisionService
+from app.services.db_utils import _es_deadlock
 from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import require_permiso
@@ -228,14 +229,42 @@ class VentaService:
         # require_permiso es una segunda validacion server-side, no confia en que la UI
         # lo hizo bien.
         ids_producto_items = {item["id_producto"] for item in items}
+        # Existencia primero: sin este chequeo, un id_producto inexistente cae directo en
+        # el gate de precio de lista de abajo (no aparece en precios_lista porque no
+        # existe, ni en ninguna tabla) y el usuario ve "no tiene precio configurado" en
+        # vez de "no encontrado" -- un mensaje enganoso que sugiere que el producto existe
+        # pero le falta el precio. El chequeo real con lock (UPDLOCK/ROWLOCK) sigue
+        # ocurriendo mas abajo al validar stock; este es solo para dar el mensaje correcto
+        # antes de evaluar nada mas.
+        productos_existentes = {
+            p.id_producto
+            for p in session.query(Inventario.id_producto).filter(Inventario.id_producto.in_(ids_producto_items))
+        }
+        ids_inexistentes = ids_producto_items - productos_existentes
+        if ids_inexistentes:
+            raise ValueError(f"Producto {next(iter(ids_inexistentes))} no encontrado")
+
         precios_lista = {
             precio.id_producto: precio.precio_venta
             for precio in session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto_items)).all()
         }
+        # Todo producto vendible debe tener un precio de lista configurado -- sin uno, no
+        # hay forma de detectar automaticamente si el vendedor le puso un precio bajo
+        # (requiere autorizacion) o alto (genera comision, ver ComisionService), dejando
+        # ese hueco sin control. Bloquea aca, antes de tocar stock/CxC/comisiones -- si un
+        # producto nuevo todavia no tiene precio, se le asigna uno en Inventario primero.
+        ids_sin_precio = ids_producto_items - precios_lista.keys()
+        if ids_sin_precio:
+            productos_sin_precio = ", ".join(
+                p.nombre_producto
+                for p in session.query(Inventario).filter(Inventario.id_producto.in_(ids_sin_precio)).all()
+            )
+            raise ValueError(
+                f"Los siguientes productos no tienen precio de venta configurado: {productos_sin_precio}. "
+                "Configure un precio en Inventario antes de venderlos."
+            )
         hay_precio_bajo_lista = any(
-            item["id_producto"] in precios_lista
-            and Decimal(str(item["precio_unitario"])) < precios_lista[item["id_producto"]]
-            for item in items
+            Decimal(str(item["precio_unitario"])) < precios_lista[item["id_producto"]] for item in items
         )
         requiere_autorizacion_descuento = hay_precio_bajo_lista or monto_descuento > 0
         if requiere_autorizacion_descuento:
@@ -275,6 +304,14 @@ class VentaService:
                 raise ValueError(
                     f"Stock insuficiente para '{producto.nombre_producto}': "
                     f"disponible {producto.cantidad_unidad}, solicitado {cantidad_requerida}"
+                )
+            # Validar que la venta no deje stock por debajo de cantidad_minima
+            saldo_posterior = producto.cantidad_unidad - cantidad_requerida
+            if saldo_posterior < (producto.cantidad_minima or 0):
+                raise ValueError(
+                    f"La venta de {cantidad_requerida} unidades de '{producto.nombre_producto}' "
+                    f"dejaría stock en {saldo_posterior}, por debajo del mínimo configurado "
+                    f"({producto.cantidad_minima})"
                 )
 
         # --- IVA: snapshot de la configuracion vigente, no recalculado retroactivamente
@@ -611,7 +648,16 @@ class VentaService:
             factura.autorizado_por_vuelto = id_autorizador_vuelto if metodo_vuelto != "efectivo" else None
             factura.fecha_autorizacion_vuelto = datetime.now() if metodo_vuelto != "efectivo" else None
 
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                # Se relanza tal cual (no como ValueError) para que el caller pueda
+                # distinguirlo y reintentar la operacion completa -- ver
+                # app.services.db_utils.reintentar_en_deadlock.
+                raise
+            raise ValueError(f"Error al emitir factura: {str(e)}") from e
         session.refresh(factura)
 
         logger.info(
@@ -727,6 +773,19 @@ class VentaService:
             )
             if any(comision.estado_pago == "pagada" for comision in comisiones):
                 raise ValueError("No se puede anular: hay comisiones ya pagadas sobre esta factura.")
+            # 'liberada' (cliente ya pago la factura, el vendedor aun no cobro la
+            # comision) tambien bloquea la anulacion: el dinero de la venta ya entro
+            # (contado, o credito ya cobrado via trg_cxc_libera_comisiones,
+            # migrations/0045), asi que el vendedor ya tiene derecho a esa comision --
+            # borrarla silenciosamente le haria perder un ingreso ya generado sin dejar
+            # rastro. A diferencia de 'pendiente' (cliente todavia no pago, no hay nada
+            # que preservar), esta no se resuelve sola: anular de todas formas requiere
+            # decidir aparte que hacer con esa comision (pagarla igual, o no).
+            if any(comision.estado_pago == "liberada" for comision in comisiones):
+                raise ValueError(
+                    "No se puede anular: hay comisiones liberadas (venta ya cobrada) sin pagar al vendedor "
+                    "sobre esta factura."
+                )
             if comisiones:
                 session.query(ComisionFactura).filter(ComisionFactura.id_factura_detalle.in_(ids_detalle)).delete(
                     synchronize_session=False

@@ -374,6 +374,22 @@ def _estilizar_fecha(date_edit: QDateEdit) -> None:
         calendario.setWeekdayTextFormat(dia, formato)
 
 
+def _tarea_exportar_reporte_excel(session, ruta, encabezados, filas, titulo, config_empresa) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- reportes con muchas filas pueden
+    tardar varios segundos en volcarse a Excel/PDF, sin esto congelaban la ventana."""
+    exportar_excel(ruta, encabezados, filas, titulo=titulo, config_empresa=config_empresa)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_reporte_pdf(
+    session, ruta, encabezados, filas, titulo, filtros, col_widths, config_empresa
+) -> tuple[str, int]:
+    exportar_pdf(
+        ruta, titulo, encabezados, filas, filtros=filtros, col_widths=col_widths, config_empresa=config_empresa
+    )
+    return ruta, len(filas)
+
+
 def _tarea_aging_cxc(session, id_usuario, fecha_corte, id_cliente, orden):
     return ReporteService.aging_cuentas_por_cobrar(
         session, id_usuario=id_usuario, fecha_corte=fecha_corte, id_cliente=id_cliente, orden=orden
@@ -4442,6 +4458,10 @@ class ReportesPanel(QWidget):
         if self._ultimo_resultado is None:
             MessageBox.information(self, "Sin datos", "Generá un reporte antes de exportarlo.")
             return
+        # Mismo guard que _generar(): reasignar self._worker_export a un QThread nuevo
+        # mientras el viejo sigue corriendo lo destruye a mitad de ejecucion.
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
 
         nombre_sugerido, encabezados, filas = self._filas_para_exportar()
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar reporte", f"{nombre_sugerido}.xlsx", "Excel (*.xlsx)")
@@ -4451,15 +4471,30 @@ class ReportesPanel(QWidget):
         try:
             titulo, _filtros, _col_widths = self._info_pdf()
             config_empresa = self._obtener_config_empresa()
-            exportar_excel(ruta, encabezados, filas, titulo=titulo, config_empresa=config_empresa)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} filas a:\n{ruta}")
         except Exception:
-            logger.exception("Fallo al exportar el reporte a Excel")
+            logger.exception("Fallo al preparar la exportacion del reporte a Excel")
             MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
+            return
+
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_reporte_excel,
+            ruta=ruta,
+            encabezados=encabezados,
+            filas=filas,
+            titulo=titulo,
+            config_empresa=config_empresa,
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
     def _exportar_pdf(self) -> None:
         if self._ultimo_resultado is None:
             MessageBox.information(self, "Sin datos", "Generá un reporte antes de exportarlo.")
+            return
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
 
         nombre_sugerido, encabezados, filas = self._filas_para_exportar()
@@ -4470,10 +4505,33 @@ class ReportesPanel(QWidget):
         try:
             titulo, filtros, col_widths = self._info_pdf()
             config_empresa = self._obtener_config_empresa()
-            exportar_pdf(
-                ruta, titulo, encabezados, filas, filtros=filtros, col_widths=col_widths, config_empresa=config_empresa
-            )
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} filas a:\n{ruta}")
         except Exception:
-            logger.exception("Fallo al exportar el reporte a PDF")
+            logger.exception("Fallo al preparar la exportacion del reporte a PDF")
             MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
+            return
+
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_reporte_pdf,
+            ruta=ruta,
+            encabezados=encabezados,
+            filas=filas,
+            titulo=titulo,
+            filtros=filtros,
+            col_widths=col_widths,
+            config_empresa=config_empresa,
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} filas a:\n{ruta}")
+
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar el reporte: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")

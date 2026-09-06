@@ -45,6 +45,7 @@ from tests.factories import (
 def _factura_a_credito(session, admin, cliente, total, fecha_vencimiento):
     vendedor = crear_vendedor(session)
     producto = crear_producto(session, cantidad_unidad=1000)
+    crear_precio_producto(session, producto, total)
     return VentaService.emitir_factura(
         session,
         id_cliente=cliente.id_cliente,
@@ -272,11 +273,15 @@ def test_ventas_por_periodo_agrupa_por_dia_y_excluye_anuladas(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "5.00")
     cliente = crear_cliente(db_session)
 
     _factura_contado(db_session, admin, cliente, vendedor, producto, 2, "10.00")  # 20.00
     _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "5.00")  # 5.00
-    anulada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "999.00")
+    # precio_unitario == precio_lista ("5.00"): monto_comision = 0, no genera ComisionFactura
+    # -- si no, la comision nace 'liberada' (factura de contado) y el guard nuevo de
+    # anular_factura (ventas.py) bloquea la anulacion de mas abajo.
+    anulada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "5.00")
     VentaService.anular_factura(db_session, anulada.id_factura, id_usuario=admin.id_usuario, motivo="prueba")
 
     resultado = ReporteService.ventas_por_periodo(
@@ -304,6 +309,7 @@ def test_ventas_por_cliente_arma_ranking_descendente(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente_a = crear_cliente(db_session, nombre_razon_social="Cliente A")
     cliente_b = crear_cliente(db_session, nombre_razon_social="Cliente B")
 
@@ -333,6 +339,7 @@ def test_ventas_por_vendedor_agrupa_correctamente(db_session):
     vendedor_a = crear_vendedor(db_session, nombre_vendedor="Vendedor A")
     vendedor_b = crear_vendedor(db_session, nombre_vendedor="Vendedor B")
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "5.00")
     cliente = crear_cliente(db_session)
 
     _factura_contado(db_session, admin, cliente, vendedor_a, producto, 1, "10.00")
@@ -355,6 +362,7 @@ def test_ventas_por_vendedor_calcula_ticket_promedio(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente = crear_cliente(db_session)
 
     _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
@@ -397,6 +405,7 @@ def test_ventas_por_ruta_agrupa_por_ruta_del_vendedor_y_calcula_ticket_promedio(
     otro_vendedor_norte = crear_vendedor(db_session, nombre_vendedor="Otro Vendedor Norte", ruta=ruta_norte)
     vendedor_sur = crear_vendedor(db_session, nombre_vendedor="Vendedor Sur", ruta=ruta_sur)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "5.00")
     cliente = crear_cliente(db_session)
 
     _factura_contado(db_session, admin, cliente, vendedor_norte, producto, 1, "10.00")
@@ -421,10 +430,14 @@ def test_ventas_por_ruta_excluye_anuladas(db_session):
     ruta = crear_ruta(db_session)
     vendedor = crear_vendedor(db_session, ruta=ruta)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente = crear_cliente(db_session)
 
     _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
-    anulada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "100.00")
+    # precio_unitario == precio_lista ("10.00"): monto_comision = 0, no genera
+    # ComisionFactura -- si no, la comision nace 'liberada' (factura de contado) y el
+    # guard nuevo de anular_factura (ventas.py) bloquea la anulacion de mas abajo.
+    anulada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
     VentaService.anular_factura(db_session, anulada.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga")
 
     resultado = ReporteService.ventas_por_ruta(
@@ -460,6 +473,7 @@ def test_activacion_clientes_calcula_efectividad_contra_meta_del_vendedor(db_ses
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session, meta_activacion=4)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente = crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor)
 
     _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
@@ -497,6 +511,7 @@ def test_activacion_clientes_sin_meta_configurada_no_calcula_efectividad(db_sess
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente = crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor)
 
     _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
@@ -515,6 +530,7 @@ def test_activacion_clientes_excluye_anuladas(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session, meta_activacion=1)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente = crear_cliente(db_session, vendedor_cliente=vendedor.id_vendedor)
 
     anulada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
@@ -585,7 +601,9 @@ def test_productos_mas_vendidos_respeta_orden_asc_y_desc(db_session):
     vendedor = crear_vendedor(db_session)
     cliente = crear_cliente(db_session)
     producto_popular = crear_producto(db_session, cantidad_unidad=100, nombre_producto="Popular")
+    crear_precio_producto(db_session, producto_popular, "10.00")
     producto_lento = crear_producto(db_session, cantidad_unidad=100, nombre_producto="Lento")
+    crear_precio_producto(db_session, producto_lento, "2.00")
 
     _factura_contado(db_session, admin, cliente, vendedor, producto_popular, 5, "10.00")  # 50.00
     _factura_contado(db_session, admin, cliente, vendedor, producto_lento, 1, "2.00")  # 2.00
@@ -615,6 +633,7 @@ def test_facturas_anuladas_incluye_motivo_desde_auditoria(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente = crear_cliente(db_session)
 
     factura = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
@@ -635,6 +654,7 @@ def test_facturas_anuladas_no_incluye_facturas_vigentes(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente = crear_cliente(db_session)
     _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
 
@@ -662,6 +682,7 @@ def test_notas_credito_emitidas_lista_las_generadas_al_anular_con_pago(db_sessio
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "20.00")
     cliente = crear_cliente(db_session)
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
@@ -701,6 +722,7 @@ def test_notas_credito_emitidas_filtra_por_cliente(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
     cliente_a = crear_cliente(db_session)
     cliente_b = crear_cliente(db_session)
     caja = crear_caja(db_session)
@@ -751,6 +773,7 @@ def test_ventas_contado_vs_credito_separa_correctamente(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "30.00")
     cliente_contado = crear_cliente(db_session)
     cliente_credito = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
 
@@ -784,6 +807,7 @@ def test_margen_utilidad_calcula_ingreso_costo_y_margen(db_session):
     vendedor = crear_vendedor(db_session)
     cliente = crear_cliente(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100, costo_producto=Decimal("6.00"))
+    crear_precio_producto(db_session, producto, "10.00")
 
     _factura_contado(db_session, admin, cliente, vendedor, producto, 10, "10.00")  # ingreso 100, costo 60
 
@@ -1254,6 +1278,7 @@ def test_kardex_combina_las_4_fuentes_con_saldo_corrido(db_session):
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("1000.00"))
     producto = crear_producto(db_session, cantidad_unidad=0)
+    crear_precio_producto(db_session, producto, "8.00")
     hoy = date.today()
 
     # Entrada 1: compra directa (10 unidades)
@@ -1445,6 +1470,7 @@ def test_sin_movimiento_excluye_productos_con_venta_o_compra_en_rango(db_session
     hoy = date.today()
 
     con_venta = crear_producto(db_session, cod_producto="CON-VENTA", cantidad_unidad=100)
+    crear_precio_producto(db_session, con_venta, "8.00")
     con_compra = crear_producto(db_session, cod_producto="CON-COMPRA", cantidad_unidad=100)
     sin_movimiento = crear_producto(db_session, cod_producto="SIN-MOV", cantidad_unidad=100)
 
@@ -1466,6 +1492,7 @@ def test_sin_movimiento_incluye_fecha_ultimo_movimiento_fuera_de_rango(db_sessio
     cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "8.00")
     hoy = date.today()
 
     factura = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "8.00")

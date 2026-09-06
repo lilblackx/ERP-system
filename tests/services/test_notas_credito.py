@@ -20,6 +20,7 @@ from tests.factories import (
     crear_cliente,
     crear_cuenta_bancaria,
     crear_permiso,
+    crear_precio_producto,
     crear_producto,
     crear_proveedor,
     crear_rol,
@@ -34,6 +35,7 @@ def _crear_factura(session):
     admin = crear_usuario_admin(session)
     vendedor = crear_vendedor(session)
     producto = crear_producto(session, cantidad_unidad=10)
+    crear_precio_producto(session, producto, "10.00")
     cliente = crear_cliente(session)
     factura = VentaService.emitir_factura(
         session,
@@ -216,6 +218,7 @@ def _crear_factura_credito(session, cliente, monto="80.00"):
     admin = crear_usuario_admin(session)
     vendedor = crear_vendedor(session)
     producto = crear_producto(session, cantidad_unidad=10)
+    crear_precio_producto(session, producto, monto)
     return VentaService.emitir_factura(
         session,
         id_cliente=cliente.id_cliente,

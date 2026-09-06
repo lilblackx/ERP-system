@@ -96,6 +96,78 @@ def _tarea_imprimir_factura(session, id_factura: int, id_usuario: int | None) ->
     return config_empresa.impresora_predeterminada
 
 
+def _filas_facturas_query(
+    session, texto_busqueda: str | None, estado: str | None, condicion_pago: str | None, id_usuario: int | None
+) -> list[list]:
+    # Paginado en chunks (en vez de por_pagina=1_000_000 de una sola vez): reduce el
+    # pico de memoria -- cada página se convierte a listas simples y se descarta el
+    # batch de objetos ORM antes de pedir el siguiente, en vez de mantener 1M filas
+    # de FacturaVenta (con sus relaciones cliente/vendedor) vivas en memoria a la vez.
+    TAMANO_PAGINA = 5_000
+    filas: list[list] = []
+    pagina = 1
+    while True:
+        resultado = VentaService.listar_facturas(
+            session,
+            texto_busqueda=texto_busqueda,
+            estado=estado,
+            condicion_pago=condicion_pago,
+            pagina=pagina,
+            por_pagina=TAMANO_PAGINA,
+            id_usuario=id_usuario,
+        )
+        items = resultado["items"]
+        if not items:
+            break
+        filas.extend(
+            [
+                f.id_factura,
+                f.numero_factura,
+                f.cliente.nombre_razon_social if f.cliente else None,
+                f.vendedor.nombre_vendedor if f.vendedor else None,
+                f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
+                "Contado" if f.condicion_pago == "contado" else "Crédito",
+                "N/A" if f.condicion_pago != "contado" else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None)),
+                float(f.total_venta),
+                f.estado_visual,
+            ]
+            for f in items
+        )
+        if len(items) < TAMANO_PAGINA:
+            break
+        pagina += 1
+    return filas
+
+
+def _tarea_exportar_facturas_excel(
+    session,
+    ruta: str,
+    texto_busqueda: str | None,
+    estado: str | None,
+    condicion_pago: str | None,
+    id_usuario: int | None,
+) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar potencialmente
+    miles de facturas a un archivo (openpyxl) es lo bastante lento como para congelar
+    la ventana si se hace en el hilo de GUI."""
+    filas = _filas_facturas_query(session, texto_busqueda, estado, condicion_pago, id_usuario)
+    exportar_excel(ruta, COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_facturas_pdf(
+    session,
+    ruta: str,
+    texto_busqueda: str | None,
+    estado: str | None,
+    condicion_pago: str | None,
+    id_usuario: int | None,
+) -> tuple[str, int]:
+    filas = _filas_facturas_query(session, texto_busqueda, estado, condicion_pago, id_usuario)
+    exportar_pdf(ruta, "Facturas de Venta", COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
 ESTADOS_FILTRO = [
     ("Todos los estados", None),
     ("Emitida", "EMITIDA"),
@@ -465,6 +537,7 @@ class FacturacionPanel(QWidget):
             )
             return
 
+        self.btn_nueva_factura.setEnabled(False)
         session = self.session_factory()
         try:
             # FacturaFormDialog emite la factura el mismo adentro (ver
@@ -488,6 +561,7 @@ class FacturacionPanel(QWidget):
             MessageBox.critical(self, "Error", "No se pudo emitir la factura.")
         finally:
             session.close()
+            self.btn_nueva_factura.setEnabled(True)
 
     def _disparar_impresion_automatica(self, id_factura: int) -> None:
         """Lanza _tarea_imprimir_factura en un QueryWorker (QThread) para que enviar el
@@ -611,65 +685,54 @@ class FacturacionPanel(QWidget):
         finally:
             session.close()
 
-    def _filas_para_exportar(self, session) -> list[list]:
-        resultado = VentaService.listar_facturas(
-            session,
-            texto_busqueda=self.buscar_input.text().strip() or None,
-            estado=self.estado_combo.currentData(),
-            condicion_pago=self.condicion_combo.currentData(),
-            pagina=1,
-            por_pagina=1_000_000,
-            id_usuario=self.usuario.id_usuario,
-        )
-        return [
-            [
-                f.id_factura,
-                f.numero_factura,
-                f.cliente.nombre_razon_social if f.cliente else None,
-                f.vendedor.nombre_vendedor if f.vendedor else None,
-                f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
-                "Contado" if f.condicion_pago == "contado" else "Crédito",
-                "N/A" if f.condicion_pago != "contado" else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None)),
-                float(f.total_venta),
-                f.estado_visual,
-            ]
-            for f in resultado["items"]
-        ]
+    def _filtros_actuales_exportar(self) -> dict:
+        return {
+            "texto_busqueda": self.buscar_input.text().strip() or None,
+            "estado": self.estado_combo.currentData(),
+            "condicion_pago": self.condicion_combo.currentData(),
+            "id_usuario": self.usuario.id_usuario,
+        }
 
     def exportar_excel_facturas(self) -> None:
+        # Mismo guard que reportes_panel.py: reasignar self._worker_export a un QThread
+        # nuevo mientras el viejo sigue corriendo lo destruye a mitad de ejecucion.
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal.
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar facturas", "facturas.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_excel(ruta, COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
-        except Exception:
-            logger.exception("Fallo al exportar el listado de facturas a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_facturas_excel, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
     def exportar_pdf_facturas(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar facturas", "facturas.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_pdf(ruta, "Facturas de Venta", COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} facturas a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
-        except Exception:
-            logger.exception("Fallo al exportar el listado de facturas a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_facturas_pdf, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} facturas a:\n{ruta}")
+
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar el listado de facturas: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")

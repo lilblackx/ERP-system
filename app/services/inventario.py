@@ -16,6 +16,13 @@ ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 TIPO_PRECIO_UNICO = "UNICO"
 
 
+def _escapar_like(texto: str) -> str:
+    """Escapa caracteres especiales en búsquedas LIKE: % y _ son wildcards,
+    necesitan escape para búsquedas literales. Sin esto, una búsqueda de '%' devuelve
+    todos los registros, '%_' devuelve cualquier registro con N caracteres, etc."""
+    return texto.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+
+
 class ProductoService:
     @staticmethod
     def _validar_codigo_unico(session: Session, cod_producto: str, excluir_id: int | None = None) -> None:
@@ -144,12 +151,14 @@ class ProductoService:
         # exportacion (hasta 1_000_000 filas en una sola llamada).
         query = session.query(Inventario).options(joinedload(Inventario.categoria))
         if texto:
-            like = f"%{texto}%"
-            query = query.filter(Inventario.cod_producto.ilike(like) | Inventario.nombre_producto.ilike(like))
+            like = f"%{_escapar_like(texto)}%"
+            query = query.filter(
+                Inventario.cod_producto.ilike(like, escape="\\") | Inventario.nombre_producto.ilike(like, escape="\\")
+            )
         if codigo:
-            query = query.filter(Inventario.cod_producto.ilike(f"%{codigo}%"))
+            query = query.filter(Inventario.cod_producto.ilike(f"%{_escapar_like(codigo)}%", escape="\\"))
         if nombre:
-            query = query.filter(Inventario.nombre_producto.ilike(f"%{nombre}%"))
+            query = query.filter(Inventario.nombre_producto.ilike(f"%{_escapar_like(nombre)}%", escape="\\"))
         if id_categoria:
             query = query.filter(Inventario.id_categoria == id_categoria)
         if solo_con_stock:

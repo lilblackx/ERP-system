@@ -64,6 +64,7 @@ from app.ui.styles import (
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,31 @@ ESTADOS_FILTRO = [
 ]
 
 LIMITE_CATALOGO = 50
+
+
+def _tarea_exportar_excel(session, ruta: str, encabezados: list[str], filas: list[list], config_empresa) -> str:
+    """Corre en un QThread (ver QueryWorker) para no bloquear la ventana mientras
+    openpyxl genera el archivo -- `session` no se usa (config_empresa ya se resolvio
+    de forma sincrona antes de lanzar el worker), pero es parte del contrato de
+    QueryWorker.run()."""
+    exportar_excel(ruta, encabezados, filas, titulo="Comisiones", config_empresa=config_empresa)
+    return ruta
+
+
+def _tarea_exportar_pdf(
+    session, ruta: str, encabezados: list[str], filas: list[list], filtros: dict, col_widths: list, config_empresa
+) -> str:
+    exportar_pdf(
+        ruta,
+        "Comisiones",
+        encabezados,
+        filas,
+        filtros=filtros,
+        col_widths=col_widths,
+        config_empresa=config_empresa,
+    )
+    return ruta
+
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -587,6 +613,7 @@ class ComisionesPanel(QWidget):
             return
 
         nombre_vendedor = self.vendedor_combo.currentText()
+        self.btn_pagar.setEnabled(False)
         session = self.session_factory()
         try:
             dialogo = PagarComisionesDialog(
@@ -599,6 +626,7 @@ class ComisionesPanel(QWidget):
             logger.exception("Fallo al abrir dialogo de pago")
         finally:
             session.close()
+            self.btn_pagar.setEnabled(True)
 
     def _datos_para_exportar(self) -> tuple[list[str], list[list]]:
         encabezados = ["Factura", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado"]
@@ -636,44 +664,80 @@ class ComisionesPanel(QWidget):
         return EmpresaService.obtener_datos_documento(session)
 
     def exportar_excel(self) -> None:
+        # Mismo guard que reportes_panel.py/facturacion_panel.py: reasignar
+        # self._worker_export a un QThread nuevo mientras el viejo sigue corriendo lo
+        # destruye a mitad de ejecucion.
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar comisiones", "comisiones.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
+
         session = self.session_factory()
         try:
-            encabezados, filas = self._datos_para_exportar()
             config_empresa = self._obtener_config_empresa(session)
-            exportar_excel(ruta, encabezados, filas, titulo="Comisiones", config_empresa=config_empresa)
-            MessageBox.information(self, "Exportación completa", f"Se exportó a:\n{ruta}")
         except Exception:
-            logger.exception("Fallo al exportar comisiones a Excel")
+            logger.exception("Fallo al obtener configuracion de empresa para exportar")
             MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+            return
         finally:
             session.close()
 
+        encabezados, filas = self._datos_para_exportar()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_excel,
+            ruta=ruta,
+            encabezados=encabezados,
+            filas=filas,
+            config_empresa=config_empresa,
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
     def exportar_pdf(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar comisiones", "comisiones.pdf", "PDF (*.pdf)")
         if not ruta:
             return
+
         session = self.session_factory()
         try:
-            encabezados, filas = self._datos_para_exportar()
             config_empresa = self._obtener_config_empresa(session)
-            exportar_pdf(
-                ruta,
-                "Comisiones",
-                encabezados,
-                filas,
-                filtros=self._filtros_para_exportar(),
-                col_widths=[1.4, 1.0, 1.0, 1.0, 1.0, 1.0],
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación completa", f"Se exportó a:\n{ruta}")
         except Exception:
-            logger.exception("Fallo al exportar comisiones a PDF")
+            logger.exception("Fallo al obtener configuracion de empresa para exportar")
             MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
+            return
         finally:
             session.close()
+
+        encabezados, filas = self._datos_para_exportar()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_pdf,
+            ruta=ruta,
+            encabezados=encabezados,
+            filas=filas,
+            filtros=self._filtros_para_exportar(),
+            col_widths=[1.4, 1.0, 1.0, 1.0, 1.0, 1.0],
+            config_empresa=config_empresa,
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def _on_exportar_ok(self, ruta: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        MessageBox.information(self, "Exportación completa", f"Se exportó a:\n{ruta}")
+
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar comisiones: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo completar la exportación.")
 
     def _fila_seleccionada_id_factura(self) -> int | None:
         """Obtiene el ID de la factura de la fila seleccionada en la tabla."""

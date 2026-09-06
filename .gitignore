@@ -7,3 +7,5 @@ logs/
 .pytest_cache/
 docs/CHECKLIST_PRODUCCION.md
 CLAUDE.md
+FASE_*.md
+keep_wsl_running.bat

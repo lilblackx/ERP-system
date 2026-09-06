@@ -1,5 +1,6 @@
 import qtawesome as qta
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QRegularExpression, QSize, Qt
+from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -257,6 +258,9 @@ class ProveedorFormDialog(QDialog):
         self.identificacion_input.setPlaceholderText("Ej: 30489713 / 12345678-0")
         self.identificacion_input.setMaxLength(20)
         self.identificacion_input.setFixedHeight(32)
+        # Validador para RIF/Cédula: 1-8 dígitos opcionalmente seguidos de guión y un dígito
+        id_validator = QRegularExpressionValidator(QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$"))
+        self.identificacion_input.setValidator(id_validator)
 
         id_hbox.addWidget(self.tipo_id_combo)
         id_hbox.addWidget(self.identificacion_input)
@@ -309,6 +313,11 @@ class ProveedorFormDialog(QDialog):
         self.email_input.setPlaceholderText("Ej: contacto@proveedor.com")
         self.email_input.setMaxLength(150)
         self.email_input.setFixedHeight(32)
+        # Validador para email: patrón básico user@domain.ext
+        email_validator = QRegularExpressionValidator(
+            QRegularExpression(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+        )
+        self.email_input.setValidator(email_validator)
         grid2.addWidget(lbl_email, 0, 1)
         grid2.addWidget(self.email_input, 1, 1)
 

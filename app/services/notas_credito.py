@@ -94,6 +94,13 @@ class NotaCreditoService:
         motivo: str,
         id_usuario: int | None,
     ) -> NotaCreditoCliente:
+        # Sin require_permiso a proposito: este metodo publico (y su nucleo
+        # _crear_nota_credito_cliente) son un efecto secundario interno de una accion ya
+        # autorizada -- VentaService.anular_factura()/CompraService.anular_compra() ya
+        # exigen su propio require_permiso("ventas"/"compras", "eliminar") antes de
+        # generar la nota, mismo criterio que id_tasa en VentaService.emitir_factura. No
+        # existe ningun callsite de UI que llame a este metodo publico directamente
+        # (solo tests, que lo usan con id_usuario=None para probarlo en aislamiento).
         nota = NotaCreditoService._crear_nota_credito_cliente(
             session,
             id_cliente=id_cliente,

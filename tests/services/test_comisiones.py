@@ -59,8 +59,9 @@ def _crear_comisiones_liberadas(session, vendedor, admin, cantidades_precios: li
 
 
 def test_calcular_comisiones_factura_batch_saltea_producto_sin_precio(db_session):
-    """Un producto sin precio de lista configurado no genera comision ni bloquea la
-    venta -- las demas lineas del mismo batch si se calculan normalmente."""
+    """Un solo producto del batch sin precio de lista configurado bloquea la factura
+    entera (VentaService.emitir_factura lo valida antes de tocar stock/CxC/comisiones) --
+    no hay forma de emitir parcialmente ni de saltear solo esa linea."""
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     con_precio = crear_producto(db_session, cantidad_unidad=50)
@@ -68,27 +69,19 @@ def test_calcular_comisiones_factura_batch_saltea_producto_sin_precio(db_session
     sin_precio = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
 
-    factura = VentaService.emitir_factura(
-        db_session,
-        id_cliente=cliente.id_cliente,
-        id_usuario=admin.id_usuario,
-        id_vendedor=vendedor.id_vendedor,
-        condicion_pago="contado",
-        items=[
-            {"id_producto": con_precio.id_producto, "cantidad": 2, "precio_unitario": "2.00"},
-            {"id_producto": sin_precio.id_producto, "cantidad": 1, "precio_unitario": "20.00"},
-        ],
-        pagos=pago_contado(db_session),
-    )
-
-    comisiones = (
-        db_session.query(ComisionFactura)
-        .join(FacturaDetalle)
-        .filter(FacturaDetalle.id_factura == factura.id_factura)
-        .all()
-    )
-    assert len(comisiones) == 1
-    assert comisiones[0].monto_comision == Decimal("2.00")  # (2.00-1.00)*2
+    with pytest.raises(ValueError, match="no tienen precio de venta configurado"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            items=[
+                {"id_producto": con_precio.id_producto, "cantidad": 2, "precio_unitario": "2.00"},
+                {"id_producto": sin_precio.id_producto, "cantidad": 1, "precio_unitario": "20.00"},
+            ],
+            pagos=pago_contado(db_session),
+        )
 
 
 # --- PagoComisionService.pagar_comisiones_vendedor ----------------------------------
