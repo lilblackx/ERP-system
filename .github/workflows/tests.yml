@@ -28,7 +28,14 @@ jobs:
         env:
           ACCEPT_EULA: "Y"
           MSSQL_SA_PASSWORD: "CIPassword123*"
-          MSSQL_PID: Express
+          # Developer, no Express: Express limita el buffer pool a ~1.4GB y CPU/sockets --
+          # bajo la suite completa (850+ tests, cada uno con DELETE masivo en cascada de
+          # triggers sobre 60+ tablas via tests/conftest.py) el proceso sqlservr crasheaba
+          # en pleno run sin loggear shutdown graceful, mismo sintoma reproducido y
+          # diagnosticado en local (ver docker-compose.yml). Developer es gratis para uso
+          # no productivo -- exactamente este caso, un contenedor efimero de CI -- y no
+          # impone esos limites artificiales.
+          MSSQL_PID: Developer
         ports:
           - 1433:1433
         options: >-
