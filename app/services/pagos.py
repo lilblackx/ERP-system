@@ -16,7 +16,7 @@ from app.db.models import (
     PagoProveedor,
 )
 from app.services.auditoria import AuditoriaService
-from app.services.db_utils import _es_deadlock
+from app.services.db_utils import _es_deadlock, traducir_error_trigger
 from app.services.permisos import require_permiso
 
 logger = logging.getLogger(__name__)
@@ -119,11 +119,7 @@ class PagoService:
             session.rollback()
             if _es_deadlock(e):
                 raise
-            if "exactamente un origen" in str(e).lower():
-                raise ValueError("Indique exactamente un método de pago (efectivo/transferencia/cheque)") from e
-            elif "saldo" in str(e).lower() and "monto" in str(e).lower():
-                raise ValueError("El pago excede el saldo pendiente") from e
-            raise ValueError(f"Error al registrar pago: {str(e)}") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         return pago
 
     @staticmethod
@@ -270,7 +266,7 @@ class PagoService:
             session.rollback()
             if _es_deadlock(e):
                 raise
-            raise ValueError(f"Error al registrar pago a proveedor: {str(e)}") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(pago)
         session.refresh(cuenta)
 

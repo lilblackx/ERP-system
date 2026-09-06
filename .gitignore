@@ -8,4 +8,5 @@ logs/
 docs/CHECKLIST_PRODUCCION.md
 CLAUDE.md
 FASE_*.md
+ROADMAP_*.md
 keep_wsl_running.bat

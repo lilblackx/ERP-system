@@ -24,7 +24,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.comisiones import ComisionService
-from app.services.db_utils import _es_deadlock
+from app.services.db_utils import _es_deadlock, traducir_error_trigger
 from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import require_permiso
@@ -657,7 +657,7 @@ class VentaService:
                 # distinguirlo y reintentar la operacion completa -- ver
                 # app.services.db_utils.reintentar_en_deadlock.
                 raise
-            raise ValueError(f"Error al emitir factura: {str(e)}") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(factura)
 
         logger.info(

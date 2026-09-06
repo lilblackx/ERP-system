@@ -56,3 +56,27 @@ def reintentar_en_deadlock(func: Callable[[], T], max_intentos: int = 3) -> T:
             )
             time.sleep(espera)
     raise ultimo_error  # pragma: no cover -- inalcanzable, el loop siempre retorna o lanza
+
+
+_ERRORES_TRIGGER_TRADUCCION = {
+    "exactamente un origen": "Indique exactamente un método de pago (efectivo, transferencia o cheque)",
+    "saldo excedido": "El pago excede el saldo pendiente de la cuenta",
+    "saldo pendiente": "El pago excede el saldo pendiente de la cuenta",
+    "monto negativo": "El monto debe ser mayor a cero",
+    "limite credito": "La compra excede el límite de crédito otorgado al cliente o proveedor",
+    "cantidad minima": "La venta dejaría el stock por debajo de la cantidad mínima configurada",
+    "cantidad negativa": "La cantidad debe ser mayor a cero",
+    "producto inactivo": "No se puede vender/comprar productos inactivos",
+    "cliente inactivo": "No se puede facturar a clientes inactivos",
+    "proveedor inactivo": "No se puede comprar a proveedores inactivos",
+}
+
+
+def traducir_error_trigger(exc: Exception) -> str:
+    """Traduce mensajes de error crudos de triggers SQL Server a mensajes amigables
+    para el usuario. Si no hay coincidencia, retorna un mensaje genérico."""
+    texto = str(exc).lower()
+    for clave, traduccion in _ERRORES_TRIGGER_TRADUCCION.items():
+        if clave in texto:
+            return traduccion
+    return f"Error en la operación: {str(exc)}"

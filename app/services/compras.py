@@ -18,7 +18,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
-from app.services.db_utils import _es_deadlock
+from app.services.db_utils import _es_deadlock, traducir_error_trigger
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
@@ -243,7 +243,7 @@ class CompraService:
             session.rollback()
             if _es_deadlock(e):
                 raise
-            raise ValueError(f"Error al registrar compra: {str(e)}") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(compra)
 
         logger.info(
