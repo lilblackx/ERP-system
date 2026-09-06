@@ -16,7 +16,7 @@ from app.db.models import (
     PagoProveedor,
 )
 from app.services.auditoria import AuditoriaService
-from app.services.db_utils import _es_deadlock, traducir_error_trigger
+from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
 from app.services.permisos import require_permiso
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,8 @@ class PagoService:
         monto = Decimal(str(monto))
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
+
+        aplicar_lock_timeout(session)
 
         # WITH (UPDLOCK, ROWLOCK): sin esto, dos pagos concurrentes contra la MISMA cuenta
         # por cobrar (ej. dos cajeros cobrando la misma factura por error, o un doble clic)
@@ -119,6 +121,8 @@ class PagoService:
             session.rollback()
             if _es_deadlock(e):
                 raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         return pago
 
@@ -209,6 +213,8 @@ class PagoService:
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
 
+        aplicar_lock_timeout(session)
+
         # WITH (UPDLOCK, ROWLOCK): evita race condition -- dos pagos concurrentes contra
         # la misma cuenta por pagar podrían ambos leer el mismo saldo_pendiente antes de
         # que ninguno commitee, pasar la validación cada uno por separado y sobreguirar
@@ -266,6 +272,8 @@ class PagoService:
             session.rollback()
             if _es_deadlock(e):
                 raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(pago)
         session.refresh(cuenta)

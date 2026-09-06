@@ -458,13 +458,19 @@ def test_desempeno_mes_suma_ventas_y_excluye_anuladas(db_session):
         items=[{"id_producto": producto.id_producto, "cantidad": 2, "precio_unitario": "10.00"}],
         pagos=pago_contado(db_session),
     )
+    # precio_unitario == precio de lista (10.00): a proposito, para no generar comision
+    # -- si el vendedor vendiera por encima de precio de lista, la comision de una venta
+    # de contado nace 'liberada' de inmediato (C14/migrations/0045) y anular_factura()
+    # bloquea la anulacion mientras esa comision siga sin pagar (ver ventas.py:774-788).
+    # Este test solo verifica que las facturas anuladas no cuenten en el desempeno del
+    # vendedor, no el flujo de comisiones.
     factura_anulada = VentaService.emitir_factura(
         db_session,
         id_cliente=cliente.id_cliente,
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
-        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "10.00"}],
         pagos=pago_contado(db_session),
     )
     VentaService.anular_factura(

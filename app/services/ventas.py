@@ -24,7 +24,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.comisiones import ComisionService
-from app.services.db_utils import _es_deadlock, traducir_error_trigger
+from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
 from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import require_permiso
@@ -144,6 +144,7 @@ class VentaService:
         id_autorizador_vuelto: int | None = None,
     ) -> FacturaVenta:
         require_permiso(session, id_usuario, "ventas", "crear")
+        aplicar_lock_timeout(session)
         _validar_items(items)
 
         monto_descuento = Decimal(str(monto_descuento))
@@ -657,6 +658,11 @@ class VentaService:
                 # distinguirlo y reintentar la operacion completa -- ver
                 # app.services.db_utils.reintentar_en_deadlock.
                 raise
+            if _es_lock_timeout(e):
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a un registro (stock, cliente o caja). "
+                    "Intente de nuevo."
+                ) from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(factura)
 
@@ -735,6 +741,8 @@ class VentaService:
         motivo = (motivo or "").strip()
         if not motivo:
             raise ValueError("motivo es requerido para anular una factura")
+
+        aplicar_lock_timeout(session)
 
         # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18/C22 -- evita que dos clics de
         # "anular" casi simultaneos sobre la misma factura pasen ambos el guard de
@@ -834,7 +842,17 @@ class VentaService:
             )
             numero_nota_credito = nota_credito.numero_nota_credito
 
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a un registro. Intente de nuevo."
+                ) from e
+            raise
         session.refresh(factura)
 
         logger.info(

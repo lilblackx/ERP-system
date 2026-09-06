@@ -12,6 +12,7 @@ from app.services.ventas import VentaService
 from tests.factories import (
     crear_caja,
     crear_cliente,
+    crear_precio_producto,
     crear_producto,
     crear_proveedor,
     crear_usuario_admin,
@@ -85,6 +86,7 @@ def test_por_cobrar_suma_saldos_abiertos_y_cuenta_vencidas(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "80.00")
     cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
 
     factura = VentaService.emitir_factura(

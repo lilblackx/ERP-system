@@ -144,6 +144,10 @@ def test_engine():
     engine = create_engine(
         "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(_odbc_connect_str(TEST_DB_NAME)),
         fast_executemany=True,
+        pool_size=5,
+        max_overflow=0,
+        pool_pre_ping=True,
+        pool_recycle=3600,
     )
     aplicar_migraciones(engine)
     yield engine
@@ -164,4 +168,8 @@ def db_session(test_engine):
     try:
         yield session
     finally:
+        try:
+            session.rollback()
+        except Exception:
+            pass
         session.close()

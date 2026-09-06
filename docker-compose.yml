@@ -6,16 +6,23 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${DB_PASSWORD}
-      MSSQL_PID: Express
+      # Developer edition, no Express: Express limita buffer pool a ~1.4GB y CPU/
+      # sockets -- bajo la suite de tests completa (850+ tests, cada uno haciendo
+      # DELETE masivo con triggers en cascada sobre 60+ tablas) el proceso sqlservr
+      # crasheaba cada 60-90s sin loggear shutdown graceful, consistente con
+      # agotar un limite interno de recursos de Express. Developer es gratis para
+      # uso no productivo (exactamente este caso: DB de dev/test local) y no
+      # impone esos limites artificiales.
+      MSSQL_PID: Developer
     ports:
       - "14330:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      interval: 15s
+      timeout: 15s
+      retries: 5
       start_period: 30s
 
 volumes:

@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from app.services.historial_cliente import obtener_historial_cliente
 from app.services.ventas import VentaService
-from tests.factories import crear_cliente, crear_producto, crear_usuario_admin, crear_vendedor
+from tests.factories import crear_cliente, crear_precio_producto, crear_producto, crear_usuario_admin, crear_vendedor
 
 
 def test_obtener_historial_cliente_dias_credito_no_cambia_retroactivamente(db_session):
@@ -15,6 +15,7 @@ def test_obtener_historial_cliente_dias_credito_no_cambia_retroactivamente(db_se
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=10)
+    crear_precio_producto(db_session, producto, "50.00")
     cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"), dias_credito=10)
 
     factura = VentaService.emitir_factura(

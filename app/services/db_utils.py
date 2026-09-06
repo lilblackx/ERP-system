@@ -17,7 +17,9 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from pyodbc import OperationalError as PyodbcOperationalError
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError as SqlAlchemyOperationalError
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +29,36 @@ T = TypeVar("T")
 _SQLSTATE_DEADLOCK = "40001"
 _ERROR_DEADLOCK_TEXTO = "deadlock"
 
+# Sin `SET LOCK_TIMEOUT`, el default de SQL Server es -1 (esperar indefinidamente un
+# lock). Bajo un UPDLOCK/ROWLOCK sostenido (ej. una sesion de cajero que quedo colgada a
+# mitad de una transaccion), una segunda operacion contra la misma fila esperaria para
+# siempre en vez de fallar con un error claro -- 30s es suficiente margen para
+# contencion normal (otra transaccion terminando su commit) sin dejar al usuario
+# esperando indefinidamente frente a una fila realmente trabada.
+LOCK_TIMEOUT_MS = 30000
+# Error 1222 de SQL Server: "Lock request time out period exceeded."
+_ERROR_LOCK_TIMEOUT_TEXTO = "lock request time out period exceeded"
+
 
 def _es_deadlock(exc: BaseException) -> bool:
     if not isinstance(exc, (SqlAlchemyOperationalError, PyodbcOperationalError)):
         return False
     texto = str(exc).lower()
     return _SQLSTATE_DEADLOCK in texto or _ERROR_DEADLOCK_TEXTO in texto
+
+
+def _es_lock_timeout(exc: BaseException) -> bool:
+    if not isinstance(exc, (SqlAlchemyOperationalError, PyodbcOperationalError)):
+        return False
+    return _ERROR_LOCK_TIMEOUT_TEXTO in str(exc).lower()
+
+
+def aplicar_lock_timeout(session: Session) -> None:
+    """Limita a LOCK_TIMEOUT_MS la espera por un lock (UPDLOCK/ROWLOCK) en esta sesion,
+    en vez del default de SQL Server de esperar indefinidamente. Llamar al inicio de
+    cada operacion de escritura que tome UPDLOCK, antes del primer SELECT ... WITH
+    (UPDLOCK, ROWLOCK)."""
+    session.execute(text(f"SET LOCK_TIMEOUT {LOCK_TIMEOUT_MS}"))
 
 
 def reintentar_en_deadlock(func: Callable[[], T], max_intentos: int = 3) -> T:

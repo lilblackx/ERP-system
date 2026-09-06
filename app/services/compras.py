@@ -18,7 +18,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
-from app.services.db_utils import _es_deadlock, traducir_error_trigger
+from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
@@ -70,6 +70,7 @@ class CompraService:
         que ya existen para el vuelto bancario de facturacion (CajaService/BancoService.
         _registrar_egreso_vuelto) -- son genericos, no especificos de vuelto."""
         require_permiso(session, id_usuario, "compras", "crear")
+        aplicar_lock_timeout(session)
         _validar_items(items)
 
         proveedor = session.get(Proveedor, id_proveedor)
@@ -80,6 +81,16 @@ class CompraService:
 
         if condicion_pago not in ("contado", "credito"):
             raise ValueError("condicion_pago debe ser 'contado' o 'credito'")
+
+        # Mismo criterio que VentaService.emitir_factura: si el caller pasa un id_tasa
+        # explicito, se valida su existencia de una vez aca -- antes, una compra a
+        # credito con un id_tasa invalido lo dejaba pasar sin chequeo (el bloque de mas
+        # abajo solo lo resuelve/valida para condicion_pago='contado', que es el unico
+        # caso que necesita convertir un monto), y terminaba insertandose como FK
+        # colgante en Compra.id_tasa_compra, para recien fallar con un error crudo de SQL
+        # en el INSERT en vez de este ValueError legible.
+        if id_tasa is not None and session.get(ControlDeTasa, id_tasa) is None:
+            raise ValueError("Tasa de cambio no encontrada")
 
         # --- Validar que los productos existan y esten activos (agrupando repetidos) ---
         for id_producto in {item["id_producto"] for item in items}:
@@ -243,6 +254,10 @@ class CompraService:
             session.rollback()
             if _es_deadlock(e):
                 raise
+            if _es_lock_timeout(e):
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a un registro. Intente de nuevo."
+                ) from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(compra)
 
@@ -296,6 +311,8 @@ class CompraService:
         if not motivo:
             raise ValueError("motivo es requerido para anular una compra")
 
+        aplicar_lock_timeout(session)
+
         # Ver el comentario equivalente en VentaService.anular_factura() -- mismo patron
         # de C1/C18/C22, aca resolviendo C24.
         compra = session.execute(
@@ -343,7 +360,17 @@ class CompraService:
                 id_usuario=id_usuario,
             )
 
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a un registro. Intente de nuevo."
+                ) from e
+            raise
         session.refresh(compra)
 
         logger.info(
@@ -424,10 +451,13 @@ class CompraService:
         -- no hay trigger ni CHECK que la proteja, es una invariante entre dos tablas
         (compra_detalle y compra_oc_detalle) que ningun trigger de esta migracion cubre."""
         require_permiso(session, id_usuario, "compras", "crear")
+        aplicar_lock_timeout(session)
         if not items:
             raise ValueError("La compra debe tener al menos un item")
         if condicion_pago not in ("contado", "credito"):
             raise ValueError("condicion_pago debe ser 'contado' o 'credito'")
+        if id_tasa is not None and session.get(ControlDeTasa, id_tasa) is None:
+            raise ValueError("Tasa de cambio no encontrada")
 
         oc = session.get(CompraOC, id_oc)
         if oc is None:
@@ -590,7 +620,17 @@ class CompraService:
                     fecha=compra.fecha_emision,
                 )
 
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a un registro. Intente de nuevo."
+                ) from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(compra)
 
         logger.info(
