@@ -581,11 +581,7 @@ class ComisionesPanel(QWidget):
         if ids_facturas:
             session = self.session_factory()
             try:
-                cuentas = (
-                    session.query(CuentaPorCobrar)
-                    .filter(CuentaPorCobrar.id_factura.in_(ids_facturas))
-                    .all()
-                )
+                cuentas = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_(ids_facturas)).all()
                 for cxc in cuentas:
                     cxc_por_factura[cxc.id_factura] = cxc
             finally:

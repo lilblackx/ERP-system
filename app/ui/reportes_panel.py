@@ -3686,12 +3686,8 @@ class ReportesPanel(QWidget):
 
         self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
-        self.resumen_layout.addWidget(
-            self._chip(f"Horizonte: {resultado['dias_horizonte']} días", COLOR_INFO)
-        )
-        self.resumen_layout.addWidget(
-            self._chip(f"Fecha actual: {resultado['fecha_actual']}", COLOR_TEXT_MUTED)
-        )
+        self.resumen_layout.addWidget(self._chip(f"Horizonte: {resultado['dias_horizonte']} días", COLOR_INFO))
+        self.resumen_layout.addWidget(self._chip(f"Fecha actual: {resultado['fecha_actual']}", COLOR_TEXT_MUTED))
         self.resumen_layout.addStretch()
 
     # ── Chips de resumen ─────────────────────────────────────────────────────
