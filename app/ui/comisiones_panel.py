@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import ComisionFactura, Usuario
+from app.db.models import ComisionFactura, CuentaPorCobrar, Usuario
 from app.services.comisiones import ComisionService, PagoComisionService
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
@@ -454,9 +454,9 @@ class ComisionesPanel(QWidget):
         return w
 
     def _make_table(self) -> QTableWidget:
-        self.tabla = QTableWidget(0, 7)
+        self.tabla = QTableWidget(0, 8)
         self.tabla.setHorizontalHeaderLabels(
-            ["ID", "Factura", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado"]
+            ["ID", "Factura", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado", "Estado de Pago"]
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -469,7 +469,9 @@ class ComisionesPanel(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(6, 110)
+        self.tabla.setColumnWidth(6, 120)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(7, 130)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(0, True)
@@ -566,11 +568,46 @@ class ComisionesPanel(QWidget):
         total_pendiente = Decimal("0.00")
         total_liberada = Decimal("0.00")
 
-        for fila, comision in enumerate(comisiones):
-            factura_num = ""
+        # Cargar cuentas por cobrar de todas las facturas en una sola consulta
+        ids_facturas = []
+        for comision in comisiones:
             try:
                 if comision.detalle and comision.detalle.factura:
-                    factura_num = comision.detalle.factura.numero_factura or ""
+                    ids_facturas.append(comision.detalle.factura.id_factura)
+            except Exception:
+                pass
+
+        cxc_por_factura = {}
+        if ids_facturas:
+            session = self.session_factory()
+            try:
+                cuentas = (
+                    session.query(CuentaPorCobrar)
+                    .filter(CuentaPorCobrar.id_factura.in_(ids_facturas))
+                    .all()
+                )
+                for cxc in cuentas:
+                    cxc_por_factura[cxc.id_factura] = cxc
+            finally:
+                session.close()
+
+        for fila, comision in enumerate(comisiones):
+            factura_num = ""
+            estado_pago_factura = "Pendiente"
+            try:
+                if comision.detalle and comision.detalle.factura:
+                    factura = comision.detalle.factura
+                    factura_num = factura.numero_factura or ""
+                    # Verificar si la factura está pagada completamente
+                    cxc = cxc_por_factura.get(factura.id_factura)
+                    if cxc:
+                        # Si el saldo pendiente es 0 o la cuenta está pagada
+                        if cxc.saldo_pendiente <= 0 or cxc.estado in ("pagada", "cancelada"):
+                            estado_pago_factura = "Liberada"
+                    else:
+                        # Si no hay cuenta por cobrar, verificar estado de la factura
+                        if factura.estado_factura in ("PAGADA", "ANULADA"):
+                            estado_pago_factura = "Liberada"
             except Exception:
                 pass
 
@@ -585,6 +622,10 @@ class ComisionesPanel(QWidget):
             estado = comision.estado_pago or "pendiente"
             color = COLORES_ESTADO_COMISION.get(estado, COLOR_TEXT_MUTED)
             self.tabla.setCellWidget(fila, 6, EstadoBadge(estado.capitalize(), color))
+
+            # Estado de pago de la factura
+            color_pago = COLOR_SUCCESS if estado_pago_factura == "Liberada" else COLOR_PRIMARY
+            self.tabla.setCellWidget(fila, 7, EstadoBadge(estado_pago_factura, color_pago))
 
             if estado == "pendiente":
                 total_pendiente += comision.monto_comision

@@ -37,6 +37,7 @@ from app.db.models import (
     BancoMovimiento,
     Caja,
     CajaMovimiento,
+    Categoria,
     Cliente,
     ComisionFactura,
     Compra,
@@ -587,6 +588,58 @@ class ReporteService:
             "orden": orden,
             "filas": filas,
             "total_general": sum((f["total"] for f in filas), Decimal("0.00")),
+        }
+
+    @staticmethod
+    def productos_proximos_a_vencer(
+        session: Session,
+        id_usuario: int | None,
+        dias_horizonte: int = 30,
+        id_categoria: int | None = None,
+    ) -> dict:
+        """Listado de productos proximos a vencerse, con los dias restantes hasta la
+        fecha de vencimiento (fecha_vencimiento - fecha_actual). Solo incluye productos
+        con fecha_vencimiento definida y que vencen dentro del horizonte especificado."""
+        require_permiso(session, id_usuario, "reportes", "ver")
+        if dias_horizonte <= 0:
+            raise ValueError("dias_horizonte debe ser mayor a 0")
+
+        fecha_actual = date.today()
+        fecha_limite = fecha_actual + timedelta(days=dias_horizonte)
+
+        query = (
+            session.query(Inventario)
+            .options(joinedload(Inventario.categoria))
+            .filter(Inventario.fecha_vencimiento.isnot(None))
+            .filter(Inventario.fecha_vencimiento >= fecha_actual)
+            .filter(Inventario.fecha_vencimiento <= fecha_limite)
+            .filter(Inventario.estado_producto == "ACTIVO")
+        )
+        if id_categoria:
+            query = query.filter(Inventario.id_categoria == id_categoria)
+
+        productos = query.order_by(Inventario.fecha_vencimiento).all()
+
+        filas = []
+        for producto in productos:
+            dias_para_vencer = (producto.fecha_vencimiento - fecha_actual).days if producto.fecha_vencimiento else 0
+            filas.append(
+                {
+                    "id_producto": producto.id_producto,
+                    "cod_producto": producto.cod_producto,
+                    "producto": producto.nombre_producto,
+                    "categoria": producto.categoria.nombre if producto.categoria else None,
+                    "cantidad_unidad": producto.cantidad_unidad,
+                    "fecha_vencimiento": producto.fecha_vencimiento,
+                    "dias_para_vencer": dias_para_vencer,
+                }
+            )
+
+        return {
+            "fecha_actual": fecha_actual,
+            "dias_horizonte": dias_horizonte,
+            "filas": filas,
+            "total_productos": len(filas),
         }
 
     @staticmethod

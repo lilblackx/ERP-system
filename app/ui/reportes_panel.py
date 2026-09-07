@@ -109,6 +109,7 @@ REPORTE_CONCILIACION_BANCARIA = "conciliacion_bancaria"
 REPORTE_SALDO_CONSOLIDADO = "saldo_consolidado"
 REPORTE_COMISIONES_VENDEDOR = "comisiones_vendedor"
 REPORTE_COMISIONES_PAGADAS_PENDIENTES = "comisiones_pagadas_pendientes"
+REPORTE_PRODUCTOS_PROXIMOS_VENCER = "productos_proximos_vencer"
 
 COLS_AGING_CXC = ["Factura", "Cliente", "Vencimiento", "Saldo Pendiente", "Días Vencido", "Rango"]
 COLS_AGING_CXP = ["Compra", "Proveedor", "Vencimiento", "Saldo Pendiente", "Días Vencido", "Rango"]
@@ -197,6 +198,7 @@ COLS_CONCILIACION_BANCARIA = ["Cuenta", "Pendiente", "Cant. Pendiente", "Concili
 COLS_SALDO_CONSOLIDADO = ["Banco", "Cuenta", "Tipo", "Titular", "Saldo"]
 COLS_COMISIONES_VENDEDOR = ["Vendedor", "Facturas", "Comisión"]
 COLS_COMISIONES_PAGADAS_PENDIENTES = ["Vendedor", "Pagado", "Liberada", "Pendiente"]
+COLS_PRODUCTOS_PROXIMOS_VENCER = ["Código", "Producto", "Categoría", "Cantidad", "Vencimiento", "Días para Vencer"]
 
 ETIQUETAS_ESTADO_NC = {"disponible": "Disponible", "aplicada": "Aplicada", "devuelta": "Devuelta"}
 ETIQUETAS_ESTADO_OC = {"PENDIENTE": "Pendiente", "PARCIAL": "Parcial", "COMPLETA": "Completa", "ANULADA": "Anulada"}
@@ -641,6 +643,12 @@ def _tarea_comisiones_pagadas_pendientes(session, id_usuario, fecha_desde, fecha
     )
 
 
+def _tarea_productos_proximos_vencer(session, id_usuario, dias_horizonte, id_categoria):
+    return ReporteService.productos_proximos_a_vencer(
+        session, id_usuario=id_usuario, dias_horizonte=dias_horizonte, id_categoria=id_categoria
+    )
+
+
 class ReportesPanel(QWidget):
     """Panel principal del modulo Reportes: selector de reporte + filtros propios de
     cada uno + tabla de resultados + exportacion a Excel/PDF."""
@@ -790,6 +798,7 @@ class ReportesPanel(QWidget):
         self.tipo_combo.addItem("Saldo Consolidado", REPORTE_SALDO_CONSOLIDADO)
         self.tipo_combo.addItem("Comisiones por Vendedor/Período", REPORTE_COMISIONES_VENDEDOR)
         self.tipo_combo.addItem("Comisiones Pagadas vs. Pendientes", REPORTE_COMISIONES_PAGADAS_PENDIENTES)
+        self.tipo_combo.addItem("Productos Próximos a Vencer", REPORTE_PRODUCTOS_PROXIMOS_VENCER)
         self.tipo_combo.currentIndexChanged.connect(self._on_tipo_cambiado)
 
         # Con 41 reportes en un solo combo plano, encontrar uno por nombre exacto en la
@@ -864,6 +873,7 @@ class ReportesPanel(QWidget):
             REPORTE_SALDO_CONSOLIDADO: self._make_filtros_saldo_consolidado(),
             REPORTE_COMISIONES_VENDEDOR: self._make_filtros_comisiones_vendedor(),
             REPORTE_COMISIONES_PAGADAS_PENDIENTES: self._make_filtros_comisiones_pagadas_pendientes(),
+            REPORTE_PRODUCTOS_PROXIMOS_VENCER: self._make_filtros_productos_proximos_vencer(),
         }
         for modo, pagina in self._filtros_paginas.items():
             filtros_layout.addWidget(pagina)
@@ -1930,6 +1940,31 @@ class ReportesPanel(QWidget):
         h.addWidget(self.vendedor_combo_cpp)
         return w
 
+    def _make_filtros_productos_proximos_vencer(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+
+        lbl_dias = QLabel("Días horizonte:")
+        lbl_dias.setStyleSheet(LABEL_QSS)
+        self.dias_horizonte_ppv_input = QSpinBox()
+        self.dias_horizonte_ppv_input.setRange(1, 365)
+        self.dias_horizonte_ppv_input.setValue(30)
+        self.dias_horizonte_ppv_input.setFixedWidth(100)
+        self.dias_horizonte_ppv_input.setStyleSheet(COMBO_QSS)
+
+        lbl_categoria = QLabel("Categoría:")
+        lbl_categoria.setStyleSheet(LABEL_QSS)
+        self.categoria_combo_ppv = _crear_combo(ancho=200)
+
+        h.addWidget(lbl_dias)
+        h.addWidget(self.dias_horizonte_ppv_input)
+        h.addWidget(lbl_categoria)
+        h.addWidget(self.categoria_combo_ppv)
+        return w
+
     def _make_resumen(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
@@ -2074,7 +2109,12 @@ class ReportesPanel(QWidget):
         session = self.session_factory()
         try:
             categorias = session.query(Categoria).order_by(Categoria.nombre).all()
-            for combo in (self.categoria_combo_valorizacion, self.categoria_combo_bajo_minimo, self.categoria_combo_sm):
+            for combo in (
+                self.categoria_combo_valorizacion,
+                self.categoria_combo_bajo_minimo,
+                self.categoria_combo_sm,
+                self.categoria_combo_ppv,
+            ):
                 combo.clear()
                 combo.addItem("Todas las categorías", None)
                 for categoria in categorias:
@@ -2616,6 +2656,18 @@ class ReportesPanel(QWidget):
                 fecha_hasta=fecha_hasta,
                 id_vendedor=self.vendedor_combo_comv.currentData(),
             )
+        elif modo == REPORTE_PRODUCTOS_PROXIMOS_VENCER:
+            dias_horizonte = self.dias_horizonte_ppv_input.value()
+            if dias_horizonte <= 0:
+                MessageBox.warning(self, "Valor inválido", "El horizonte de días debe ser mayor a 0.")
+                return
+            self._worker = QueryWorker(
+                self.session_factory,
+                _tarea_productos_proximos_vencer,
+                id_usuario=self.usuario.id_usuario,
+                dias_horizonte=dias_horizonte,
+                id_categoria=self.categoria_combo_ppv.currentData(),
+            )
         else:
             fecha_desde = self.fecha_desde_cpp_com_input.date().toPython()
             fecha_hasta = self.fecha_hasta_cpp_com_input.date().toPython()
@@ -2722,6 +2774,8 @@ class ReportesPanel(QWidget):
             self._mostrar_saldo_consolidado(resultado)
         elif self._ultimo_modo == REPORTE_COMISIONES_VENDEDOR:
             self._mostrar_comisiones_vendedor(resultado)
+        elif self._ultimo_modo == REPORTE_PRODUCTOS_PROXIMOS_VENCER:
+            self._mostrar_productos_proximos_vencer(resultado)
         else:
             self._mostrar_comisiones_pagadas_pendientes(resultado)
 
@@ -3616,6 +3670,30 @@ class ReportesPanel(QWidget):
         )
         self.resumen_layout.addStretch()
 
+    # ── Resultados: productos próximos a vencer ───────────────────────────────
+
+    def _mostrar_productos_proximos_vencer(self, resultado: dict) -> None:
+        self._reset_tabla(COLS_PRODUCTOS_PROXIMOS_VENCER)
+        filas = resultado["filas"]
+        self.tabla.setRowCount(len(filas))
+        for row, f in enumerate(filas):
+            self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
+            self.tabla.setItem(row, 1, QTableWidgetItem(f["producto"]))
+            self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"] or "N/A"))
+            self.tabla.setItem(row, 3, QTableWidgetItem(f"{float(f['cantidad_unidad']):,.2f}"))
+            self.tabla.setItem(row, 4, QTableWidgetItem(str(f["fecha_vencimiento"])))
+            self.tabla.setItem(row, 5, QTableWidgetItem(f"{f['dias_para_vencer']}"))
+
+        self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
+        self._limpiar_resumen()
+        self.resumen_layout.addWidget(
+            self._chip(f"Horizonte: {resultado['dias_horizonte']} días", COLOR_INFO)
+        )
+        self.resumen_layout.addWidget(
+            self._chip(f"Fecha actual: {resultado['fecha_actual']}", COLOR_TEXT_MUTED)
+        )
+        self.resumen_layout.addStretch()
+
     # ── Chips de resumen ─────────────────────────────────────────────────────
 
     def _chip(self, texto: str, color: str = COLOR_TEXT_MUTED, fondo: str = COLOR_TABLE_HEADER) -> QLabel:
@@ -4073,6 +4151,20 @@ class ReportesPanel(QWidget):
             ]
             return "comisiones_vendedor", COLS_COMISIONES_VENDEDOR, filas
 
+        if self._ultimo_modo == REPORTE_PRODUCTOS_PROXIMOS_VENCER:
+            filas = [
+                [
+                    f["cod_producto"],
+                    f["producto"],
+                    f["categoria"] or "N/A",
+                    float(f["cantidad_unidad"]),
+                    str(f["fecha_vencimiento"]),
+                    f["dias_para_vencer"],
+                ]
+                for f in self._ultimo_resultado["filas"]
+            ]
+            return "productos_proximos_vencer", COLS_PRODUCTOS_PROXIMOS_VENCER, filas
+
         filas = [
             [f["vendedor"], float(f["pagado"]), float(f["liberada"]), float(f["pendiente"])]
             for f in self._ultimo_resultado["filas"]
@@ -4436,6 +4528,15 @@ class ReportesPanel(QWidget):
                 "Total": f"${float(resultado['total_general']):,.2f}",
             }
             return "Comisiones por Vendedor/Período", filtros, [2.0, 1.0, 1.2]
+
+        if self._ultimo_modo == REPORTE_PRODUCTOS_PROXIMOS_VENCER:
+            filtros = {
+                "Horizonte": f"{resultado['dias_horizonte']} días",
+                "Fecha actual": resultado["fecha_actual"].strftime("%d/%m/%Y"),
+                "Categoría": self.categoria_combo_ppv.currentText(),
+                "Total": f"{resultado['total_productos']} productos",
+            }
+            return "Productos Próximos a Vencer", filtros, [1.0, 2.0, 1.3, 1.0, 1.2, 1.0]
 
         filtros = {
             "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y") if resultado["fecha_desde"] else "N/A",
