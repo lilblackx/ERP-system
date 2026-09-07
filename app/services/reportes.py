@@ -37,7 +37,7 @@ from app.db.models import (
     BancoMovimiento,
     Caja,
     CajaMovimiento,
-    Categoria,
+    Categoria,  # noqa: F401 - usado en joinedload(Inventario.categoria)
     Cliente,
     ComisionFactura,
     Compra,
