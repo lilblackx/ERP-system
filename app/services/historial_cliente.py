@@ -39,6 +39,7 @@ class HistorialItem(TypedDict):
     monto_vuelto: Decimal
     metodo_vuelto: str | None
     pagos_detalle: list[PagoDetalle]
+    saldo_corrido: Decimal
 
 
 def obtener_historial_cliente(session: Session, id_cliente: int) -> list[HistorialItem]:
@@ -52,16 +53,18 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
     Returns:
         Lista de items del historial con facturas, pagos y saldos pendientes
     """
-    # Obtener facturas del cliente con sus cuentas por cobrar
+    # Obtener facturas del cliente con sus cuentas por cobrar, ordenadas por fecha
+    # ascendente para calcular el saldo corrido acumulativo
     facturas = (
         session.query(FacturaVenta)
         .options(joinedload(FacturaVenta.cliente))
         .filter(FacturaVenta.id_cliente_factura == id_cliente)
-        .order_by(FacturaVenta.fecha_emision.desc())
+        .order_by(FacturaVenta.fecha_emision.asc(), FacturaVenta.id_factura.asc())
         .all()
     )
 
     historial: list[HistorialItem] = []
+    saldo_corrido_acumulado = Decimal("0.00")
 
     for factura in facturas:
         # Obtener cuenta por cobrar de esta factura
@@ -110,6 +113,10 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         else:
             saldo_pendiente = factura.total_venta - total_pagado
 
+        # Calcular saldo corrido acumulativo
+        # El saldo corrido es el acumulado de saldos pendientes de todas las transacciones
+        saldo_corrido_acumulado += saldo_pendiente
+
         # Formatear fechas
         fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d") if factura.fecha_emision else ""
         fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
@@ -149,9 +156,14 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "monto_vuelto": factura.monto_vuelto,
             "metodo_vuelto": factura.metodo_vuelto,
             "pagos_detalle": pagos_detalle,
+            "saldo_corrido": saldo_corrido_acumulado,
         }
 
         historial.append(item)
+
+    # Invertir el orden para mostrar las facturas más recientes primero
+    # pero manteniendo el saldo corrido calculado correctamente
+    historial.reverse()
 
     return historial
 

@@ -117,6 +117,7 @@ COLS_HISTORIAL = [
     "Pagos",
     "Vuelto",
     "Saldo Pendiente",
+    "Saldo Corrido",
 ]
 
 
@@ -243,6 +244,7 @@ class HistorialClienteWindow(QDialog):
                 9: Qt.AlignmentFlag.AlignLeft,
                 10: Qt.AlignmentFlag.AlignRight,
                 11: Qt.AlignmentFlag.AlignRight,
+                12: Qt.AlignmentFlag.AlignRight,
             },
         )
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -263,10 +265,8 @@ class HistorialClienteWindow(QDialog):
         self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.ResizeToContents)
-        # 11 = "Saldo Pendiente" (antes 10, antes de insertar la columna "Vuelto") -- sin
-        # este override quedaba en el Stretch por defecto de la linea de arriba, la unica
-        # columna de monto de la tabla que se estiraba en vez de ajustarse al contenido.
         self.tabla.horizontalHeader().setSectionResizeMode(11, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(12, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(45)
@@ -509,6 +509,19 @@ class HistorialClienteWindow(QDialog):
             item_saldo.setFont(font)
             self.tabla.setItem(fila, 11, item_saldo)
 
+            # Saldo Corrido
+            saldo_corrido = f"${float(item['saldo_corrido']):,.2f}"
+            item_corrido = QTableWidgetItem(saldo_corrido)
+            item_corrido.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            if item["saldo_corrido"] > 0:
+                item_corrido.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER))
+            else:
+                item_corrido.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS))
+            font_corrido = item_corrido.font()
+            font_corrido.setBold(True)
+            item_corrido.setFont(font_corrido)
+            self.tabla.setItem(fila, 12, item_corrido)
+
     def exportar_excel(self) -> None:
         session = self.session_factory()
         try:
@@ -529,6 +542,7 @@ class HistorialClienteWindow(QDialog):
                     str(item["total_pagado"]),
                     _texto_vuelto(item),
                     str(item["saldo_pendiente"]),
+                    str(item["saldo_corrido"]),
                 ]
                 for item in historial
             ]
@@ -568,6 +582,7 @@ class HistorialClienteWindow(QDialog):
                     str(item["total_pagado"]),
                     _texto_vuelto(item),
                     str(item["saldo_pendiente"]),
+                    str(item["saldo_corrido"]),
                 ]
                 for item in historial
             ]
