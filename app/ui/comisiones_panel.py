@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import ComisionFactura, CuentaPorCobrar, Usuario
+from app.db.models import ComisionFactura, Usuario
 from app.services.comisiones import ComisionService, PagoComisionService
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
@@ -444,6 +444,7 @@ class ComisionesPanel(QWidget):
         for etiqueta, valor in ESTADOS_FILTRO:
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._aplicar_filtro_estado)
+
         self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel, on_pdf=self.exportar_pdf)
@@ -456,7 +457,7 @@ class ComisionesPanel(QWidget):
     def _make_table(self) -> QTableWidget:
         self.tabla = QTableWidget(0, 8)
         self.tabla.setHorizontalHeaderLabels(
-            ["ID", "Factura", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado", "Estado de Pago"]
+            ["ID", "Factura", "Cliente", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado"]
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -468,10 +469,9 @@ class ComisionesPanel(QWidget):
         self.tabla.doubleClicked.connect(self.ver_detalle_factura)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(6, 120)
+        self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(7, 130)
+        self.tabla.setColumnWidth(7, 120)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(0, True)
@@ -568,60 +568,29 @@ class ComisionesPanel(QWidget):
         total_pendiente = Decimal("0.00")
         total_liberada = Decimal("0.00")
 
-        # Cargar cuentas por cobrar de todas las facturas en una sola consulta
-        ids_facturas = []
-        for comision in comisiones:
-            try:
-                if comision.detalle and comision.detalle.factura:
-                    ids_facturas.append(comision.detalle.factura.id_factura)
-            except Exception:
-                pass
-
-        cxc_por_factura = {}
-        if ids_facturas:
-            session = self.session_factory()
-            try:
-                cuentas = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_(ids_facturas)).all()
-                for cxc in cuentas:
-                    cxc_por_factura[cxc.id_factura] = cxc
-            finally:
-                session.close()
-
         for fila, comision in enumerate(comisiones):
             factura_num = ""
-            estado_pago_factura = "Pendiente"
+            cliente_nombre = ""
             try:
                 if comision.detalle and comision.detalle.factura:
                     factura = comision.detalle.factura
                     factura_num = factura.numero_factura or ""
-                    # Verificar si la factura está pagada completamente
-                    cxc = cxc_por_factura.get(factura.id_factura)
-                    if cxc:
-                        # Si el saldo pendiente es 0 o la cuenta está pagada
-                        if cxc.saldo_pendiente <= 0 or cxc.estado in ("pagada", "cancelada"):
-                            estado_pago_factura = "Liberada"
-                    else:
-                        # Si no hay cuenta por cobrar, verificar estado de la factura
-                        if factura.estado_factura in ("PAGADA", "ANULADA"):
-                            estado_pago_factura = "Liberada"
+                    cliente_nombre = factura.cliente.nombre_razon_social if factura.cliente else "Consumidor final"
             except Exception:
                 pass
 
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(comision.id_comision)))
             self.tabla.setItem(fila, 1, QTableWidgetItem(factura_num))
+            self.tabla.setItem(fila, 2, QTableWidgetItem(cliente_nombre))
             fecha_str = comision.fecha_calculo.strftime("%d/%m/%Y") if comision.fecha_calculo else ""
-            self.tabla.setItem(fila, 2, QTableWidgetItem(fecha_str))
-            self.tabla.setItem(fila, 3, QTableWidgetItem(f"${float(comision.monto_base_comision or 0):,.2f}"))
-            self.tabla.setItem(fila, 4, QTableWidgetItem(f"${float(comision.monto_venta_comision or 0):,.2f}"))
-            self.tabla.setItem(fila, 5, QTableWidgetItem(f"${float(comision.monto_comision):,.2f}"))
+            self.tabla.setItem(fila, 3, QTableWidgetItem(fecha_str))
+            self.tabla.setItem(fila, 4, QTableWidgetItem(f"${float(comision.monto_base_comision or 0):,.2f}"))
+            self.tabla.setItem(fila, 5, QTableWidgetItem(f"${float(comision.monto_venta_comision or 0):,.2f}"))
+            self.tabla.setItem(fila, 6, QTableWidgetItem(f"${float(comision.monto_comision):,.2f}"))
 
             estado = comision.estado_pago or "pendiente"
             color = COLORES_ESTADO_COMISION.get(estado, COLOR_TEXT_MUTED)
-            self.tabla.setCellWidget(fila, 6, EstadoBadge(estado.capitalize(), color))
-
-            # Estado de pago de la factura
-            color_pago = COLOR_SUCCESS if estado_pago_factura == "Liberada" else COLOR_PRIMARY
-            self.tabla.setCellWidget(fila, 7, EstadoBadge(estado_pago_factura, color_pago))
+            self.tabla.setCellWidget(fila, 7, EstadoBadge(estado.capitalize(), color))
 
             if estado == "pendiente":
                 total_pendiente += comision.monto_comision
@@ -666,19 +635,23 @@ class ComisionesPanel(QWidget):
             self.btn_pagar.setEnabled(True)
 
     def _datos_para_exportar(self) -> tuple[list[str], list[list]]:
-        encabezados = ["Factura", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado"]
+        encabezados = ["Factura", "Cliente", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado"]
         filas = []
         for comision in self.comisiones_filtradas:
             factura_num = ""
+            cliente_nombre = ""
             try:
                 if comision.detalle and comision.detalle.factura:
-                    factura_num = comision.detalle.factura.numero_factura or ""
+                    factura = comision.detalle.factura
+                    factura_num = factura.numero_factura or ""
+                    cliente_nombre = factura.cliente.nombre_razon_social if factura.cliente else "Consumidor final"
             except Exception:
                 pass
             fecha_str = comision.fecha_calculo.strftime("%d/%m/%Y") if comision.fecha_calculo else ""
             filas.append(
                 [
                     factura_num,
+                    cliente_nombre,
                     fecha_str,
                     float(comision.monto_base_comision or 0),
                     float(comision.monto_venta_comision or 0),
@@ -760,7 +733,7 @@ class ComisionesPanel(QWidget):
             encabezados=encabezados,
             filas=filas,
             filtros=self._filtros_para_exportar(),
-            col_widths=[1.4, 1.0, 1.0, 1.0, 1.0, 1.0],
+            col_widths=[1.4, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             config_empresa=config_empresa,
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)

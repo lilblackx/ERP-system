@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     BancoMovimiento,
@@ -102,8 +102,12 @@ class ComisionService:
         session: Session, id_vendedor: int, estado_pago: str | None = None, id_usuario: int | None = None
     ) -> list[ComisionFactura]:
         require_permiso(session, id_usuario, "comisiones", "ver")
-        query = session.query(ComisionFactura).filter(
-            ComisionFactura.id_vendedor == id_vendedor, ComisionFactura.monto_comision > 0
+        query = (
+            session.query(ComisionFactura)
+            .options(
+                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente)
+            )
+            .filter(ComisionFactura.id_vendedor == id_vendedor, ComisionFactura.monto_comision > 0)
         )
         if estado_pago:
             query = query.filter(ComisionFactura.estado_pago == estado_pago)
@@ -120,6 +124,9 @@ class ComisionService:
             raise ValueError("Este usuario no tiene un vendedor vinculado")
         return (
             session.query(ComisionFactura)
+            .options(
+                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente)
+            )
             .filter(ComisionFactura.id_vendedor == usuario.id_vendedor_usuario, ComisionFactura.monto_comision > 0)
             .order_by(ComisionFactura.fecha_calculo.desc())
             .all()
