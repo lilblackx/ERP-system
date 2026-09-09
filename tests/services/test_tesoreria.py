@@ -192,6 +192,36 @@ def test_listar_cajas_sin_usuario_autorizado_falla(db_session):
         CajaService.listar_cajas(db_session)
 
 
+def test_crear_caja(db_session):
+    admin = crear_usuario_admin(db_session)
+    caja = CajaService.crear_caja(db_session, "Caja Principal", id_usuario=admin.id_usuario)
+
+    assert caja.id_caja is not None
+    assert caja.nombre_caja == "Caja Principal"
+    assert caja.estado_caja == "CERRADA"
+    assert caja.fecha_apertura is None
+
+
+def test_crear_caja_sin_nombre_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    with pytest.raises(ValueError, match="nombre de la caja"):
+        CajaService.crear_caja(db_session, "   ", id_usuario=admin.id_usuario)
+
+
+def test_crear_caja_usuario_no_admin_falla(db_session):
+    """Crear una caja se restringe a ADMIN, mismo criterio que abrir/cerrar turno (ver
+    _require_admin en app/services/tesoreria.py) -- ni siquiera un rol con el permiso
+    'cajas'/'crear' explicitamente otorgado alcanza."""
+    admin = crear_usuario_admin(db_session)
+    rol = crear_rol(db_session)
+    permiso = crear_permiso(db_session, recurso="cajas", accion="crear")
+    PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+
+    with pytest.raises(PermisoDenegadoError):
+        CajaService.crear_caja(db_session, "Caja Z", id_usuario=usuario.id_usuario)
+
+
 def test_abrir_caja(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)

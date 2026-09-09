@@ -36,6 +36,7 @@ from app.db.models import CuentaPorPagar, Usuario
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
+from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
@@ -60,6 +61,7 @@ from app.ui.styles import (
     ICON_CHEVRON_UP_URL,
     TABLE_QSS,
     EstadoBadge,
+    alinear_encabezados,
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonFiltros
@@ -185,11 +187,19 @@ class PagoProveedorDialog(QDialog):
     la maneja, a diferencia de PagoLineaDialog/pagos_cobros) contra el saldo_pendiente de
     una CuentaPorPagar. Mismo patron de origen caja/cuenta que PagoLineaDialog."""
 
-    def __init__(self, session: Session, id_usuario: int | None, cuenta: CuentaPorPagar, parent=None):
+    def __init__(
+        self,
+        session: Session,
+        id_usuario: int | None,
+        cuenta: CuentaPorPagar,
+        tasa_bcv: float | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.session = session
         self.id_usuario = id_usuario
         self.cuenta = cuenta
+        self.tasa_bcv = tasa_bcv
         self.pago_creado = None
         self._cajas_abiertas: list = []
         self._cuentas_activas: list = []
@@ -219,7 +229,10 @@ class PagoProveedorDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        lbl_saldo = QLabel(f"Saldo pendiente: ${float(self.cuenta.saldo_pendiente):,.2f}")
+        texto_saldo = f"Saldo pendiente: ${float(self.cuenta.saldo_pendiente):,.2f}"
+        if self.tasa_bcv:
+            texto_saldo += f"  (Bs {float(self.cuenta.saldo_pendiente) * self.tasa_bcv:,.2f})"
+        lbl_saldo = QLabel(texto_saldo)
         lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_saldo)
 
@@ -365,6 +378,7 @@ class CuentasPorPagarPanel(QWidget):
         self.usuario = usuario
         self.pagina_actual = 1
         self.total_paginas = 1
+        self._tasa_bcv: float | None = None
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_cuentas)
@@ -403,8 +417,20 @@ class CuentasPorPagarPanel(QWidget):
             " padding: 3px 10px;"
         )
 
+        # Tasa BCV vigente -- mismo patron informativo que factura_form_dialog.py/
+        # cuentas_por_cobrar_panel.py: se oculta si el usuario no tiene 'tasas'/'ver' o no
+        # hay ninguna tasa registrada, nunca bloquea el panel.
+        self.lbl_tasa = QLabel()
+        self.lbl_tasa.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 13px;"
+            f" background-color: {COLOR_TABLE_HEADER}; border-radius: 10px;"
+            " padding: 3px 10px;"
+        )
+        self.lbl_tasa.setVisible(False)
+
         h.addWidget(lbl)
         h.addWidget(self.lbl_total)
+        h.addWidget(self.lbl_tasa)
         h.addStretch()
         return w
 
@@ -428,7 +454,20 @@ class CuentasPorPagarPanel(QWidget):
         return w
 
     def _make_table(self) -> QWidget:
-        self.tabla = self._crear_tabla(["ID", "Compra", "Proveedor", "Saldo Pendiente", "Vencimiento", "Estado"])
+        self.tabla = self._crear_tabla(
+            ["ID", "Compra", "Proveedor", "Saldo Pendiente", "Saldo Pendiente (Bs)", "Vencimiento", "Estado"]
+        )
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
         return self.tabla
 
     def _crear_tabla(self, columnas: list[str]):
@@ -500,9 +539,26 @@ class CuentasPorPagarPanel(QWidget):
 
     # ── Logica de datos ────────────────────────────────────────────────────
 
+    def _cargar_tasa_actual(self, session) -> float | None:
+        """Tasa BCV vigente, solo para mostrar el equivalente en Bs -- nunca bloquea el
+        panel. Mismo patron que factura_form_dialog.py::_cargar_tasa_vigente()."""
+        try:
+            tasa = TasaService.obtener_tasa_actual(session, id_usuario=self.usuario.id_usuario)
+        except PermisoDenegadoError:
+            self.lbl_tasa.setVisible(False)
+            return None
+        if tasa is None:
+            self.lbl_tasa.setVisible(False)
+            return None
+        fecha = tasa["fecha_tasa"].strftime("%d/%m/%Y")
+        self.lbl_tasa.setText(f"Tasa BCV: {tasa['tasa_bcv']:,.2f} Bs/USD ({fecha})")
+        self.lbl_tasa.setVisible(True)
+        return float(tasa["tasa_bcv"])
+
     def cargar_cuentas(self) -> None:
         session = self.session_factory()
         try:
+            self._tasa_bcv = self._cargar_tasa_actual(session)
             resultado = PagoService.listar_cuentas_por_pagar(
                 session,
                 estado=self.estado_combo.currentData(),
@@ -529,11 +585,22 @@ class CuentasPorPagarPanel(QWidget):
             self.tabla.setItem(
                 fila, 2, QTableWidgetItem(compra.proveedor.nombre_razon_social if compra and compra.proveedor else "")
             )
-            self.tabla.setItem(fila, 3, QTableWidgetItem(f"${float(cuenta.saldo_pendiente):,.2f}"))
+            item_saldo = QTableWidgetItem(f"${float(cuenta.saldo_pendiente):,.2f}")
+            item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 3, item_saldo)
+
+            # Equivalente en Bs, informativo (mismo criterio que factura_pdf.py/CxC): usa
+            # la tasa BCV vigente al momento de consultar, no una tasa historica de cuando
+            # nacio la deuda -- no hay ninguna guardada por cuenta.
+            texto_bs = f"Bs {float(cuenta.saldo_pendiente) * self._tasa_bcv:,.2f}" if self._tasa_bcv else "—"
+            item_saldo_bs = QTableWidgetItem(texto_bs)
+            item_saldo_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 4, item_saldo_bs)
+
             vencimiento = cuenta.fecha_vencimiento.strftime("%d/%m/%Y") if cuenta.fecha_vencimiento else "Sin definir"
-            self.tabla.setItem(fila, 4, QTableWidgetItem(vencimiento))
+            self.tabla.setItem(fila, 5, QTableWidgetItem(vencimiento))
             color = COLORES_ESTADO_CXP.get(cuenta.estado, COLOR_TEXT_MUTED)
-            self.tabla.setCellWidget(fila, 5, EstadoBadge(cuenta.estado.capitalize(), color))
+            self.tabla.setCellWidget(fila, 6, EstadoBadge(cuenta.estado.capitalize(), color))
 
         total = resultado["total"]
         self.total_paginas = max(1, -(-total // POR_PAGINA))
@@ -564,7 +631,9 @@ class CuentasPorPagarPanel(QWidget):
             if cuenta.estado == "pagada":
                 MessageBox.information(self, "Ya pagada", "Esta cuenta por pagar ya está saldada.")
                 return
-            dialogo = PagoProveedorDialog(session, self.usuario.id_usuario, cuenta, parent=self)
+            dialogo = PagoProveedorDialog(
+                session, self.usuario.id_usuario, cuenta, tasa_bcv=self._tasa_bcv, parent=self
+            )
             if dialogo.exec() and dialogo.pago_creado is not None:
                 self.cargar_cuentas()
                 MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")

@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import datetime
 
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Usuario
 from app.services.auditoria import AuditoriaService
+
+logger = logging.getLogger(__name__)
 
 MAX_INTENTOS_FALLIDOS = 5
 
@@ -94,13 +97,16 @@ def authenticate(
         .first()
     )
     if usuario is None:
+        logger.warning("Intento de login con usuario inexistente: '%s'", nombre_usuario)
         return None
 
     if usuario.bloqueado_desde is not None:
+        logger.warning("Intento de login contra cuenta bloqueada: '%s'", nombre_usuario)
         raise CuentaBloqueadaError(usuario.bloqueado_desde)
 
     if usuario.clave and verify_password(clave, usuario.clave):
         usuario.intentos_fallidos = 0
+        logger.info("Login exitoso: usuario='%s' accion=%s", usuario.nombre_usuario, accion_exito)
         AuditoriaService.registrar_evento(
             session,
             id_usuario=usuario.id_usuario,
@@ -114,6 +120,16 @@ def authenticate(
     usuario.intentos_fallidos += 1
     if usuario.intentos_fallidos >= MAX_INTENTOS_FALLIDOS:
         usuario.bloqueado_desde = datetime.now()
+        logger.warning(
+            "Cuenta '%s' bloqueada tras %d intentos fallidos", usuario.nombre_usuario, usuario.intentos_fallidos
+        )
+    else:
+        logger.warning(
+            "Login fallido: usuario='%s' intento=%d accion=%s",
+            usuario.nombre_usuario,
+            usuario.intentos_fallidos,
+            accion_fallo,
+        )
     AuditoriaService.registrar_evento(
         session,
         id_usuario=usuario.id_usuario,

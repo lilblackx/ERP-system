@@ -6,9 +6,10 @@ tabla estilizada, paginación (D-01) y exportación a Excel (R-02/R-10).
 """
 
 import logging
+from datetime import date, timedelta
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -57,12 +58,61 @@ from app.ui.styles import (
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
 COLS_VISIBLES = ["ID", "Código", "Nombre", "Categoría", "Cantidad", "Costo", "Precio Venta", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
+# Mismo horizonte que ProductoService.obtener_alertas_stock(dias_vencimiento=30) --
+# mantener sincronizado si ese default cambia.
+DIAS_VENCIMIENTO_ALERTA = 30
+
+
+def _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario) -> list[list]:
+    resultado = ProductoService.buscar(
+        session,
+        texto=texto,
+        id_categoria=id_categoria,
+        solo_con_stock=solo_con_stock,
+        pagina=1,
+        por_pagina=1_000_000,
+        id_usuario=id_usuario,
+    )
+    precios = InventarioPanel._obtener_precios(session, [p.id_producto for p in resultado["items"]])
+    return [
+        [
+            p.id_producto,
+            p.cod_producto,
+            p.nombre_producto,
+            p.categoria.nombre if p.categoria else None,
+            float(p.cantidad_unidad),
+            float(p.costo_producto),
+            precios.get(p.id_producto),
+            p.estado_producto,
+        ]
+        for p in resultado["items"]
+    ]
+
+
+def _tarea_exportar_productos_excel(
+    session, ruta: str, texto, id_categoria, solo_con_stock, id_usuario
+) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el catalogo
+    completo de inventario a un archivo (openpyxl) es lo bastante lento como para
+    congelar la ventana si se hace en el hilo de GUI."""
+    filas = _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario)
+    exportar_excel(ruta, COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_productos_pdf(
+    session, ruta: str, texto, id_categoria, solo_con_stock, id_usuario
+) -> tuple[str, int]:
+    filas = _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario)
+    exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
+    return ruta, len(filas)
 
 
 class InventarioPanel(QWidget):
@@ -109,7 +159,7 @@ class InventarioPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        lbl = QLabel("Catálogo de Inventario")
+        lbl = QLabel("Catálogo de Productos")
         lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
@@ -119,11 +169,22 @@ class InventarioPanel(QWidget):
             " padding: 3px 10px;"
         )
 
-        self.lbl_alertas = QLabel()
-        self.lbl_alertas.setStyleSheet(
-            f"color: {COLOR_WARNING}; font-size: 13px; font-weight: bold;"
-            " background-color: #FEF3C7; border-radius: 10px; padding: 3px 10px;"
+        # Icono real (qtawesome) + texto en vez de un caracter "⚠" suelto en el string --
+        # ver GUIA_ESTILO_UI.md 3.1 (todo icono de la app es qtawesome, ninguno un emoji).
+        self.lbl_alertas = QWidget()
+        self.lbl_alertas.setStyleSheet("background-color: #FEF3C7; border-radius: 10px;")
+        alertas_layout = QHBoxLayout(self.lbl_alertas)
+        alertas_layout.setContentsMargins(8, 3, 10, 3)
+        alertas_layout.setSpacing(5)
+        icon_alertas = QLabel()
+        icon_alertas.setPixmap(qta.icon("fa5s.exclamation-triangle", color=COLOR_WARNING).pixmap(QSize(12, 12)))
+        icon_alertas.setStyleSheet("background: transparent;")
+        self.lbl_alertas_texto = QLabel()
+        self.lbl_alertas_texto.setStyleSheet(
+            f"color: {COLOR_WARNING}; font-size: 13px; font-weight: bold; background: transparent;"
         )
+        alertas_layout.addWidget(icon_alertas)
+        alertas_layout.addWidget(self.lbl_alertas_texto)
         self.lbl_alertas.setVisible(False)
 
         h.addWidget(lbl)
@@ -328,9 +389,19 @@ class InventarioPanel(QWidget):
 
     def _actualizar_alertas(self, session) -> None:
         alertas = ProductoService.obtener_alertas_stock(session, id_usuario=self.usuario.id_usuario)
-        total_alertas = len(alertas["bajo_stock"]) + len(alertas["proximos_vencer"])
-        if total_alertas:
-            self.lbl_alertas.setText(f"⚠ {total_alertas} producto{'s' if total_alertas != 1 else ''} con alerta")
+        n_bajo_stock = len(alertas["bajo_stock"])
+        n_proximos_vencer = len(alertas["proximos_vencer"])
+        # Antes se sumaban ambos conteos en un solo numero ("3 productos con alerta")
+        # sin decir de que se trataba -- confuso para el usuario, que veia stock de sobra
+        # y no entendia por que el producto estaba marcado (la alerta real era por
+        # vencimiento proximo, no por stock).
+        partes = []
+        if n_bajo_stock:
+            partes.append(f"{n_bajo_stock} con stock bajo")
+        if n_proximos_vencer:
+            partes.append(f"{n_proximos_vencer} por vencer")
+        if partes:
+            self.lbl_alertas_texto.setText(" · ".join(partes))
             self.lbl_alertas.setVisible(True)
         else:
             self.lbl_alertas.setVisible(False)
@@ -338,10 +409,25 @@ class InventarioPanel(QWidget):
     def _poblar_tabla(self, resultado: dict, precios: dict[int, float]) -> None:
         productos: list[Inventario] = resultado["items"]
         self.tabla.setRowCount(len(productos))
+        limite_vencimiento = date.today() + timedelta(days=DIAS_VENCIMIENTO_ALERTA)
         for fila, p in enumerate(productos):
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(p.id_producto)))
             self.tabla.setItem(fila, 1, QTableWidgetItem(p.cod_producto or ""))
-            self.tabla.setItem(fila, 2, QTableWidgetItem(p.nombre_producto or ""))
+
+            # Indicador sutil de alerta (icono + tooltip) en la misma fila del producto --
+            # antes la unica senal era el contador agregado del encabezado ("N con
+            # alerta"), sin decir CUAL producto ni por que (stock bajo vs. por vencer).
+            item_nombre = QTableWidgetItem(p.nombre_producto or "")
+            motivos = []
+            if p.cantidad_minima and p.cantidad_minima > 0 and p.cantidad_unidad < p.cantidad_minima:
+                motivos.append(f"Stock bajo (mínimo configurado: {float(p.cantidad_minima):,.2f})")
+            if p.fecha_vencimiento is not None and p.fecha_vencimiento <= limite_vencimiento:
+                motivos.append(f"Vence el {p.fecha_vencimiento.strftime('%d/%m/%Y')}")
+            if motivos:
+                item_nombre.setIcon(qta.icon("fa5s.exclamation-triangle", color=COLOR_WARNING))
+                item_nombre.setToolTip(" · ".join(motivos))
+            self.tabla.setItem(fila, 2, item_nombre)
+
             self.tabla.setItem(fila, 3, QTableWidgetItem(p.categoria.nombre if p.categoria else ""))
 
             item_cant = QTableWidgetItem(f"{float(p.cantidad_unidad):,.2f}")
@@ -473,65 +559,52 @@ class InventarioPanel(QWidget):
         finally:
             session.close()
 
-    def _filas_para_exportar(self, session) -> list[list]:
-        resultado = ProductoService.buscar(
-            session,
-            texto=self.buscar_input.text().strip() or None,
-            id_categoria=self.categoria_filtro_combo.currentData(),
-            solo_con_stock=self.solo_stock_check.isChecked(),
-            pagina=1,
-            por_pagina=1_000_000,
-            id_usuario=self.usuario.id_usuario,
-        )
-        precios = self._obtener_precios(session, [p.id_producto for p in resultado["items"]])
-        return [
-            [
-                p.id_producto,
-                p.cod_producto,
-                p.nombre_producto,
-                p.categoria.nombre if p.categoria else None,
-                float(p.cantidad_unidad),
-                float(p.costo_producto),
-                precios.get(p.id_producto),
-                p.estado_producto,
-            ]
-            for p in resultado["items"]
-        ]
+    def _filtros_actuales_exportar(self) -> dict:
+        return {
+            "texto": self.buscar_input.text().strip() or None,
+            "id_categoria": self.categoria_filtro_combo.currentData(),
+            "solo_con_stock": self.solo_stock_check.isChecked(),
+            "id_usuario": self.usuario.id_usuario,
+        }
 
     def exportar_excel_productos(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal.
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", "inventario.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_excel(ruta, COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
-        except Exception:
-            logger.exception("Fallo al exportar el catálogo de inventario a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_productos_excel, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
     def exportar_pdf_productos(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", "inventario.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} productos a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
-        except Exception:
-            logger.exception("Fallo al exportar el catálogo de inventario a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_productos_pdf, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} productos a:\n{ruta}")
+
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar el catálogo de inventario: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")

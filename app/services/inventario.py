@@ -170,7 +170,7 @@ class ProductoService:
 
     @staticmethod
     def obtener_alertas_stock(
-        session: Session, limite_minimo: int = 10, dias_vencimiento: int = 30, id_usuario: int | None = None
+        session: Session, dias_vencimiento: int = 30, id_usuario: int | None = None
     ) -> dict[str, list[Inventario]]:
         require_permiso(session, id_usuario, "inventario", "ver")
         hoy = date.today()
@@ -178,9 +178,21 @@ class ProductoService:
         # Un producto INACTIVO (descontinuado) no deberia seguir generando alertas para
         # siempre (C21) -- a diferencia de un listado general (buscar()), que si muestra
         # inactivos porque el usuario puede estar buscandolos a proposito.
+        #
+        # cantidad_minima=0 (default del producto) significa "sin minimo configurado" --
+        # mismo criterio que ReporteService.stock_bajo_minimo (app/services/reportes.py):
+        # antes esta funcion usaba un umbral fijo (10 unidades) igual para todos los
+        # productos, ignorando por completo el "Stock Minimo" que se configura por
+        # producto en producto_form_dialog.py -- un producto con minimo=5 y 37 en
+        # existencia nunca deberia alertar, pero con el umbral fijo cualquiera con 10 o
+        # menos unidades alertaba igual sin importar su propio minimo.
         bajo_stock = (
             session.query(Inventario)
-            .filter(Inventario.cantidad_unidad <= limite_minimo, Inventario.estado_producto == "ACTIVO")
+            .filter(
+                Inventario.cantidad_minima > 0,
+                Inventario.cantidad_unidad < Inventario.cantidad_minima,
+                Inventario.estado_producto == "ACTIVO",
+            )
             .order_by(Inventario.cantidad_unidad)
             .all()
         )

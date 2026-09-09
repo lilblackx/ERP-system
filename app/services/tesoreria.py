@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Banco, BancoMovimiento, Caja, CajaMovimiento, CuentaBancaria, Rol, Usuario
 from app.services.auditoria import AuditoriaService
+from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
 from app.services.permisos import PermisoDenegadoError, require_permiso
 
 logger = logging.getLogger(__name__)
@@ -17,15 +18,15 @@ ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
 def _require_admin(session: Session, id_usuario: int | None) -> Usuario:
-    """Abrir/cerrar un turno de caja fija el saldo inicial/final de esa caja -- mas
-    sensible que "editar" un registro cualquiera, asi que se restringe especificamente a
-    ADMIN en vez del RBAC generico de 'cajas'/'editar' (un rol podria tener ese permiso
-    para otras operaciones de caja sin que eso deba habilitar abrir/cerrar turnos).
-    Repite las mismas validaciones de estado/bloqueo que require_permiso() (ver
+    """Crear una caja o abrir/cerrar su turno fija el saldo inicial/final -- mas sensible
+    que "editar" un registro cualquiera, asi que se restringe especificamente a ADMIN en
+    vez del RBAC generico de 'cajas'/'editar' (un rol podria tener ese permiso para otras
+    operaciones de caja sin que eso deba habilitar crear/abrir/cerrar turnos). Repite las
+    mismas validaciones de estado/bloqueo que require_permiso() (ver
     app/services/permisos.py) porque no hay bypass de ADMIN que reusar aca -- ADMIN es
     justamente el unico rol permitido."""
     if id_usuario is None:
-        raise PermisoDenegadoError("Abrir/cerrar caja requiere un usuario autenticado")
+        raise PermisoDenegadoError("Esta operación requiere un usuario autenticado")
     usuario = session.get(Usuario, id_usuario)
     if usuario is None:
         raise PermisoDenegadoError(f"Usuario {id_usuario} no encontrado")
@@ -35,7 +36,7 @@ def _require_admin(session: Session, id_usuario: int | None) -> Usuario:
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
     rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
     if rol is None or rol.nombre != "ADMIN":
-        raise PermisoDenegadoError("Solo un administrador puede abrir/cerrar turnos de caja")
+        raise PermisoDenegadoError("Solo un administrador puede gestionar cajas (crear, abrir o cerrar turnos)")
     return usuario
 
 
@@ -57,7 +58,15 @@ class BancoService:
         require_permiso(session, datos.get("creado_por"), "bancos", "crear")
         banco = Banco(**datos)
         session.add(banco)
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(banco)
 
         AuditoriaService.registrar_evento(
@@ -77,7 +86,15 @@ class BancoService:
             raise ValueError("Banco no encontrado")
         for campo, valor in datos.items():
             setattr(banco, campo, valor)
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(banco)
 
         AuditoriaService.registrar_evento(
@@ -115,7 +132,15 @@ class BancoService:
             raise ValueError("Banco no encontrado")
 
         banco.estado_banco = nuevo_estado
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(banco)
 
         AuditoriaService.registrar_evento(
@@ -147,7 +172,15 @@ class BancoService:
             raise ValueError(f"El banco '{banco.nombre_banco}' esta inactivo")
         cuenta = CuentaBancaria(**datos)
         session.add(cuenta)
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(cuenta)
 
         AuditoriaService.registrar_evento(
@@ -167,7 +200,15 @@ class BancoService:
             raise ValueError("Cuenta bancaria no encontrada")
         for campo, valor in datos.items():
             setattr(cuenta, campo, valor)
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(cuenta)
 
         AuditoriaService.registrar_evento(
@@ -207,7 +248,15 @@ class BancoService:
             raise ValueError("Cuenta bancaria no encontrada")
 
         cuenta.estado_cuenta = nuevo_estado
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(cuenta)
 
         AuditoriaService.registrar_evento(
@@ -334,8 +383,45 @@ class CajaService:
         return session.query(Caja).options(joinedload(Caja.usuario)).order_by(Caja.nombre_caja).all()
 
     @staticmethod
+    def crear_caja(session: Session, nombre_caja: str, id_usuario: int | None) -> Caja:
+        """Da de alta una caja nueva (turno todavia no abierto, id_usuario/fecha_apertura
+        quedan NULL hasta que alguien la abra con abrir_caja()). Restringido a ADMIN,
+        mismo criterio que abrir/cerrar turno (_require_admin) -- crear una caja fisica
+        es un acto de configuracion del negocio, no una operacion diaria de cualquier rol
+        con el permiso generico 'cajas'."""
+        _require_admin(session, id_usuario)
+        nombre_caja = (nombre_caja or "").strip()
+        if not nombre_caja:
+            raise ValueError("El nombre de la caja es obligatorio")
+
+        caja = Caja(nombre_caja=nombre_caja, estado_caja="CERRADA")
+        session.add(caja)
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
+        session.refresh(caja)
+
+        logger.info("Caja creada: nombre=%s usuario=%s", caja.nombre_caja, id_usuario)
+
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=id_usuario,
+            accion="CREAR_CAJA",
+            modulo="CAJAS",
+            detalle={"id_caja": caja.id_caja, "nombre_caja": caja.nombre_caja},
+        )
+        return caja
+
+    @staticmethod
     def abrir_caja(session: Session, id_caja: int, id_usuario: int, saldo_apertura) -> Caja:
         _require_admin(session, id_usuario)
+        aplicar_lock_timeout(session)
         # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18 -- bloquea la fila hasta el
         # commit para que una segunda apertura/cierre concurrente sobre la misma caja
         # espere en vez de leer el mismo estado stale y pisar el saldo_apertura ya fijado
@@ -355,7 +441,15 @@ class CajaService:
         caja.estado_caja = "ABIERTA"
         caja.id_usuario = id_usuario
 
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(caja)
 
         logger.info(
@@ -378,6 +472,7 @@ class CajaService:
     @staticmethod
     def cerrar_caja(session: Session, id_caja: int, id_usuario_cierre: int) -> Caja:
         _require_admin(session, id_usuario_cierre)
+        aplicar_lock_timeout(session)
         # Ver el comentario de abrir_caja() -- mismo patron.
         caja = session.execute(
             select(Caja).where(Caja.id_caja == id_caja).with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
@@ -391,7 +486,15 @@ class CajaService:
         caja.estado_caja = "CERRADA"
         caja.modificado_por = id_usuario_cierre
 
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(caja)
 
         logger.info(
@@ -471,7 +574,15 @@ class CajaService:
             creado_por=id_usuario,
         )
         session.add(movimiento)
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+            raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(movimiento)
 
         logger.info(

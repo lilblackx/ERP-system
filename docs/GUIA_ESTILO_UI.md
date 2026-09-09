@@ -101,16 +101,45 @@ visual encontrado en producción).
 ### 3.1 Íconos — convención de color
 
 Todos los íconos son [qtawesome](https://github.com/spyder-ide/qtawesome), familia
-`fa5s.*` (Font Awesome 5 Solid), tamaño típico `18–22px`. El color del ícono **no** es
-libre — sigue el significado semántico de la paleta:
+`fa5s.*` (Font Awesome 5 Solid), tamaño típico `18–22px`. **Nunca un emoji u otro
+carácter Unicode suelto** (`⚠`, `✓`, `✗`, `✖`, `📍`, `🗑`, `↩`, etc.) incrustado en el
+`.setText()`/string de un botón o label — siempre `qta.icon(...)`. Hallazgo real
+(2026-09-08, auditoría de consistencia visual): media docena de pantallas
+(`login_window.py`, `cliente_form_dialog.py`, `inventario_panel.py`,
+`conciliacion_bancos_dialog.py`, `mapa_widget.py`, `ruta_form_dialog.py`) tenían
+mensajes de alerta/sugerencia/botones con un emoji pegado al texto en vez de un ícono
+real — inconsistente con el resto de la app y con problemas propios de fuente/render
+por plataforma que un ícono vectorial no tiene.
+
+- **`QPushButton`**: soporta ícono nativo — `btn.setText(" Texto")` (un espacio inicial
+  para separar del ícono, mismo criterio que el resto de botones con ícono) +
+  `btn.setIcon(qta.icon("fa5s.icono", color=COLOR_QUE_CORRESPONDA))`. No hace falta
+  ningún widget extra.
+- **`QLabel`**: no soporta ícono nativo — para un mensaje/badge de texto que necesita
+  ícono (alertas, estados, sugerencias), armar un `QWidget` chico con `QHBoxLayout`
+  conteniendo un `QLabel` con `.setPixmap(qta.icon(...).pixmap(QSize(w, h)))` seguido del
+  `QLabel` de texto real, igual que ya se hace con los headers de diálogo (ver ejemplo de
+  `icon_lbl` más abajo). Si el texto puede ser multilínea (`setWordWrap(True)`), alinear
+  el ícono con `Qt.AlignmentFlag.AlignTop` para que no se recentre verticalmente cuando el
+  texto ocupe 2+ líneas.
+
+El color del ícono **no** es libre — sigue el significado semántico de la paleta:
 
 - `COLOR_PRIMARY` (azul): acción neutra/principal — cerrar, ver, agregar, confirmar.
 - `COLOR_SUCCESS` (verde): Excel, guardar/aprobar, positivo.
-- `COLOR_DANGER` (rojo): PDF, eliminar/anular, negativo.
+- `COLOR_WARNING` (ámbar): advertencia — no bloquea, pero requiere atención.
+- `COLOR_DANGER` (rojo): PDF, eliminar/anular, negativo/error.
 - `COLOR_TEXT_DARK` / `#475569`: acción secundaria genérica sin carga semántica
   (ej. "Exportar" genérico, "Ver detalle").
 - Blanco (`#FFFFFF`): ícono sobre un botón de fondo sólido (`BtnPrimary`,
   `BUTTON_DANGER_QSS`).
+
+Glyphs ya establecidos para los casos de alerta/estado más comunes (`message_box.py`,
+`MessageBox`): `fa5s.question-circle` (pregunta, `COLOR_PRIMARY`),
+`fa5s.check-circle` (éxito/confirmación, `COLOR_SUCCESS`),
+`fa5s.exclamation-triangle` (advertencia, `COLOR_WARNING`),
+`fa5s.times-circle` (error/crítico, `COLOR_DANGER`) — reusar estos mismos antes de elegir
+un glyph nuevo para un caso equivalente.
 
 ### 3.2 Botones de exportación — `BotonExportar`
 

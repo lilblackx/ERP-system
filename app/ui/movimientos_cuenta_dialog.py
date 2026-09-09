@@ -20,6 +20,7 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     TABLE_QSS,
+    alinear_encabezados,
 )
 
 
@@ -96,6 +97,19 @@ class MovimientosCuentaDialog(QDialog):
         self.table.setColumnWidth(4, 120)
         self.table.setColumnWidth(5, 150)
         self.table.setColumnWidth(6, 100)
+        alinear_encabezados(
+            self.table,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         layout.addWidget(self.table)
 
         # ── Footer ──
@@ -151,7 +165,9 @@ class MovimientosCuentaDialog(QDialog):
 
             # Monto
             monto_str = f"${float(movimiento.monto_movimiento):,.2f}" if movimiento.monto_movimiento else "$0.00"
-            self.table.setItem(row, 2, QTableWidgetItem(monto_str))
+            item_monto = QTableWidgetItem(monto_str)
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 2, item_monto)
 
             # Origen (Cliente, Proveedor, Comisión, Manual, Otro)
             origen = "Manual"

@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.config import validar_configuracion
@@ -38,11 +40,27 @@ from app.logging_config import setup_logging
 from app.ui.geo_http import esperar_workers_pendientes
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
-from app.ui.styles import generar_iconos_qss
+from app.ui.message_box import MessageBox
+from app.ui.styles import COLOR_TEXT_DARK, GLOBAL_QSS, generar_iconos_qss
+
+
+def _manejar_excepcion_no_capturada(tipo, valor, tb):
+    """P-01: sin esto, una excepcion no capturada en un slot de Qt tira la app entera
+    al escritorio sin quedar en log -- solo QueryWorker.run() capturaba errores hasta
+    ahora, y solo lo que pasaba por ahi."""
+    logging.getLogger(__name__).critical("Excepcion no capturada", exc_info=(tipo, valor, tb))
+    sys.__excepthook__(tipo, valor, tb)
+    if QApplication.instance() is not None:
+        MessageBox.critical(
+            None,
+            "Error inesperado",
+            "Ocurrio un error inesperado. Revise logs/app.log o contacte a soporte.",
+        )
 
 
 def main():
     setup_logging()
+    sys.excepthook = _manejar_excepcion_no_capturada
     validar_configuracion()
     verificar_migraciones_al_dia()
     # Requisito documentado de Qt/PySide6 para QWebEngineView (app/ui/mapa_widget.py,
@@ -51,6 +69,22 @@ def main():
     # con el compositor de Chromium) -- hallazgo real, no un caso hipotetico.
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
+    # QToolTip es una ventana emergente aparte, no un hijo normal del widget que la
+    # dispara -- fijar GLOBAL_QSS solo en MainWindow.setStyleSheet() (como se hacia antes)
+    # no le llega de forma confiable, y el tooltip caia al estilo nativo de Windows
+    # (fondo claro sin el texto/color definidos aca, casi ilegible). Fijarlo tambien a
+    # nivel QApplication garantiza que cualquier tooltip de la app -- LoginWindow incluida,
+    # que ni siquiera es hija de MainWindow -- se vea consistente.
+    app.setStyleSheet(GLOBAL_QSS)
+    # El QSS de arriba (regla `QToolTip {...}`) no alcanza por si solo en Windows 11: el
+    # estilo nativo "windows11" de Qt6 no respeta background-color/color en el tooltip via
+    # stylesheet (reportado por el usuario, 2026-09-08 -- seguia ilegible incluso despues
+    # de reiniciar la app con el fix de arriba ya aplicado). El tooltip SI respeta la
+    # paleta (QPalette.ToolTip*), asi que se fija tambien de forma explicita como refuerzo.
+    paleta = app.palette()
+    paleta.setColor(QPalette.ColorRole.ToolTipBase, QColor(COLOR_TEXT_DARK))
+    paleta.setColor(QPalette.ColorRole.ToolTipText, QColor("white"))
+    app.setPalette(paleta)
     # Ver app/ui/geo_http.py::esperar_workers_pendientes -- evita que cerrar la app
     # mientras una busqueda/geolocalizacion en el mapa sigue en vuelo destruya un QThread
     # todavia corriendo (fatal en Qt).

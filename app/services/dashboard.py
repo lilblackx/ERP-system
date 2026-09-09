@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Caja, CuentaPorCobrar, CuentaPorPagar, FacturaVenta, Inventario
@@ -17,21 +17,37 @@ def _rango_dia(dia: date) -> tuple[datetime, datetime]:
 
 class DashboardService:
     @staticmethod
-    def get_panel_general_data(session: Session, umbral_stock_minimo: int = 10, id_usuario: int | None = None) -> dict:
+    def get_panel_general_data(session: Session, dias_vencimiento: int = 30, id_usuario: int | None = None) -> dict:
         require_permiso(session, id_usuario, "dashboard", "ver")
         hoy = date.today()
         ayer = hoy - timedelta(days=1)
+        limite_vencimiento = hoy + timedelta(days=dias_vencimiento)
 
         return {
             "ventas_hoy": DashboardService._kpi_ventas_hoy(session, hoy, ayer),
             "por_cobrar": DashboardService._kpi_por_cobrar(session, hoy),
             "por_pagar": DashboardService._kpi_por_pagar(session, hoy),
-            "productos_alerta": DashboardService._kpi_productos_alerta(session, umbral_stock_minimo),
+            "productos_alerta": DashboardService._kpi_productos_alerta(session, limite_vencimiento),
             "grafico_semanal": DashboardService._grafico_semanal(session, hoy),
             "cajas_activas": DashboardService._cajas_activas(session, hoy),
             "facturas_recientes": DashboardService._facturas_recientes(session),
-            "inventario_alerta": DashboardService._inventario_alerta(session, umbral_stock_minimo),
+            "inventario_alerta": DashboardService._inventario_alerta(session, limite_vencimiento),
         }
+
+    @staticmethod
+    def _filtro_alerta_inventario(limite_vencimiento: date):
+        """Mismo criterio que ProductoService.obtener_alertas_stock() (app/services/
+        inventario.py): stock bajo compara contra el minimo configurado POR PRODUCTO
+        (cantidad_minima=0 significa 'sin minimo configurado', nunca alerta), no un
+        umbral fijo igual para todos -- bug real corregido 2026-09 (un producto con
+        minimo=5 y 37 en existencia no deberia alertar nunca). No se llama directo a
+        ProductoService aca para no acoplar el dashboard al permiso 'inventario'/'ver'
+        (un rol con 'dashboard'/'ver' pero sin acceso a Inventario no deberia perder el
+        panel general por esto)."""
+        return or_(
+            and_(Inventario.cantidad_minima > 0, Inventario.cantidad_unidad < Inventario.cantidad_minima),
+            and_(Inventario.fecha_vencimiento.isnot(None), Inventario.fecha_vencimiento <= limite_vencimiento),
+        )
 
     @staticmethod
     def _total_ventas_del_dia(session: Session, dia: date) -> Decimal:
@@ -99,12 +115,15 @@ class DashboardService:
         return {"saldo_total": saldo_total, "compras_vencidas": compras_vencidas}
 
     @staticmethod
-    def _kpi_productos_alerta(session: Session, umbral_stock_minimo: int) -> int:
+    def _kpi_productos_alerta(session: Session, limite_vencimiento: date) -> int:
         # Excluye INACTIVOS (C21): un producto descontinuado no deberia inflar la alerta
         # de stock bajo para siempre.
         return (
             session.query(func.count(Inventario.id_producto))
-            .filter(Inventario.cantidad_unidad <= umbral_stock_minimo, Inventario.estado_producto == "ACTIVO")
+            .filter(
+                Inventario.estado_producto == "ACTIVO",
+                DashboardService._filtro_alerta_inventario(limite_vencimiento),
+            )
             .scalar()
         )
 
@@ -158,21 +177,37 @@ class DashboardService:
         ]
 
     @staticmethod
-    def _inventario_alerta(session: Session, umbral_stock_minimo: int, limite: int = 5) -> list[dict]:
+    def _inventario_alerta(session: Session, limite_vencimiento: date, limite: int = 5) -> list[dict]:
         productos = (
             session.query(Inventario)
             .options(joinedload(Inventario.categoria))
-            .filter(Inventario.cantidad_unidad <= umbral_stock_minimo, Inventario.estado_producto == "ACTIVO")
+            .filter(
+                Inventario.estado_producto == "ACTIVO",
+                DashboardService._filtro_alerta_inventario(limite_vencimiento),
+            )
             .order_by(Inventario.cantidad_unidad)
             .limit(limite)
             .all()
         )
-        return [
-            {
-                "cod_producto": producto.cod_producto,
-                "nombre_producto": producto.nombre_producto,
-                "categoria": producto.categoria.nombre if producto.categoria else None,
-                "cantidad_unidad": producto.cantidad_unidad,
-            }
-            for producto in productos
-        ]
+        resultado = []
+        for producto in productos:
+            bajo_stock = bool(
+                producto.cantidad_minima
+                and producto.cantidad_minima > 0
+                and producto.cantidad_unidad < producto.cantidad_minima
+            )
+            proximo_vencer = bool(
+                producto.fecha_vencimiento is not None and producto.fecha_vencimiento <= limite_vencimiento
+            )
+            resultado.append(
+                {
+                    "cod_producto": producto.cod_producto,
+                    "nombre_producto": producto.nombre_producto,
+                    "categoria": producto.categoria.nombre if producto.categoria else None,
+                    "cantidad_unidad": producto.cantidad_unidad,
+                    "fecha_vencimiento": producto.fecha_vencimiento,
+                    "bajo_stock": bajo_stock,
+                    "proximo_vencer": proximo_vencer,
+                }
+            )
+        return resultado

@@ -32,7 +32,7 @@ def validar_configuracion() -> None:
     en email_service.enviar_correo() recien cuando de verdad hace falta mandar un correo
     (desbloqueo/recuperar clave) -- es una funcionalidad opcional para poder usar el resto
     de la app, forzarla al arrancar rompe el caso de uso normal de instalar sin SMTP
-    configurado todavia (ver "Pendientes manuales" en docs/CHECKLIST_PRODUCCION.md)."""
+    configurado todavia (ver seccion 10 de docs/ESTADO_DEL_PROYECTO.md)."""
     if DB_TRUSTED_CONNECTION.lower() not in ("yes", "true", "1") and not DB_PASSWORD:
         raise RuntimeError(
             "DB_PASSWORD no esta configurado (o esta vacio) en .env. "

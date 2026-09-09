@@ -1,3 +1,5 @@
+import logging
+
 import qtawesome as qta
 from PySide6.QtCore import QRegularExpression, QSize, Qt
 from PySide6.QtGui import QRegularExpressionValidator
@@ -17,6 +19,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import CategoriaCliente, Cliente, Vendedor
+from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from app.ui.mapa_widget import MapaWidget
 from app.ui.message_box import MessageBox
@@ -36,6 +39,8 @@ from app.ui.styles import (
     ICON_CHEVRON_UP_URL,
     aplicar_sombra,
 )
+
+logger = logging.getLogger(__name__)
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -155,10 +160,11 @@ class ClienteFormDialog(QDialog):
     Utiliza Font Awesome para todos los íconos y cuenta con selector fiscal (J, G, V, E, P).
     """
 
-    def __init__(self, session: Session, cliente: Cliente | None = None, parent=None):
+    def __init__(self, session: Session, cliente: Cliente | None = None, id_usuario: int | None = None, parent=None):
         super().__init__(parent)
         self.session = session
         self.cliente = cliente
+        self.id_usuario = id_usuario
         self.setWindowTitle("Editar Cliente" if cliente else "Nuevo Cliente")
         # Un poco mas ancho/alto que antes (860x740) -- pedido del usuario 2026-09-03:
         # mas area de mapa hace mas facil marcar la ubicacion con precision.
@@ -468,10 +474,19 @@ class ClienteFormDialog(QDialog):
 
         # Sugerencia (no forzada) de vendedor segun la zona de ruta que contiene el punto
         # marcado -- ver _sugerir_vendedor_por_ubicacion(). Oculta hasta que haya una
-        # coordenada que evaluar.
-        self.lbl_sugerencia_ruta = QLabel()
-        self.lbl_sugerencia_ruta.setWordWrap(True)
-        self.lbl_sugerencia_ruta.setStyleSheet(f"font-size: 11px; color: {COLOR_PRIMARY}; font-weight: 600;")
+        # coordenada que evaluar. Icono real (qtawesome) en vez de un "📍" suelto en el
+        # texto -- ver GUIA_ESTILO_UI.md 3.1.
+        self.lbl_sugerencia_ruta = QWidget()
+        sugerencia_layout = QHBoxLayout(self.lbl_sugerencia_ruta)
+        sugerencia_layout.setContentsMargins(0, 0, 0, 0)
+        sugerencia_layout.setSpacing(4)
+        icon_sugerencia = QLabel()
+        icon_sugerencia.setPixmap(qta.icon("fa5s.map-marker-alt", color=COLOR_PRIMARY).pixmap(QSize(12, 12)))
+        self.lbl_sugerencia_ruta_texto = QLabel()
+        self.lbl_sugerencia_ruta_texto.setWordWrap(True)
+        self.lbl_sugerencia_ruta_texto.setStyleSheet(f"font-size: 11px; color: {COLOR_PRIMARY}; font-weight: 600;")
+        sugerencia_layout.addWidget(icon_sugerencia, alignment=Qt.AlignmentFlag.AlignTop)
+        sugerencia_layout.addWidget(self.lbl_sugerencia_ruta_texto, stretch=1)
         self.lbl_sugerencia_ruta.setVisible(False)
 
         campos.addWidget(lbl_lat)
@@ -583,8 +598,20 @@ class ClienteFormDialog(QDialog):
         geografia, pero siempre editable a mano. Solo PRESELECCIONA el combo cuando se
         esta creando un cliente NUEVO y el usuario todavia no eligio vendedor a mano (el
         combo sigue en "Sin asignar") -- en edicion, o si ya se eligio uno, nunca
-        reasigna solo: aca solo se actualiza el texto informativo."""
-        ruta = RutaService.sugerir_ruta_por_ubicacion(self.session, lat, lng)
+        reasigna solo: aca solo se actualiza el texto informativo. Es una sugerencia, no
+        una accion critica -- si falla (sin permiso 'rutas'/'ver', o cualquier otro
+        error), se oculta el texto y se sigue completando el formulario en silencio en
+        vez de interrumpir al usuario con un dialogo de error."""
+        try:
+            ruta = RutaService.sugerir_ruta_por_ubicacion(self.session, lat, lng, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            logger.warning("Sin permiso para sugerir ruta por ubicacion (usuario=%s)", self.id_usuario)
+            self.lbl_sugerencia_ruta.setVisible(False)
+            return
+        except Exception:
+            logger.exception("Fallo al sugerir vendedor por ubicacion")
+            self.lbl_sugerencia_ruta.setVisible(False)
+            return
         if ruta is None:
             self.lbl_sugerencia_ruta.setVisible(False)
             return
@@ -597,8 +624,8 @@ class ClienteFormDialog(QDialog):
         )
         if len(vendedores_zona) == 1:
             vendedor = vendedores_zona[0]
-            self.lbl_sugerencia_ruta.setText(
-                f"📍 Dentro de la zona '{ruta.nombre_ruta}' — vendedor sugerido: {vendedor.nombre_vendedor}."
+            self.lbl_sugerencia_ruta_texto.setText(
+                f"Dentro de la zona '{ruta.nombre_ruta}' — vendedor sugerido: {vendedor.nombre_vendedor}."
             )
             if self.cliente is None and self.vendedor_combo.currentData() is None:
                 idx = self.vendedor_combo.findData(vendedor.id_vendedor)
@@ -606,12 +633,12 @@ class ClienteFormDialog(QDialog):
                     self.vendedor_combo.setCurrentIndex(idx)
         elif vendedores_zona:
             nombres = ", ".join(v.nombre_vendedor for v in vendedores_zona)
-            self.lbl_sugerencia_ruta.setText(
-                f"📍 Dentro de la zona '{ruta.nombre_ruta}', con varios vendedores asignados ({nombres}) — elige uno."
+            self.lbl_sugerencia_ruta_texto.setText(
+                f"Dentro de la zona '{ruta.nombre_ruta}', con varios vendedores asignados ({nombres}) — elige uno."
             )
         else:
-            self.lbl_sugerencia_ruta.setText(
-                f"📍 Dentro de la zona '{ruta.nombre_ruta}', sin vendedor asignado todavía."
+            self.lbl_sugerencia_ruta_texto.setText(
+                f"Dentro de la zona '{ruta.nombre_ruta}', sin vendedor asignado todavía."
             )
         self.lbl_sugerencia_ruta.setVisible(True)
 

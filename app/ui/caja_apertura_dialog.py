@@ -158,8 +158,7 @@ class CajaAperturaDialog(QDialog):
         self._verificado = False
 
         self.setWindowTitle("Abrir Turno de Caja")
-        self.setMinimumWidth(420)
-        self.resize(420, 480)
+        self.setFixedWidth(420)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -196,7 +195,6 @@ class CajaAperturaDialog(QDialog):
         self.card_apertura = self._make_card_apertura()
         self.card_apertura.hide()
         root.addWidget(self.card_apertura)
-        root.addStretch()
 
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 4, 0, 0)
@@ -328,6 +326,11 @@ class CajaAperturaDialog(QDialog):
         self.card_apertura.show()
         self.btn_principal.setText("Abrir Turno")
         self.btn_principal.setIcon(qta.icon("fa5s.unlock", color="#FFFFFF"))
+        # Sin fixed size, el dialogo se dimensiona segun su contenido al mostrarse por
+        # primera vez, pero no vuelve a recalcular su alto solo porque una card oculta
+        # se hace visible despues -- adjustSize() lo fuerza a crecer para la card de
+        # apertura recien revelada.
+        self.adjustSize()
 
     # ── Paso 2: apertura ───────────────────────────────────────────────────
 

@@ -49,10 +49,41 @@ from app.ui.styles import (
 )
 from app.ui.tasa_registro_dialog import TasaRegistroDialog
 from app.ui.toolbar_popups import BotonExportar
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
 COLS_VISIBLES = ["Fecha", "Tasa BCV", "Dólar Paralelo", "Brecha"]
+
+
+def _filas_tasas_query(session, limite, id_usuario) -> list[list]:
+    historico = TasaService.obtener_historico_tasas(session, limite=limite, id_usuario=id_usuario)
+    return [
+        [
+            t["fecha"].strftime("%d/%m/%Y %H:%M"),
+            float(t["tasa_bcv"]),
+            float(t["tasa_paralelo"]) if t["tasa_paralelo"] is not None else None,
+            t["brecha_porcentual"],
+        ]
+        for t in reversed(historico)
+    ]
+
+
+def _tarea_exportar_tasas_excel(session, ruta: str, limite, id_usuario) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el historico
+    completo de tasas a un archivo (openpyxl) es lo bastante lento como para congelar
+    la ventana si se hace en el hilo de GUI."""
+    filas = _filas_tasas_query(session, limite, id_usuario)
+    exportar_excel(ruta, COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_tasas_pdf(session, ruta: str, limite, id_usuario) -> tuple[str, int]:
+    filas = _filas_tasas_query(session, limite, id_usuario)
+    exportar_pdf(ruta, "Histórico de Tasas de Cambio", COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
 OPCIONES_RANGO = [("Últimos 30 días", 30), ("Últimos 60 días", 60), ("Últimos 90 días", 90)]
 
 
@@ -387,52 +418,48 @@ class TasasPanel(QWidget):
 
     # ── Exportación ───────────────────────────────────────────────────────
 
-    def _filas_para_exportar(self, session) -> list[list]:
-        historico = TasaService.obtener_historico_tasas(
-            session, limite=self.rango_combo.currentData(), id_usuario=self.usuario.id_usuario
-        )
-        return [
-            [
-                t["fecha"].strftime("%d/%m/%Y %H:%M"),
-                float(t["tasa_bcv"]),
-                float(t["tasa_paralelo"]) if t["tasa_paralelo"] is not None else None,
-                t["brecha_porcentual"],
-            ]
-            for t in reversed(historico)
-        ]
+    def _filtros_actuales_exportar(self) -> dict:
+        return {
+            "limite": self.rango_combo.currentData(),
+            "id_usuario": self.usuario.id_usuario,
+        }
 
     def exportar_excel_tasas(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar tasas", "tasas.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_excel(ruta, COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} tasas a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
-        except Exception:
-            logger.exception("Fallo al exportar el histórico de tasas a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_tasas_excel, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
     def exportar_pdf_tasas(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar tasas", "tasas.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_pdf(ruta, "Histórico de Tasas de Cambio", COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} tasas a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
-        except Exception:
-            logger.exception("Fallo al exportar el histórico de tasas a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_tasas_pdf, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} tasas a:\n{ruta}")
+
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar el histórico de tasas: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")

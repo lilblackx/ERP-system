@@ -80,6 +80,7 @@ from app.ui.styles import (
     TABLE_QSS,
     TABS_QSS,
     EstadoBadge,
+    alinear_encabezados,
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonFiltros
@@ -423,6 +424,15 @@ class OrdenCompraFormDialog(QDialog):
         self.tabla_items = _tabla_lecturas(["Producto", "Cantidad", "Precio Unit.", "Subtotal", ""])
         self.tabla_items.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla_items.setColumnWidth(4, 70)
+        alinear_encabezados(
+            self.tabla_items,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         self.tabla_items.setMinimumHeight(140)
         layout.addWidget(self.tabla_items, stretch=1)
 
@@ -559,9 +569,18 @@ class OrdenCompraFormDialog(QDialog):
             subtotal = item["cantidad"] * item["precio"]
             total += subtotal
             self.tabla_items.setItem(fila, 0, QTableWidgetItem(item["nombre_producto"]))
-            self.tabla_items.setItem(fila, 1, QTableWidgetItem(f"{item['cantidad']:,.2f}"))
-            self.tabla_items.setItem(fila, 2, QTableWidgetItem(f"${item['precio']:,.2f}"))
-            self.tabla_items.setItem(fila, 3, QTableWidgetItem(f"${subtotal:,.2f}"))
+
+            item_cantidad = QTableWidgetItem(f"{item['cantidad']:,.2f}")
+            item_cantidad.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla_items.setItem(fila, 1, item_cantidad)
+
+            item_precio = QTableWidgetItem(f"${item['precio']:,.2f}")
+            item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla_items.setItem(fila, 2, item_precio)
+
+            item_subtotal = QTableWidgetItem(f"${subtotal:,.2f}")
+            item_subtotal.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla_items.setItem(fila, 3, item_subtotal)
             btn_quitar = QPushButton()
             btn_quitar.setObjectName("BtnQuitar")
             btn_quitar.setIcon(qta.icon("fa5s.trash-alt", color=COLOR_DANGER))
@@ -886,13 +905,24 @@ class NotaRecepcionFormDialog(QDialog):
             root.addWidget(QLabel("Esta orden de compra no tiene lineas pendientes de recibir."))
         else:
             self.tabla = _tabla_lecturas(["Producto", "Pendiente", "Cant. a Recibir", "Cant. Rechazada"])
+            alinear_encabezados(
+                self.tabla,
+                {
+                    0: Qt.AlignmentFlag.AlignLeft,
+                    1: Qt.AlignmentFlag.AlignRight,
+                    2: Qt.AlignmentFlag.AlignLeft,
+                    3: Qt.AlignmentFlag.AlignLeft,
+                },
+            )
             self.tabla.setRowCount(len(self.detalles_pendientes))
             self._spins_recibida: list[QDoubleSpinBox] = []
             self._spins_rechazada: list[QDoubleSpinBox] = []
             for fila, detalle in enumerate(self.detalles_pendientes):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
-                self.tabla.setItem(fila, 1, QTableWidgetItem(f"{float(detalle.cantidad_pendiente):,.2f}"))
+                item_pendiente = QTableWidgetItem(f"{float(detalle.cantidad_pendiente):,.2f}")
+                item_pendiente.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla.setItem(fila, 1, item_pendiente)
 
                 spin_recibida = QDoubleSpinBox()
                 spin_recibida.setRange(0, float(detalle.cantidad_pendiente))
@@ -1037,12 +1067,22 @@ class NotaDevolucionFormDialog(QDialog):
             root.addWidget(QLabel("Esta recepción no tiene unidades rechazadas pendientes de devolver."))
         else:
             self.tabla = _tabla_lecturas(["Producto", "Disponible para Devolver", "Cantidad a Devolver"])
+            alinear_encabezados(
+                self.tabla,
+                {
+                    0: Qt.AlignmentFlag.AlignLeft,
+                    1: Qt.AlignmentFlag.AlignRight,
+                    2: Qt.AlignmentFlag.AlignLeft,
+                },
+            )
             self.tabla.setRowCount(len(self.lineas_disponibles))
             self._spins: list[QDoubleSpinBox] = []
             for fila, (detalle, disponible) in enumerate(self.lineas_disponibles):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
-                self.tabla.setItem(fila, 1, QTableWidgetItem(f"{float(disponible):,.2f}"))
+                item_disponible = QTableWidgetItem(f"{float(disponible):,.2f}")
+                item_disponible.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla.setItem(fila, 1, item_disponible)
                 spin = QDoubleSpinBox()
                 spin.setRange(0, float(disponible))
                 spin.setDecimals(2)
@@ -1161,13 +1201,26 @@ class CompraDesdeOCFormDialog(QDialog):
             root.addWidget(QLabel("Esta orden de compra no tiene mercancía recibida pendiente de facturar."))
         else:
             self.tabla = _tabla_lecturas(["Producto", "Disponible", "Costo Unit.", "Cant. a Facturar"])
+            alinear_encabezados(
+                self.tabla,
+                {
+                    0: Qt.AlignmentFlag.AlignLeft,
+                    1: Qt.AlignmentFlag.AlignRight,
+                    2: Qt.AlignmentFlag.AlignRight,
+                    3: Qt.AlignmentFlag.AlignLeft,
+                },
+            )
             self.tabla.setRowCount(len(self.lineas_disponibles))
             self._spins: list[QDoubleSpinBox] = []
             for fila, (detalle, disponible) in enumerate(self.lineas_disponibles):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
-                self.tabla.setItem(fila, 1, QTableWidgetItem(f"{float(disponible):,.2f}"))
-                self.tabla.setItem(fila, 2, QTableWidgetItem(f"${float(detalle.precio_unitario):,.2f}"))
+                item_disponible = QTableWidgetItem(f"{float(disponible):,.2f}")
+                item_disponible.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla.setItem(fila, 1, item_disponible)
+                item_costo = QTableWidgetItem(f"${float(detalle.precio_unitario):,.2f}")
+                item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla.setItem(fila, 2, item_costo)
                 spin = QDoubleSpinBox()
                 spin.setRange(0, float(disponible))
                 spin.setDecimals(2)
@@ -1462,6 +1515,18 @@ class ComprasView(QWidget):
         self.tabla_oc = self._make_tabla(
             ["ID", "N° ODC", "Proveedor", "Fecha", "Total Productos", "Cant. Rec.", "Total", "Estado"]
         )
+        alinear_encabezados(
+            self.tabla_oc,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
         self.tabla_oc.doubleClicked.connect(self.ver_detalle_oc)
         layout.addWidget(self.tabla_oc, stretch=1)
 
@@ -1505,9 +1570,17 @@ class ComprasView(QWidget):
                 self.tabla_oc.setItem(
                     fila, 3, QTableWidgetItem(oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else "")
                 )
-                self.tabla_oc.setItem(fila, 4, QTableWidgetItem(f"{float(oc.cantidad_solicitada):,.2f}"))
-                self.tabla_oc.setItem(fila, 5, QTableWidgetItem(f"{float(oc.cantidad_recibida):,.2f}"))
-                self.tabla_oc.setItem(fila, 6, QTableWidgetItem(f"${float(oc.total_oc):,.2f}"))
+                item_solicitada = QTableWidgetItem(f"{float(oc.cantidad_solicitada):,.2f}")
+                item_solicitada.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_oc.setItem(fila, 4, item_solicitada)
+
+                item_recibida = QTableWidgetItem(f"{float(oc.cantidad_recibida):,.2f}")
+                item_recibida.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_oc.setItem(fila, 5, item_recibida)
+
+                item_total = QTableWidgetItem(f"${float(oc.total_oc):,.2f}")
+                item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_oc.setItem(fila, 6, item_total)
                 color = COLORES_ESTADO_OC.get(oc.estado, COLOR_TEXT_MUTED)
                 self.tabla_oc.setCellWidget(fila, 7, EstadoBadge(oc.estado.capitalize(), color))
             self._actualizar_paginacion(
@@ -1599,6 +1672,16 @@ class ComprasView(QWidget):
         layout.addWidget(toolbar)
 
         self.tabla_nr = self._make_tabla(["ID", "N° NR", "ODC", "Proveedor", "Fecha", "Estado"])
+        alinear_encabezados(
+            self.tabla_nr,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
         layout.addWidget(self.tabla_nr, stretch=1)
 
         btn_rechazar = QPushButton("Rechazar (Devolución)")
@@ -1721,6 +1804,18 @@ class ComprasView(QWidget):
         self.tabla_compra = self._make_tabla(
             ["ID", "N° Compra", "ODC", "Proveedor", "Fecha", "Condición", "Total", "Estado"]
         )
+        alinear_encabezados(
+            self.tabla_compra,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
         layout.addWidget(self.tabla_compra, stretch=1)
 
         footer, self.lbl_pagina_compra, self.btn_compra_anterior, self.btn_compra_siguiente = self._make_footer(
@@ -1760,7 +1855,9 @@ class ComprasView(QWidget):
                 self.tabla_compra.setItem(
                     fila, 5, QTableWidgetItem("Contado" if c.condicion_pago == "contado" else "Crédito")
                 )
-                self.tabla_compra.setItem(fila, 6, QTableWidgetItem(f"${float(c.total_compra):,.2f}"))
+                item_total = QTableWidgetItem(f"${float(c.total_compra):,.2f}")
+                item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_compra.setItem(fila, 6, item_total)
                 estado = c.estado_compra or "EMITIDA"
                 color = COLORES_ESTADO_COMPRA.get(estado, COLOR_TEXT_MUTED)
                 self.tabla_compra.setCellWidget(fila, 7, EstadoBadge(estado.capitalize(), color))

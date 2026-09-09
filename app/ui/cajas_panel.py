@@ -74,6 +74,43 @@ QLineEdit, QComboBox, QDoubleSpinBox {{
 """
 
 
+class CajaFormDialog(QDialog):
+    """Formulario minimo para crear una caja nueva (turno todavia no abierto) --
+    CajaService.crear_caja() existia sin ningun caller de UI: no habia forma de dar de
+    alta una caja fisica desde la app, solo de abrir/cerrar el turno de una ya existente."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Nueva Caja")
+        self.setMinimumWidth(360)
+        self.setStyleSheet(DIALOG_STYLE_MOVIMIENTO)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+
+        layout.addWidget(QLabel("Nombre de la Caja"))
+        self.nombre_input = QLineEdit()
+        self.nombre_input.setPlaceholderText("Ej. Caja Principal")
+        self.nombre_input.setMaxLength(50)
+        layout.addWidget(self.nombre_input)
+
+        botones = QHBoxLayout()
+        btn_cancelar = QPushButton("Cancelar")
+        btn_cancelar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_cancelar.clicked.connect(self.reject)
+        btn_guardar = QPushButton("Crear")
+        btn_guardar.setStyleSheet(BUTTON_PRIMARY_QSS)
+        btn_guardar.clicked.connect(self.accept)
+        botones.addStretch()
+        botones.addWidget(btn_cancelar)
+        botones.addWidget(btn_guardar)
+        layout.addLayout(botones)
+
+    def get_nombre(self) -> str:
+        return self.nombre_input.text().strip()
+
+
 class MovimientoManualDialog(QDialog):
     """Formulario minimo para registrar un ingreso/egreso manual de caja durante un turno
     abierto (ej. compra menor de insumos, un retiro parcial) -- CajaService.
@@ -172,6 +209,12 @@ class CajasPanel(QWidget):
         h.addWidget(self.lbl_total)
         h.addStretch()
 
+        btn_nueva_caja = QPushButton("Nueva Caja")
+        btn_nueva_caja.setIcon(qta.icon("fa5s.plus", color="white"))
+        btn_nueva_caja.setStyleSheet(BUTTON_PRIMARY_QSS)
+        btn_nueva_caja.clicked.connect(self.crear_caja)
+        h.addWidget(btn_nueva_caja)
+
         btn_refrescar = QPushButton("Actualizar")
         btn_refrescar.setIcon(qta.icon("fa5s.sync-alt", color="white"))
         btn_refrescar.setStyleSheet(BUTTON_PRIMARY_QSS)
@@ -231,6 +274,30 @@ class CajasPanel(QWidget):
         h.addWidget(self.btn_movimiento)
         h.addWidget(btn_cerrar)
         return w
+
+    def crear_caja(self) -> None:
+        dialogo = CajaFormDialog(parent=self)
+        if not dialogo.exec():
+            return
+        nombre = dialogo.get_nombre()
+
+        session = self.session_factory()
+        try:
+            caja = CajaService.crear_caja(session, nombre, id_usuario=self.usuario.id_usuario)
+            self.cargar_cajas()
+            MessageBox.information(self, "Caja creada", f"La caja '{caja.nombre_caja}' fue creada correctamente.")
+        except ValueError as exc:
+            session.rollback()
+            MessageBox.warning(self, "Dato inválido", str(exc))
+        except PermisoDenegadoError as exc:
+            session.rollback()
+            MessageBox.warning(self, "Sin permiso", str(exc))
+        except Exception:
+            session.rollback()
+            logger.exception("Fallo al crear la caja")
+            MessageBox.critical(self, "Error", "No se pudo crear la caja.")
+        finally:
+            session.close()
 
     def cargar_cajas(self) -> None:
         session = self.session_factory()

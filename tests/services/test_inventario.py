@@ -255,28 +255,55 @@ def test_buscar_pagina_resultados(db_session):
 
 def test_obtener_alertas_stock_bajo(db_session):
     admin = crear_usuario_admin(db_session)
-    crear_producto(db_session, cantidad_unidad=3)
-    crear_producto(db_session, cantidad_unidad=50)
+    crear_producto(db_session, cantidad_unidad=3, cantidad_minima=Decimal("10.00"))
+    crear_producto(db_session, cantidad_unidad=50, cantidad_minima=Decimal("10.00"))
 
-    alertas = ProductoService.obtener_alertas_stock(db_session, limite_minimo=10, id_usuario=admin.id_usuario)
+    alertas = ProductoService.obtener_alertas_stock(db_session, id_usuario=admin.id_usuario)
 
     assert len(alertas["bajo_stock"]) == 1
     assert alertas["bajo_stock"][0].cantidad_unidad == Decimal("3.00")
 
 
+def test_obtener_alertas_stock_bajo_usa_minimo_configurado_por_producto(db_session):
+    """Bug real (2026-09): la funcion usaba un umbral fijo de 10 unidades para todos los
+    productos, ignorando el 'Stock Minimo' que se configura por producto -- un producto
+    con minimo=5 y 37 en existencia no deberia alertar nunca, aunque 37 > 10 tambien lo
+    hubiera dejado afuera del umbral viejo; este test cubre el caso que el umbral fijo
+    manejaba mal: un minimo MAYOR a 10 con stock por debajo de ESE minimo especifico."""
+    admin = crear_usuario_admin(db_session)
+    crear_producto(db_session, cantidad_unidad=37, cantidad_minima=Decimal("5.00"))
+    crear_producto(db_session, cantidad_unidad=15, cantidad_minima=Decimal("20.00"))
+
+    alertas = ProductoService.obtener_alertas_stock(db_session, id_usuario=admin.id_usuario)
+
+    assert len(alertas["bajo_stock"]) == 1
+    assert alertas["bajo_stock"][0].cantidad_unidad == Decimal("15.00")
+
+
+def test_obtener_alertas_stock_bajo_ignora_productos_sin_minimo_configurado(db_session):
+    """cantidad_minima=0 (default del producto) significa 'sin minimo configurado' --
+    mismo criterio que ReporteService.stock_bajo_minimo (app/services/reportes.py)."""
+    admin = crear_usuario_admin(db_session)
+    crear_producto(db_session, cantidad_unidad=1)
+
+    alertas = ProductoService.obtener_alertas_stock(db_session, id_usuario=admin.id_usuario)
+
+    assert len(alertas["bajo_stock"]) == 0
+
+
 def test_obtener_alertas_stock_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
-        ProductoService.obtener_alertas_stock(db_session, limite_minimo=10)
+        ProductoService.obtener_alertas_stock(db_session)
 
 
 def test_obtener_alertas_stock_bajo_excluye_inactivos(db_session):
     """C21: un producto descontinuado (INACTIVO) no deberia seguir generando alerta de
     stock bajo para siempre."""
     admin = crear_usuario_admin(db_session)
-    crear_producto(db_session, cantidad_unidad=3)
-    crear_producto(db_session, cantidad_unidad=3, estado_producto="INACTIVO")
+    crear_producto(db_session, cantidad_unidad=3, cantidad_minima=Decimal("10.00"))
+    crear_producto(db_session, cantidad_unidad=3, cantidad_minima=Decimal("10.00"), estado_producto="INACTIVO")
 
-    alertas = ProductoService.obtener_alertas_stock(db_session, limite_minimo=10, id_usuario=admin.id_usuario)
+    alertas = ProductoService.obtener_alertas_stock(db_session, id_usuario=admin.id_usuario)
 
     assert len(alertas["bajo_stock"]) == 1
     assert alertas["bajo_stock"][0].estado_producto == "ACTIVO"

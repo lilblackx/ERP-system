@@ -25,6 +25,7 @@ from tests.factories import (
     crear_proveedor,
     crear_usuario_admin,
     crear_vendedor,
+    pago_contado,
 )
 
 
@@ -792,6 +793,35 @@ def test_listar_cuentas_por_cobrar_filtra_por_estado_pagada(db_session):
 
     assert resultado["total"] == 1
     assert resultado["items"][0].estado_visual == "pagada"
+
+
+def test_listar_cuentas_por_cobrar_excluye_facturas_de_contado(db_session):
+    """Bug real (2026-09): desde migrations/0024_pagos_contado_multimetodo.sql,
+    trg_factura_venta_cxc abre una CuentaPorCobrar tambien para facturas de CONTADO --
+    nace en 'pagada'/saldo=0 en la misma transaccion, como vehiculo tecnico para poder
+    registrar los PagoCobro de esa venta (requieren un id_cuenta_por_cobrar), no porque
+    haya algo pendiente de cobrar. Sin este filtro aparecia en el modulo de gestion de
+    cobros una factura de contado ya saldada, confundiendo al usuario ("no debe aparecer,
+    no hay nada que cobrar")."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=10)
+    crear_precio_producto(db_session, producto, "50.00")
+    cliente = crear_cliente(db_session)
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "50.00"}],
+    )
+
+    resultado = PagoService.listar_cuentas_por_cobrar(db_session, id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 0
+    assert resultado["items"] == []
 
 
 def test_listar_cuentas_por_cobrar_sin_usuario_autorizado_falla(db_session):
