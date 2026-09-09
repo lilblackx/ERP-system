@@ -51,6 +51,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_sombra,
 )
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,43 @@ COLS_HISTORIAL = [
     "Monto",
     "Saldo Corrido",
 ]
+
+
+def _filas_historial_para_exportar(session, id_cliente: int) -> list[list]:
+    historial = obtener_historial_cliente(session, id_cliente)
+    return [
+        [
+            item["id_cuenta"] or "N/A",
+            item["numero_factura"],
+            item["fecha_emision"],
+            str(item["total_venta"]),
+            item["estado_factura"],
+            item["condicion_pago"],
+            _etiqueta_metodo_pago(item["metodo_pago"]),
+            str(item["dias_credito"] or 0),
+            item["observaciones_factura"] or "",
+            str(item["total_pagado"]),
+            _texto_vuelto(item),
+            str(item["saldo_pendiente"]),
+            str(item["saldo_corrido"]),
+        ]
+        for item in historial
+    ]
+
+
+def _tarea_exportar_historial_excel(session, ruta: str, id_cliente: int) -> str:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el historial
+    completo del cliente a un archivo (openpyxl) es lo bastante lento como para
+    congelar la ventana si se hace en el hilo de GUI."""
+    filas = _filas_historial_para_exportar(session, id_cliente)
+    exportar_excel(ruta, COLS_HISTORIAL, filas)
+    return ruta
+
+
+def _tarea_exportar_historial_pdf(session, ruta: str, id_cliente: int, cliente_nombre: str | None) -> str:
+    filas = _filas_historial_para_exportar(session, id_cliente)
+    exportar_pdf(ruta, "Historial del Cliente", COLS_HISTORIAL, filas, cliente_nombre=cliente_nombre)
+    return ruta
 
 
 class HistorialClienteWindow(QDialog):
@@ -279,19 +317,19 @@ class HistorialClienteWindow(QDialog):
         btn_detalle.setAutoDefault(False)
         btn_detalle.clicked.connect(self.ver_detalle_factura)
 
-        btn_exportar_excel = QPushButton("Exportar Excel")
-        btn_exportar_excel.setIcon(qta.icon("fa5s.file-excel", color=COLOR_SUCCESS))
-        btn_exportar_excel.setObjectName("BtnSecondary")
-        btn_exportar_excel.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_exportar_excel.setAutoDefault(False)
-        btn_exportar_excel.clicked.connect(self.exportar_excel)
+        self.btn_exportar_excel = QPushButton("Exportar Excel")
+        self.btn_exportar_excel.setIcon(qta.icon("fa5s.file-excel", color=COLOR_SUCCESS))
+        self.btn_exportar_excel.setObjectName("BtnSecondary")
+        self.btn_exportar_excel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_exportar_excel.setAutoDefault(False)
+        self.btn_exportar_excel.clicked.connect(self.exportar_excel)
 
-        btn_exportar_pdf = QPushButton("Exportar PDF")
-        btn_exportar_pdf.setIcon(qta.icon("fa5s.file-pdf", color=COLOR_DANGER))
-        btn_exportar_pdf.setObjectName("BtnSecondary")
-        btn_exportar_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_exportar_pdf.setAutoDefault(False)
-        btn_exportar_pdf.clicked.connect(self.exportar_pdf)
+        self.btn_exportar_pdf = QPushButton("Exportar PDF")
+        self.btn_exportar_pdf.setIcon(qta.icon("fa5s.file-pdf", color=COLOR_DANGER))
+        self.btn_exportar_pdf.setObjectName("BtnSecondary")
+        self.btn_exportar_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_exportar_pdf.setAutoDefault(False)
+        self.btn_exportar_pdf.clicked.connect(self.exportar_pdf)
 
         # Deshabilitados hasta que cargar_historial() confirme que hay notas
         # disponibles/facturas con saldo pendiente (ver _actualizar_notas_credito) -- sin
@@ -340,8 +378,8 @@ class HistorialClienteWindow(QDialog):
         h.addWidget(btn_detalle)
         h.addWidget(self.btn_aplicar_nota)
         h.addWidget(self.btn_devolver_nota)
-        h.addWidget(btn_exportar_excel)
-        h.addWidget(btn_exportar_pdf)
+        h.addWidget(self.btn_exportar_excel)
+        h.addWidget(self.btn_exportar_pdf)
         h.addWidget(btn_cerrar)
         return h
 
@@ -502,15 +540,18 @@ class HistorialClienteWindow(QDialog):
             # Preparar filas para exportación
             filas = [
                 [
-                    "Factura" if item["tipo_transaccion"] == "factura" else "Abono",
+                    item["id_cuenta"] or "N/A",
                     item["numero_factura"],
-                    item["fecha"],
-                    item["estado_factura"] or "",
-                    item["condicion_pago"] or "",
+                    item["fecha_emision"],
+                    str(item["total_venta"]),
+                    item["estado_factura"],
+                    item["condicion_pago"],
                     _etiqueta_metodo_pago(item["metodo_pago"]),
-                    str(item["dias_credito"]) if item["dias_credito"] is not None else "",
-                    item["observaciones"] or "",
-                    str(item["monto"]),
+                    str(item["dias_credito"] or 0),
+                    item["observaciones_factura"] or "",
+                    str(item["total_pagado"]),
+                    _texto_vuelto(item),
+                    str(item["saldo_pendiente"]),
                     str(item["saldo_corrido"]),
                 ]
                 for item in historial
@@ -523,13 +564,13 @@ class HistorialClienteWindow(QDialog):
             if not ruta:
                 return
 
-            exportar_excel(ruta, COLS_HISTORIAL, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar historial a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar el historial a Excel.")
-        finally:
-            session.close()
+        self.btn_exportar_excel.setEnabled(False)
+        self._worker_export_excel = QueryWorker(
+            self.session_factory, _tarea_exportar_historial_excel, ruta=ruta, id_cliente=self.id_cliente
+        )
+        self._worker_export_excel.resultado.connect(self._on_exportar_excel_ok)
+        self._worker_export_excel.error.connect(self._on_exportar_excel_error)
+        self._worker_export_excel.start()
 
     def exportar_pdf(self) -> None:
         session = self.session_factory()
@@ -539,15 +580,18 @@ class HistorialClienteWindow(QDialog):
             # Preparar filas para exportación
             filas = [
                 [
-                    "Factura" if item["tipo_transaccion"] == "factura" else "Abono",
+                    str(item["id_cuenta"] or "N/A"),
                     item["numero_factura"],
-                    item["fecha"],
-                    item["estado_factura"] or "",
-                    item["condicion_pago"] or "",
+                    item["fecha_emision"],
+                    str(item["total_venta"]),
+                    item["estado_factura"],
+                    item["condicion_pago"],
                     _etiqueta_metodo_pago(item["metodo_pago"]),
-                    str(item["dias_credito"]) if item["dias_credito"] is not None else "",
-                    item["observaciones"] or "",
-                    str(item["monto"]),
+                    str(item["dias_credito"] or 0),
+                    item["observaciones_factura"] or "",
+                    str(item["total_pagado"]),
+                    _texto_vuelto(item),
+                    str(item["saldo_pendiente"]),
                     str(item["saldo_corrido"]),
                 ]
                 for item in historial
@@ -560,19 +604,35 @@ class HistorialClienteWindow(QDialog):
             if not ruta:
                 return
 
-            exportar_pdf(
-                ruta,
-                "Historial del Cliente",
-                COLS_HISTORIAL,
-                filas,
-                cliente_nombre=self.cliente.nombre_razon_social,
-            )
-            MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar historial a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar el historial a PDF.")
-        finally:
-            session.close()
+        self.btn_exportar_pdf.setEnabled(False)
+        self._worker_export_pdf = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_historial_pdf,
+            ruta=ruta,
+            id_cliente=self.id_cliente,
+            cliente_nombre=self.cliente.nombre_razon_social,
+        )
+        self._worker_export_pdf.resultado.connect(self._on_exportar_pdf_ok)
+        self._worker_export_pdf.error.connect(self._on_exportar_pdf_error)
+        self._worker_export_pdf.start()
+
+    def _on_exportar_excel_ok(self, ruta: str) -> None:
+        self.btn_exportar_excel.setEnabled(True)
+        MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
+
+    def _on_exportar_excel_error(self, mensaje: str) -> None:
+        self.btn_exportar_excel.setEnabled(True)
+        logger.error("Fallo al exportar historial a Excel: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar el historial a Excel.")
+
+    def _on_exportar_pdf_ok(self, ruta: str) -> None:
+        self.btn_exportar_pdf.setEnabled(True)
+        MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
+
+    def _on_exportar_pdf_error(self, mensaje: str) -> None:
+        self.btn_exportar_pdf.setEnabled(True)
+        logger.error("Fallo al exportar historial a PDF: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar el historial a PDF.")
 
     def _fila_seleccionada_id_factura(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()

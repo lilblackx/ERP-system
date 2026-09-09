@@ -47,6 +47,7 @@ from app.ui.styles import (
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,51 @@ COLORES_ESTADO_CUENTA = {
     "ACTIVO": COLOR_SUCCESS,
     "INACTIVO": "#dc3545",  # Rojo para estado inactivo
 }
+
+
+def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario) -> list[list]:
+    resultado = CuentaBancariaService.listar(
+        session,
+        texto_busqueda=texto_busqueda,
+        estado_cuenta=estado_cuenta,
+        id_banco=id_banco,
+        id_usuario=id_usuario,
+        pagina=1,
+        por_pagina=1_000_000,
+    )
+    cuentas = resultado["items"]
+    return [
+        [
+            cuenta.id_cuenta,
+            cuenta.banco.nombre_banco if cuenta.banco else None,
+            _enmascarar_numero_cuenta(cuenta.numero_cuenta),
+            cuenta.tipo_cuenta_banco,
+            cuenta.nombre_titular,
+            cuenta.identificacion_titular,
+            float(cuenta.saldo_total_banco or 0),
+            cuenta.estado_cuenta,
+        ]
+        for cuenta in cuentas
+    ]
+
+
+def _tarea_exportar_cuentas_bancarias_excel(
+    session, ruta: str, texto_busqueda, estado_cuenta, id_banco, id_usuario
+) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
+    de cuentas bancarias a un archivo (openpyxl) es lo bastante lento como para
+    congelar la ventana si se hace en el hilo de GUI."""
+    filas = _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario)
+    exportar_excel(ruta, COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_cuentas_bancarias_pdf(
+    session, ruta: str, texto_busqueda, estado_cuenta, id_banco, id_usuario, filtros, col_widths
+) -> tuple[str, int]:
+    filas = _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario)
+    exportar_pdf(ruta, "Reporte de Cuentas Bancarias", COLS_VISIBLES, filas, filtros=filtros, col_widths=col_widths)
+    return ruta, len(filas)
 
 
 class CuentasBancariasPanel(QWidget):
@@ -175,7 +221,7 @@ class CuentasBancariasPanel(QWidget):
                 3: Qt.AlignmentFlag.AlignLeft,
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignRight,
                 7: Qt.AlignmentFlag.AlignCenter,
             },
         )
@@ -318,7 +364,9 @@ class CuentasBancariasPanel(QWidget):
             self.table.setItem(row, 3, QTableWidgetItem(cuenta.tipo_cuenta_banco or "N/A"))
             self.table.setItem(row, 4, QTableWidgetItem(cuenta.nombre_titular or "N/A"))
             self.table.setItem(row, 5, QTableWidgetItem(cuenta.identificacion_titular or "N/A"))
-            self.table.setItem(row, 6, QTableWidgetItem(f"${float(cuenta.saldo_total_banco):,.2f}"))
+            item_saldo = QTableWidgetItem(f"${float(cuenta.saldo_total_banco):,.2f}")
+            item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 6, item_saldo)
 
             estado = cuenta.estado_cuenta or "N/A"
             color_estado = COLORES_ESTADO_CUENTA.get(estado, COLOR_TEXT_MUTED)
@@ -515,90 +563,73 @@ class CuentasBancariasPanel(QWidget):
             self._pagina_actual += 1
             self._cargar_datos()
 
-    def _filas_para_exportar(self, session) -> list[list]:
-        resultado = CuentaBancariaService.listar(
-            session,
-            texto_busqueda=self._texto_busqueda or None,
-            estado_cuenta=self._filtro_estado,
-            id_banco=self._filtro_banco,
-            id_usuario=self.usuario.id_usuario,
-            pagina=1,
-            por_pagina=1_000_000,
-        )
-        cuentas = resultado["items"]
-        return [
-            [
-                cuenta.id_cuenta,
-                cuenta.banco.nombre_banco if cuenta.banco else None,
-                _enmascarar_numero_cuenta(cuenta.numero_cuenta),
-                cuenta.tipo_cuenta_banco,
-                cuenta.nombre_titular,
-                cuenta.identificacion_titular,
-                float(cuenta.saldo_total_banco or 0),
-                cuenta.estado_cuenta,
-            ]
-            for cuenta in cuentas
-        ]
+    def _filtros_actuales_exportar(self) -> dict:
+        return {
+            "texto_busqueda": self._texto_busqueda or None,
+            "estado_cuenta": self._filtro_estado,
+            "id_banco": self._filtro_banco,
+            "id_usuario": self.usuario.id_usuario,
+        }
 
     def _exportar_excel(self):
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(
             self, "Exportar cuentas bancarias", "cuentas_bancarias.xlsx", "Excel (*.xlsx)"
         )
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_excel(ruta, COLS_VISIBLES, filas)
-            MessageBox.information(
-                self, "Exportación completa", f"Se exportaron {len(filas)} cuentas bancarias a:\n{ruta}"
-            )
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
-        except Exception:
-            logger.exception("Fallo al exportar la lista de cuentas bancarias a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_cuentas_bancarias_excel,
+            ruta=ruta,
+            **self._filtros_actuales_exportar(),
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
     def _exportar_pdf(self):
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(
             self, "Exportar cuentas bancarias", "cuentas_bancarias.pdf", "PDF (*.pdf)"
         )
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
+        texto_busqueda = self.search_input.text().strip()
+        filtros = {
+            "Búsqueda": texto_busqueda if texto_busqueda else "Todos",
+            "Banco": self.banco_combo.currentText(),
+            "Estado": self.estado_combo.currentText(),
+        }
+        col_widths = [0.5, 1.5, 1.5, 1.0, 1.5, 1.3, 1.0, 1.0]
 
-            filtros = {}
-            texto_busqueda = self.search_input.text().strip()
-            filtros["Búsqueda"] = texto_busqueda if texto_busqueda else "Todos"
-            filtros["Banco"] = self.banco_combo.currentText()
-            filtros["Estado"] = self.estado_combo.currentText()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_cuentas_bancarias_pdf,
+            ruta=ruta,
+            filtros=filtros,
+            col_widths=col_widths,
+            **self._filtros_actuales_exportar(),
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
-            col_widths = [0.5, 1.5, 1.5, 1.0, 1.5, 1.3, 1.0, 1.0]
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} cuentas bancarias a:\n{ruta}")
 
-            exportar_pdf(
-                ruta,
-                "Reporte de Cuentas Bancarias",
-                COLS_VISIBLES,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-            )
-            MessageBox.information(
-                self, "Exportación completa", f"Se exportaron {len(filas)} cuentas bancarias a:\n{ruta}"
-            )
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
-        except Exception:
-            logger.exception("Fallo al exportar la lista de cuentas bancarias a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
-        finally:
-            session.close()
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar cuentas bancarias: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
 
     def closeEvent(self, event):
         """Detiene el timer de auto-refresh cuando se cierra el panel."""

@@ -56,6 +56,7 @@ from app.ui.styles import (
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,52 @@ ESTADOS_FILTRO = [
     ("Activos", "ACTIVO"),
     ("Inactivos", "INACTIVO"),
 ]
+
+
+def _filas_proveedores_query(session, texto_busqueda, estado_proveedor, id_usuario) -> list[list]:
+    resultado = ProveedorService.listar(
+        session,
+        texto_busqueda=texto_busqueda,
+        estado_proveedor=estado_proveedor,
+        id_usuario=id_usuario,
+        pagina=1,
+        por_pagina=1_000_000,
+    )
+    proveedores = resultado["items"]
+    return [
+        [
+            p.id_proveedor,
+            p.codigo_proveedor,
+            p.nombre_razon_social,
+            f"{p.id_legal}-{p.identificacion_proveedor}"
+            if p.id_legal and p.identificacion_proveedor
+            else (p.id_legal or p.identificacion_proveedor or ""),
+            p.telefono,
+            p.email,
+            p.dias_credito if p.dias_credito is not None else 0,
+            p.estado_proveedor,
+        ]
+        for p in proveedores
+    ]
+
+
+def _tarea_exportar_proveedores_excel(
+    session, ruta: str, texto_busqueda, estado_proveedor, id_usuario
+) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
+    de proveedores a un archivo (openpyxl) es lo bastante lento como para congelar la
+    ventana si se hace en el hilo de GUI."""
+    filas = _filas_proveedores_query(session, texto_busqueda, estado_proveedor, id_usuario)
+    exportar_excel(ruta, COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_proveedores_pdf(
+    session, ruta: str, texto_busqueda, estado_proveedor, id_usuario, filtros, col_widths
+) -> tuple[str, int]:
+    filas = _filas_proveedores_query(session, texto_busqueda, estado_proveedor, id_usuario)
+    exportar_pdf(ruta, "Reporte de Proveedores", COLS_VISIBLES, filas, filtros=filtros, col_widths=col_widths)
+    return ruta, len(filas)
 
 
 class ProveedoresPanel(QWidget):
@@ -319,82 +366,64 @@ class ProveedoresPanel(QWidget):
         self.btn_anterior.setEnabled(self.pagina_actual > 1)
         self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
-    def _filas_para_exportar(self, session) -> list[list]:
-        resultado = ProveedorService.listar(
-            session,
-            texto_busqueda=self.buscar_input.text().strip() or None,
-            estado_proveedor=self.estado_combo.currentData(),
-            id_usuario=self.usuario.id_usuario,
-            pagina=1,
-            por_pagina=1_000_000,
-        )
-        proveedores = resultado["items"]
-        return [
-            [
-                p.id_proveedor,
-                p.codigo_proveedor,
-                p.nombre_razon_social,
-                f"{p.id_legal}-{p.identificacion_proveedor}"
-                if p.id_legal and p.identificacion_proveedor
-                else (p.id_legal or p.identificacion_proveedor or ""),
-                p.telefono,
-                p.email,
-                p.dias_credito if p.dias_credito is not None else 0,
-                p.estado_proveedor,
-            ]
-            for p in proveedores
-        ]
+    def _filtros_actuales_exportar(self) -> dict:
+        return {
+            "texto_busqueda": self.buscar_input.text().strip() or None,
+            "estado_proveedor": self.estado_combo.currentData(),
+            "id_usuario": self.usuario.id_usuario,
+        }
 
     def exportar_excel_proveedores(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar proveedores", "proveedores.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_excel(ruta, COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} proveedores a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
-        except Exception:
-            logger.exception("Fallo al exportar la lista de proveedores a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_proveedores_excel, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
     def exportar_pdf_proveedores(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar proveedores", "proveedores.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
+        texto_busqueda = self.buscar_input.text().strip()
+        filtros = {
+            "Búsqueda": texto_busqueda if texto_busqueda else "Todos",
+            "Estado": self.estado_combo.currentText(),
+        }
+        col_widths = [0.5, 1.2, 2.5, 1.5, 1.3, 2.0, 1.0, 1.0]
 
-            filtros = {}
-            texto_busqueda = self.buscar_input.text().strip()
-            filtros["Búsqueda"] = texto_busqueda if texto_busqueda else "Todos"
-            filtros["Estado"] = self.estado_combo.currentText()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_proveedores_pdf,
+            ruta=ruta,
+            filtros=filtros,
+            col_widths=col_widths,
+            **self._filtros_actuales_exportar(),
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
-            col_widths = [0.5, 1.2, 2.5, 1.5, 1.3, 2.0, 1.0, 1.0]
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} proveedores a:\n{ruta}")
 
-            exportar_pdf(
-                ruta,
-                "Reporte de Proveedores",
-                COLS_VISIBLES,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-            )
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} proveedores a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
-        except Exception:
-            logger.exception("Fallo al exportar la lista de proveedores a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
-        finally:
-            session.close()
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar proveedores: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()

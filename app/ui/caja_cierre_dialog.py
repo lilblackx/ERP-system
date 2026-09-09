@@ -37,6 +37,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     TABLE_QSS,
+    alinear_encabezados,
     aplicar_sombra,
 )
 
@@ -199,6 +200,15 @@ class CajaCierreDialog(QDialog):
         self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
+        alinear_encabezados(
+            self.tabla,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         return self.tabla
 
     @staticmethod
@@ -232,7 +242,9 @@ class CajaCierreDialog(QDialog):
             tipo_item.setForeground(Qt.GlobalColor.darkGreen if es_entrada else Qt.GlobalColor.red)
             self.tabla.setItem(fila, 1, tipo_item)
             self.tabla.setItem(fila, 2, QTableWidgetItem(mov.descripcion_movimiento or ""))
-            self.tabla.setItem(fila, 3, QTableWidgetItem(f"$ {mov.monto_movimiento or 0:,.2f}"))
+            item_monto = QTableWidgetItem(f"$ {mov.monto_movimiento or 0:,.2f}")
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 3, item_monto)
 
         if not movimientos:
             self.btn_cerrar.setText("Confirmar Cierre de Turno (sin movimientos)")

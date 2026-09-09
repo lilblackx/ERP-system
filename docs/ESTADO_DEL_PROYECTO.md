@@ -1127,3 +1127,116 @@ de servicio.
     destino con trazado real por calles via OSRM) fue reemplazado 2026-09-03 por una zona
     de cobertura (poligono de vertices, `migrations/0043`) -- ver "Zona de cobertura de
     ruta reemplaza origen/destino/trazado" mas arriba en esta seccion.
+
+- **Reporte "Productos Proximos a Vencer"** (2026-09-07, `ReporteService.productos_proximos_a_vencer()`
+  en `reportes.py`): filtra `Inventario` por `fecha_vencimiento` dentro de una ventana
+  configurable (`dias_horizonte`, default 30) y categoria opcional, devuelve dias
+  restantes por fila. UI en `reportes_panel.py` (nuevo tipo de reporte, filtros de dias
+  horizonte + categoria, export incluido).
+- **Columna "Cliente" en Comisiones** (2026-09-07/08, `app/services/comisiones.py`,
+  `app/ui/comisiones_panel.py`): `listar_comisiones_vendedor()`/`listar_mis_comisiones()`
+  ahora hacen eager load `ComisionFactura.detalle -> FacturaDetalle.factura ->
+  FacturaVenta.cliente` (evita N+1) y el panel muestra el cliente de cada factura
+  comisionada. Nota de proceso: el mismo dia (66ca20b) se habia agregado primero una
+  columna "Estado de Pago" (Liberada/Pendiente, via lookup de `CuentaPorCobrar` por
+  fila) -- se revirtio horas despues (22f84c4) a favor de la columna Cliente por
+  performance (evitar el lookup por fila) y utilidad percibida; el codigo de estado de
+  pago ya no existe en el panel.
+- **Saldo corrido en Historial de Cliente** (2026-09-08, `app/services/historial_cliente.py`,
+  `app/ui/historial_cliente_window.py`): `obtener_historial_cliente()` ordena las facturas
+  cronologicamente y acumula `saldo_pendiente` factura a factura para exponer
+  `saldo_corrido` en cada item (el resultado se invierte al final para seguir mostrando
+  mas reciente primero en la tabla, pero el acumulado se calculo en orden cronologico).
+  Tabla UI y export a Excel incluyen la columna nueva.
+
+## 10. Checklist de producción (consolidado, reemplaza `docs/CHECKLIST_PRODUCCION.md`)
+
+`docs/CHECKLIST_PRODUCCION.md` existió como documento aparte (2026-08-22 en adelante,
+**sin versionar** — estaba en `.gitignore`, lo que en sí mismo era el hallazgo V-03 de más
+abajo) y quedó congelado el 2026-08-23 pese a que el proyecto siguió avanzando hasta hoy.
+Se eliminó y su contenido vigente se fusionó aquí, en un documento sí versionado, para que
+no vuelva a desincronizarse del código real. Esta sección reemplaza a aquel archivo por
+completo.
+
+### 10.1 Fuera de alcance (confirmado, no re-evaluar en futuras auditorías)
+
+La arquitectura es desktop PySide6 + SQL Server vía `pyodbc`, sin capa HTTP propia. Ítems
+típicos de auditoría de backend web **no aplican**:
+
+- Tokens de acceso/refresh, rotación, revocación — no hay tokens; la sesión es el objeto
+  `Usuario` en memoria del proceso. El equivalente real (revocación en caliente) ya está
+  resuelto: `require_permiso()` revalida `estado`/`bloqueado_desde` en cada llamada.
+- CORS, Helmet, headers de seguridad, rate-limit por IP — no hay peticiones HTTP. El
+  equivalente real (cooldown + límite de intentos en códigos de recuperación) ya está
+  resuelto.
+- Validación de payload tipo Zod/Joi/DTO en un boundary HTTP — no hay boundary HTTP; cada
+  método de servicio (`if ...: raise ValueError`) es el boundary real.
+- IDOR/BOLA por endpoint — no hay endpoints; el control de acceso equivalente es RBAC en
+  la firma de cada método de servicio.
+- Middleware unificado de excepciones / endpoints `/health/live`, `/health/ready` — no hay
+  servidor HTTP. El equivalente real es cada panel UI capturando excepciones + el
+  fail-fast de `validar_configuracion()`/`verificar_migraciones_al_dia()` al arrancar. El
+  indicador de salud en caliente sigue pendiente (O-04, ver abajo).
+- Dockerfile multi-stage / usuario no-root / `.dockerignore` — el ejecutable corre nativo
+  en Windows en la máquina de cada empleado; solo la base de datos usa Docker, y solo para
+  desarrollo.
+- Redis/BullMQ/Celery, Dead Letter Queues, circuit breakers de terceros — no hay
+  infraestructura de colas. El equivalente real de "ejecución desacoplada" es
+  `QueryWorker` (`app/ui/workers.py`).
+
+### 10.2 Última auditoría integral: 2026-09-06, verificada vigente 2026-09-08
+
+Método: inspección directa de código (RBAC, validaciones, reglas financieras, triggers,
+resiliencia, UI/UX) + suite `pytest` completa contra `distribuidora_dj_test` real +
+`ruff check`/`ruff format --check`. Resultado: **865/865 tests, sin regresiones, lint y
+formato limpios.**
+
+**Scorecard por área:**
+
+| Área | Score | Motivo |
+|---|---|---|
+| Integridad de datos y triggers | 93% | Secuencia header→detalle→recálculo, orden de borrado en anulación, notas de crédito automáticas, atomicidad (un commit por operación), locks `UPDLOCK`/`ROWLOCK` con test de concurrencia real — todo verificado con evidencia en código. Resta el vacío de manejo de excepciones en `tesoreria.py` (ver P-01 abajo). |
+| Validación y seguridad (RBAC/inputs) | 50% | RBAC en sí es sólido (~98% de cobertura, `require_permiso` como primera línea en los 18 servicios). Pero la credencial SMTP filtrada (P-00) es descalificante para cualquier score de seguridad mientras siga expuesta — sin ese hallazgo el área estaría ~85%. |
+| Estabilidad UI y asincronía | 68% | Modal unificado (`MessageBox`) casi total (482 usos vs 1-2 nativos residuales). Sin `sys.excepthook` global y con la mayoría de los exports corriendo síncrono en el hilo de UI sin bloqueo de botón. |
+| Cobertura de pruebas y robustez | 95% | 865/865 verde contra BD real (no mocks), CI activo, tests de concurrencia real (deadlock/lock), lint/format limpios. |
+
+**Veredicto: CONDICIONADO / NO-GO.** No apto para producción hasta cerrar P-00 a P-04 de
+la tabla siguiente.
+
+### 10.3 Pendientes de producción (estado verificado 2026-09-08)
+
+| ID | Prioridad | Ítem | Archivo/módulo | Estado |
+|---|---|---|---|---|
+| **P-00** | **Bloqueante inmediato** | Credencial SMTP real (Gmail App Password) hardcodeada como valor por defecto, commiteada a git y pusheada a GitHub (`lilblackx/ERP-system`) | `app/config.py:23` (`SMTP_PASSWORD`) | **Abierto** — verificado igual hoy 2026-09-08. Acción: revocar el App Password en Google, generar uno nuevo solo en `.env`, quitar el default de `config.py`, purgar el historial de git (`git filter-repo`/BFG — un commit nuevo no lo borra del historial ya pusheado). |
+| **V-01** | P0 | Empaquetado y distribución (instalador/ejecutable standalone, `PyInstaller` o equivalente) | no existe | **Abierto**. Sin esto no hay forma de llevar el sistema a la máquina de cada empleado. Criterio de aceptación: ejecutable/instalador corre en Windows limpio (sin Python/repo) contra la base compartida, con ODBC Driver 18 documentado como prerrequisito. |
+| **P-01** | P0 (nuevo, hallazgo 2026-09-06) | Sin `sys.excepthook` global | `app/main.py` | **Abierto**. Una excepción no capturada en un slot de Qt tira la app entera al escritorio sin quedar en log. Solo `QueryWorker.run()` captura, y solo lo que pasa por ahí. |
+| **S-02** | P1 | Eventos de autenticación (login OK/fallido/bloqueo) no llegan a `logs/app.log`, solo a `dbo.auditoria` | `app/services/auth.py` | **Abierto**, verificado hoy (cero `import logging` en el archivo). |
+| **P-02** | P1 (nuevo, hallazgo 2026-09-06) | `tesoreria.py` sin manejo de excepción/rollback en ningún método (apertura/cierre de caja, movimientos manuales) | `app/services/tesoreria.py` | **Abierto**. Contraste directo con `ventas.py`/`compras.py`/`pagos.py`, que sí capturan y traducen errores de trigger vía `db_utils.py::traducir_error_trigger()`. |
+| **P-03** | P1/P2 (nuevo, hallazgo 2026-09-06) | 8 de 10 paneles exportan a Excel síncrono en el hilo de UI sin `setEnabled(False)`/reactivación | `clientes_panel.py`, `proveedores_panel.py`, `inventario_panel.py`, `facturacion_panel.py`, `cuentas_bancarias_panel.py`, `historial_cliente_window.py`, `tasas_panel.py`, `vendedores_panel.py` | **Abierto**. Solo `comisiones_panel.py`/`reportes_panel.py` usan `QueryWorker` correctamente para esto. |
+| **D-02** | P1 | Runner de migraciones sin lock entre instancias concurrentes | `app/db/migrar.py::aplicar_migraciones()` | **Abierto**. Envolver en `sp_getapplock` antes de iterar pendientes. |
+| **O-03** | P1 | Log estructurado con ID de correlación (hoy texto plano) | `app/logging_config.py` | **Abierto**. |
+| **O-04** | P1 | Sin indicador de salud/conectividad en caliente | `app/ui/topbar.py` | **Abierto**. Solo existe el fail-fast al arrancar. |
+| **D-01** | P1 (mayormente resuelto, verificado 2026-09-06) | Paginación en listados de catálogo | `app/services/*.py` | **Resuelto en la práctica** para clientes (`clientes.py:108`), proveedores (`proveedores.py:49`), inventario, ventas/facturas, vendedores, cuentas bancarias — verificado con `pagina`/`por_pagina`/`offset().limit()` en código. El checklist original (2026-08-23, "39 llamadas `.all()` sin límite") quedó desactualizado; no se hizo un barrido exhaustivo de los 18 servicios para certificar el 100%, pero no se encontró ningún listado grande sin paginar en la muestra revisada. |
+| **X-01** | P2 | Cache del dashboard (recalcula 9 agregaciones en cada apertura, sin TTL) | `app/services/dashboard.py::get_panel_general_data()` | **Abierto**. |
+| **X-02** | P2 | Reintento con backoff ante corte de red (hoy solo `pool_pre_ping=True`) | `app/db/session.py` | **Abierto**. |
+| **R-02b** | P1 | Exportación PDF/impresión de reportes (la parte Excel ya está resuelta) | nuevo, requiere `QTextDocument`/`QPrinter` | **Abierto**. Sin pantalla de reportes que lo dispare todavía cuando se catalogó; hoy sí existe `reportes_panel.py` — revisar si sigue aplicando. |
+| **R-04** | P1 (condicional) | Streaming en exportaciones de detalle grandes (kardex/facturas del año) | `app/services/exportacion.py` | **Abierto pero de bajo riesgo actual** — los reportes existentes son acotados por naturaleza; sube de prioridad el día que exista un reporte sobre una tabla sin acotar. |
+| **S-01** | P2 | Mass assignment en creación/edición (`Cliente(**datos)`, `Proveedor(**datos)`) | `app/services/clientes.py:118`, `app/services/proveedores.py:65` | **Abierto**, verificado hoy. Bajo riesgo porque el caller siempre es UI interna, pero es el patrón correcto a fijar antes de que entre dato externo (import masivo, integración). |
+| **1b/1c** | P2 (nuevo, hallazgo 2026-09-06) | Validación de formato servidor para identificación (prefijo J/G/V/E/P) y email en clientes/proveedores — hoy solo presencia+unicidad, formato depende 100% de la UI | `clientes.py:23,144`, `proveedores.py:57,89` | **Abierto**. `usuarios.py` sí valida email con regex servidor; clientes/proveedores no tienen equivalente. |
+| **3b** | P2 (nuevo, hallazgo 2026-09-06) | Tabla `Auditoria` sin columnas estructuradas `valor_anterior`/`valor_nuevo` — solo `detalle` texto/JSON libre poblado ad-hoc por cada caller | `app/db/models.py:181-191` | **Abierto**, decisión de diseño original, no bloqueante pero limita trazabilidad fina. |
+| — | P2 | Sin `Connection Timeout` explícito en la cadena ODBC | `app/config.py::get_database_url()` | **Abierto**, verificado hoy — solo `TrustServerCertificate` está seteado. |
+| D-03 | P2 (proceso) | Reversibilidad de migraciones — decisión ya tomada (no hay `down`, una migración nueva deshace la anterior); confirmar por escrito que el respaldo de BD se corre siempre antes de aplicar una migración en un entorno con datos reales | `migrations/README.md`, `docs/BACKUP_RESTORE.md` | Documentado, sin acción de código pendiente. |
+| V-02 | P2 | Mensaje de error de `verificar_migraciones_al_dia()` no referencia qué versión del instalador corresponde | `app/db/migrar.py` | Depende de V-01; sin acción hasta que exista. |
+| ~~V-03~~ | — | Checklist fuera de control de versión | — | **Resuelto por esta misma consolidación** (2026-09-08): el documento pasó a vivir versionado dentro de `ESTADO_DEL_PROYECTO.md`, ya no existe `docs/CHECKLIST_PRODUCCION.md` como archivo aparte ni entrada en `.gitignore`. |
+
+**Notas sobre `require_permiso()` (verificado 2026-09-06, sigue vigente):** dos métodos
+públicos sin guardia propia — `NotaCreditoService.crear_nota_credito_cliente()`/
+`crear_nota_credito_proveedor()` (`notas_credito.py`) y el núcleo interno de
+`comisiones.py` — son seguros hoy porque nada los llama directo (siempre vía las
+variantes internas `_crear_nota_credito_*` desde `anular_factura()`/`anular_compra()`,
+que sí están gateadas). Si en el futuro se agrega un caller directo a los públicos,
+quedarían sin RBAC — vale agregarles una guardia propia aunque hoy no la necesiten.
+
+**Próximo paso sugerido**: cerrar P-00 (credencial) y P-01 (excepthook) antes de tocar
+cualquier otra cosa — son los dos únicos hallazgos con riesgo real de incidente en
+producción hoy mismo, no de deuda técnica a mediano plazo.

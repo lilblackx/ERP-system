@@ -1,7 +1,7 @@
 import datetime
 
 import qtawesome as qta
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtWidgets import (
     QCalendarWidget,
     QComboBox,
@@ -28,6 +28,7 @@ from app.ui.styles import (
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
     TABLE_QSS,
+    alinear_encabezados,
 )
 
 
@@ -149,8 +150,18 @@ class ConciliacionBancosDialog(QDialog):
         self.lbl_diferencia.setStyleSheet("font-size: 14px; font-weight: 600; color: #475569;")
         resumen_layout.addWidget(self.lbl_diferencia, 1, 1)
 
-        self.lbl_estado = QLabel("Estado: Pendiente")
-        self.lbl_estado.setStyleSheet("font-size: 14px; font-weight: 600; color: #F59E0B;")
+        # Icono real (qtawesome) en vez de "✓"/"✗" sueltos en el texto -- ver
+        # GUIA_ESTILO_UI.md 3.1.
+        self.lbl_estado = QWidget()
+        estado_layout = QHBoxLayout(self.lbl_estado)
+        estado_layout.setContentsMargins(0, 0, 0, 0)
+        estado_layout.setSpacing(4)
+        self.icon_estado = QLabel()
+        self.lbl_estado_texto = QLabel("Estado: Pendiente")
+        self.lbl_estado_texto.setStyleSheet("font-size: 14px; font-weight: 600; color: #F59E0B;")
+        estado_layout.addWidget(self.icon_estado)
+        estado_layout.addWidget(self.lbl_estado_texto)
+        estado_layout.addStretch()
         resumen_layout.addWidget(self.lbl_estado, 1, 2)
 
         layout.addWidget(resumen_card)
@@ -205,6 +216,17 @@ class ConciliacionBancosDialog(QDialog):
         self.table.setColumnWidth(2, 100)
         self.table.setColumnWidth(3, 100)
         self.table.setColumnWidth(4, 120)
+        alinear_encabezados(
+            self.table,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         layout.addWidget(self.table)
 
         # ── Footer ──
@@ -354,7 +376,9 @@ class ConciliacionBancosDialog(QDialog):
             self.table.setItem(row, 1, tipo_item)
 
             # Monto
-            self.table.setItem(row, 2, QTableWidgetItem(f"${movimiento['monto']:,.2f}"))
+            item_monto = QTableWidgetItem(f"${movimiento['monto']:,.2f}")
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 2, item_monto)
 
             # Origen
             self.table.setItem(row, 3, QTableWidgetItem(movimiento["origen"]))
@@ -576,11 +600,13 @@ class ConciliacionBancosDialog(QDialog):
 
         # Verificar si está cuadrado (diferencia debe ser 0)
         if abs(diferencia) < 0.01:
-            self.lbl_estado.setText("Estado: Cuadrado ✓")
-            self.lbl_estado.setStyleSheet("font-size: 14px; font-weight: 600; color: #16A34A;")
+            self.icon_estado.setPixmap(qta.icon("fa5s.check-circle", color="#16A34A").pixmap(QSize(14, 14)))
+            self.lbl_estado_texto.setText("Estado: Cuadrado")
+            self.lbl_estado_texto.setStyleSheet("font-size: 14px; font-weight: 600; color: #16A34A;")
         else:
-            self.lbl_estado.setText("Estado: Desbalanceado ✗")
-            self.lbl_estado.setStyleSheet("font-size: 14px; font-weight: 600; color: #DC2626;")
+            self.icon_estado.setPixmap(qta.icon("fa5s.times-circle", color="#DC2626").pixmap(QSize(14, 14)))
+            self.lbl_estado_texto.setText("Estado: Desbalanceado")
+            self.lbl_estado_texto.setStyleSheet("font-size: 14px; font-weight: 600; color: #DC2626;")
 
         # Actualizar tabla de movimientos
         self._actualizar_tabla_manuales()

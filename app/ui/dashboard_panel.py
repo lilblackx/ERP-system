@@ -315,6 +315,12 @@ class ListaFilasAjustable(QWidget):
         self._filas = widgets
         for widget in widgets:
             self._layout.addWidget(widget)
+        # Sin este stretch final, con pocas filas (1-2) Qt reparte el alto sobrante DENTRO
+        # de cada fila en vez de dejarlo en blanco despues de la ultima -- cada fila se
+        # estira para llenar el espacio, separando el titulo del subtitulo dentro de
+        # FilaCaja/FilaFactura/FilaInventarioAlerta (reportado por el usuario, 2026-09-08:
+        # "Caja Principal" y "admin" quedaban lejos entre si).
+        self._layout.addStretch()
         self._ajustar_visibilidad()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (override de Qt)
@@ -373,7 +379,11 @@ class FilaCaja(QWidget):
 
         h.addLayout(info)
         h.addStretch()
-        h.addWidget(badge)
+        # Sin AlignVCenter, QHBoxLayout estira el QLabel para llenar el alto de la fila
+        # (determinado por las 2 lineas de `info`) -- como el badge pinta su propio
+        # background-color, sin este flag se ve como una franja de color alta en vez de
+        # una pildora chica centrada (reportado por el usuario, 2026-09-08).
+        h.addWidget(badge, alignment=Qt.AlignmentFlag.AlignVCenter)
 
 
 class FilaInventarioAlerta(QWidget):
@@ -397,14 +407,24 @@ class FilaInventarioAlerta(QWidget):
         info.addWidget(lbl_nombre)
         info.addWidget(lbl_categoria)
 
-        lbl_cantidad = QLabel(f"{float(producto['cantidad_unidad']):,.0f} und.")
-        lbl_cantidad.setStyleSheet(
+        # Motivo real de la alerta -- antes esta fila solo existia para stock bajo, asi
+        # que siempre mostraba la cantidad; ahora tambien incluye productos proximos a
+        # vencer (mismo criterio que ProductoService.obtener_alertas_stock), que no
+        # tienen nada que ver con el stock disponible.
+        if producto.get("bajo_stock"):
+            texto_alerta = f"{float(producto['cantidad_unidad']):,.0f} und."
+        elif producto.get("fecha_vencimiento"):
+            texto_alerta = f"Vence {producto['fecha_vencimiento'].strftime('%d/%m/%Y')}"
+        else:
+            texto_alerta = ""
+        lbl_alerta = QLabel(texto_alerta)
+        lbl_alerta.setStyleSheet(
             f"font-size: 12px; font-weight: bold; color: {COLOR_DANGER}; background: transparent; border: none;"
         )
 
         h.addLayout(info)
         h.addStretch()
-        h.addWidget(lbl_cantidad)
+        h.addWidget(lbl_alerta)
 
 
 class FilaFactura(QWidget):
@@ -442,7 +462,9 @@ class FilaFactura(QWidget):
         h.addWidget(lbl_numero)
         h.addWidget(lbl_cliente, stretch=1)
         h.addWidget(lbl_total)
-        h.addWidget(badge)
+        # Mismo motivo que en FilaCaja.badge -- sin AlignVCenter el QLabel con
+        # background-color se estira al alto completo de la fila.
+        h.addWidget(badge, alignment=Qt.AlignmentFlag.AlignVCenter)
 
 
 class DashboardPanel(QWidget):
@@ -724,7 +746,11 @@ class DashboardPanel(QWidget):
         self.kpi_por_pagar.set_detalle(f"{por_pagar['compras_vencidas']} compras vencidas", COLOR_DANGER)
 
         self.kpi_productos_alerta.set_valor(str(datos["productos_alerta"]))
-        self.kpi_productos_alerta.set_detalle("Bajo el mínimo", COLOR_WARNING)
+        # Ya no es solo "bajo el minimo" -- el conteo tambien suma proximos a vencer
+        # (ver DashboardService._filtro_alerta_inventario), asi que el detalle debe
+        # cubrir ambos motivos sin volverse tan largo como para ensanchar la tarjeta
+        # (ver el comentario de kpi_productos_alerta mas arriba).
+        self.kpi_productos_alerta.set_detalle("Stock o vencimiento", COLOR_WARNING)
 
         self.grafico_ventas.set_datos(datos["grafico_semanal"])
         self.etiquetas_dias.set_datos(datos["grafico_semanal"])

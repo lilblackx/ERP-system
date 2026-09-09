@@ -6,7 +6,7 @@ Diseño: Split-screen (izquierda azul con bienvenida, derecha blanca con formula
 import logging
 
 import qtawesome as qta
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QDialog,
@@ -158,11 +158,19 @@ class LoginWindow(QDialog):
         lbl_olvidaste.mousePressEvent = lambda event: self._abrir_recuperar_clave()
         right_layout.addWidget(lbl_olvidaste)
 
-        # Mensaje de error (oculto por defecto)
-        self.mensaje = QLabel("")
-        self.mensaje.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Mensaje de error (oculto por defecto) -- icono real (qtawesome) en vez de "⚠"/
+        # "✖" sueltos en el texto, ver GUIA_ESTILO_UI.md 3.1.
+        self.mensaje = QWidget()
         self.mensaje.setFixedHeight(20)
-        self.mensaje.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 12px;")
+        mensaje_layout = QHBoxLayout(self.mensaje)
+        mensaje_layout.setContentsMargins(0, 0, 0, 0)
+        mensaje_layout.setSpacing(4)
+        mensaje_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_mensaje = QLabel()
+        self.mensaje_texto = QLabel("")
+        self.mensaje_texto.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 12px;")
+        mensaje_layout.addWidget(self.icon_mensaje)
+        mensaje_layout.addWidget(self.mensaje_texto)
         right_layout.addWidget(self.mensaje)
 
         # Botón Iniciar Sesion
@@ -209,13 +217,20 @@ class LoginWindow(QDialog):
 
     # ── Lógica de autenticación ───────────────────────────────────────────
 
+    def _mostrar_mensaje(self, texto: str, icono: str | None = None) -> None:
+        if icono:
+            self.icon_mensaje.setPixmap(qta.icon(icono, color=COLOR_DANGER).pixmap(QSize(12, 12)))
+        else:
+            self.icon_mensaje.clear()
+        self.mensaje_texto.setText(texto)
+
     def intentar_login(self) -> None:
         nombre_usuario = self.usuario_input.text().strip()
         clave = self.clave_input.text()
-        self.mensaje.setText("")
+        self._mostrar_mensaje("")
 
         if not nombre_usuario or not clave:
-            self.mensaje.setText("⚠ Ingrese usuario y contraseña")
+            self._mostrar_mensaje("Ingrese usuario y contraseña", "fa5s.exclamation-triangle")
             return
 
         self.btn_login.setText("Verificando…")
@@ -225,7 +240,7 @@ class LoginWindow(QDialog):
         try:
             usuario = authenticate(session, nombre_usuario, clave)
         except CuentaBloqueadaError:
-            self.mensaje.setText("⚠ Cuenta bloqueada por intentos fallidos")
+            self._mostrar_mensaje("Cuenta bloqueada por intentos fallidos", "fa5s.exclamation-triangle")
             self.clave_input.clear()
             self.clave_input.setFocus()
             dialogo = SolicitarCodigoDialog(SessionLocal, TIPO_DESBLOQUEO, nombre_usuario, parent=self)
@@ -241,7 +256,7 @@ class LoginWindow(QDialog):
             self.btn_login.setEnabled(True)
 
         if usuario is None:
-            self.mensaje.setText("✖ Usuario o contraseña incorrectos")
+            self._mostrar_mensaje("Usuario o contraseña incorrectos", "fa5s.times-circle")
             self.clave_input.clear()
             self.clave_input.setFocus()
             return

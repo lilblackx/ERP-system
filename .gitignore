@@ -5,7 +5,6 @@ __pycache__/
 logs/
 .claude/settings.local.json
 .pytest_cache/
-docs/CHECKLIST_PRODUCCION.md
 CLAUDE.md
 FASE_*.md
 ROADMAP_*.md

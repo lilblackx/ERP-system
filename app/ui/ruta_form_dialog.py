@@ -264,13 +264,17 @@ class RutaFormDialog(QDialog):
         acciones_layout = QHBoxLayout()
         acciones_layout.setSpacing(8)
 
-        self.btn_deshacer = QPushButton("↩ Deshacer")
+        # Iconos reales (qtawesome, via setIcon) en vez de "↩"/"🗑" sueltos en el string
+        # del boton -- ver GUIA_ESTILO_UI.md 3.1.
+        self.btn_deshacer = QPushButton(" Deshacer")
+        self.btn_deshacer.setIcon(qta.icon("fa5s.undo", color=COLOR_TEXT_DARK))
         self.btn_deshacer.setObjectName("BtnZona")
         self.btn_deshacer.setFixedHeight(28)
         self.btn_deshacer.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_deshacer.clicked.connect(self._deshacer_vertice)
 
-        self.btn_limpiar = QPushButton("🗑 Limpiar")
+        self.btn_limpiar = QPushButton(" Limpiar")
+        self.btn_limpiar.setIcon(qta.icon("fa5s.trash-alt", color=COLOR_TEXT_DARK))
         self.btn_limpiar.setObjectName("BtnZona")
         self.btn_limpiar.setFixedHeight(28)
         self.btn_limpiar.setCursor(Qt.CursorShape.PointingHandCursor)

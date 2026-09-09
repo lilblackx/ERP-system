@@ -4,7 +4,7 @@ Panel del modulo Reportes: primer consumidor de UI para ReporteService
 Cubre los cuatro reportes ya resueltos en el servicio -- antiguedad de saldos
 de cuentas por cobrar y por pagar (aging CxC/CxP), libro de ventas (base del
 formato exigido por el SENIAT) y arqueo de caja -- ver
-docs/CHECKLIST_PRODUCCION.md seccion "Reportes y Analitica" para el resto del
+docs/ESTADO_DEL_PROYECTO.md seccion 10 (R-02b/R-04) para el resto del
 catalogo (kardex, conciliacion bancaria, comisiones, etc.) que se agrega en
 pasos siguientes sobre esta misma pantalla.
 
@@ -60,6 +60,7 @@ from app.ui.styles import (
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     TABLE_QSS,
+    alinear_encabezados,
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar
@@ -2786,14 +2787,34 @@ class ReportesPanel(QWidget):
 
     # ── Resultados: aging CxC ────────────────────────────────────────────────
 
-    def _reset_tabla(self, columnas: list[str]) -> None:
+    def _reset_tabla(self, columnas: list[str], alineaciones: dict[int, Qt.AlignmentFlag] | None = None) -> None:
         self.tabla.clear()
         self.tabla.setColumnCount(len(columnas))
         self.tabla.setHorizontalHeaderLabels(columnas)
         self.tabla.setRowCount(0)
+        alinear_encabezados(self.tabla, alineaciones or {})
+
+    @staticmethod
+    def _item_num(texto: str) -> QTableWidgetItem:
+        """Celda de monto/cantidad/porcentaje alineada a la derecha -- ver
+        alinear_encabezados() y GUIA_ESTILO_UI.md #5. El header de esa misma columna se
+        alinea vía el dict pasado a _reset_tabla(), no acá."""
+        item = QTableWidgetItem(texto)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return item
 
     def _mostrar_aging(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_AGING_CXC)
+        self._reset_tabla(
+            COLS_AGING_CXC,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -2801,8 +2822,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "Consumidor final"))
             fecha_venc = f["fecha_vencimiento"].strftime("%d/%m/%Y") if f["fecha_vencimiento"] else "N/A"
             self.tabla.setItem(row, 2, QTableWidgetItem(fecha_venc))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['saldo_pendiente']):,.2f}"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(str(f["dias_vencido"])))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['saldo_pendiente']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(str(f["dias_vencido"])))
             self.tabla.setItem(row, 5, QTableWidgetItem(ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"])))
 
         self.lbl_total.setText(
@@ -2825,7 +2846,17 @@ class ReportesPanel(QWidget):
     # ── Resultados: aging CxP ────────────────────────────────────────────────
 
     def _mostrar_aging_cxp(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_AGING_CXP)
+        self._reset_tabla(
+            COLS_AGING_CXP,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -2833,8 +2864,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             fecha_venc = f["fecha_vencimiento"].strftime("%d/%m/%Y") if f["fecha_vencimiento"] else "N/A"
             self.tabla.setItem(row, 2, QTableWidgetItem(fecha_venc))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['saldo_pendiente']):,.2f}"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(str(f["dias_vencido"])))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['saldo_pendiente']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(str(f["dias_vencido"])))
             self.tabla.setItem(row, 5, QTableWidgetItem(ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"])))
 
         self.lbl_total.setText(
@@ -2847,7 +2878,20 @@ class ReportesPanel(QWidget):
     # ── Resultados: libro de ventas ──────────────────────────────────────────
 
     def _mostrar_libro_ventas(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_LIBRO_VENTAS)
+        self._reset_tabla(
+            COLS_LIBRO_VENTAS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -2856,10 +2900,10 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_factura"]))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["cliente"] or "Consumidor final"))
             self.tabla.setItem(row, 4, QTableWidgetItem(f["identificacion_cliente"] or "N/A"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['base_imponible']):,.2f}"))
-            self.tabla.setItem(row, 6, QTableWidgetItem(f"{float(f['porcentaje_iva']):.2f}%"))
-            self.tabla.setItem(row, 7, QTableWidgetItem(f"${float(f['monto_iva']):,.2f}"))
-            self.tabla.setItem(row, 8, QTableWidgetItem(f"${float(f['total']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['base_imponible']):,.2f}"))
+            self.tabla.setItem(row, 6, self._item_num(f"{float(f['porcentaje_iva']):.2f}%"))
+            self.tabla.setItem(row, 7, self._item_num(f"${float(f['monto_iva']):,.2f}"))
+            self.tabla.setItem(row, 8, self._item_num(f"${float(f['total']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} factura{'s' if len(filas) != 1 else ''}")
         self._mostrar_resumen_libro_ventas(resultado)
@@ -2884,14 +2928,17 @@ class ReportesPanel(QWidget):
     # ── Resultados: ventas por período ───────────────────────────────────────
 
     def _mostrar_ventas_periodo(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_VENTAS_PERIODO)
+        self._reset_tabla(
+            COLS_VENTAS_PERIODO,
+            {0: Qt.AlignmentFlag.AlignLeft, 1: Qt.AlignmentFlag.AlignRight, 2: Qt.AlignmentFlag.AlignRight},
+        )
         filas = resultado["filas"]
         formato_fecha = "%d/%m/%Y" if resultado["agrupacion"] == "dia" else "%m/%Y"
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime(formato_fecha)))
-            self.tabla.setItem(row, 1, QTableWidgetItem(str(f["cantidad_facturas"])))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['total']):,.2f}"))
+            self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_facturas"])))
+            self.tabla.setItem(row, 2, self._item_num(f"${float(f['total']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} período{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -2914,17 +2961,25 @@ class ReportesPanel(QWidget):
         """`clave_promedio` agrega una 4ta columna (ej. "Ticket Promedio") cuando el
         reporte la trae -- ventas por vendedor/ruta ("drop site", 2026-09-02: total
         facturado en $ entre cantidad de facturas), no cliente/productos."""
-        self._reset_tabla(columnas)
+        self._reset_tabla(
+            columnas,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f[clave_nombre] or "N/A"))
             valor_cantidad = f[clave_cantidad]
             texto_cantidad = str(valor_cantidad) if isinstance(valor_cantidad, int) else f"{float(valor_cantidad):,.2f}"
-            self.tabla.setItem(row, 1, QTableWidgetItem(texto_cantidad))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['total']):,.2f}"))
+            self.tabla.setItem(row, 1, self._item_num(texto_cantidad))
+            self.tabla.setItem(row, 2, self._item_num(f"${float(f['total']):,.2f}"))
             if clave_promedio is not None:
-                self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f[clave_promedio]):,.2f}"))
+                self.tabla.setItem(row, 3, self._item_num(f"${float(f[clave_promedio]):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} fila{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -2950,16 +3005,25 @@ class ReportesPanel(QWidget):
         """Forma distinta a _mostrar_ranking: sin columnas en $ (facturas/meta son
         conteos, efectividad es %), y meta/efectividad pueden venir None cuando el
         vendedor del cliente no tiene cuota configurada (Vendedor.meta_activacion)."""
-        self._reset_tabla(COLS_ACTIVACION_CLIENTES)
+        self._reset_tabla(
+            COLS_ACTIVACION_CLIENTES,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cliente"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["vendedor"] or "N/A"))
-            self.tabla.setItem(row, 2, QTableWidgetItem(str(f["cantidad_facturas"])))
-            self.tabla.setItem(row, 3, QTableWidgetItem(str(f["meta_activacion"]) if f["meta_activacion"] else "—"))
+            self.tabla.setItem(row, 2, self._item_num(str(f["cantidad_facturas"])))
+            self.tabla.setItem(row, 3, self._item_num(str(f["meta_activacion"]) if f["meta_activacion"] else "—"))
             texto_efectividad = f"{f['efectividad_pct']:.2f}%" if f["efectividad_pct"] is not None else "—"
-            self.tabla.setItem(row, 4, QTableWidgetItem(texto_efectividad))
+            self.tabla.setItem(row, 4, self._item_num(texto_efectividad))
 
         self.lbl_total.setText(f"{len(filas)} cliente{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -2977,7 +3041,16 @@ class ReportesPanel(QWidget):
     # ── Resultados: facturas anuladas ─────────────────────────────────────────
 
     def _mostrar_facturas_anuladas(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_FACTURAS_ANULADAS)
+        self._reset_tabla(
+            COLS_FACTURAS_ANULADAS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -2997,7 +3070,18 @@ class ReportesPanel(QWidget):
     # ── Resultados: notas de crédito emitidas ─────────────────────────────────
 
     def _mostrar_nc_emitidas(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_NC_EMITIDAS)
+        self._reset_tabla(
+            COLS_NC_EMITIDAS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3005,8 +3089,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_factura_origen"] or "N/A"))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["fecha_creacion"].strftime("%d/%m/%Y")))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['monto']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['saldo_disponible']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['monto']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo_disponible']):,.2f}"))
             self.tabla.setItem(row, 6, QTableWidgetItem(ETIQUETAS_ESTADO_NC.get(f["estado"], f["estado"])))
 
         self.lbl_total.setText(f"{len(filas)} nota{'s' if len(filas) != 1 else ''} de crédito")
@@ -3019,14 +3103,22 @@ class ReportesPanel(QWidget):
     # ── Resultados: ventas contado vs. crédito ────────────────────────────────
 
     def _mostrar_contado_credito(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_CONTADO_CREDITO)
+        self._reset_tabla(
+            COLS_CONTADO_CREDITO,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["condicion_pago"].capitalize()))
-            self.tabla.setItem(row, 1, QTableWidgetItem(str(f["cantidad_facturas"])))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['total']):,.2f}"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"{float(f['porcentaje']):.1f}%"))
+            self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_facturas"])))
+            self.tabla.setItem(row, 2, self._item_num(f"${float(f['total']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"{float(f['porcentaje']):.1f}%"))
 
         self.lbl_total.setText("2 condiciones de pago")
         self._limpiar_resumen()
@@ -3038,16 +3130,26 @@ class ReportesPanel(QWidget):
     # ── Resultados: margen de utilidad ────────────────────────────────────────
 
     def _mostrar_margen_utilidad(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_MARGEN_UTILIDAD)
+        self._reset_tabla(
+            COLS_MARGEN_UTILIDAD,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["producto"] or "N/A"))
-            self.tabla.setItem(row, 1, QTableWidgetItem(f"{float(f['cantidad']):,.2f}"))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['ingreso']):,.2f}"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['costo']):,.2f}"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['margen']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"{float(f['margen_pct']):.1f}%"))
+            self.tabla.setItem(row, 1, self._item_num(f"{float(f['cantidad']):,.2f}"))
+            self.tabla.setItem(row, 2, self._item_num(f"${float(f['ingreso']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['costo']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['margen']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"{float(f['margen_pct']):.1f}%"))
 
         self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3061,14 +3163,17 @@ class ReportesPanel(QWidget):
     # ── Resultados: compras por período ──────────────────────────────────────
 
     def _mostrar_compras_periodo(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_COMPRAS_PERIODO)
+        self._reset_tabla(
+            COLS_COMPRAS_PERIODO,
+            {0: Qt.AlignmentFlag.AlignLeft, 1: Qt.AlignmentFlag.AlignRight, 2: Qt.AlignmentFlag.AlignRight},
+        )
         filas = resultado["filas"]
         formato_fecha = "%d/%m/%Y" if resultado["agrupacion"] == "dia" else "%m/%Y"
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime(formato_fecha)))
-            self.tabla.setItem(row, 1, QTableWidgetItem(str(f["cantidad_compras"])))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['total']):,.2f}"))
+            self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_compras"])))
+            self.tabla.setItem(row, 2, self._item_num(f"${float(f['total']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} período{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3089,7 +3194,21 @@ class ReportesPanel(QWidget):
     # ── Resultados: órdenes de compra abiertas ────────────────────────────────
 
     def _mostrar_oc_abiertas(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_OC_ABIERTAS)
+        self._reset_tabla(
+            COLS_OC_ABIERTAS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignLeft,
+                8: Qt.AlignmentFlag.AlignRight,
+                9: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3098,11 +3217,11 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(f["fecha_oc"].strftime("%d/%m/%Y")))
             fecha_est = f["fecha_estimada_entrega"].strftime("%d/%m/%Y") if f["fecha_estimada_entrega"] else "N/A"
             self.tabla.setItem(row, 3, QTableWidgetItem(fecha_est))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"{float(f['cantidad_solicitada']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"{float(f['cantidad_recibida']):,.2f}"))
-            self.tabla.setItem(row, 6, QTableWidgetItem(f"{float(f['cantidad_pendiente']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"{float(f['cantidad_solicitada']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"{float(f['cantidad_recibida']):,.2f}"))
+            self.tabla.setItem(row, 6, self._item_num(f"{float(f['cantidad_pendiente']):,.2f}"))
             self.tabla.setItem(row, 7, QTableWidgetItem(ETIQUETAS_ESTADO_OC.get(f["estado"], f["estado"])))
-            self.tabla.setItem(row, 8, QTableWidgetItem(f"${float(f['total_oc']):,.2f}"))
+            self.tabla.setItem(row, 8, self._item_num(f"${float(f['total_oc']):,.2f}"))
             self.tabla.setItem(row, 9, QTableWidgetItem("Sí" if f["vencida"] else "No"))
 
         self.lbl_total.setText(
@@ -3120,17 +3239,27 @@ class ReportesPanel(QWidget):
     # ── Resultados: cumplimiento de proveedores ───────────────────────────────
 
     def _mostrar_cumplimiento_proveedores(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_CUMPLIMIENTO_PROVEEDORES)
+        self._reset_tabla(
+            COLS_CUMPLIMIENTO_PROVEEDORES,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["proveedor"] or "N/A"))
-            self.tabla.setItem(row, 1, QTableWidgetItem(str(f["cantidad_oc"])))
-            self.tabla.setItem(row, 2, QTableWidgetItem(str(f["a_tiempo"])))
-            self.tabla.setItem(row, 3, QTableWidgetItem(str(f["tardias"])))
-            self.tabla.setItem(row, 4, QTableWidgetItem(str(f["sin_fecha_estimada"])))
+            self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_oc"])))
+            self.tabla.setItem(row, 2, self._item_num(str(f["a_tiempo"])))
+            self.tabla.setItem(row, 3, self._item_num(str(f["tardias"])))
+            self.tabla.setItem(row, 4, self._item_num(str(f["sin_fecha_estimada"])))
             pct = f["pct_a_tiempo"]
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"{float(pct):.1f}%" if pct is not None else "N/A"))
+            self.tabla.setItem(row, 5, self._item_num(f"{float(pct):.1f}%" if pct is not None else "N/A"))
 
         self.lbl_total.setText(f"{len(filas)} proveedor{'es' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3139,7 +3268,18 @@ class ReportesPanel(QWidget):
     # ── Resultados: devoluciones a proveedor ──────────────────────────────────
 
     def _mostrar_devoluciones_proveedor(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_DEVOLUCIONES_PROVEEDOR)
+        self._reset_tabla(
+            COLS_DEVOLUCIONES_PROVEEDOR,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3148,7 +3288,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_oc"]))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["fecha_devolucion"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 4, QTableWidgetItem(f["motivo"]))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"{float(f['cantidad_total']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"{float(f['cantidad_total']):,.2f}"))
             self.tabla.setItem(row, 6, QTableWidgetItem(f["estado"].capitalize()))
 
         self.lbl_total.setText(f"{len(filas)} {'devolución' if len(filas) == 1 else 'devoluciones'}")
@@ -3162,7 +3302,18 @@ class ReportesPanel(QWidget):
     # ── Resultados: notas de crédito de proveedor ─────────────────────────────
 
     def _mostrar_nc_proveedor(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_NC_PROVEEDOR)
+        self._reset_tabla(
+            COLS_NC_PROVEEDOR,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3170,8 +3321,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_compra_origen"] or "N/A"))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["fecha_creacion"].strftime("%d/%m/%Y")))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['monto']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['saldo_disponible']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['monto']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo_disponible']):,.2f}"))
             self.tabla.setItem(row, 6, QTableWidgetItem(ETIQUETAS_ESTADO_NC.get(f["estado"], f["estado"])))
 
         self.lbl_total.setText(f"{len(filas)} nota{'s' if len(filas) != 1 else ''} de crédito")
@@ -3184,14 +3335,22 @@ class ReportesPanel(QWidget):
     # ── Resultados: arqueo de caja ───────────────────────────────────────────
 
     def _mostrar_arqueo(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_ARQUEO_CAJA)
+        self._reset_tabla(
+            COLS_ARQUEO_CAJA,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         movimientos = resultado["movimientos"]
         self.tabla.setRowCount(len(movimientos))
         for row, m in enumerate(movimientos):
             self.tabla.setItem(row, 0, QTableWidgetItem(m["fecha_registro"].strftime("%d/%m/%Y %H:%M")))
             self.tabla.setItem(row, 1, QTableWidgetItem(m["tipo_movimiento"].capitalize()))
             self.tabla.setItem(row, 2, QTableWidgetItem(m["descripcion_movimiento"] or ""))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(m['monto_movimiento']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(m['monto_movimiento']):,.2f}"))
 
         self.lbl_total.setText(f"{len(movimientos)} movimiento{'s' if len(movimientos) != 1 else ''}")
         self._mostrar_resumen_arqueo(resultado)
@@ -3216,16 +3375,26 @@ class ReportesPanel(QWidget):
     # ── Resultados: kardex de producto ────────────────────────────────────────
 
     def _mostrar_kardex(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_KARDEX)
+        self._reset_tabla(
+            COLS_KARDEX,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia"] or "N/A"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"{float(f['entrada']):,.2f}" if f["entrada"] else ""))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"{float(f['salida']):,.2f}" if f["salida"] else ""))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"{float(f['saldo']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"{float(f['entrada']):,.2f}" if f["entrada"] else ""))
+            self.tabla.setItem(row, 4, self._item_num(f"{float(f['salida']):,.2f}" if f["salida"] else ""))
+            self.tabla.setItem(row, 5, self._item_num(f"{float(f['saldo']):,.2f}"))
 
         self.lbl_total.setText(
             f"{resultado['nombre_producto']} — {len(filas)} movimiento{'s' if len(filas) != 1 else ''}"
@@ -3240,16 +3409,26 @@ class ReportesPanel(QWidget):
     # ── Resultados: valorización de inventario ────────────────────────────────
 
     def _mostrar_valorizacion(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_VALORIZACION)
+        self._reset_tabla(
+            COLS_VALORIZACION,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["nombre_producto"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"]))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"{float(f['cantidad_unidad']):,.2f}"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['costo_producto']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['valor_total']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"{float(f['cantidad_unidad']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['costo_producto']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['valor_total']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3261,16 +3440,26 @@ class ReportesPanel(QWidget):
     # ── Resultados: stock bajo mínimo ─────────────────────────────────────────
 
     def _mostrar_bajo_minimo(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_BAJO_MINIMO)
+        self._reset_tabla(
+            COLS_BAJO_MINIMO,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["nombre_producto"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"] or "N/A"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"{float(f['cantidad_unidad']):,.2f}"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"{float(f['cantidad_minima']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"{float(f['deficit']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"{float(f['cantidad_unidad']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"{float(f['cantidad_minima']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"{float(f['deficit']):,.2f}"))
 
         total = resultado["total_productos"]
         self.lbl_total.setText(f"{total} producto{'s' if total != 1 else ''} bajo mínimo")
@@ -3281,15 +3470,25 @@ class ReportesPanel(QWidget):
     # ── Resultados: productos sin movimiento ──────────────────────────────────
 
     def _mostrar_sin_movimiento(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_SIN_MOVIMIENTO)
+        self._reset_tabla(
+            COLS_SIN_MOVIMIENTO,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["nombre_producto"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"] or "N/A"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"{float(f['cantidad_unidad']):,.2f}"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['costo_producto']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"{float(f['cantidad_unidad']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['costo_producto']):,.2f}"))
             fecha_mov = f["fecha_ultimo_movimiento"]
             self.tabla.setItem(row, 5, QTableWidgetItem(fecha_mov.strftime("%d/%m/%Y") if fecha_mov else "Nunca"))
 
@@ -3301,15 +3500,23 @@ class ReportesPanel(QWidget):
     # ── Resultados: histórico de precios ──────────────────────────────────────
 
     def _mostrar_historico_precios(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_HISTORICO_PRECIOS)
+        self._reset_tabla(
+            COLS_HISTORICO_PRECIOS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_evento"].strftime("%d/%m/%Y %H:%M")))
             precio = f["precio_venta"]
-            self.tabla.setItem(row, 1, QTableWidgetItem(f"${float(precio):,.2f}" if precio is not None else "N/A"))
+            self.tabla.setItem(row, 1, self._item_num(f"${float(precio):,.2f}" if precio is not None else "N/A"))
             margen = f["porcentaje_ganancia"]
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"{float(margen):.2f}%" if margen is not None else "N/A"))
+            self.tabla.setItem(row, 2, self._item_num(f"{float(margen):.2f}%" if margen is not None else "N/A"))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["usuario"] or "N/A"))
 
         self.lbl_total.setText(f"{resultado['nombre_producto']} — {len(filas)} cambio{'s' if len(filas) != 1 else ''}")
@@ -3319,16 +3526,26 @@ class ReportesPanel(QWidget):
     # ── Resultados: estado de cuenta por cliente ──────────────────────────────
 
     def _mostrar_estado_cuenta_cliente(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_ESTADO_CTA_CLIENTE)
+        self._reset_tabla(
+            COLS_ESTADO_CTA_CLIENTE,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia"] or "N/A"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['cargo']):,.2f}" if f["cargo"] else ""))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['abono']):,.2f}" if f["abono"] else ""))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['saldo']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['cargo']):,.2f}" if f["cargo"] else ""))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['abono']):,.2f}" if f["abono"] else ""))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo']):,.2f}"))
 
         self.lbl_total.setText(f"{resultado['cliente']} — {len(filas)} movimiento{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3341,7 +3558,17 @@ class ReportesPanel(QWidget):
     # ── Resultados: cobros del período ────────────────────────────────────────
 
     def _mostrar_cobros_periodo(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_COBROS_PERIODO)
+        self._reset_tabla(
+            COLS_COBROS_PERIODO,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3350,7 +3577,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_factura"]))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["metodo_pago"].capitalize()))
             self.tabla.setItem(row, 4, QTableWidgetItem(f["moneda"]))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['monto']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['monto']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} cobro{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3364,14 +3591,22 @@ class ReportesPanel(QWidget):
     # ── Resultados: clientes morosos ──────────────────────────────────────────
 
     def _mostrar_clientes_morosos(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_CLIENTES_MOROSOS)
+        self._reset_tabla(
+            COLS_CLIENTES_MOROSOS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cliente"] or "N/A"))
-            self.tabla.setItem(row, 1, QTableWidgetItem(f"${float(f['saldo_vencido']):,.2f}"))
-            self.tabla.setItem(row, 2, QTableWidgetItem(str(f["dias_vencido_max"])))
-            self.tabla.setItem(row, 3, QTableWidgetItem(str(f["facturas_vencidas"])))
+            self.tabla.setItem(row, 1, self._item_num(f"${float(f['saldo_vencido']):,.2f}"))
+            self.tabla.setItem(row, 2, self._item_num(str(f["dias_vencido_max"])))
+            self.tabla.setItem(row, 3, self._item_num(str(f["facturas_vencidas"])))
 
         total = len(filas)
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''} moroso{'s' if total != 1 else ''}")
@@ -3384,7 +3619,18 @@ class ReportesPanel(QWidget):
     # ── Resultados: CxC otras ─────────────────────────────────────────────────
 
     def _mostrar_cxc_otras(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_CXC_OTRAS)
+        self._reset_tabla(
+            COLS_CXC_OTRAS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3394,8 +3640,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(fecha_em))
             fecha_venc = f["fecha_vencimiento"].strftime("%d/%m/%Y") if f["fecha_vencimiento"] else "N/A"
             self.tabla.setItem(row, 3, QTableWidgetItem(fecha_venc))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['monto_total']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['saldo_pendiente']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['monto_total']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo_pendiente']):,.2f}"))
             self.tabla.setItem(row, 6, QTableWidgetItem(ETIQUETAS_ESTADO_CXC_OTRO.get(f["estado"], f["estado"])))
 
         self.lbl_total.setText(f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''}")
@@ -3408,16 +3654,26 @@ class ReportesPanel(QWidget):
     # ── Resultados: estado de cuenta por proveedor ────────────────────────────
 
     def _mostrar_estado_cuenta_proveedor(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_ESTADO_CTA_PROVEEDOR)
+        self._reset_tabla(
+            COLS_ESTADO_CTA_PROVEEDOR,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia"] or "N/A"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['cargo']):,.2f}" if f["cargo"] else ""))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['abono']):,.2f}" if f["abono"] else ""))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['saldo']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['cargo']):,.2f}" if f["cargo"] else ""))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['abono']):,.2f}" if f["abono"] else ""))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo']):,.2f}"))
 
         self.lbl_total.setText(f"{resultado['proveedor']} — {len(filas)} movimiento{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3430,7 +3686,16 @@ class ReportesPanel(QWidget):
     # ── Resultados: pagos del período ─────────────────────────────────────────
 
     def _mostrar_pagos_periodo(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_PAGOS_PERIODO)
+        self._reset_tabla(
+            COLS_PAGOS_PERIODO,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3438,7 +3703,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_compra"]))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["metodo_pago"].capitalize()))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['monto']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['monto']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} pago{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3452,15 +3717,24 @@ class ReportesPanel(QWidget):
     # ── Resultados: próximos vencimientos (CxP) ───────────────────────────────
 
     def _mostrar_proximos_vencimientos(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_PROXIMOS_VENCIMIENTOS)
+        self._reset_tabla(
+            COLS_PROXIMOS_VENCIMIENTOS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_compra"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["fecha_vencimiento"].strftime("%d/%m/%Y")))
-            self.tabla.setItem(row, 3, QTableWidgetItem(str(f["dias_para_vencer"])))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['saldo_pendiente']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(str(f["dias_para_vencer"])))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['saldo_pendiente']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''} por vencer")
         self._limpiar_resumen()
@@ -3472,7 +3746,19 @@ class ReportesPanel(QWidget):
     # ── Resultados: CxP otras ──────────────────────────────────────────────────
 
     def _mostrar_cxp_otras(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_CXP_OTRAS)
+        self._reset_tabla(
+            COLS_CXP_OTRAS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3481,8 +3767,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(f["descripcion"] or ""))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["fecha_recepcion"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 4, QTableWidgetItem(f["cliente_identificado"] or "Sin identificar"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['monto_total']):,.2f}"))
-            self.tabla.setItem(row, 6, QTableWidgetItem(f"${float(f['saldo_pendiente']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['monto_total']):,.2f}"))
+            self.tabla.setItem(row, 6, self._item_num(f"${float(f['saldo_pendiente']):,.2f}"))
             self.tabla.setItem(row, 7, QTableWidgetItem(ETIQUETAS_ESTADO_CXP_OTRO.get(f["estado"], f["estado"])))
 
         self.lbl_total.setText(f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''}")
@@ -3495,7 +3781,17 @@ class ReportesPanel(QWidget):
     # ── Resultados: movimientos de caja por período ───────────────────────────
 
     def _mostrar_mov_caja_periodo(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_MOV_CAJA_PERIODO)
+        self._reset_tabla(
+            COLS_MOV_CAJA_PERIODO,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3504,7 +3800,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(f["tipo_movimiento"].capitalize()))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["origen"]))
             self.tabla.setItem(row, 4, QTableWidgetItem(f["descripcion_movimiento"] or ""))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['monto_movimiento']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['monto_movimiento']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} movimiento{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3518,7 +3814,21 @@ class ReportesPanel(QWidget):
     # ── Resultados: cierre diario por cajero ──────────────────────────────────
 
     def _mostrar_cierre_cajero(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_CIERRE_CAJERO)
+        self._reset_tabla(
+            COLS_CIERRE_CAJERO,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignRight,
+                9: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3527,14 +3837,14 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(f["fecha_apertura"].strftime("%d/%m/%Y %H:%M")))
             fecha_cierre = f["fecha_cierre"].strftime("%d/%m/%Y %H:%M") if f["fecha_cierre"] else "Abierta"
             self.tabla.setItem(row, 3, QTableWidgetItem(fecha_cierre))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['saldo_apertura']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['total_entradas']):,.2f}"))
-            self.tabla.setItem(row, 6, QTableWidgetItem(f"${float(f['total_salidas']):,.2f}"))
-            self.tabla.setItem(row, 7, QTableWidgetItem(f"${float(f['saldo_esperado']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['saldo_apertura']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['total_entradas']):,.2f}"))
+            self.tabla.setItem(row, 6, self._item_num(f"${float(f['total_salidas']):,.2f}"))
+            self.tabla.setItem(row, 7, self._item_num(f"${float(f['saldo_esperado']):,.2f}"))
             saldo_cierre = f"${float(f['saldo_cierre']):,.2f}" if f["saldo_cierre"] is not None else "N/A"
-            self.tabla.setItem(row, 8, QTableWidgetItem(saldo_cierre))
+            self.tabla.setItem(row, 8, self._item_num(saldo_cierre))
             diferencia = f"${float(f['diferencia']):,.2f}" if f["diferencia"] is not None else "N/A"
-            self.tabla.setItem(row, 9, QTableWidgetItem(diferencia))
+            self.tabla.setItem(row, 9, self._item_num(diferencia))
 
         self.lbl_total.setText(f"{resultado['total_turnos']} turno{'s' if resultado['total_turnos'] != 1 else ''}")
         self._limpiar_resumen()
@@ -3543,17 +3853,27 @@ class ReportesPanel(QWidget):
     # ── Resultados: flujo de caja consolidado ─────────────────────────────────
 
     def _mostrar_flujo_caja(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_FLUJO_CAJA)
+        self._reset_tabla(
+            COLS_FLUJO_CAJA,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         formato_fecha = "%d/%m/%Y" if resultado["agrupacion"] == "dia" else "%m/%Y"
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["periodo"].strftime(formato_fecha)))
-            self.tabla.setItem(row, 1, QTableWidgetItem(f"${float(f['entradas_caja']):,.2f}"))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['salidas_caja']):,.2f}"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['entradas_banco']):,.2f}"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['salidas_banco']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['neto']):,.2f}"))
+            self.tabla.setItem(row, 1, self._item_num(f"${float(f['entradas_caja']):,.2f}"))
+            self.tabla.setItem(row, 2, self._item_num(f"${float(f['salidas_caja']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['entradas_banco']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['salidas_banco']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['neto']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} período{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3566,7 +3886,17 @@ class ReportesPanel(QWidget):
     # ── Resultados: movimientos por cuenta bancaria ───────────────────────────
 
     def _mostrar_mov_cuenta_bancaria(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_MOV_CUENTA_BANCARIA)
+        self._reset_tabla(
+            COLS_MOV_CUENTA_BANCARIA,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3574,8 +3904,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo_movimiento"].capitalize()))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia_movimiento"] or "N/A"))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["descripcion_movimiento"] or ""))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['monto_movimiento']):,.2f}"))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"${float(f['saldo']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['monto_movimiento']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo']):,.2f}"))
 
         total = len(filas)
         self.lbl_total.setText(f"{resultado['numero_cuenta']} — {total} movimiento{'s' if total != 1 else ''}")
@@ -3589,15 +3919,24 @@ class ReportesPanel(QWidget):
     # ── Resultados: conciliación bancaria ─────────────────────────────────────
 
     def _mostrar_conciliacion_bancaria(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_CONCILIACION_BANCARIA)
+        self._reset_tabla(
+            COLS_CONCILIACION_BANCARIA,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_cuenta"] or "N/A"))
-            self.tabla.setItem(row, 1, QTableWidgetItem(f"${float(f['total_pendiente']):,.2f}"))
-            self.tabla.setItem(row, 2, QTableWidgetItem(str(f["cantidad_pendiente"])))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['total_conciliado']):,.2f}"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(str(f["cantidad_conciliada"])))
+            self.tabla.setItem(row, 1, self._item_num(f"${float(f['total_pendiente']):,.2f}"))
+            self.tabla.setItem(row, 2, self._item_num(str(f["cantidad_pendiente"])))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['total_conciliado']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(str(f["cantidad_conciliada"])))
 
         self.lbl_total.setText(f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3612,7 +3951,16 @@ class ReportesPanel(QWidget):
     # ── Resultados: saldo consolidado ─────────────────────────────────────────
 
     def _mostrar_saldo_consolidado(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_SALDO_CONSOLIDADO)
+        self._reset_tabla(
+            COLS_SALDO_CONSOLIDADO,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
@@ -3620,7 +3968,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["numero_cuenta"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["tipo_cuenta"] or "N/A"))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["nombre_titular"] or "N/A"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f"${float(f['saldo_actual']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['saldo_actual']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3632,13 +3980,16 @@ class ReportesPanel(QWidget):
     # ── Resultados: comisiones por vendedor/período ───────────────────────────
 
     def _mostrar_comisiones_vendedor(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_COMISIONES_VENDEDOR)
+        self._reset_tabla(
+            COLS_COMISIONES_VENDEDOR,
+            {0: Qt.AlignmentFlag.AlignLeft, 1: Qt.AlignmentFlag.AlignRight, 2: Qt.AlignmentFlag.AlignRight},
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["vendedor"] or "N/A"))
-            self.tabla.setItem(row, 1, QTableWidgetItem(str(f["cantidad_facturas"])))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['monto_comision']):,.2f}"))
+            self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_facturas"])))
+            self.tabla.setItem(row, 2, self._item_num(f"${float(f['monto_comision']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} vendedor{'es' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3650,14 +4001,22 @@ class ReportesPanel(QWidget):
     # ── Resultados: comisiones pagadas vs. pendientes ─────────────────────────
 
     def _mostrar_comisiones_pagadas_pendientes(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_COMISIONES_PAGADAS_PENDIENTES)
+        self._reset_tabla(
+            COLS_COMISIONES_PAGADAS_PENDIENTES,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["vendedor"] or "N/A"))
-            self.tabla.setItem(row, 1, QTableWidgetItem(f"${float(f['pagado']):,.2f}"))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f"${float(f['liberada']):,.2f}"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"${float(f['pendiente']):,.2f}"))
+            self.tabla.setItem(row, 1, self._item_num(f"${float(f['pagado']):,.2f}"))
+            self.tabla.setItem(row, 2, self._item_num(f"${float(f['liberada']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['pendiente']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} vendedor{'es' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -3673,16 +4032,26 @@ class ReportesPanel(QWidget):
     # ── Resultados: productos próximos a vencer ───────────────────────────────
 
     def _mostrar_productos_proximos_vencer(self, resultado: dict) -> None:
-        self._reset_tabla(COLS_PRODUCTOS_PROXIMOS_VENCER)
+        self._reset_tabla(
+            COLS_PRODUCTOS_PROXIMOS_VENCER,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["producto"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"] or "N/A"))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f"{float(f['cantidad_unidad']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"{float(f['cantidad_unidad']):,.2f}"))
             self.tabla.setItem(row, 4, QTableWidgetItem(str(f["fecha_vencimiento"])))
-            self.tabla.setItem(row, 5, QTableWidgetItem(f"{f['dias_para_vencer']}"))
+            self.tabla.setItem(row, 5, self._item_num(f"{f['dias_para_vencer']}"))
 
         self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()

@@ -59,6 +59,7 @@ from app.ui.styles import (
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,56 @@ ESTADOS_FILTRO = [
     ("Activos", "ACTIVO"),
     ("Inactivos", "INACTIVO"),
 ]
+
+
+def _filas_clientes_query(session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria) -> list[list]:
+    resultado = list_clientes(
+        session,
+        texto_busqueda,
+        id_usuario=id_usuario,
+        estado_cliente=estado_cliente,
+        id_vendedor=id_vendedor,
+        id_categoria=id_categoria,
+        pagina=1,
+        por_pagina=1_000_000,
+    )
+    clientes = resultado["items"]
+    return [
+        [
+            c.id_cliente,
+            c.nombre_razon_social,
+            f"{c.id_legal}-{c.identificacion_cliente}"
+            if c.id_legal and c.identificacion_cliente
+            else (c.id_legal or c.identificacion_cliente or ""),
+            c.email,
+            c.telefono,
+            c.direccion,
+            c.vendedor.nombre_vendedor if c.vendedor else "",
+            float(c.limite_credito) if c.limite_credito else 0,
+            c.dias_credito if c.dias_credito is not None else 0,
+            c.estado_cliente,
+        ]
+        for c in clientes
+    ]
+
+
+def _tarea_exportar_clientes_excel(
+    session, ruta: str, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria
+) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
+    de clientes a un archivo (openpyxl) es lo bastante lento como para congelar la
+    ventana si se hace en el hilo de GUI."""
+    filas = _filas_clientes_query(session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria)
+    exportar_excel(ruta, COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_clientes_pdf(
+    session, ruta: str, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria, filtros, col_widths
+) -> tuple[str, int]:
+    filas = _filas_clientes_query(session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria)
+    exportar_pdf(ruta, "Reporte de Clientes", COLS_VISIBLES, filas, filtros=filtros, col_widths=col_widths)
+    return ruta, len(filas)
 
 
 class ClientesPanel(QWidget):
@@ -412,99 +463,74 @@ class ClientesPanel(QWidget):
         self.btn_anterior.setEnabled(self.pagina_actual > 1)
         self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
-    def _filas_para_exportar(self, session) -> list[list]:
-        resultado = list_clientes(
-            session,
-            self.buscar_input.text().strip() or None,
-            id_usuario=self.usuario.id_usuario,
-            estado_cliente=self.estado_combo.currentData(),
-            id_vendedor=self.vendedor_combo.currentData(),
-            id_categoria=self.categoria_combo.currentData(),
-            pagina=1,
-            por_pagina=1_000_000,
-        )
-        clientes = resultado["items"]
-        return [
-            [
-                c.id_cliente,
-                c.nombre_razon_social,
-                f"{c.id_legal}-{c.identificacion_cliente}"
-                if c.id_legal and c.identificacion_cliente
-                else (c.id_legal or c.identificacion_cliente or ""),
-                c.email,
-                c.telefono,
-                c.direccion,
-                c.vendedor.nombre_vendedor if c.vendedor else "",
-                float(c.limite_credito) if c.limite_credito else 0,
-                c.dias_credito if c.dias_credito is not None else 0,
-                c.estado_cliente,
-            ]
-            for c in clientes
-        ]
+    def _filtros_actuales_exportar(self) -> dict:
+        return {
+            "texto_busqueda": self.buscar_input.text().strip() or None,
+            "id_usuario": self.usuario.id_usuario,
+            "estado_cliente": self.estado_combo.currentData(),
+            "id_vendedor": self.vendedor_combo.currentData(),
+            "id_categoria": self.categoria_combo.currentData(),
+        }
 
     def exportar_excel_clientes(self) -> None:
+        # Mismo guard que facturacion_panel.py: reasignar self._worker_export a un
+        # QThread nuevo mientras el viejo sigue corriendo lo destruye a mitad de ejecucion.
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal, asi que no hay nada que purgar si el usuario cancela.
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar clientes", "clientes.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_excel(ruta, COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
-        except Exception:
-            logger.exception("Fallo al exportar la lista de clientes a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_clientes_excel, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
     def exportar_pdf_clientes(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar clientes", "clientes.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
+        texto_busqueda = self.buscar_input.text().strip()
+        filtros = {
+            "Búsqueda": texto_busqueda if texto_busqueda else "Todos",
+            "Estado": self.estado_combo.currentText(),
+            "Vendedor": self.vendedor_combo.currentText(),
+            "Categoría": self.categoria_combo.currentText(),
+        }
+        # Anchos de columnas optimizados para mejor legibilidad
+        # ID: pequeño, Nombre: grande, Identificación: medio, Email: grande, etc.
+        col_widths = [0.5, 2.5, 1.2, 2.0, 1.2, 1.5, 1.5, 1.0, 0.8, 1.0]
 
-            # Construir diccionario de filtros aplicados (siempre mostrar todos)
-            filtros = {}
-            texto_busqueda = self.buscar_input.text().strip()
-            filtros["Búsqueda"] = texto_busqueda if texto_busqueda else "Todos"
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_clientes_pdf,
+            ruta=ruta,
+            filtros=filtros,
+            col_widths=col_widths,
+            **self._filtros_actuales_exportar(),
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
-            estado = self.estado_combo.currentText()
-            filtros["Estado"] = estado
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} clientes a:\n{ruta}")
 
-            vendedor = self.vendedor_combo.currentText()
-            filtros["Vendedor"] = vendedor
-
-            categoria = self.categoria_combo.currentText()
-            filtros["Categoría"] = categoria
-
-            # Anchos de columnas optimizados para mejor legibilidad
-            # ID: pequeño, Nombre: grande, Identificación: medio, Email: grande, etc.
-            col_widths = [0.5, 2.5, 1.2, 2.0, 1.2, 1.5, 1.5, 1.0, 0.8, 1.0]
-
-            exportar_pdf(
-                ruta,
-                "Reporte de Clientes",
-                COLS_VISIBLES,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-            )
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} clientes a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
-        except Exception:
-            logger.exception("Fallo al exportar la lista de clientes a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
-        finally:
-            session.close()
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar clientes: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -520,7 +546,7 @@ class ClientesPanel(QWidget):
     def nuevo_cliente(self) -> None:
         session = self.session_factory()
         try:
-            dialogo = ClienteFormDialog(session, parent=self)
+            dialogo = ClienteFormDialog(session, id_usuario=self.usuario.id_usuario, parent=self)
             if dialogo.exec():
                 datos = dialogo.get_data()
                 datos["creado_por"] = self.usuario.id_usuario
@@ -554,7 +580,7 @@ class ClientesPanel(QWidget):
         session = self.session_factory()
         try:
             cliente = session.get(Cliente, id_cliente)
-            dialogo = ClienteFormDialog(session, cliente, parent=self)
+            dialogo = ClienteFormDialog(session, cliente, id_usuario=self.usuario.id_usuario, parent=self)
             if dialogo.exec():
                 update_cliente(session, id_cliente, id_usuario=self.usuario.id_usuario, **dialogo.get_data())
                 self.cargar_clientes()

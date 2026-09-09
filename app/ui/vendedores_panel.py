@@ -60,12 +60,58 @@ from app.ui.styles import (
 )
 from app.ui.toolbar_popups import BotonExportar
 from app.ui.vendedor_form_dialog import VendedorFormDialog
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
 COLS_VISIBLES = ["ID", "Nombre", "Código", "Identificación", "Ruta", "Teléfono", "Email", "Estado"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
+
+
+def _filas_vendedores_query(session, texto_busqueda, id_usuario, estado_vendedor) -> list[list]:
+    resultado = VendedorService.listar(
+        session,
+        texto_busqueda,
+        id_usuario=id_usuario,
+        estado_vendedor=estado_vendedor,
+        pagina=1,
+        por_pagina=1_000_000,
+    )
+    vendedores: list[Vendedor] = resultado["items"]
+    return [
+        [
+            v.id_vendedor,
+            v.nombre_vendedor,
+            v.codigo_vendedor,
+            v.identificacion_vendedor,
+            v.ruta.nombre_ruta if v.ruta else "",
+            v.telefono_vendedor,
+            v.email_vendedor,
+            v.estado_vendedor,
+        ]
+        for v in vendedores
+    ]
+
+
+def _tarea_exportar_vendedores_excel(
+    session, ruta: str, texto_busqueda, id_usuario, estado_vendedor
+) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
+    de vendedores a un archivo (openpyxl) es lo bastante lento como para congelar la
+    ventana si se hace en el hilo de GUI."""
+    filas = _filas_vendedores_query(session, texto_busqueda, id_usuario, estado_vendedor)
+    exportar_excel(ruta, COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_vendedores_pdf(
+    session, ruta: str, texto_busqueda, id_usuario, estado_vendedor, filtros, col_widths
+) -> tuple[str, int]:
+    filas = _filas_vendedores_query(session, texto_busqueda, id_usuario, estado_vendedor)
+    exportar_pdf(ruta, "Reporte de Vendedores", COLS_VISIBLES, filas, filtros=filtros, col_widths=col_widths)
+    return ruta, len(filas)
+
 
 ESTADOS_FILTRO = [
     ("Todos los estados", None),
@@ -369,80 +415,64 @@ class VendedoresPanel(QWidget):
         self.btn_anterior.setEnabled(self.pagina_actual > 1)
         self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
-    def _filas_para_exportar(self, session) -> list[list]:
-        resultado = VendedorService.listar(
-            session,
-            self.buscar_input.text().strip() or None,
-            id_usuario=self.usuario.id_usuario,
-            estado_vendedor=self.estado_combo.currentData(),
-            pagina=1,
-            por_pagina=1_000_000,
-        )
-        vendedores: list[Vendedor] = resultado["items"]
-        return [
-            [
-                v.id_vendedor,
-                v.nombre_vendedor,
-                v.codigo_vendedor,
-                v.identificacion_vendedor,
-                v.ruta.nombre_ruta if v.ruta else "",
-                v.telefono_vendedor,
-                v.email_vendedor,
-                v.estado_vendedor,
-            ]
-            for v in vendedores
-        ]
+    def _filtros_actuales_exportar(self) -> dict:
+        return {
+            "texto_busqueda": self.buscar_input.text().strip() or None,
+            "id_usuario": self.usuario.id_usuario,
+            "estado_vendedor": self.estado_combo.currentData(),
+        }
 
     def exportar_excel_vendedores(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar vendedores", "vendedores.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
-            exportar_excel(ruta, COLS_VISIBLES, filas)
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} vendedores a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
-        except Exception:
-            logger.exception("Fallo al exportar la lista de vendedores a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
-        finally:
-            session.close()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory, _tarea_exportar_vendedores_excel, ruta=ruta, **self._filtros_actuales_exportar()
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
     def exportar_pdf_vendedores(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar vendedores", "vendedores.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
-        session = self.session_factory()
-        try:
-            filas = self._filas_para_exportar(session)
+        texto_busqueda = self.buscar_input.text().strip()
+        filtros = {
+            "Búsqueda": texto_busqueda if texto_busqueda else "Todos",
+            "Estado": self.estado_combo.currentText(),
+        }
+        col_widths = [0.5, 2.0, 1.0, 1.2, 1.2, 1.3, 2.0, 1.0]
 
-            filtros = {}
-            texto_busqueda = self.buscar_input.text().strip()
-            filtros["Búsqueda"] = texto_busqueda if texto_busqueda else "Todos"
-            filtros["Estado"] = self.estado_combo.currentText()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_vendedores_pdf,
+            ruta=ruta,
+            filtros=filtros,
+            col_widths=col_widths,
+            **self._filtros_actuales_exportar(),
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
 
-            col_widths = [0.5, 2.0, 1.0, 1.2, 1.2, 1.3, 2.0, 1.0]
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} vendedores a:\n{ruta}")
 
-            exportar_pdf(
-                ruta,
-                "Reporte de Vendedores",
-                COLS_VISIBLES,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-            )
-            MessageBox.information(self, "Exportación completa", f"Se exportaron {len(filas)} vendedores a:\n{ruta}")
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
-        except Exception:
-            logger.exception("Fallo al exportar la lista de vendedores a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
-        finally:
-            session.close()
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar vendedores: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()

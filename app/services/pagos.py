@@ -373,7 +373,19 @@ class PagoService:
         """
         require_permiso(session, id_usuario, "pagos", "ver")
         hoy = date.today()
-        query = session.query(CuentaPorCobrar).join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+        # Desde migrations/0024_pagos_contado_multimetodo.sql, trg_factura_venta_cxc abre
+        # una CuentaPorCobrar tambien para facturas de CONTADO -- no porque haya algo que
+        # cobrar (nace con saldo_pendiente=0 / estado='pagada' en la misma transaccion),
+        # sino como vehiculo tecnico para poder registrar los PagoCobro de esa venta
+        # (requieren un id_cuenta_por_cobrar, ver app/db/models.py). Ese registro es
+        # relevante en el detalle de la factura (VentaService.obtener_factura), no en este
+        # listado de gestion de cobros -- filtrar por 'credito' evita que facturas de
+        # contado, sin nada pendiente de cobrar, aparezcan aca como si lo tuvieran.
+        query = (
+            session.query(CuentaPorCobrar)
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+            .filter(FacturaVenta.condicion_pago == "credito")
+        )
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if estado == "vencida":

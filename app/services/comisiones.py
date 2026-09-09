@@ -105,7 +105,8 @@ class ComisionService:
         query = (
             session.query(ComisionFactura)
             .options(
-                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente)
+                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente),
+                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.producto),
             )
             .filter(ComisionFactura.id_vendedor == id_vendedor, ComisionFactura.monto_comision > 0)
         )
@@ -125,7 +126,8 @@ class ComisionService:
         return (
             session.query(ComisionFactura)
             .options(
-                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente)
+                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente),
+                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.producto),
             )
             .filter(ComisionFactura.id_vendedor == usuario.id_vendedor_usuario, ComisionFactura.monto_comision > 0)
             .order_by(ComisionFactura.fecha_calculo.desc())

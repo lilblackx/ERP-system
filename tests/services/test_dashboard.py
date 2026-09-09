@@ -128,21 +128,52 @@ def test_por_pagar_suma_saldos_abiertos_y_cuenta_vencidas(db_session):
 
 def test_productos_alerta_cuenta_bajo_stock(db_session):
     admin = crear_usuario_admin(db_session)
-    crear_producto(db_session, cantidad_unidad=3)
-    crear_producto(db_session, cantidad_unidad=500)
+    crear_producto(db_session, cantidad_unidad=3, cantidad_minima=Decimal("10.00"))
+    crear_producto(db_session, cantidad_unidad=500, cantidad_minima=Decimal("10.00"))
 
-    resultado = DashboardService.get_panel_general_data(db_session, umbral_stock_minimo=10, id_usuario=admin.id_usuario)
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["productos_alerta"] == 1
+
+
+def test_productos_alerta_ignora_productos_sin_minimo_configurado(db_session):
+    """Bug real (2026-09): el KPI usaba un umbral fijo de 10 unidades para todos los
+    productos, ignorando el 'Stock Minimo' configurado por producto -- un producto con
+    minimo=5 y 37 en existencia no deberia contar como alerta nunca (mismo fix que
+    ProductoService.obtener_alertas_stock, ver test_inventario.py)."""
+    admin = crear_usuario_admin(db_session)
+    crear_producto(db_session, cantidad_unidad=37, cantidad_minima=Decimal("5.00"))
+    crear_producto(db_session, cantidad_unidad=1)  # cantidad_minima queda en 0 (default)
+
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
+
+    assert resultado["productos_alerta"] == 0
+
+
+def test_productos_alerta_cuenta_proximos_a_vencer(db_session):
+    """El KPI (y la lista 'Inventario en alerta') tambien deben contar productos por
+    vencer, no solo stock bajo -- antes un producto con stock de sobra pero por vencer
+    no aparecia en ningun lado del dashboard."""
+    admin = crear_usuario_admin(db_session)
+    crear_producto(db_session, cantidad_unidad=37, fecha_vencimiento=date.today() + timedelta(days=3))
+    crear_producto(db_session, cantidad_unidad=50, fecha_vencimiento=date.today() + timedelta(days=90))
+
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
+
+    assert resultado["productos_alerta"] == 1
+    assert len(resultado["inventario_alerta"]) == 1
+    alerta = resultado["inventario_alerta"][0]
+    assert alerta["proximo_vencer"] is True
+    assert alerta["bajo_stock"] is False
 
 
 def test_productos_alerta_excluye_inactivos(db_session):
     """C21: un producto descontinuado no deberia inflar el KPI de stock bajo para
     siempre."""
     admin = crear_usuario_admin(db_session)
-    crear_producto(db_session, cantidad_unidad=3, estado_producto="INACTIVO")
+    crear_producto(db_session, cantidad_unidad=3, cantidad_minima=Decimal("10.00"), estado_producto="INACTIVO")
 
-    resultado = DashboardService.get_panel_general_data(db_session, umbral_stock_minimo=10, id_usuario=admin.id_usuario)
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["productos_alerta"] == 0
 
@@ -209,21 +240,30 @@ def test_inventario_alerta_incluye_categoria(db_session):
 
     admin = crear_usuario_admin(db_session)
     categoria = crear_categoria(db_session, nombre="Lacteos")
-    crear_producto(db_session, categoria=categoria, cantidad_unidad=2, nombre_producto="Leche")
-    crear_producto(db_session, cantidad_unidad=999)
+    crear_producto(
+        db_session, categoria=categoria, cantidad_unidad=2, cantidad_minima=Decimal("10.00"), nombre_producto="Leche"
+    )
+    crear_producto(db_session, cantidad_unidad=999, cantidad_minima=Decimal("10.00"))
 
-    resultado = DashboardService.get_panel_general_data(db_session, umbral_stock_minimo=10, id_usuario=admin.id_usuario)
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
     alertas = resultado["inventario_alerta"]
 
     assert len(alertas) == 1
     assert alertas[0]["nombre_producto"] == "Leche"
     assert alertas[0]["categoria"] == "Lacteos"
+    assert alertas[0]["bajo_stock"] is True
 
 
 def test_inventario_alerta_excluye_inactivos(db_session):
     admin = crear_usuario_admin(db_session)
-    crear_producto(db_session, cantidad_unidad=2, nombre_producto="Descontinuado", estado_producto="INACTIVO")
+    crear_producto(
+        db_session,
+        cantidad_unidad=2,
+        cantidad_minima=Decimal("10.00"),
+        nombre_producto="Descontinuado",
+        estado_producto="INACTIVO",
+    )
 
-    resultado = DashboardService.get_panel_general_data(db_session, umbral_stock_minimo=10, id_usuario=admin.id_usuario)
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["inventario_alerta"] == []

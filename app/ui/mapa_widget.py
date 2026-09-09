@@ -56,6 +56,7 @@ import json
 import logging
 from pathlib import Path
 
+import qtawesome as qta
 from PySide6.QtCore import QStringListModel, Qt, QTimer, QUrl, QUrlQuery, Signal
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEnginePermission, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -71,6 +72,7 @@ from PySide6.QtWidgets import (
 
 from app.ui.geo_http import HttpWorker, buscar_lugares, obtener_ubicacion_dispositivo
 from app.ui.geo_windows import obtener_ubicacion_precisa_windows
+from app.ui.styles import COLOR_PRIMARY
 
 logger = logging.getLogger(__name__)
 
@@ -463,11 +465,13 @@ class MapaWidget(QWidget):
         self.btn_buscar.setMinimumWidth(64)
         self.btn_buscar.clicked.connect(self._buscar_lugar)
 
-        # Con texto (no solo el emoji) e icono en el propio texto -- un boton de solo 36px
-        # con un emoji chiquito se leia como decoracion, no como accion (reportado por el
-        # usuario, 2026-09-01, "debe ser mas intuitivo"). min-width en vez de fixed, mismo
-        # criterio que "Buscar": un ancho fijo recortaba el texto.
-        self.btn_ubicacion_precisa = QPushButton("📍 Mi ubicación")
+        # Con texto (no solo un icono) -- un boton de solo 36px con icono chico se leia
+        # como decoracion, no como accion (reportado por el usuario, 2026-09-01, "debe ser
+        # mas intuitivo"). min-width en vez de fixed, mismo criterio que "Buscar": un ancho
+        # fijo recortaba el texto. Icono real (qtawesome, via setIcon) en vez de un "📍"
+        # suelto en el string del boton -- ver GUIA_ESTILO_UI.md 3.1.
+        self.btn_ubicacion_precisa = QPushButton(" Mi ubicación")
+        self.btn_ubicacion_precisa.setIcon(qta.icon("fa5s.map-marker-alt", color=COLOR_PRIMARY))
         self.btn_ubicacion_precisa.setFixedHeight(32)
         self.btn_ubicacion_precisa.setMinimumWidth(120)
         self.btn_ubicacion_precisa.setToolTip("Usar mi ubicación actual (GPS/WiFi del dispositivo)")

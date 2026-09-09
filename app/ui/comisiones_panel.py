@@ -8,6 +8,7 @@ Mismo patron visual que app/ui/cuentas_por_pagar_panel.py.
 
 import logging
 from decimal import Decimal
+from functools import partial
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
@@ -61,6 +62,7 @@ from app.ui.styles import (
     ICON_CHEVRON_DOWN_URL,
     TABLE_QSS,
     EstadoBadge,
+    alinear_encabezados,
     aplicar_sombra,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
@@ -355,6 +357,146 @@ class PagarComisionesDialog(QDialog):
         self.accept()
 
 
+def _agrupar_comisiones_por_factura(comisiones: list[ComisionFactura]) -> list[dict]:
+    """Agrupa comisiones (una fila por producto facturado) en una fila por factura para
+    la vista principal -- el desglose por producto queda disponible como drill-down
+    (DetalleComisionFacturaDialog). Seguro sin tocar reglas de negocio: dentro de una
+    misma factura todas sus ComisionFactura comparten siempre el mismo estado_pago --
+    trg_cxc_libera_comisiones (migrations/0045) las libera todas juntas cuando la cuenta
+    por cobrar de la factura llega a 'pagada', y VentaService.anular_factura() bloquea la
+    anulacion si CUALQUIER linea esta liberada/pagada o borra TODAS juntas si ninguna lo
+    esta -- nunca hay estados mixtos dentro de una factura, asi que tomar el estado de la
+    primera linea del grupo es siempre correcto."""
+    grupos: dict[object, dict] = {}
+    orden: list[object] = []
+    for comision in comisiones:
+        factura_num = ""
+        cliente_nombre = ""
+        clave: object = id(comision)
+        try:
+            if comision.detalle and comision.detalle.factura:
+                factura = comision.detalle.factura
+                clave = factura.id_factura
+                factura_num = factura.numero_factura or ""
+                cliente_nombre = factura.cliente.nombre_razon_social if factura.cliente else "Consumidor final"
+        except Exception:
+            pass
+
+        if clave not in grupos:
+            grupos[clave] = {
+                "id_factura": clave if isinstance(clave, int) else None,
+                "numero_factura": factura_num,
+                "cliente_nombre": cliente_nombre,
+                "fecha_calculo": comision.fecha_calculo,
+                "estado_pago": comision.estado_pago or "pendiente",
+                "cantidad_lineas": 0,
+                "monto_base": Decimal("0.00"),
+                "monto_venta": Decimal("0.00"),
+                "monto_comision": Decimal("0.00"),
+                "lineas": [],
+            }
+            orden.append(clave)
+
+        grupo = grupos[clave]
+        grupo["cantidad_lineas"] += 1
+        grupo["monto_base"] += comision.monto_base_comision or Decimal("0.00")
+        grupo["monto_venta"] += comision.monto_venta_comision or Decimal("0.00")
+        grupo["monto_comision"] += comision.monto_comision
+        grupo["lineas"].append(comision)
+
+    return [grupos[clave] for clave in orden]
+
+
+class DetalleComisionFacturaDialog(QDialog):
+    """Desglose de comisiones por producto de una sola factura -- todo en memoria, sin
+    consultar la BD: el grupo ya trae las ComisionFactura originales cargadas (con
+    detalle.producto precargado, ver ComisionService.listar_comisiones_vendedor/
+    listar_mis_comisiones)."""
+
+    def __init__(self, grupo: dict, parent=None):
+        super().__init__(parent)
+        self.grupo = grupo
+        self.setWindowTitle(f"Detalle de comisión - Factura {grupo['numero_factura']}")
+        self.setFixedSize(560, 420)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        fecha_str = self.grupo["fecha_calculo"].strftime("%d/%m/%Y") if self.grupo["fecha_calculo"] else ""
+        estado = (self.grupo["estado_pago"] or "pendiente").capitalize()
+        lbl_titulo = QLabel(f"Factura {self.grupo['numero_factura']} · {self.grupo['cliente_nombre']}")
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        root.addWidget(lbl_titulo)
+
+        lbl_sub = QLabel(f"Fecha: {fecha_str}  ·  Estado: {estado}")
+        lbl_sub.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        root.addWidget(lbl_sub)
+
+        tabla = QTableWidget(len(self.grupo["lineas"]), 5)
+        tabla.setHorizontalHeaderLabels(["Producto", "Cantidad", "Monto Base", "Monto Venta", "Comisión"])
+        tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        tabla.setAlternatingRowColors(True)
+        tabla.setShowGrid(False)
+        tabla.verticalHeader().setVisible(False)
+        tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        tabla.setStyleSheet(TABLE_QSS)
+        alinear_encabezados(
+            tabla,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+            },
+        )
+        for fila, linea in enumerate(self.grupo["lineas"]):
+            nombre_producto = ""
+            try:
+                if linea.detalle and linea.detalle.producto:
+                    nombre_producto = linea.detalle.producto.nombre_producto or ""
+            except Exception:
+                pass
+            cantidad = linea.detalle.cantidad_producto if linea.detalle else None
+            tabla.setItem(fila, 0, QTableWidgetItem(nombre_producto))
+
+            item_cantidad = QTableWidgetItem(f"{float(cantidad):,.2f}" if cantidad is not None else "")
+            item_cantidad.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tabla.setItem(fila, 1, item_cantidad)
+
+            item_base = QTableWidgetItem(f"${float(linea.monto_base_comision or 0):,.2f}")
+            item_base.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tabla.setItem(fila, 2, item_base)
+
+            item_venta = QTableWidgetItem(f"${float(linea.monto_venta_comision or 0):,.2f}")
+            item_venta.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tabla.setItem(fila, 3, item_venta)
+
+            item_comision = QTableWidgetItem(f"${float(linea.monto_comision):,.2f}")
+            item_comision.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tabla.setItem(fila, 4, item_comision)
+        root.addWidget(tabla, stretch=1)
+
+        lbl_total = QLabel(f"Total comisión: ${float(self.grupo['monto_comision']):,.2f}")
+        lbl_total.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
+        root.addWidget(lbl_total)
+
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.setObjectName("BtnSecondary")
+        btn_cerrar.clicked.connect(self.accept)
+        fila_botones = QHBoxLayout()
+        fila_botones.addStretch()
+        fila_botones.addWidget(btn_cerrar)
+        root.addLayout(fila_botones)
+
+
 class ComisionesPanel(QWidget):
     """Panel del modulo Comisiones: dos modos segun el permiso del usuario.
     - Modo gestion (comisiones:ver): selector de vendedor + tabla + pagar.
@@ -376,7 +518,7 @@ class ComisionesPanel(QWidget):
 
         self.id_vendedor_actual: int | None = None
         self.comisiones_cargadas: list[ComisionFactura] = []
-        self.comisiones_filtradas: list[ComisionFactura] = []
+        self.grupos_filtrados: list[dict] = []
         self.total_pendiente = Decimal("0.00")
         self.total_liberada = Decimal("0.00")
 
@@ -455,9 +597,37 @@ class ComisionesPanel(QWidget):
         return w
 
     def _make_table(self) -> QTableWidget:
-        self.tabla = QTableWidget(0, 8)
+        # Una fila por FACTURA (no por producto facturado): agrupa las ComisionFactura
+        # de cada factura -- ver _agrupar_comisiones_por_factura(). El desglose por
+        # producto queda en DetalleComisionFacturaDialog, vía el botón de la ultima
+        # columna.
+        self.tabla = QTableWidget(0, 10)
         self.tabla.setHorizontalHeaderLabels(
-            ["ID", "Factura", "Cliente", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado"]
+            [
+                "ID",
+                "Factura",
+                "Cliente",
+                "Fecha Cálculo",
+                "Líneas",
+                "Monto Base",
+                "Monto Venta",
+                "Comisión",
+                "Estado",
+                "",
+            ]
+        )
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignCenter,
+            },
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -470,8 +640,11 @@ class ComisionesPanel(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(7, 120)
+        self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(8, 120)
+        self.tabla.setColumnWidth(9, 48)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(0, True)
@@ -563,39 +736,50 @@ class ComisionesPanel(QWidget):
         self._poblar_tabla(filtradas)
 
     def _poblar_tabla(self, comisiones: list[ComisionFactura]) -> None:
-        self.tabla.setRowCount(len(comisiones))
-        self.comisiones_filtradas = comisiones
+        grupos = _agrupar_comisiones_por_factura(comisiones)
+        self.tabla.setRowCount(len(grupos))
+        self.grupos_filtrados = grupos
         total_pendiente = Decimal("0.00")
         total_liberada = Decimal("0.00")
 
-        for fila, comision in enumerate(comisiones):
-            factura_num = ""
-            cliente_nombre = ""
-            try:
-                if comision.detalle and comision.detalle.factura:
-                    factura = comision.detalle.factura
-                    factura_num = factura.numero_factura or ""
-                    cliente_nombre = factura.cliente.nombre_razon_social if factura.cliente else "Consumidor final"
-            except Exception:
-                pass
-
-            self.tabla.setItem(fila, 0, QTableWidgetItem(str(comision.id_comision)))
-            self.tabla.setItem(fila, 1, QTableWidgetItem(factura_num))
-            self.tabla.setItem(fila, 2, QTableWidgetItem(cliente_nombre))
-            fecha_str = comision.fecha_calculo.strftime("%d/%m/%Y") if comision.fecha_calculo else ""
+        for fila, grupo in enumerate(grupos):
+            self.tabla.setItem(fila, 0, QTableWidgetItem(str(grupo["id_factura"] or "")))
+            self.tabla.setItem(fila, 1, QTableWidgetItem(grupo["numero_factura"]))
+            self.tabla.setItem(fila, 2, QTableWidgetItem(grupo["cliente_nombre"]))
+            fecha_str = grupo["fecha_calculo"].strftime("%d/%m/%Y") if grupo["fecha_calculo"] else ""
             self.tabla.setItem(fila, 3, QTableWidgetItem(fecha_str))
-            self.tabla.setItem(fila, 4, QTableWidgetItem(f"${float(comision.monto_base_comision or 0):,.2f}"))
-            self.tabla.setItem(fila, 5, QTableWidgetItem(f"${float(comision.monto_venta_comision or 0):,.2f}"))
-            self.tabla.setItem(fila, 6, QTableWidgetItem(f"${float(comision.monto_comision):,.2f}"))
+            item_lineas = QTableWidgetItem(str(grupo["cantidad_lineas"]))
+            item_lineas.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 4, item_lineas)
 
-            estado = comision.estado_pago or "pendiente"
+            item_base = QTableWidgetItem(f"${float(grupo['monto_base']):,.2f}")
+            item_base.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 5, item_base)
+
+            item_venta = QTableWidgetItem(f"${float(grupo['monto_venta']):,.2f}")
+            item_venta.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 6, item_venta)
+
+            item_comision = QTableWidgetItem(f"${float(grupo['monto_comision']):,.2f}")
+            item_comision.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 7, item_comision)
+
+            estado = grupo["estado_pago"] or "pendiente"
             color = COLORES_ESTADO_COMISION.get(estado, COLOR_TEXT_MUTED)
-            self.tabla.setCellWidget(fila, 7, EstadoBadge(estado.capitalize(), color))
+            self.tabla.setCellWidget(fila, 8, EstadoBadge(estado.capitalize(), color))
+
+            btn_detalle = QPushButton()
+            btn_detalle.setIcon(qta.icon("fa5s.list-ul", color=COLOR_TEXT_MUTED))
+            btn_detalle.setToolTip("Ver desglose por producto")
+            btn_detalle.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_detalle.setFlat(True)
+            btn_detalle.clicked.connect(partial(self._ver_detalle_comision, grupo))
+            self.tabla.setCellWidget(fila, 9, btn_detalle)
 
             if estado == "pendiente":
-                total_pendiente += comision.monto_comision
+                total_pendiente += grupo["monto_comision"]
             elif estado == "liberada":
-                total_liberada += comision.monto_comision
+                total_liberada += grupo["monto_comision"]
 
         self.total_pendiente = total_pendiente
         self.total_liberada = total_liberada
@@ -604,6 +788,9 @@ class ComisionesPanel(QWidget):
         )
         if self.modo_gestion:
             self.btn_pagar.setEnabled(self.id_vendedor_actual is not None and total_liberada > 0)
+
+    def _ver_detalle_comision(self, grupo: dict) -> None:
+        DetalleComisionFacturaDialog(grupo, parent=self).exec()
 
     def pagar_comisiones(self) -> None:
         if self.id_vendedor_actual is None:
@@ -635,30 +822,29 @@ class ComisionesPanel(QWidget):
             self.btn_pagar.setEnabled(True)
 
     def _datos_para_exportar(self) -> tuple[list[str], list[list]]:
-        encabezados = ["Factura", "Cliente", "Fecha Cálculo", "Monto Base", "Monto Venta", "Comisión", "Estado"]
-        filas = []
-        for comision in self.comisiones_filtradas:
-            factura_num = ""
-            cliente_nombre = ""
-            try:
-                if comision.detalle and comision.detalle.factura:
-                    factura = comision.detalle.factura
-                    factura_num = factura.numero_factura or ""
-                    cliente_nombre = factura.cliente.nombre_razon_social if factura.cliente else "Consumidor final"
-            except Exception:
-                pass
-            fecha_str = comision.fecha_calculo.strftime("%d/%m/%Y") if comision.fecha_calculo else ""
-            filas.append(
-                [
-                    factura_num,
-                    cliente_nombre,
-                    fecha_str,
-                    float(comision.monto_base_comision or 0),
-                    float(comision.monto_venta_comision or 0),
-                    float(comision.monto_comision),
-                    (comision.estado_pago or "pendiente").capitalize(),
-                ]
-            )
+        encabezados = [
+            "Factura",
+            "Cliente",
+            "Fecha Cálculo",
+            "Líneas",
+            "Monto Base",
+            "Monto Venta",
+            "Comisión",
+            "Estado",
+        ]
+        filas = [
+            [
+                grupo["numero_factura"],
+                grupo["cliente_nombre"],
+                grupo["fecha_calculo"].strftime("%d/%m/%Y") if grupo["fecha_calculo"] else "",
+                grupo["cantidad_lineas"],
+                float(grupo["monto_base"]),
+                float(grupo["monto_venta"]),
+                float(grupo["monto_comision"]),
+                (grupo["estado_pago"] or "pendiente").capitalize(),
+            ]
+            for grupo in self.grupos_filtrados
+        ]
         return encabezados, filas
 
     def _filtros_para_exportar(self) -> dict:
@@ -733,7 +919,7 @@ class ComisionesPanel(QWidget):
             encabezados=encabezados,
             filas=filas,
             filtros=self._filtros_para_exportar(),
-            col_widths=[1.4, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            col_widths=[1.4, 2.0, 1.0, 0.6, 1.0, 1.0, 1.0, 1.0],
             config_empresa=config_empresa,
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)
@@ -750,23 +936,17 @@ class ComisionesPanel(QWidget):
         MessageBox.critical(self, "Error", "No se pudo completar la exportación.")
 
     def _fila_seleccionada_id_factura(self) -> int | None:
-        """Obtiene el ID de la factura de la fila seleccionada en la tabla."""
+        """Obtiene el ID de la factura de la fila (agrupada por factura) seleccionada."""
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(self, "Selección requerida", "Selecciona una comisión de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
             return None
 
         fila = filas[0].row()
-        if fila < 0 or fila >= len(self.comisiones_cargadas):
+        if fila < 0 or fila >= len(self.grupos_filtrados):
             return None
 
-        comision = self.comisiones_cargadas[fila]
-        try:
-            if comision.detalle and comision.detalle.factura:
-                return comision.detalle.factura.id_factura
-        except Exception:
-            pass
-        return None
+        return self.grupos_filtrados[fila]["id_factura"]
 
     def ver_detalle_factura(self) -> None:
         """Abre el diálogo de detalle de la factura seleccionada."""
