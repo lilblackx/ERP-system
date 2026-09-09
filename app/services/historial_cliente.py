@@ -33,22 +33,22 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
     """
     Obtiene el historial de facturas y pagos de un cliente.
 
-    Las transacciones (facturas y pagos) se ordenan cronológicamente y el saldo
-    corrido se calcula acumulativamente. Las facturas aumentan el saldo (cargos)
-    y los pagos lo disminuyen (abonos).
+    Las transacciones se agrupan por factura: cada factura se muestra con sus
+    pagos asociados. El saldo corrido se calcula acumulativamente por factura.
 
     Args:
         session: Sesión de SQLAlchemy
         id_cliente: ID del cliente
 
     Returns:
-        Lista de items del historial con transacciones y saldo corrido acumulativo
+        Lista de items del historial con transacciones agrupadas por factura
     """
     # Obtener facturas del cliente con sus cuentas por cobrar
     facturas = (
         session.query(FacturaVenta)
         .options(joinedload(FacturaVenta.cliente))
         .filter(FacturaVenta.id_cliente_factura == id_cliente)
+        .order_by(FacturaVenta.fecha_emision.desc())
         .all()
     )
 
@@ -63,109 +63,82 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             joinedload(PagoCobro.caja),
             joinedload(PagoCobro.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura),
         )
+        .order_by(PagoCobro.fecha_pago.desc())
         .all()
     )
 
-    # Construir lista de transacciones (facturas y pagos)
-    transacciones: list[dict] = []
+    # Agrupar pagos por factura
+    pagos_por_factura: dict[int, list] = {}
+    for pago in pagos:
+        cxc = pago.cuenta_por_cobrar
+        if cxc and cxc.id_factura:
+            if cxc.id_factura not in pagos_por_factura:
+                pagos_por_factura[cxc.id_factura] = []
+            pagos_por_factura[cxc.id_factura].append(pago)
 
-    # Agregar facturas como transacciones de cargo
+    # Construir historial agrupado por factura
+    historial: list[HistorialItem] = []
+
     for factura in facturas:
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
         fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d %H:%M") if factura.fecha_emision else ""
         fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
 
-        transacciones.append(
-            {
-                "tipo": "factura",
-                "fecha": fecha_emision_str,
-                "fecha_obj": factura.fecha_emision,
-                "id_cuenta": cxc.id_cuenta_por_cobrar if cxc else None,
-                "id_factura": factura.id_factura,
-                "id_pago": None,
-                "numero_factura": factura.numero_factura or "",
-                "monto": factura.total_venta,
-                "estado_factura": factura.estado_factura or "EMITIDA",
-                "condicion_pago": factura.condicion_pago or "",
-                "dias_credito": factura.dias_credito_aplicados,
-                "observaciones": factura.observaciones_factura,
-                "metodo_pago": None,
-                "monto_vuelto": factura.monto_vuelto,
-                "metodo_vuelto": factura.metodo_vuelto,
-                "fecha_vencimiento": fecha_vencimiento_str,
-            }
-        )
-
-    # Agregar pagos como transacciones de abono
-    for pago in pagos:
-        fecha_pago_str = pago.fecha_pago.strftime("%Y-%m-%d %H:%M") if pago.fecha_pago else ""
-        cxc = pago.cuenta_por_cobrar
-        factura = cxc.factura if cxc else None
-        numero_factura = factura.numero_factura if factura else "N/A"
-
-        # Construir observaciones con bolivares y tasa si es transferencia
-        observaciones = f"Abono - {pago.metodo_pago}"
-        if pago.metodo_pago == "transferencia" and pago.monto_moneda_origen:
-            tasa_bcv = pago.tasa.tasa_dolar_bcv if pago.tasa else None
-            if tasa_bcv:
-                observaciones += f" - Bs {pago.monto_moneda_origen:,.2f} @ {tasa_bcv:,.2f}"
-            else:
-                observaciones += f" - Bs {pago.monto_moneda_origen:,.2f}"
-
-        transacciones.append(
-            {
-                "tipo": "pago",
-                "fecha": fecha_pago_str,
-                "fecha_obj": pago.fecha_pago,
-                "id_cuenta": cxc.id_cuenta_por_cobrar if cxc else None,
-                "id_factura": factura.id_factura if factura else None,
-                "id_pago": pago.id_pago_cobro,
-                "numero_factura": numero_factura,
-                "monto": -pago.monto,  # Negativo para restar del saldo
-                "estado_factura": None,
-                "condicion_pago": None,
-                "dias_credito": None,
-                "observaciones": observaciones,
-                "metodo_pago": pago.metodo_pago,
-                "monto_vuelto": Decimal("0.00"),
-                "metodo_vuelto": None,
-                "fecha_vencimiento": None,
-            }
-        )
-
-    # Ordenar transacciones cronológicamente
-    transacciones.sort(key=lambda x: (x["fecha_obj"], x["tipo"] == "pago"))
-
-    # Calcular saldo corrido acumulativo
-    saldo_corrido_acumulado = Decimal("0.00")
-    historial: list[HistorialItem] = []
-
-    for trans in transacciones:
-        saldo_corrido_acumulado += trans["monto"]
-
-        item: HistorialItem = {
-            "tipo_transaccion": trans["tipo"],
-            "id_cuenta": trans["id_cuenta"],
-            "id_factura": trans["id_factura"],
-            "id_pago": trans["id_pago"],
-            "numero_factura": trans["numero_factura"],
-            "fecha": trans["fecha"],
-            "fecha_vencimiento": trans["fecha_vencimiento"],
-            "monto": trans["monto"],
-            "estado_factura": trans["estado_factura"],
-            "condicion_pago": trans["condicion_pago"],
-            "dias_credito": trans["dias_credito"],
-            "observaciones": trans["observaciones"],
-            "metodo_pago": trans["metodo_pago"],
-            "monto_vuelto": trans["monto_vuelto"],
-            "metodo_vuelto": trans["metodo_vuelto"],
-            "saldo_corrido": saldo_corrido_acumulado,
+        # Agregar la factura
+        item_factura: HistorialItem = {
+            "tipo_transaccion": "factura",
+            "id_cuenta": cxc.id_cuenta_por_cobrar if cxc else None,
+            "id_factura": factura.id_factura,
+            "id_pago": None,
+            "numero_factura": factura.numero_factura or "",
+            "fecha": fecha_emision_str,
+            "fecha_vencimiento": fecha_vencimiento_str,
+            "monto": factura.total_venta,
+            "estado_factura": factura.estado_factura or "EMITIDA",
+            "condicion_pago": factura.condicion_pago or "",
+            "dias_credito": factura.dias_credito_aplicados,
+            "observaciones": factura.observaciones_factura,
+            "metodo_pago": None,
+            "monto_vuelto": factura.monto_vuelto,
+            "metodo_vuelto": factura.metodo_vuelto,
+            "saldo_corrido": cxc.saldo_pendiente if cxc else Decimal("0.00"),
         }
+        historial.append(item_factura)
 
-        historial.append(item)
+        # Agregar los pagos de esta factura
+        if factura.id_factura in pagos_por_factura:
+            for pago in pagos_por_factura[factura.id_factura]:
+                fecha_pago_str = pago.fecha_pago.strftime("%Y-%m-%d %H:%M") if pago.fecha_pago else ""
+                cxc_pago = pago.cuenta_por_cobrar
 
-    # Invertir el orden para mostrar las transacciones más recientes primero
-    historial.reverse()
+                # Construir observaciones con bolivares y tasa si es transferencia
+                observaciones = f"Abono - {pago.metodo_pago}"
+                if pago.metodo_pago == "transferencia" and pago.monto_moneda_origen:
+                    tasa_bcv = pago.tasa.tasa_dolar_bcv if pago.tasa else None
+                    if tasa_bcv:
+                        observaciones += f" - Bs {pago.monto_moneda_origen:,.2f} @ {tasa_bcv:,.2f}"
+                    else:
+                        observaciones += f" - Bs {pago.monto_moneda_origen:,.2f}"
+
+                item_pago: HistorialItem = {
+                    "tipo_transaccion": "pago",
+                    "id_cuenta": cxc_pago.id_cuenta_por_cobrar if cxc_pago else None,
+                    "id_factura": factura.id_factura,
+                    "id_pago": pago.id_pago_cobro,
+                    "numero_factura": factura.numero_factura or "",
+                    "fecha": fecha_pago_str,
+                    "fecha_vencimiento": None,
+                    "monto": -pago.monto,  # Negativo para restar del saldo
+                    "estado_factura": None,
+                    "condicion_pago": None,
+                    "dias_credito": None,
+                    "observaciones": observaciones,
+                    "metodo_pago": pago.metodo_pago,
+                    "monto_vuelto": Decimal("0.00"),
+                    "metodo_vuelto": None,
+                    "saldo_corrido": Decimal("0.00"),  # No aplica para pagos individuales
+                }
+                historial.append(item_pago)
 
     return historial
 
