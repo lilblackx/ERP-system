@@ -431,10 +431,14 @@ class HistorialClienteWindow(QDialog):
             {
                 "id_factura": item["id_factura"],
                 "numero_factura": item["numero_factura"],
-                "saldo_pendiente": item["monto"] if item["tipo_transaccion"] == "factura" else Decimal("0.00"),
+                "saldo_pendiente": item["saldo_corrido"] if item["saldo_corrido"] > 0 else Decimal("0.00"),
             }
             for item in historial
-            if item["tipo_transaccion"] == "factura" and item["monto"] > 0 and item["estado_factura"] != "ANULADA"
+            if (
+                item["tipo_transaccion"] == "factura"
+                and item["saldo_corrido"] > 0
+                and item["estado_factura"] != "ANULADA"
+            )
         ]
 
         hay_notas = bool(self._notas_disponibles)
@@ -535,28 +539,6 @@ class HistorialClienteWindow(QDialog):
     def exportar_excel(self) -> None:
         session = self.session_factory()
         try:
-            historial = obtener_historial_cliente(session, self.id_cliente)
-
-            # Preparar filas para exportación
-            filas = [
-                [
-                    item["id_cuenta"] or "N/A",
-                    item["numero_factura"],
-                    item["fecha_emision"],
-                    str(item["total_venta"]),
-                    item["estado_factura"],
-                    item["condicion_pago"],
-                    _etiqueta_metodo_pago(item["metodo_pago"]),
-                    str(item["dias_credito"] or 0),
-                    item["observaciones_factura"] or "",
-                    str(item["total_pagado"]),
-                    _texto_vuelto(item),
-                    str(item["saldo_pendiente"]),
-                    str(item["saldo_corrido"]),
-                ]
-                for item in historial
-            ]
-
             nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
             ruta, _ = QFileDialog.getSaveFileName(
                 self, "Exportar Historial a Excel", f"{nombre_archivo}.xlsx", "Excel (*.xlsx)"
@@ -564,39 +546,19 @@ class HistorialClienteWindow(QDialog):
             if not ruta:
                 return
 
-        self.btn_exportar_excel.setEnabled(False)
-        self._worker_export_excel = QueryWorker(
-            self.session_factory, _tarea_exportar_historial_excel, ruta=ruta, id_cliente=self.id_cliente
-        )
-        self._worker_export_excel.resultado.connect(self._on_exportar_excel_ok)
-        self._worker_export_excel.error.connect(self._on_exportar_excel_error)
-        self._worker_export_excel.start()
+            self.btn_exportar_excel.setEnabled(False)
+            self._worker_export_excel = QueryWorker(
+                self.session_factory, _tarea_exportar_historial_excel, ruta=ruta, id_cliente=self.id_cliente
+            )
+            self._worker_export_excel.resultado.connect(self._on_exportar_excel_ok)
+            self._worker_export_excel.error.connect(self._on_exportar_excel_error)
+            self._worker_export_excel.start()
+        finally:
+            session.close()
 
     def exportar_pdf(self) -> None:
         session = self.session_factory()
         try:
-            historial = obtener_historial_cliente(session, self.id_cliente)
-
-            # Preparar filas para exportación
-            filas = [
-                [
-                    str(item["id_cuenta"] or "N/A"),
-                    item["numero_factura"],
-                    item["fecha_emision"],
-                    str(item["total_venta"]),
-                    item["estado_factura"],
-                    item["condicion_pago"],
-                    _etiqueta_metodo_pago(item["metodo_pago"]),
-                    str(item["dias_credito"] or 0),
-                    item["observaciones_factura"] or "",
-                    str(item["total_pagado"]),
-                    _texto_vuelto(item),
-                    str(item["saldo_pendiente"]),
-                    str(item["saldo_corrido"]),
-                ]
-                for item in historial
-            ]
-
             nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
             ruta, _ = QFileDialog.getSaveFileName(
                 self, "Exportar Historial a PDF", f"{nombre_archivo}.pdf", "PDF (*.pdf)"
@@ -604,17 +566,19 @@ class HistorialClienteWindow(QDialog):
             if not ruta:
                 return
 
-        self.btn_exportar_pdf.setEnabled(False)
-        self._worker_export_pdf = QueryWorker(
-            self.session_factory,
-            _tarea_exportar_historial_pdf,
-            ruta=ruta,
-            id_cliente=self.id_cliente,
-            cliente_nombre=self.cliente.nombre_razon_social,
-        )
-        self._worker_export_pdf.resultado.connect(self._on_exportar_pdf_ok)
-        self._worker_export_pdf.error.connect(self._on_exportar_pdf_error)
-        self._worker_export_pdf.start()
+            self.btn_exportar_pdf.setEnabled(False)
+            self._worker_export_pdf = QueryWorker(
+                self.session_factory,
+                _tarea_exportar_historial_pdf,
+                ruta=ruta,
+                id_cliente=self.id_cliente,
+                cliente_nombre=self.cliente.nombre_razon_social,
+            )
+            self._worker_export_pdf.resultado.connect(self._on_exportar_pdf_ok)
+            self._worker_export_pdf.error.connect(self._on_exportar_pdf_error)
+            self._worker_export_pdf.start()
+        finally:
+            session.close()
 
     def _on_exportar_excel_ok(self, ruta: str) -> None:
         self.btn_exportar_excel.setEnabled(True)
@@ -641,17 +605,20 @@ class HistorialClienteWindow(QDialog):
             return None
         # El ID de factura está en la columna 1 (N° Factura) pero necesitamos el ID interno
         # Lo obtenemos del historial cargado usando el índice de la fila
+        fila = filas[0].row()
+        # Obtener el historial actual (ya cargado en la tabla)
         session = self.session_factory()
         try:
             historial = obtener_historial_cliente(session, self.id_cliente)
-            fila = filas[0].row()
-            if fila < len(historial):
-                # Solo permitir seleccionar facturas, no pagos
-                if historial[fila]["tipo_transaccion"] == "factura":
-                    return historial[fila]["id_factura"]
-                else:
-                    MessageBox.information(self, "Selección inválida", "Selecciona una factura, no un pago.")
-                    return None
+            if fila >= len(historial):
+                logger.warning("Fila seleccionada fuera de rango: %d (total: %d)", fila, len(historial))
+                return None
+            # Solo permitir seleccionar facturas, no pagos
+            if historial[fila]["tipo_transaccion"] == "factura":
+                return historial[fila]["id_factura"]
+            else:
+                MessageBox.information(self, "Selección inválida", "Selecciona una factura, no un pago.")
+                return None
         except Exception:
             logger.exception("Fallo al obtener el ID de factura de la fila seleccionada")
         finally:
