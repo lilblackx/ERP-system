@@ -480,14 +480,33 @@ class PagoCobroDialog(QDialog):
 
         self.btn_cobrar.setEnabled(False)
         try:
+            metodo = self.metodo_combo.currentData()
+            monto_moneda_origen = None
+            id_tasa = None
+
+            # Si es transferencia, guardar bolivares y tasa
+            if metodo == "transferencia":
+                bolivares = self.bolivares_input.value()
+                tasa = self.tasa_input.value()
+                if bolivares > 0:
+                    monto_moneda_origen = bolivares
+                    # Buscar la tasa que coincide con el valor ingresado
+                    for tasa_disponible in self._tasas_disponibles:
+                        if float(tasa_disponible["tasa_bcv"]) == tasa:
+                            id_tasa = tasa_disponible["id_tasa"]
+                            break
+
             self.pago_creado = reintentar_en_deadlock(
                 lambda: PagoService.registrar_pago_cobro(
                     self.session,
                     id_cuenta_por_cobrar=self.cuenta.id_cuenta_por_cobrar,
                     monto=self.monto_input.value(),
-                    metodo_pago=self.metodo_combo.currentData(),
+                    metodo_pago=metodo,
+                    moneda="USD",
+                    monto_moneda_origen=monto_moneda_origen,
                     id_caja=id_origen if tipo_origen == "caja" else None,
                     id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
+                    id_tasa=id_tasa,
                     referencia=self.referencia_input.text().strip() or None,
                     id_usuario=self.id_usuario,
                 )

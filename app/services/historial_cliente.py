@@ -103,6 +103,15 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         factura = cxc.factura if cxc else None
         numero_factura = factura.numero_factura if factura else "N/A"
 
+        # Construir observaciones con bolivares y tasa si es transferencia
+        observaciones = f"Abono - {pago.metodo_pago}"
+        if pago.metodo_pago == "transferencia" and pago.monto_moneda_origen:
+            tasa_bcv = pago.tasa.tasa_dolar_bcv if pago.tasa else None
+            if tasa_bcv:
+                observaciones += f" - Bs {pago.monto_moneda_origen:,.2f} @ {tasa_bcv:,.2f}"
+            else:
+                observaciones += f" - Bs {pago.monto_moneda_origen:,.2f}"
+
         transacciones.append(
             {
                 "tipo": "pago",
@@ -116,7 +125,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                 "estado_factura": None,
                 "condicion_pago": None,
                 "dias_credito": None,
-                "observaciones": f"Abono - {pago.metodo_pago}",
+                "observaciones": observaciones,
                 "metodo_pago": pago.metodo_pago,
                 "monto_vuelto": Decimal("0.00"),
                 "metodo_vuelto": None,
