@@ -367,43 +367,40 @@ class PagoCobroDialog(QDialog):
         self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
 
     def _cargar_tasas(self) -> None:
-        """Carga todas las tasas disponibles del módulo de tasas."""
+        """Carga las tasas actuales (BCV, paralelo y COP) en el combo."""
         try:
             from app.db.models import ControlDeTasa
 
-            tasas = (
+            # Obtener la tasa más reciente
+            tasa_registro = (
                 self.session.query(ControlDeTasa)
                 .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
-                .all()
+                .first()
             )
-            tasas.reverse()  # cronologico ascendente (mas antiguo -> mas reciente)
-            self._tasas_disponibles = [
-                {
-                    "id_tasa": tasa.id_tasa,
-                    "fecha": tasa.fecha_tasa,
-                    "tasa_bcv": tasa.tasa_dolar_bcv,
-                    "tasa_paralelo": tasa.tasa_dolar_paralelo,
-                }
-                for tasa in tasas
-            ]
         except Exception:
-            self._tasas_disponibles = []
+            tasa_registro = None
 
         self.tasa_combo.blockSignals(True)
         self.tasa_combo.clear()
         self.tasa_combo.addItem("-- Seleccionar --", None)
-        for tasa in self._tasas_disponibles:
-            fecha = tasa["fecha"].strftime("%d/%m/%Y")
+
+        if tasa_registro:
             # Agregar tasa BCV
-            etiqueta_bcv = f"BCV: {tasa['tasa_bcv']:,.2f} ({fecha})"
-            self.tasa_combo.addItem(etiqueta_bcv, float(tasa["tasa_bcv"]))
-            # Agregar tasa paralelo si existe
-            if tasa["tasa_paralelo"]:
-                etiqueta_paralelo = f"Paralelo: {tasa['tasa_paralelo']:,.2f} ({fecha})"
-                self.tasa_combo.addItem(etiqueta_paralelo, float(tasa["tasa_paralelo"]))
+            if tasa_registro.tasa_dolar_bcv:
+                etiqueta_bcv = f"BCV: {tasa_registro.tasa_dolar_bcv:,.2f}"
+                self.tasa_combo.addItem(etiqueta_bcv, float(tasa_registro.tasa_dolar_bcv))
+            # Agregar tasa paralelo
+            if tasa_registro.tasa_dolar_paralelo:
+                etiqueta_paralelo = f"Paralelo: {tasa_registro.tasa_dolar_paralelo:,.2f}"
+                self.tasa_combo.addItem(etiqueta_paralelo, float(tasa_registro.tasa_dolar_paralelo))
+            # Agregar tasa COP
+            if tasa_registro.tasa_cop:
+                etiqueta_cop = f"COP: {tasa_registro.tasa_cop:,.2f}"
+                self.tasa_combo.addItem(etiqueta_cop, float(tasa_registro.tasa_cop))
+
         self.tasa_combo.blockSignals(False)
 
-        # Pre-seleccionar la tasa actual si está disponible
+        # Pre-seleccionar la tasa BCV si está disponible
         if self.tasa_bcv:
             self.tasa_input.setValue(self.tasa_bcv)
 
@@ -484,17 +481,23 @@ class PagoCobroDialog(QDialog):
             monto_moneda_origen = None
             id_tasa = None
 
-            # Si es transferencia, guardar bolivares y tasa
+            # Si es transferencia, guardar bolivares y buscar tasa
             if metodo == "transferencia":
                 bolivares = self.bolivares_input.value()
                 tasa = self.tasa_input.value()
                 if bolivares > 0:
                     monto_moneda_origen = bolivares
-                    # Buscar la tasa que coincide con el valor ingresado
-                    for tasa_disponible in self._tasas_disponibles:
-                        if float(tasa_disponible["tasa_bcv"]) == tasa:
-                            id_tasa = tasa_disponible["id_tasa"]
-                            break
+                    # Buscar la tasa en la base de datos
+                    from app.db.models import ControlDeTasa
+
+                    tasa_registro = (
+                        self.session.query(ControlDeTasa)
+                        .filter(ControlDeTasa.tasa_dolar_bcv == tasa)
+                        .order_by(ControlDeTasa.fecha_tasa.desc())
+                        .first()
+                    )
+                    if tasa_registro:
+                        id_tasa = tasa_registro.id_tasa
 
             self.pago_creado = reintentar_en_deadlock(
                 lambda: PagoService.registrar_pago_cobro(
