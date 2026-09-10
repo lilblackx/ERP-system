@@ -70,6 +70,11 @@ jobs:
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
+      # Qt necesita libEGL y otras dependencias para funcionar en modo offscreen
+      - name: Instalar dependencias de Qt
+        run: |
+          sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0
+
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
