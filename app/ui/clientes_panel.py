@@ -149,6 +149,9 @@ class ClientesPanel(QWidget):
         self.usuario = usuario
         self.pagina_actual = 1
         self.total_paginas = 1
+        # Guard anti-reentrancia para ver_historial_cliente() -- ver bancos_panel.py para
+        # el motivo (hallazgo 3.3, auditoria 2026-09-05).
+        self._abriendo_dialogo = False
         self.setObjectName("ContentArea")
         self._setup_ui()
         # Carga inicial diferida para no bloquear el arranque
@@ -635,6 +638,9 @@ class ClientesPanel(QWidget):
         id_cliente = self._fila_seleccionada_id()
         if id_cliente is None:
             return
+        if self._abriendo_dialogo:
+            return
+        self._abriendo_dialogo = True
 
         session = self.session_factory()
         try:
@@ -656,3 +662,4 @@ class ClientesPanel(QWidget):
             MessageBox.critical(self, "Error", "No se pudo abrir el historial del cliente.")
         finally:
             session.close()
+            self._abriendo_dialogo = False

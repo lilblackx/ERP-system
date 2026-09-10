@@ -17,6 +17,14 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import app.ui.factura_form_dialog as ffd
+from tests.factories import (
+    crear_cliente,
+    crear_precio_producto,
+    crear_producto,
+    crear_usuario_admin,
+    crear_vendedor,
+    pago_contado,
+)
 
 
 def _mock_servicios(monkeypatch, productos=None):
@@ -353,3 +361,186 @@ def test_abrir_nuevo_cliente_cancelado_no_cambia_nada(qtbot, monkeypatch):
 
     creado.assert_not_called()
     assert dialogo.cliente_combo.currentData() is None
+
+
+# --- _tarea_emitir_factura: corre en el QThread de QueryWorker (hallazgo 2.5/#7 de la ---
+# auditoria -- emitir_factura() ya no bloquea el hilo de UI). Es una funcion de modulo sin
+# dependencias de Qt (solo session + datos primitivos), asi que se prueba igual que un
+# metodo de servicio, contra la base de datos real de test (no MagicMock).
+
+
+def test_tarea_emitir_factura_ok_devuelve_factura(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "20.00")
+    cliente = crear_cliente(db_session)
+
+    resultado = ffd._tarea_emitir_factura(
+        db_session,
+        id_usuario=admin.id_usuario,
+        id_cliente=cliente.id_cliente,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
+        fecha_vencimiento=None,
+        observaciones=None,
+        monto_descuento=Decimal("0.00"),
+        motivo_descuento=None,
+        id_autorizador_descuento=None,
+        dias_credito_personalizados=None,
+        motivo_dias_credito=None,
+        id_autorizador_dias_credito=None,
+        metodo_vuelto=None,
+        id_caja_vuelto=None,
+        id_cuenta_bancaria_vuelto=None,
+        referencia_vuelto=None,
+        id_autorizador_vuelto=None,
+    )
+
+    assert resultado["ok"] is True
+    assert resultado["factura"].total_venta == Decimal("100.00")
+
+
+def test_tarea_emitir_factura_value_error_devuelve_mensaje_sin_lanzar(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session)
+    cliente = crear_cliente(db_session)
+
+    resultado = ffd._tarea_emitir_factura(
+        db_session,
+        id_usuario=admin.id_usuario,
+        id_cliente=cliente.id_cliente,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="otra",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    assert resultado == {
+        "ok": False,
+        "titulo": "No se pudo emitir la factura",
+        "mensaje": "condicion_pago debe ser 'contado' o 'credito'",
+    }
+
+
+def test_tarea_emitir_factura_sin_permiso_devuelve_mensaje_sin_lanzar(db_session):
+    producto = crear_producto(db_session)
+    cliente = crear_cliente(db_session)
+
+    resultado = ffd._tarea_emitir_factura(
+        db_session,
+        id_usuario=None,
+        id_cliente=cliente.id_cliente,
+        id_vendedor=None,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    assert resultado == {
+        "ok": False,
+        "titulo": "Sin permiso",
+        "mensaje": "No tienes permiso para emitir facturas.",
+    }
+
+
+# --- _validar_y_aceptar: manejo async del resultado del worker (mismo hallazgo 2.5) -----
+# Se prueban los handlers/guardas directo (sin levantar un QThread real ni pegarle a la
+# base de datos) -- lo que importa aca es el cableado de señales/estado de UI, no
+# VentaService.emitir_factura en si (ya cubierto arriba y en test_ventas.py).
+
+
+def test_iniciar_y_finalizar_emision_ui_alternan_estado(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+
+    dialogo._iniciar_emision_ui()
+    assert dialogo._emitiendo_factura is True
+    assert dialogo.btn_emitir.isEnabled() is False
+    assert dialogo.btn_cancelar.isEnabled() is False
+    assert ffd.QApplication.overrideCursor() is not None
+
+    dialogo._finalizar_emision_ui()
+    assert dialogo._emitiendo_factura is False
+    assert dialogo.btn_emitir.isEnabled() is True
+    assert dialogo.btn_cancelar.isEnabled() is True
+    assert ffd.QApplication.overrideCursor() is None
+
+
+def test_reject_bloqueado_mientras_emite_factura(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    llamadas = []
+    monkeypatch.setattr(ffd.QDialog, "reject", lambda self: llamadas.append(True))
+
+    dialogo._emitiendo_factura = True
+    dialogo.reject()
+    assert llamadas == []
+
+    dialogo._emitiendo_factura = False
+    dialogo.reject()
+    assert llamadas == [True]
+
+
+def test_close_event_bloqueado_mientras_emite_factura(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    llamadas = []
+    monkeypatch.setattr(ffd.QDialog, "closeEvent", lambda self, event: llamadas.append(event))
+    evento = MagicMock()
+
+    dialogo._emitiendo_factura = True
+    dialogo.closeEvent(evento)
+    evento.ignore.assert_called_once()
+    assert llamadas == []
+
+    dialogo._emitiendo_factura = False
+    dialogo.closeEvent(evento)
+    assert llamadas == [evento]
+
+
+def test_on_resultado_emitir_factura_ok_acepta_dialogo(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo._iniciar_emision_ui()
+    aceptado = []
+    monkeypatch.setattr(dialogo, "accept", lambda: aceptado.append(True))
+    factura_fake = SimpleNamespace(id_factura=1, numero_factura="F-000001")
+
+    dialogo._on_resultado_emitir_factura({"ok": True, "factura": factura_fake})
+
+    assert dialogo.factura_emitida is factura_fake
+    assert aceptado == [True]
+    assert dialogo._emitiendo_factura is False
+    assert dialogo.btn_emitir.isEnabled() is True
+
+
+def test_on_resultado_emitir_factura_fallo_muestra_mensaje_y_no_cierra(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo._iniciar_emision_ui()
+    avisos = []
+    monkeypatch.setattr(ffd.MessageBox, "warning", lambda *a, **k: avisos.append((a, k)))
+    aceptado = []
+    monkeypatch.setattr(dialogo, "accept", lambda: aceptado.append(True))
+
+    dialogo._on_resultado_emitir_factura(
+        {"ok": False, "titulo": "Sin permiso", "mensaje": "No tienes permiso para emitir facturas."}
+    )
+
+    assert dialogo.factura_emitida is None
+    assert aceptado == []
+    assert dialogo._emitiendo_factura is False
+    assert dialogo.btn_emitir.isEnabled() is True
+    assert len(avisos) == 1
+    assert avisos[0][0][1:] == ("Sin permiso", "No tienes permiso para emitir facturas.")
+
+
+def test_on_error_emitir_factura_muestra_mensaje_generico(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo._iniciar_emision_ui()
+    avisos = []
+    monkeypatch.setattr(ffd.MessageBox, "critical", lambda *a, **k: avisos.append((a, k)))
+
+    dialogo._on_error_emitir_factura("TCP Provider: conexion perdida")
+
+    assert dialogo._emitiendo_factura is False
+    assert dialogo.btn_emitir.isEnabled() is True
+    assert avisos[0][0][1:] == ("Error", "No se pudo emitir la factura.")

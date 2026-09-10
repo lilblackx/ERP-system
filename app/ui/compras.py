@@ -1363,6 +1363,9 @@ class ComprasView(QWidget):
         self.usuario = usuario
         self.paginas = {"oc": 1, "nr": 1, "compra": 1}
         self.total_paginas = {"oc": 1, "nr": 1, "compra": 1}
+        # Guard anti-reentrancia para ver_detalle_oc() -- ver bancos_panel.py para el
+        # motivo (hallazgo 3.3, auditoria 2026-09-05).
+        self._abriendo_dialogo = False
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self._cargar_tab_actual)
@@ -1622,6 +1625,9 @@ class ComprasView(QWidget):
             self._abrir_detalle_oc(id_oc)
 
     def _abrir_detalle_oc(self, id_oc: int) -> None:
+        if self._abriendo_dialogo:
+            return
+        self._abriendo_dialogo = True
         session = self.session_factory()
         try:
             datos = CompraOCService.obtener_oc(session, id_oc, id_usuario=self.usuario.id_usuario)
@@ -1636,6 +1642,7 @@ class ComprasView(QWidget):
             MessageBox.critical(self, "Error", f"No se pudo abrir el detalle de la orden de compra: {exc}")
         finally:
             session.close()
+            self._abriendo_dialogo = False
 
     # ── Pestana: Recepciones ─────────────────────────────────────────────
 

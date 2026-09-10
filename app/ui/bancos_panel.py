@@ -84,6 +84,12 @@ class BancosPanel(QWidget):
         self.total_paginas = 1
         self.bancos = []
         self._search_timer = None
+        # Doble-click en la tabla dispara editar_banco(), que consulta la base y abre un
+        # QDialog modal -- entre el clic y que el modal capture el foco hay una ventana
+        # breve en la que la tabla sigue interactiva; sin este guard, un segundo
+        # doble-click en ese hueco reentra editar_banco() y abre dos dialogos apilados
+        # (hallazgo 3.3, auditoria 2026-09-05).
+        self._abriendo_dialogo = False
         self.setObjectName("ContentArea")
         self._setup_ui()
         # Cargar bancos inmediatamente
@@ -402,6 +408,9 @@ class BancosPanel(QWidget):
         banco_id = self._id_seleccionado()
         if banco_id is None:
             return
+        if self._abriendo_dialogo:
+            return
+        self._abriendo_dialogo = True
 
         session = self.session_factory()
         try:
@@ -428,6 +437,7 @@ class BancosPanel(QWidget):
             MessageBox.critical(self, "Error", "No se pudo guardar los cambios del banco.")
         finally:
             session.close()
+            self._abriendo_dialogo = False
 
     def cambiar_estado_banco(self):
         """Cambia el estado del banco seleccionado (ACTIVO <-> INACTIVO)."""

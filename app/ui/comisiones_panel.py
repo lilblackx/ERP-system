@@ -521,6 +521,9 @@ class ComisionesPanel(QWidget):
         self.grupos_filtrados: list[dict] = []
         self.total_pendiente = Decimal("0.00")
         self.total_liberada = Decimal("0.00")
+        # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
+        # el motivo (hallazgo 3.3, auditoria 2026-09-05).
+        self._abriendo_dialogo = False
 
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_datos)
@@ -953,6 +956,9 @@ class ComisionesPanel(QWidget):
         id_factura = self._fila_seleccionada_id_factura()
         if id_factura is None:
             return
+        if self._abriendo_dialogo:
+            return
+        self._abriendo_dialogo = True
 
         session = self.session_factory()
         try:
@@ -968,3 +974,4 @@ class ComisionesPanel(QWidget):
             MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
             session.close()
+            self._abriendo_dialogo = False

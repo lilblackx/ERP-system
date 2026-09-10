@@ -195,6 +195,9 @@ class FacturacionPanel(QWidget):
         self.pagina_actual = 1
         self.total_paginas = 1
         self._verificando_caja = False
+        # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
+        # el motivo (hallazgo 3.3, auditoria 2026-09-05).
+        self._abriendo_dialogo = False
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_facturas)
@@ -597,6 +600,9 @@ class FacturacionPanel(QWidget):
         id_factura = self._fila_seleccionada_id()
         if id_factura is None:
             return
+        if self._abriendo_dialogo:
+            return
+        self._abriendo_dialogo = True
 
         session = self.session_factory()
         try:
@@ -612,6 +618,7 @@ class FacturacionPanel(QWidget):
             MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
             session.close()
+            self._abriendo_dialogo = False
 
     def anular_factura_seleccionada(self) -> None:
         id_factura = self._fila_seleccionada_id()

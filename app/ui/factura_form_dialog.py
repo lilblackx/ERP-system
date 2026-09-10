@@ -33,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import FacturaVenta, Usuario
+from app.db.session import SessionLocal
 from app.services.clientes import create_cliente, list_clientes
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
@@ -68,10 +69,34 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_sombra,
 )
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
 _ETIQUETAS_METODO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO}
+
+
+def _tarea_emitir_factura(session: Session, id_usuario: int | None, **datos) -> dict:
+    """Corre en el QThread de QueryWorker (ver app/ui/workers.py), con su PROPIA sesion
+    (nunca self.session del dialogo -- las sesiones de SQLAlchemy no son thread-safe).
+    `datos` viene de FacturaFormDialog.get_data(), que solo devuelve tipos primitivos
+    (int/str/Decimal/dict), asi que es seguro pasarlo a traves del limite de hilos.
+
+    ValueError y PermisoDenegadoError son resultados de negocio esperables (stock
+    insuficiente, limite de credito, permiso faltante) -- se devuelven como parte del
+    resultado normal en vez de dejarlos propagar como excepcion de la tarea, para que el
+    dialogo pueda mostrar el mensaje especifico de cada uno (ver
+    _on_resultado_emitir_factura). Cualquier OTRA excepcion (conexion perdida, bug) si se
+    deja propagar: QueryWorker.run() ya la loguea y la reporta via la señal `error`."""
+    try:
+        factura = reintentar_en_deadlock(lambda: VentaService.emitir_factura(session, id_usuario=id_usuario, **datos))
+    except ValueError as exc:
+        return {"ok": False, "titulo": "No se pudo emitir la factura", "mensaje": str(exc)}
+    except PermisoDenegadoError:
+        return {"ok": False, "titulo": "Sin permiso", "mensaje": "No tienes permiso para emitir facturas."}
+    return {"ok": True, "factura": factura}
+
+
 _ETIQUETAS_MONEDA = {valor: etiqueta for etiqueta, valor in MONEDAS}
 
 # Metodo de vuelto (cambio) de una factura de contado: distinto de METODOS_PAGO (formas de
@@ -249,6 +274,12 @@ class FacturaFormDialog(QDialog):
         # carrito/formas de pago intactos, en vez de cerrarse y perder todo lo cargado
         # (hallazgo #3 de la auditoria de facturacion).
         self.factura_emitida: FacturaVenta | None = None
+        # Guarda la referencia mientras corre -- si se pierde, Python puede recolectar
+        # el QThread a mitad de ejecucion (ver docstring de QueryWorker). El flag bloquea
+        # reject()/closeEvent() mientras tanto: sin el, Esc o la X de la ventana podrian
+        # cerrar el dialogo (y liberar self.session) con la emision todavia en vuelo.
+        self._worker_emitir: QueryWorker | None = None
+        self._emitiendo_factura = False
         self._precio_lista_actual: float | None = None
         self._id_autorizador_descuento: int | None = None
         self._motivo_descuento: str | None = None
@@ -1543,35 +1574,56 @@ class FacturaFormDialog(QDialog):
         # Se emite ACA, no en el caller (ver self.factura_emitida) -- si emitir_factura
         # falla (una condicion cambio mientras se armaba la factura: stock consumido por
         # otra venta, limite de credito ya copado, etc.) el dialogo se queda abierto con
-        # todo lo cargado intacto en vez de perderse. setEnabled(False) evita un segundo
-        # click mientras la llamada esta en curso; setOverrideCursor dan feedback visual
-        # de que algo esta pasando durante la llamada sincrona a la base de datos
-        # (hallazgo #7 de la auditoria de facturacion) -- no reemplaza un QThread real
-        # (el resto de la ventana sigue sin responder), pero evita que parezca colgada.
-        self.btn_emitir.setEnabled(False)
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            self.factura_emitida = reintentar_en_deadlock(
-                lambda: VentaService.emitir_factura(self.session, id_usuario=self.id_usuario, **self.get_data())
-            )
-        except ValueError as exc:
-            self.session.rollback()
-            MessageBox.warning(self, "No se pudo emitir la factura", str(exc))
-            return
-        except PermisoDenegadoError:
-            self.session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
-            return
-        except Exception:
-            self.session.rollback()
-            logger.exception("Fallo al emitir factura")
-            MessageBox.critical(self, "Error", "No se pudo emitir la factura.")
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-            self.btn_emitir.setEnabled(True)
+        # todo lo cargado intacto en vez de perderse. Corre en un QThread real
+        # (_tarea_emitir_factura, con su propia sesion via SessionLocal) para no
+        # bloquear el resto de la ventana (hallazgo 2.5/#7 de la auditoria de
+        # facturacion) -- antes solo se deshabilitaba el boton y se ponia un
+        # WaitCursor, que evitaba el doble-click pero no el freeze real.
+        self._iniciar_emision_ui()
+        self._worker_emitir = QueryWorker(
+            SessionLocal, _tarea_emitir_factura, id_usuario=self.id_usuario, **self.get_data()
+        )
+        self._worker_emitir.resultado.connect(self._on_resultado_emitir_factura)
+        self._worker_emitir.error.connect(self._on_error_emitir_factura)
+        self._worker_emitir.start()
 
-        self.accept()
+    def _iniciar_emision_ui(self) -> None:
+        self._emitiendo_factura = True
+        self.btn_emitir.setEnabled(False)
+        self.btn_cancelar.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+    def _finalizar_emision_ui(self) -> None:
+        self._emitiendo_factura = False
+        QApplication.restoreOverrideCursor()
+        self.btn_emitir.setEnabled(True)
+        self.btn_cancelar.setEnabled(True)
+
+    def _on_resultado_emitir_factura(self, resultado: dict) -> None:
+        self._finalizar_emision_ui()
+        if resultado["ok"]:
+            self.factura_emitida = resultado["factura"]
+            self.accept()
+        else:
+            MessageBox.warning(self, resultado["titulo"], resultado["mensaje"])
+
+    def _on_error_emitir_factura(self, _mensaje: str) -> None:
+        # QueryWorker.run() ya logueo la excepcion completa (logger.exception) antes de
+        # emitir esta señal -- aca solo queda avisarle al usuario, sin exponerle detalle
+        # tecnico crudo (mismo criterio que el except Exception generico de antes).
+        self._finalizar_emision_ui()
+        MessageBox.critical(self, "Error", "No se pudo emitir la factura.")
+
+    def reject(self) -> None:
+        if getattr(self, "_emitiendo_factura", False):
+            return
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        if getattr(self, "_emitiendo_factura", False):
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def get_data(self) -> dict:
         es_credito = self.condicion_combo.currentData() == "credito"
