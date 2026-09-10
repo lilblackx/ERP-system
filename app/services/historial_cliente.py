@@ -5,7 +5,7 @@ from typing import Literal, TypedDict
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import CuentaPorCobrar, FacturaVenta, PagoCobro
+from app.db.models import CuentaBancaria, CuentaPorCobrar, FacturaVenta, PagoCobro
 
 
 class HistorialItem(TypedDict):
@@ -59,7 +59,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         .join(FacturaVenta, CuentaPorCobrar.id_factura == FacturaVenta.id_factura)
         .filter(FacturaVenta.id_cliente_factura == id_cliente)
         .options(
-            joinedload(PagoCobro.cuenta_bancaria),
+            joinedload(PagoCobro.cuenta_bancaria).joinedload(CuentaBancaria.banco),
             joinedload(PagoCobro.caja),
             joinedload(PagoCobro.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura),
         )
@@ -111,14 +111,60 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                 fecha_pago_str = pago.fecha_pago.strftime("%Y-%m-%d %H:%M") if pago.fecha_pago else ""
                 cxc_pago = pago.cuenta_por_cobrar
 
-                # Construir observaciones con bolivares y tasa si es transferencia
-                observaciones = f"Abono - {pago.metodo_pago}"
-                if pago.metodo_pago == "transferencia" and pago.monto_moneda_origen:
-                    tasa_bcv = pago.tasa.tasa_dolar_bcv if pago.tasa else None
-                    if tasa_bcv:
-                        observaciones += f" - Bs {pago.monto_moneda_origen:,.2f} @ {tasa_bcv:,.2f}"
+                # Construir observaciones con bolivares, tasa y banco
+                observaciones = ""
+
+                # Agregar bolivares y tasa si es transferencia
+                if pago.metodo_pago == "transferencia" and pago.monto_moneda_origen and pago.tasa:
+                    # Determinar qué tasa se usó comparando con los campos del registro
+                    tasa_usada = None
+                    tipo_tasa = ""
+
+                    if (
+                        pago.tasa.tasa_dolar_bcv
+                        and pago.monto / pago.monto_moneda_origen
+                        == float(pago.tasa.tasa_dolar_bcv)
+                    ):
+                        tasa_usada = pago.tasa.tasa_dolar_bcv
+                        tipo_tasa = "BCV"
+                    elif (
+                        pago.tasa.tasa_dolar_paralelo
+                        and pago.monto / pago.monto_moneda_origen
+                        == float(pago.tasa.tasa_dolar_paralelo)
+                    ):
+                        tasa_usada = pago.tasa.tasa_dolar_paralelo
+                        tipo_tasa = "Paralelo"
+                    elif (
+                        pago.tasa.tasa_cop
+                        and pago.monto / pago.monto_moneda_origen
+                        == float(pago.tasa.tasa_cop)
+                    ):
+                        tasa_usada = pago.tasa.tasa_cop
+                        tipo_tasa = "COP"
+
+                    if tasa_usada:
+                        observaciones = (
+                            f"Bs({pago.monto_moneda_origen:,.2f}) - {tipo_tasa}: {tasa_usada:,.2f}"
+                        )
                     else:
-                        observaciones += f" - Bs {pago.monto_moneda_origen:,.2f}"
+                        # Fallback: mostrar BCV si no se puede determinar
+                        if pago.tasa.tasa_dolar_bcv:
+                            observaciones = (
+                                f"Bs({pago.monto_moneda_origen:,.2f}) - BCV: "
+                                f"{pago.tasa.tasa_dolar_bcv:,.2f}"
+                            )
+                        else:
+                            observaciones = f"Bs({pago.monto_moneda_origen:,.2f})"
+
+                # Agregar banco si existe
+                if pago.cuenta_bancaria:
+                    banco = pago.cuenta_bancaria.banco
+                    nombre_banco = banco.nombre_banco if banco else ""
+                    if nombre_banco:
+                        if observaciones:
+                            observaciones += f" - ({nombre_banco})"
+                        else:
+                            observaciones = f"({nombre_banco})"
 
                 item_pago: HistorialItem = {
                     "tipo_transaccion": "pago",

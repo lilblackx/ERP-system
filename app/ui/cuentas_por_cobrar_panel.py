@@ -184,6 +184,7 @@ class PagoCobroDialog(QDialog):
         self._cajas_abiertas: list = []
         self._cuentas_activas: list = []
         self._tasas_disponibles: list = []
+        self._id_tasa_seleccionada: int | None = None
 
         self.setWindowTitle("Registrar Cobro")
         self.setFixedSize(420, 550)
@@ -357,15 +358,18 @@ class PagoCobroDialog(QDialog):
             # Agregar tasa BCV
             if tasa_registro.tasa_dolar_bcv:
                 etiqueta_bcv = f"BCV: {tasa_registro.tasa_dolar_bcv:,.2f}"
-                self.tasa_combo.addItem(etiqueta_bcv, float(tasa_registro.tasa_dolar_bcv))
+                self.tasa_combo.addItem(etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_registro.tasa_dolar_bcv)))
             # Agregar tasa paralelo
             if tasa_registro.tasa_dolar_paralelo:
                 etiqueta_paralelo = f"Paralelo: {tasa_registro.tasa_dolar_paralelo:,.2f}"
-                self.tasa_combo.addItem(etiqueta_paralelo, float(tasa_registro.tasa_dolar_paralelo))
+                self.tasa_combo.addItem(
+                    etiqueta_paralelo,
+                    (tasa_registro.id_tasa, float(tasa_registro.tasa_dolar_paralelo)),
+                )
             # Agregar tasa COP
             if tasa_registro.tasa_cop:
                 etiqueta_cop = f"COP: {tasa_registro.tasa_cop:,.2f}"
-                self.tasa_combo.addItem(etiqueta_cop, float(tasa_registro.tasa_cop))
+                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_registro.tasa_cop)))
 
         self.tasa_combo.blockSignals(False)
 
@@ -419,9 +423,11 @@ class PagoCobroDialog(QDialog):
 
     def _on_tasa_seleccionada(self) -> None:
         """Carga la tasa seleccionada del combo al campo de tasa."""
-        tasa = self.tasa_combo.currentData()
-        if tasa is not None:
-            self.tasa_input.set_value(tasa)
+        tasa_data = self.tasa_combo.currentData()
+        if tasa_data is not None:
+            id_tasa, valor_tasa = tasa_data
+            self._id_tasa_seleccionada = id_tasa
+            self.tasa_input.set_value(valor_tasa)
             self._calcular_monto_usd()
 
     def _calcular_monto_usd(self) -> None:
@@ -455,23 +461,13 @@ class PagoCobroDialog(QDialog):
             monto_moneda_origen = None
             id_tasa = None
 
-            # Si es transferencia, guardar bolivares y buscar tasa
+            # Si es transferencia, guardar bolivares y tasa seleccionada
             if metodo == "transferencia":
                 bolivares = self.bolivares_input.get_value() or Decimal("0")
-                tasa = self.tasa_input.get_value() or Decimal("0")
                 if bolivares > 0:
                     monto_moneda_origen = bolivares
-                    # Buscar la tasa en la base de datos
-                    from app.db.models import ControlDeTasa
-
-                    tasa_registro = (
-                        self.session.query(ControlDeTasa)
-                        .filter(ControlDeTasa.tasa_dolar_bcv == tasa)
-                        .order_by(ControlDeTasa.fecha_tasa.desc())
-                        .first()
-                    )
-                    if tasa_registro:
-                        id_tasa = tasa_registro.id_tasa
+                    # Usar el ID de la tasa seleccionada del combo
+                    id_tasa = self._id_tasa_seleccionada
 
             self.pago_creado = reintentar_en_deadlock(
                 lambda: PagoService.registrar_pago_cobro(

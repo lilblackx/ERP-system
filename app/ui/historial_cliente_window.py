@@ -270,10 +270,10 @@ class HistorialClienteWindow(QDialog):
             self.tabla,
             {
                 0: Qt.AlignmentFlag.AlignCenter,
-                1: Qt.AlignmentFlag.AlignLeft,
-                2: Qt.AlignmentFlag.AlignLeft,
-                3: Qt.AlignmentFlag.AlignLeft,
-                4: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignCenter,
+                2: Qt.AlignmentFlag.AlignCenter,
+                3: Qt.AlignmentFlag.AlignCenter,
+                4: Qt.AlignmentFlag.AlignCenter,
                 5: Qt.AlignmentFlag.AlignCenter,
                 6: Qt.AlignmentFlag.AlignCenter,
                 7: Qt.AlignmentFlag.AlignLeft,
@@ -297,7 +297,8 @@ class HistorialClienteWindow(QDialog):
         self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
@@ -489,26 +490,41 @@ class HistorialClienteWindow(QDialog):
             self.tabla.setItem(fila, 0, item_tipo)
 
             # N° Factura
-            self.tabla.setItem(fila, 1, QTableWidgetItem(item["numero_factura"]))
+            item_factura = QTableWidgetItem(item["numero_factura"])
+            item_factura.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 1, item_factura)
+
             # Fecha
-            self.tabla.setItem(fila, 2, QTableWidgetItem(item["fecha"]))
+            item_fecha = QTableWidgetItem(item["fecha"])
+            item_fecha.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 2, item_fecha)
 
             # Estado Factura
-            self.tabla.setItem(fila, 3, QTableWidgetItem(item["estado_factura"] or ""))
+            item_estado = QTableWidgetItem(item["estado_factura"] or "")
+            item_estado.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 3, item_estado)
+
             # Condición Pago
-            self.tabla.setItem(fila, 4, QTableWidgetItem(item["condicion_pago"] or ""))
+            item_condicion = QTableWidgetItem(item["condicion_pago"] or "")
+            item_condicion.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 4, item_condicion)
+
             # Método Pago
             metodo_pago = _etiqueta_metodo_pago(item["metodo_pago"])
             item_metodo = QTableWidgetItem(metodo_pago)
             item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 5, item_metodo)
+
             # Días Crédito
             dias = str(item["dias_credito"]) if item["dias_credito"] is not None else ""
             item_dias = QTableWidgetItem(dias)
             item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_dias)
+
             # Observaciones
-            self.tabla.setItem(fila, 7, QTableWidgetItem(item["observaciones"] or ""))
+            item_observaciones = QTableWidgetItem(item["observaciones"] or "")
+            item_observaciones.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 7, item_observaciones)
 
             # Monto (positivo para facturas, negativo para pagos)
             monto = f"${float(item['monto']):,.2f}"
