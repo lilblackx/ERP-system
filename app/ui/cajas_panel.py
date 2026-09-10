@@ -47,6 +47,7 @@ from app.ui.styles import (
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     TABLE_QSS,
     EstadoBadge,
@@ -56,7 +57,7 @@ from app.ui.styles import (
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "Caja", "Estado", "Cajero", "Apertura", "Saldo Apertura", "Saldo Cierre", "Movimientos"]
+COLS_VISIBLES = ["ID", "CAJA", "ESTADO", "CAJERO", "APERTURA", "SALDO APERTURA", "SALDO CIERRE", "MOVIMIENTOS"]
 
 DIALOG_STYLE_MOVIMIENTO = f"""
 QDialog {{
@@ -64,7 +65,7 @@ QDialog {{
     font-family: '{FONT_FAMILY}', Arial, sans-serif;
 }}
 QLineEdit, QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;

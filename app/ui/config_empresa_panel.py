@@ -40,6 +40,7 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     ICON_CHEVRON_DOWN_URL,
 )
 
@@ -229,7 +230,7 @@ class ConfigEmpresaPanel(QWidget):
         # (hallazgo del usuario, 2026-08-28).
         self.iva_porcentaje_input.setStyleSheet(f"""
             QLineEdit {{
-                background-color: #FFFFFF;
+                background-color: {COLOR_WHITE};
                 border: 1px solid {COLOR_BORDER};
                 border-radius: 6px;
                 padding: 0 4px;
@@ -274,7 +275,7 @@ class ConfigEmpresaPanel(QWidget):
         self.impresora_combo = QComboBox()
         self.impresora_combo.setStyleSheet(f"""
             QComboBox {{
-                background-color: #FFFFFF;
+                background-color: {COLOR_WHITE};
                 border: 1px solid {COLOR_BORDER};
                 border-radius: 6px;
                 padding: 6px 28px 6px 12px;

@@ -34,7 +34,9 @@ from app.ui.styles import (
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     TABLE_QSS,
     alinear_encabezados,
@@ -53,7 +55,7 @@ QWidget#SectionCard {{
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_DANGER};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -65,7 +67,7 @@ QPushButton#BtnPrimary:hover {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_TABLE_HEADER};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;

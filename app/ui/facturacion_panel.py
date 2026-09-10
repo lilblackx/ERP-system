@@ -67,7 +67,7 @@ from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "N° Factura", "Cliente", "Vendedor", "Fecha", "Condición", "Método Pago", "Total", "Estado"]
+COLS_VISIBLES = ["ID", "N° FACTURA", "CLIENTE", "VENDEDOR", "FECHA", "CONDICIÓN", "MÉTODO PAGO", "TOTAL", "ESTADO"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 

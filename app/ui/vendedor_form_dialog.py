@@ -21,16 +21,23 @@ from app.services.rutas import RutaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     aplicar_sombra,
 )
@@ -48,7 +55,7 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLabel.SectionTitle {{
@@ -59,7 +66,7 @@ QLabel.SectionTitle {{
     padding-bottom: 2px;
 }}
 QLineEdit, QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -69,15 +76,15 @@ QLineEdit, QComboBox {{
 }}
 QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
 }}
 QLineEdit::placeholder {{
-    color: #94A3B8;
+    color: {COLOR_TEXT_LIGHT};
     font-size: 12px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -92,7 +99,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -140,7 +147,8 @@ class VendedorFormDialog(QDialog):
         fa_icon_name = "fa5s.user-edit" if self.vendedor else "fa5s.user-tie"
         icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -181,7 +189,7 @@ class VendedorFormDialog(QDialog):
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
 
-        lbl_nombre = QLabel("Nombre Completo <span style='color: #DC2626;'>*</span>")
+        lbl_nombre = QLabel(f"Nombre Completo {ASTERISCO_REQUERIDO}")
         lbl_nombre.setProperty("class", "FormLabel")
         self.nombre_input = QLineEdit()
         self.nombre_input.setPlaceholderText("Ej: Juan Pérez")
@@ -189,7 +197,7 @@ class VendedorFormDialog(QDialog):
         grid.addWidget(lbl_nombre, 0, 0, 1, 2)
         grid.addWidget(self.nombre_input, 1, 0, 1, 2)
 
-        lbl_codigo = QLabel("Código <span style='color: #DC2626;'>*</span>")
+        lbl_codigo = QLabel(f"Código {ASTERISCO_REQUERIDO}")
         lbl_codigo.setProperty("class", "FormLabel")
         self.codigo_input = QLineEdit()
         self.codigo_input.setPlaceholderText("Ej: VEN-001")
@@ -198,7 +206,7 @@ class VendedorFormDialog(QDialog):
         grid.addWidget(lbl_codigo, 2, 0)
         grid.addWidget(self.codigo_input, 3, 0)
 
-        lbl_id = QLabel("Identificación <span style='color: #DC2626;'>*</span>")
+        lbl_id = QLabel(f"Identificación {ASTERISCO_REQUERIDO}")
         lbl_id.setProperty("class", "FormLabel")
         self.identificacion_input = QLineEdit()
         self.identificacion_input.setPlaceholderText("Ej: V-12345678")
@@ -223,7 +231,7 @@ class VendedorFormDialog(QDialog):
         grid.addWidget(lbl_email, 4, 1)
         grid.addWidget(self.email_input, 5, 1)
 
-        lbl_ruta = QLabel("Ruta <span style='color: #DC2626;'>*</span>")
+        lbl_ruta = QLabel(f"Ruta {ASTERISCO_REQUERIDO}")
         lbl_ruta.setProperty("class", "FormLabel")
         self.ruta_combo = QComboBox()
         self.ruta_combo.setFixedHeight(32)

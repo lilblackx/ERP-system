@@ -43,6 +43,8 @@ from app.ui.styles import (
     COLOR_SUCCESS,
     COLOR_TABLE_HOVER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHECK_URL,
     ICON_CHEVRON_DOWN_URL,
@@ -59,13 +61,13 @@ QWidget#PopupCard {{
 QLabel#FiltroLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
     border: none;
     background: transparent;
 }}
 QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 24px 5px 10px;

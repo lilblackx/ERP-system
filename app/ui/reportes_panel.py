@@ -42,12 +42,14 @@ from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_FIELD_BG,
     COLOR_INFO,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_LIGHT,
     COLOR_SUCCESS,
@@ -57,6 +59,7 @@ from app.ui.styles import (
     COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     TABLE_QSS,
@@ -302,7 +305,7 @@ QCalendarWidget QWidget#qt_calendar_navigationbar {{
     border-top-right-radius: 8px;
 }}
 QCalendarWidget QToolButton {{
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     background-color: transparent;
     border: none;
     border-radius: 4px;
@@ -325,7 +328,7 @@ QCalendarWidget QAbstractItemView:enabled {{
     background-color: {COLOR_CARD_BG};
     color: {COLOR_TEXT_DARK};
     selection-background-color: {COLOR_PRIMARY};
-    selection-color: #FFFFFF;
+    selection-color: {COLOR_WHITE};
     outline: none;
 }}
 QCalendarWidget QAbstractItemView:disabled {{
@@ -702,7 +705,8 @@ class ReportesPanel(QWidget):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.chart-bar", color=COLOR_PRIMARY).pixmap(28, 28))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 2px solid #BFDBFE; border-radius: 12px; padding: 8px;"
+            f"background-color: {COLOR_INFO_BG}; border: 2px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 12px; padding: 8px;"
         )
         icon_lbl.setFixedSize(48, 48)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)

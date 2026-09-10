@@ -56,7 +56,7 @@ from app.ui.usuario_form_dialog import UsuarioFormDialog
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "Usuario", "Nombre", "Rol", "Estado"]
+COLS_VISIBLES = ["ID", "USUARIO", "NOMBRE", "ROL", "ESTADO"]
 COL_ID_INTERNO = 0  # oculto
 
 

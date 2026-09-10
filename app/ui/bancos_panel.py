@@ -53,7 +53,7 @@ from app.ui.toolbar_popups import BotonFiltros
 logger = logging.getLogger(__name__)
 
 # Columnas visibles en la tabla (índice oculto 0 = ID interno)
-COLS_VISIBLES = ["ID", "Código", "Nombre", "Tipo", "RIF", "Teléfono", "Correo", "Estado"]
+COLS_VISIBLES = ["ID", "CÓDIGO", "NOMBRE", "TIPO", "RIF", "TELÉFONO", "CORREO", "ESTADO"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 

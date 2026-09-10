@@ -38,6 +38,7 @@ from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
@@ -98,7 +99,8 @@ class RolesPermisosPanel(QWidget):
         self.lista_roles.setStyleSheet(
             "QListWidget { border: none; font-size: 13px; }"
             "QListWidget::item { padding: 8px 6px; border-radius: 6px; }"
-            f"QListWidget::item:selected {{ background-color: #EFF6FF; color: {COLOR_PRIMARY}; font-weight: 600; }}"
+            f"QListWidget::item:selected {{ background-color: {COLOR_INFO_BG}; "
+            f"color: {COLOR_PRIMARY}; font-weight: 600; }}"
         )
         self.lista_roles.currentItemChanged.connect(self._on_rol_seleccionado)
         layout.addWidget(self.lista_roles, stretch=1)

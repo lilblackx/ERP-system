@@ -36,7 +36,10 @@ from app.ui.styles import (
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
 )
 
@@ -64,11 +67,11 @@ QDialog {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLineEdit {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 6px 10px;
@@ -81,7 +84,7 @@ QLineEdit:focus {{
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -96,7 +99,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;

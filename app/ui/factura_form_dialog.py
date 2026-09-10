@@ -49,18 +49,26 @@ from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS, PagoLineaDialog
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHT,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     TABLE_QSS,
@@ -130,7 +138,7 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLabel.SectionTitle {{
@@ -141,7 +149,7 @@ QLabel.SectionTitle {{
     padding-bottom: 2px;
 }}
 QLineEdit, QComboBox, QDateEdit {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -151,10 +159,10 @@ QLineEdit, QComboBox, QDateEdit {{
 }}
 QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
 }}
 QLineEdit::placeholder {{
-    color: #94A3B8;
+    color: {COLOR_TEXT_LIGHT};
     font-size: 12px;
 }}
 QComboBox::drop-down, QDateEdit::drop-down {{
@@ -168,15 +176,15 @@ QComboBox::down-arrow, QDateEdit::down-arrow {{
     margin-right: 6px;
 }}
 QComboBox QAbstractItemView {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
-    selection-background-color: #DBEAFE;
+    selection-background-color: {COLOR_BLUE_LIGHT};
     selection-color: {COLOR_TEXT_DARK};
     padding: 4px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -191,7 +199,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -203,9 +211,9 @@ QPushButton#BtnSecondary:hover {{
     color: {COLOR_TEXT_DARK};
 }}
 QPushButton#BtnAgregar {{
-    background-color: #EFF6FF;
+    background-color: {COLOR_INFO_BG};
     color: {COLOR_PRIMARY};
-    border: 1px solid #BFDBFE;
+    border: 1px solid {COLOR_BLUE_LIGHTER};
     border-radius: 6px;
     padding: 5px 14px;
     font-size: 13px;
@@ -236,8 +244,8 @@ QPushButton#BtnQuitarIcono:hover {{
     border-radius: 4px;
 }}
 QPushButton#BtnNuevoCliente {{
-    background-color: #EFF6FF;
-    border: 1px solid #BFDBFE;
+    background-color: {COLOR_INFO_BG};
+    border: 1px solid {COLOR_BLUE_LIGHTER};
     border-radius: 6px;
 }}
 QPushButton#BtnNuevoCliente:hover {{
@@ -372,7 +380,8 @@ class FacturaFormDialog(QDialog):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.file-invoice-dollar", color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -474,7 +483,7 @@ class FacturaFormDialog(QDialog):
             grid.setColumnStretch(col, 1)
 
         # Cliente (busqueda + combo)
-        lbl_cliente = QLabel("Cliente <span style='color: #DC2626;'>*</span>")
+        lbl_cliente = QLabel(f"Cliente {ASTERISCO_REQUERIDO}")
         lbl_cliente.setProperty("class", "FormLabel")
         self.cliente_buscar_input = QLineEdit()
         self.cliente_buscar_input.setPlaceholderText("Buscar cliente por nombre o identificación…")
@@ -508,7 +517,7 @@ class FacturaFormDialog(QDialog):
         grid.addWidget(self.cliente_combo, 2, 0, 1, 2)
 
         # Vendedor
-        lbl_vendedor = QLabel("Vendedor <span style='color: #DC2626;'>*</span>")
+        lbl_vendedor = QLabel(f"Vendedor {ASTERISCO_REQUERIDO}")
         lbl_vendedor.setProperty("class", "FormLabel")
         self.vendedor_combo = QComboBox()
         self.vendedor_combo.setFixedHeight(32)
@@ -516,7 +525,7 @@ class FacturaFormDialog(QDialog):
         grid.addWidget(self.vendedor_combo, 1, 2, 2, 1)
 
         # Condicion de pago
-        lbl_condicion = QLabel("Condición de Pago <span style='color: #DC2626;'>*</span>")
+        lbl_condicion = QLabel(f"Condición de Pago {ASTERISCO_REQUERIDO}")
         lbl_condicion.setProperty("class", "FormLabel")
         self.condicion_combo = QComboBox()
         self.condicion_combo.setFixedHeight(32)

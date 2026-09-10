@@ -52,7 +52,7 @@ from app.ui.workers import QueryWorker
 logger = logging.getLogger(__name__)
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
-COLS_VISIBLES = ["ID", "Banco", "Número de Cuenta", "Tipo", "Titular", "Identificación", "Saldo", "Estado"]
+COLS_VISIBLES = ["ID", "BANCO", "NÚMERO DE CUENTA", "TIPO", "TITULAR", "IDENTIFICACIÓN", "SALDO", "ESTADO"]
 
 ESTADOS_FILTRO = [
     ("Todos los estados", None),

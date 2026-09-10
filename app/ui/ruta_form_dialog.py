@@ -17,16 +17,23 @@ from app.db.models import Ruta
 from app.ui.mapa_widget import MapaWidget
 from app.ui.message_box import MessageBox
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     aplicar_sombra,
 )
@@ -44,7 +51,7 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLabel.SectionTitle {{
@@ -55,7 +62,7 @@ QLabel.SectionTitle {{
     padding-bottom: 2px;
 }}
 QLineEdit {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -65,15 +72,15 @@ QLineEdit {{
 }}
 QLineEdit:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
 }}
 QLineEdit::placeholder {{
-    color: #94A3B8;
+    color: {COLOR_TEXT_LIGHT};
     font-size: 12px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -88,7 +95,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -100,7 +107,7 @@ QPushButton#BtnSecondary:hover {{
     color: {COLOR_TEXT_DARK};
 }}
 QPushButton#BtnZona {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     color: {COLOR_TEXT_DARK};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -174,7 +181,8 @@ class RutaFormDialog(QDialog):
         fa_icon_name = "fa5s.edit" if self.ruta else "fa5s.draw-polygon"
         icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -210,7 +218,7 @@ class RutaFormDialog(QDialog):
         titulo_card.setProperty("class", "SectionTitle")
         card_layout.addWidget(titulo_card)
 
-        lbl_nombre = QLabel("Nombre <span style='color: #DC2626;'>*</span>")
+        lbl_nombre = QLabel(f"Nombre {ASTERISCO_REQUERIDO}")
         lbl_nombre.setProperty("class", "FormLabel")
         self.nombre_input = QLineEdit()
         self.nombre_input.setPlaceholderText("Ej: Ruta Centro")
@@ -240,7 +248,7 @@ class RutaFormDialog(QDialog):
         card_mapa_layout.setContentsMargins(16, 12, 16, 14)
         card_mapa_layout.setSpacing(8)
 
-        lbl_zona = QLabel("ZONA DE COBERTURA <span style='color: #DC2626;'>*</span>")
+        lbl_zona = QLabel(f"ZONA DE COBERTURA {ASTERISCO_REQUERIDO}")
         lbl_zona.setProperty("class", "SectionTitle")
         lbl_zona.setTextFormat(Qt.TextFormat.RichText)
         card_mapa_layout.addWidget(lbl_zona)

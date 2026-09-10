@@ -28,16 +28,22 @@ from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     ComboBoxSinScroll,
@@ -57,11 +63,11 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -87,7 +93,7 @@ QComboBox::down-arrow {{
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -102,7 +108,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -153,7 +159,8 @@ class AplicarNotaCreditoDialog(QDialog):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.receipt", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(34, 34)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -171,7 +178,7 @@ class AplicarNotaCreditoDialog(QDialog):
         card_layout.setContentsMargins(16, 14, 16, 14)
         card_layout.setSpacing(8)
 
-        lbl_nota = QLabel("Nota de crédito <span style='color: #DC2626;'>*</span>")
+        lbl_nota = QLabel(f"Nota de crédito {ASTERISCO_REQUERIDO}")
         lbl_nota.setProperty("class", "FormLabel")
         self.nota_combo = ComboBoxSinScroll()
         self.nota_combo.setFixedHeight(32)
@@ -182,7 +189,7 @@ class AplicarNotaCreditoDialog(QDialog):
         card_layout.addWidget(lbl_nota)
         card_layout.addWidget(self.nota_combo)
 
-        lbl_factura = QLabel("Factura destino <span style='color: #DC2626;'>*</span>")
+        lbl_factura = QLabel(f"Factura destino {ASTERISCO_REQUERIDO}")
         lbl_factura.setProperty("class", "FormLabel")
         self.factura_combo = ComboBoxSinScroll()
         self.factura_combo.setFixedHeight(32)
@@ -193,7 +200,7 @@ class AplicarNotaCreditoDialog(QDialog):
         card_layout.addWidget(lbl_factura)
         card_layout.addWidget(self.factura_combo)
 
-        lbl_monto = QLabel("Monto a aplicar <span style='color: #DC2626;'>*</span>")
+        lbl_monto = QLabel(f"Monto a aplicar {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
         self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)

@@ -19,16 +19,22 @@ from PySide6.QtWidgets import (
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     aplicar_sombra,
 )
@@ -46,12 +52,12 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -66,7 +72,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -104,7 +110,8 @@ class TasaRegistroDialog(QDialog):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(34, 34)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -128,7 +135,7 @@ class TasaRegistroDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
 
-        lbl_bcv = QLabel("Tasa BCV (Bs./USD) <span style='color: #DC2626;'>*</span>")
+        lbl_bcv = QLabel(f"Tasa BCV (Bs./USD) {ASTERISCO_REQUERIDO}")
         lbl_bcv.setProperty("class", "FormLabel")
         self.bcv_input = NumericLineEdit(NumericFieldType.RATE, min_value=Decimal("0"), max_value=Decimal("9999999.99"))
         self.bcv_input.setFixedHeight(32)

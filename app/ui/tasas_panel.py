@@ -53,7 +53,7 @@ from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["Fecha", "Tasa BCV", "Dólar Paralelo", "Brecha"]
+COLS_VISIBLES = ["FECHA", "TASA BCV", "DÓLAR PARALELO", "BRECHA"]
 
 
 def _filas_tasas_query(session, limite, id_usuario) -> list[list]:

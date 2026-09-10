@@ -92,11 +92,23 @@ COLOR_FIELD_BG = "#F1F5F9"
 COLOR_TEXT_DARK = "#1E293B"
 COLOR_TEXT_MUTED = "#64748B"
 COLOR_TEXT_LIGHT = "#94A3B8"
+COLOR_TEXT_DARK_SLATE = "#334155"  # Tono más oscuro para títulos
+COLOR_TEXT_MEDIUM = "#475569"  # Tono medio para iconos/labels
 
 COLOR_SUCCESS = "#16A34A"
+COLOR_SUCCESS_BG = "#DCFCE7"
 COLOR_WARNING = "#D97706"
 COLOR_DANGER = "#DC2626"
+COLOR_DANGER_BG = "#FEE2E2"
 COLOR_INFO = "#0284C7"
+COLOR_INFO_BG = "#EFF6FF"
+
+COLOR_WHITE = "#FFFFFF"
+COLOR_BLUE_LIGHT = "#DBEAFE"
+COLOR_BLUE_LIGHTER = "#BFDBFE"
+
+# HTML para campo requerido (asterisco rojo) — centralizado para evitar repetición
+ASTERISCO_REQUERIDO = f"<span style='color: {COLOR_DANGER};'>*</span>"
 
 # Antes #F1F5F9 (identico a COLOR_FIELD_BG) -- se sube un escalon para que el
 # encabezado de tabla se distinga de los chips de campo y del fondo de pagina.

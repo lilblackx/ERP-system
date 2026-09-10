@@ -28,16 +28,22 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
     COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
@@ -56,11 +62,11 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLineEdit, QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -90,7 +96,7 @@ QComboBox::down-arrow {{
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -105,7 +111,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -184,7 +190,8 @@ class PagoLineaDialog(QDialog):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.money-bill-wave", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(34, 34)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -202,7 +209,7 @@ class PagoLineaDialog(QDialog):
         card_layout.setContentsMargins(16, 14, 16, 14)
         card_layout.setSpacing(8)
 
-        lbl_metodo = QLabel("Método de Pago <span style='color: #DC2626;'>*</span>")
+        lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
         lbl_metodo.setProperty("class", "FormLabel")
         self.metodo_combo = QComboBox()
         self.metodo_combo.setFixedHeight(32)
@@ -226,7 +233,7 @@ class PagoLineaDialog(QDialog):
         col_moneda.addWidget(self.moneda_combo)
 
         col_monto = QVBoxLayout()
-        lbl_monto = QLabel("Monto <span style='color: #DC2626;'>*</span>")
+        lbl_monto = QLabel(f"Monto {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
         self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)
@@ -242,7 +249,7 @@ class PagoLineaDialog(QDialog):
         fila_monto.addLayout(col_monto, stretch=1)
         card_layout.addLayout(fila_monto)
 
-        lbl_origen = QLabel("Origen <span style='color: #DC2626;'>*</span>")
+        lbl_origen = QLabel(f"Origen {ASTERISCO_REQUERIDO}")
         lbl_origen.setProperty("class", "FormLabel")
         self.origen_combo = QComboBox()
         self.origen_combo.setFixedHeight(32)

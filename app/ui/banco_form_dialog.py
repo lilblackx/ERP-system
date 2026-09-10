@@ -17,16 +17,24 @@ from sqlalchemy.orm import Session
 from app.db.models import Banco
 from app.ui.message_box import MessageBox
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHT,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
@@ -45,7 +53,7 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 6px;
 }}
 QLabel.SectionTitle {{
@@ -56,7 +64,7 @@ QLabel.SectionTitle {{
     padding-bottom: 2px;
 }}
 QLineEdit, QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -66,10 +74,10 @@ QLineEdit, QComboBox {{
 }}
 QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
 }}
 QLineEdit::placeholder {{
-    color: #94A3B8;
+    color: {COLOR_TEXT_LIGHT};
     font-size: 12px;
 }}
 QComboBox::drop-down {{
@@ -83,15 +91,15 @@ QComboBox::down-arrow {{
     margin-right: 6px;
 }}
 QComboBox QAbstractItemView {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
-    selection-background-color: #DBEAFE;
+    selection-background-color: {COLOR_BLUE_LIGHT};
     selection-color: {COLOR_TEXT_DARK};
     padding: 4px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -106,7 +114,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -152,7 +160,8 @@ class BancoFormDialog(QDialog):
         fa_icon_name = "fa5s.university" if self.banco else "fa5s.plus-circle"
         icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -196,7 +205,7 @@ class BancoFormDialog(QDialog):
         grid.setColumnStretch(1, 1)
 
         # Código del Banco
-        lbl_cod = QLabel("Código del Banco <span style='color: #DC2626;'>*</span>")
+        lbl_cod = QLabel(f"Código del Banco {ASTERISCO_REQUERIDO}")
         lbl_cod.setProperty("class", "FormLabel")
         self.codigo_input = QLineEdit()
         self.codigo_input.setPlaceholderText("Ej: 0102")
@@ -206,7 +215,7 @@ class BancoFormDialog(QDialog):
         grid.addWidget(self.codigo_input, 1, 0)
 
         # Tipo de Banco
-        lbl_tipo = QLabel("Tipo de Banco <span style='color: #DC2626;'>*</span>")
+        lbl_tipo = QLabel(f"Tipo de Banco {ASTERISCO_REQUERIDO}")
         lbl_tipo.setProperty("class", "FormLabel")
         self.tipo_combo = QComboBox()
         self.tipo_combo.addItems(["AHORRO", "CORRIENTE"])
@@ -215,7 +224,7 @@ class BancoFormDialog(QDialog):
         grid.addWidget(self.tipo_combo, 1, 1)
 
         # Nombre del Banco
-        lbl_nom = QLabel("Nombre del Banco <span style='color: #DC2626;'>*</span>")
+        lbl_nom = QLabel(f"Nombre del Banco {ASTERISCO_REQUERIDO}")
         lbl_nom.setProperty("class", "FormLabel")
         self.nombre_input = QLineEdit()
         self.nombre_input.setPlaceholderText("Ej: Banco de Venezuela")
@@ -224,7 +233,7 @@ class BancoFormDialog(QDialog):
         grid.addWidget(self.nombre_input, 3, 0, 1, 2)
 
         # Identificación (RIF)
-        lbl_rif = QLabel("Identificación (RIF) <span style='color: #DC2626;'>*</span>")
+        lbl_rif = QLabel(f"Identificación (RIF) {ASTERISCO_REQUERIDO}")
         lbl_rif.setProperty("class", "FormLabel")
         self.identificacion_input = QLineEdit()
         self.identificacion_input.setPlaceholderText("Ej: J-12345678-9")
@@ -297,14 +306,14 @@ class BancoFormDialog(QDialog):
         footer_layout.addStretch()
 
         self.btn_cancelar = QPushButton("Cancelar")
-        self.btn_cancelar.setIcon(qta.icon("fa5s.times", color="#475569"))
+        self.btn_cancelar.setIcon(qta.icon("fa5s.times", color=COLOR_TEXT_MEDIUM))
         self.btn_cancelar.setObjectName("BtnSecondary")
         self.btn_cancelar.setFixedHeight(36)
         self.btn_cancelar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancelar.clicked.connect(self.reject)
 
         self.btn_guardar = QPushButton("Guardar Banco")
-        self.btn_guardar.setIcon(qta.icon("fa5s.save", color="#FFFFFF"))
+        self.btn_guardar.setIcon(qta.icon("fa5s.save", color=COLOR_WHITE))
         self.btn_guardar.setObjectName("BtnPrimary")
         self.btn_guardar.setFixedHeight(36)
         self.btn_guardar.setCursor(Qt.CursorShape.PointingHandCursor)

@@ -58,21 +58,28 @@ from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
+    COLOR_BLUE_LIGHT,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     SEARCH_QSS,
@@ -124,7 +131,7 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLabel.SectionTitle {{
@@ -135,7 +142,7 @@ QLabel.SectionTitle {{
     padding-bottom: 2px;
 }}
 QLineEdit, QComboBox, QDateEdit {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -145,7 +152,7 @@ QLineEdit, QComboBox, QDateEdit {{
 }}
 QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
 }}
 QComboBox::drop-down, QDateEdit::drop-down {{
     border: none;
@@ -158,15 +165,15 @@ QComboBox::down-arrow, QDateEdit::down-arrow {{
     margin-right: 6px;
 }}
 QComboBox QAbstractItemView {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
-    selection-background-color: #DBEAFE;
+    selection-background-color: {COLOR_BLUE_LIGHT};
     selection-color: {COLOR_TEXT_DARK};
     padding: 4px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -181,7 +188,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -193,9 +200,9 @@ QPushButton#BtnSecondary:hover {{
     color: {COLOR_TEXT_DARK};
 }}
 QPushButton#BtnAgregar {{
-    background-color: #EFF6FF;
+    background-color: {COLOR_INFO_BG};
     color: {COLOR_PRIMARY};
-    border: 1px solid #BFDBFE;
+    border: 1px solid {COLOR_BLUE_LIGHTER};
     border-radius: 6px;
     padding: 5px 14px;
     font-size: 13px;
@@ -272,7 +279,8 @@ class OrdenCompraFormDialog(QDialog):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.file-signature", color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -310,7 +318,7 @@ class OrdenCompraFormDialog(QDialog):
         for col in range(2):
             grid.setColumnStretch(col, 1)
 
-        lbl_proveedor = QLabel("Proveedor <span style='color: #DC2626;'>*</span>")
+        lbl_proveedor = QLabel(f"Proveedor {ASTERISCO_REQUERIDO}")
         lbl_proveedor.setProperty("class", "FormLabel")
         self.proveedor_buscar_input = QLineEdit()
         self.proveedor_buscar_input.setPlaceholderText("Buscar proveedor…")
@@ -708,7 +716,7 @@ class EnmiendaOCDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        lbl_tipo = QLabel("Tipo de Cambio <span style='color: #DC2626;'>*</span>")
+        lbl_tipo = QLabel(f"Tipo de Cambio {ASTERISCO_REQUERIDO}")
         lbl_tipo.setProperty("class", "FormLabel")
         self.tipo_combo = QComboBox()
         self.tipo_combo.addItem("Cantidad", "CANTIDAD")
@@ -749,7 +757,7 @@ class EnmiendaOCDialog(QDialog):
         layout.addWidget(self.lbl_fecha)
         layout.addWidget(self.fecha_nueva_input)
 
-        lbl_motivo = QLabel("Motivo <span style='color: #DC2626;'>*</span>")
+        lbl_motivo = QLabel(f"Motivo {ASTERISCO_REQUERIDO}")
         lbl_motivo.setProperty("class", "FormLabel")
         self.motivo_input = QLineEdit()
         self.motivo_input.setPlaceholderText("Ej: acuerdo con el proveedor por retraso de despacho")
@@ -1079,7 +1087,7 @@ class NotaDevolucionFormDialog(QDialog):
                 self._spins.append(spin)
             root.addWidget(self.tabla, stretch=1)
 
-        lbl_motivo = QLabel("Motivo <span style='color: #DC2626;'>*</span>")
+        lbl_motivo = QLabel(f"Motivo {ASTERISCO_REQUERIDO}")
         lbl_motivo.setProperty("class", "FormLabel")
         self.motivo_combo = QComboBox()
         for motivo in MOTIVOS_DEVOLUCION:

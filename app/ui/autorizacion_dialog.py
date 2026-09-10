@@ -27,6 +27,7 @@ from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.permisos import PermisoDenegadoError, require_permiso
 from app.ui.message_box import MessageBox
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
     COLOR_BORDER,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
@@ -36,7 +37,10 @@ from app.ui.styles import (
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
 )
 
@@ -48,11 +52,11 @@ QDialog {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLineEdit {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 6px 10px;
@@ -65,7 +69,7 @@ QLineEdit:focus {{
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -80,7 +84,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -157,20 +161,20 @@ class AutorizacionDialog(QDialog):
         header.addLayout(titulos, stretch=1)
         root.addLayout(header)
 
-        lbl_motivo = QLabel(f"{motivo_label} <span style='color: #DC2626;'>*</span>")
+        lbl_motivo = QLabel(f"{motivo_label} {ASTERISCO_REQUERIDO}")
         lbl_motivo.setProperty("class", "FormLabel")
         self.motivo_input = QLineEdit()
         self.motivo_input.setPlaceholderText("Ej. cliente frecuente…")
         root.addWidget(lbl_motivo)
         root.addWidget(self.motivo_input)
 
-        lbl_usuario = QLabel("Usuario del supervisor <span style='color: #DC2626;'>*</span>")
+        lbl_usuario = QLabel(f"Usuario del supervisor {ASTERISCO_REQUERIDO}")
         lbl_usuario.setProperty("class", "FormLabel")
         self.usuario_input = QLineEdit()
         root.addWidget(lbl_usuario)
         root.addWidget(self.usuario_input)
 
-        lbl_clave = QLabel("Clave <span style='color: #DC2626;'>*</span>")
+        lbl_clave = QLabel(f"Clave {ASTERISCO_REQUERIDO}")
         lbl_clave.setProperty("class", "FormLabel")
         self.clave_input = QLineEdit()
         self.clave_input.setEchoMode(QLineEdit.EchoMode.Password)

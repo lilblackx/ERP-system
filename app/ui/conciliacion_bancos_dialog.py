@@ -25,8 +25,11 @@ from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
+    COLOR_BLUE_LIGHTER,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_MEDIUM,
     TABLE_QSS,
     alinear_encabezados,
 )
@@ -65,7 +68,8 @@ class ConciliacionBancosDialog(QDialog):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.balance-scale", color=COLOR_PRIMARY).pixmap(28, 28))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 2px solid #BFDBFE; border-radius: 10px; padding: 8px;"
+            f"background-color: {COLOR_INFO_BG}; border: 2px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 10px; padding: 8px;"
         )
         icon_lbl.setFixedSize(44, 44)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -120,7 +124,7 @@ class ConciliacionBancosDialog(QDialog):
         resumen_layout.setSpacing(12)
 
         self.lbl_saldo_inicial = QLabel("Saldo Inicial: $0.00")
-        self.lbl_saldo_inicial.setStyleSheet("font-size: 14px; font-weight: 600; color: #475569;")
+        self.lbl_saldo_inicial.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         resumen_layout.addWidget(self.lbl_saldo_inicial, 0, 0)
 
         self.lbl_total_entradas = QLabel("Total Entradas: $0.00")
@@ -135,7 +139,7 @@ class ConciliacionBancosDialog(QDialog):
         saldo_final_layout = QVBoxLayout()
         saldo_final_layout.setSpacing(4)
         lbl_saldo_final = QLabel("Saldo Final (Manual):")
-        lbl_saldo_final.setStyleSheet("font-size: 13px; font-weight: 600; color: #475569;")
+        lbl_saldo_final.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         self.saldo_final_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, prefix="$ ")
         self.saldo_final_input.setFixedHeight(36)
         self.saldo_final_input.valueChanged.connect(self._calcular_conciliacion)
@@ -144,7 +148,7 @@ class ConciliacionBancosDialog(QDialog):
         resumen_layout.addLayout(saldo_final_layout, 1, 0)
 
         self.lbl_diferencia = QLabel("Diferencia: $0.00")
-        self.lbl_diferencia.setStyleSheet("font-size: 14px; font-weight: 600; color: #475569;")
+        self.lbl_diferencia.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         resumen_layout.addWidget(self.lbl_diferencia, 1, 1)
 
         # Icono real (qtawesome) en vez de "✓"/"✗" sueltos en el texto -- ver

@@ -28,16 +28,22 @@ from app.services.tesoreria import CajaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
@@ -56,11 +62,11 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLineEdit, QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -90,7 +96,7 @@ QLineEdit:disabled {{
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -105,7 +111,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -149,7 +155,8 @@ class CajaAperturaDialog(QDialog):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.cash-register", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(34, 34)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -204,13 +211,13 @@ class CajaAperturaDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        lbl_usuario = QLabel("Usuario <span style='color: #DC2626;'>*</span>")
+        lbl_usuario = QLabel(f"Usuario {ASTERISCO_REQUERIDO}")
         lbl_usuario.setProperty("class", "FormLabel")
         self.usuario_input = QLineEdit()
         layout.addWidget(lbl_usuario)
         layout.addWidget(self.usuario_input)
 
-        lbl_clave = QLabel("Clave <span style='color: #DC2626;'>*</span>")
+        lbl_clave = QLabel(f"Clave {ASTERISCO_REQUERIDO}")
         lbl_clave.setProperty("class", "FormLabel")
         self.clave_input = QLineEdit()
         self.clave_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -227,7 +234,7 @@ class CajaAperturaDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        lbl_caja = QLabel("Caja <span style='color: #DC2626;'>*</span>")
+        lbl_caja = QLabel(f"Caja {ASTERISCO_REQUERIDO}")
         lbl_caja.setProperty("class", "FormLabel")
         self.caja_combo = QComboBox()
         self.caja_combo.setFixedHeight(32)

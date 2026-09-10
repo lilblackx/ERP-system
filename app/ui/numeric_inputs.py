@@ -22,7 +22,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import QLineEdit
 
-from app.ui.styles import COLOR_BORDER, COLOR_DANGER, COLOR_PRIMARY, COLOR_TEXT_DARK
+from app.ui.styles import COLOR_BORDER, COLOR_DANGER, COLOR_PRIMARY, COLOR_TEXT_DARK, COLOR_WHITE
 
 _GROUP_SEP = "."
 _DECIMAL_SEP = ","
@@ -152,7 +152,7 @@ class NumericLineEdit(QLineEdit):
 
     _ESTILO_BASE = f"""
         QLineEdit {{
-            background-color: #FFFFFF;
+            background-color: {COLOR_WHITE};
             border: 1px solid {COLOR_BORDER};
             border-radius: 6px;
             padding: 5px 10px;

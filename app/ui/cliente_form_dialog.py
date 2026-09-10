@@ -24,16 +24,24 @@ from app.ui.mapa_widget import MapaWidget
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHT,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
@@ -54,7 +62,7 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLabel.SectionTitle {{
@@ -65,7 +73,7 @@ QLabel.SectionTitle {{
     padding-bottom: 2px;
 }}
 QLineEdit, QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -75,10 +83,10 @@ QLineEdit, QComboBox {{
 }}
 QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
 }}
 QLineEdit::placeholder {{
-    color: #94A3B8;
+    color: {COLOR_TEXT_LIGHT};
     font-size: 12px;
 }}
 QComboBox::drop-down {{
@@ -92,15 +100,15 @@ QComboBox::down-arrow {{
     margin-right: 6px;
 }}
 QComboBox QAbstractItemView {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
-    selection-background-color: #DBEAFE;
+    selection-background-color: {COLOR_BLUE_LIGHT};
     selection-color: {COLOR_TEXT_DARK};
     padding: 4px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -115,7 +123,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -167,7 +175,8 @@ class ClienteFormDialog(QDialog):
         fa_icon_name = "fa5s.user-edit" if self.cliente else "fa5s.user-plus"
         icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -215,7 +224,7 @@ class ClienteFormDialog(QDialog):
         grid1.setColumnStretch(1, 1)
 
         # Código
-        lbl_cod = QLabel("Código <span style='color: #DC2626;'>*</span>")
+        lbl_cod = QLabel(f"Código {ASTERISCO_REQUERIDO}")
         lbl_cod.setProperty("class", "FormLabel")
         self.codigo_input = QLineEdit()
         self.codigo_input.setPlaceholderText("Ej: CLI-001")
@@ -228,7 +237,7 @@ class ClienteFormDialog(QDialog):
         # columna, el combo de tipo (V/J/G/E/P) mas el placeholder largo del numero
         # ("Ej: 30489713 / 12345678-0") no entraban y el campo quedaba visualmente
         # cortado. Reportado por el usuario 2026-09-09.
-        lbl_id = QLabel("ID Fiscal / Identificación <span style='color: #DC2626;'>*</span>")
+        lbl_id = QLabel(f"ID Fiscal / Identificación {ASTERISCO_REQUERIDO}")
         lbl_id.setProperty("class", "FormLabel")
         grid1.addWidget(lbl_id, 2, 0, 1, 2)
 
@@ -254,7 +263,7 @@ class ClienteFormDialog(QDialog):
         grid1.addLayout(id_hbox, 3, 0, 1, 2)
 
         # Razón Social
-        lbl_nom = QLabel("Razón Social o Nombre Completo <span style='color: #DC2626;'>*</span>")
+        lbl_nom = QLabel(f"Razón Social o Nombre Completo {ASTERISCO_REQUERIDO}")
         lbl_nom.setProperty("class", "FormLabel")
         self.nombre_input = QLineEdit()
         self.nombre_input.setPlaceholderText("Ej: Distribuidora Central, C.A.")
@@ -411,7 +420,7 @@ class ClienteFormDialog(QDialog):
         card_layout.setContentsMargins(16, 12, 16, 14)
         card_layout.setSpacing(8)
 
-        titulo = QLabel("UBICACIÓN <span style='color: #DC2626;'>*</span>")
+        titulo = QLabel(f"UBICACIÓN {ASTERISCO_REQUERIDO}")
         titulo.setProperty("class", "SectionTitle")
         titulo.setTextFormat(Qt.TextFormat.RichText)
         card_layout.addWidget(titulo)
@@ -427,14 +436,14 @@ class ClienteFormDialog(QDialog):
         campos = QVBoxLayout()
         campos.setSpacing(8)
 
-        lbl_lat = QLabel("Latitud <span style='color: #DC2626;'>*</span>")
+        lbl_lat = QLabel(f"Latitud {ASTERISCO_REQUERIDO}")
         lbl_lat.setProperty("class", "FormLabel")
         self.latitud_input = QLineEdit()
         self.latitud_input.setPlaceholderText("Ej: 10.4806")
         self.latitud_input.setFixedHeight(32)
         self.latitud_input.editingFinished.connect(self._on_coordenadas_editadas)
 
-        lbl_lng = QLabel("Longitud <span style='color: #DC2626;'>*</span>")
+        lbl_lng = QLabel(f"Longitud {ASTERISCO_REQUERIDO}")
         lbl_lng.setProperty("class", "FormLabel")
         self.longitud_input = QLineEdit()
         self.longitud_input.setPlaceholderText("Ej: -66.9036")

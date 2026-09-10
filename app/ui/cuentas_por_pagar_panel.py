@@ -42,6 +42,7 @@ from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -54,9 +55,12 @@ from app.ui.styles import (
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
     COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     TABLE_QSS,
@@ -98,11 +102,11 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLineEdit, QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -129,7 +133,7 @@ QComboBox::down-arrow {{
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -144,7 +148,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -212,7 +216,7 @@ class PagoProveedorDialog(QDialog):
         lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_saldo)
 
-        lbl_metodo = QLabel("Método de Pago <span style='color: #DC2626;'>*</span>")
+        lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
         lbl_metodo.setProperty("class", "FormLabel")
         self.metodo_combo = QComboBox()
         for etiqueta, valor in METODOS_PAGO:
@@ -222,7 +226,7 @@ class PagoProveedorDialog(QDialog):
         layout.addWidget(lbl_metodo)
         layout.addWidget(self.metodo_combo)
 
-        lbl_monto = QLabel("Monto (USD) <span style='color: #DC2626;'>*</span>")
+        lbl_monto = QLabel(f"Monto (USD) {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
         self.monto_input = NumericLineEdit(
             NumericFieldType.AMOUNT, min_value=Decimal("0.01"), max_value=self.cuenta.saldo_pendiente, prefix="$ "
@@ -232,7 +236,7 @@ class PagoProveedorDialog(QDialog):
         layout.addWidget(lbl_monto)
         layout.addWidget(self.monto_input)
 
-        lbl_origen = QLabel("Origen <span style='color: #DC2626;'>*</span>")
+        lbl_origen = QLabel(f"Origen {ASTERISCO_REQUERIDO}")
         lbl_origen.setProperty("class", "FormLabel")
         self.origen_combo = QComboBox()
         self.origen_combo.setFixedHeight(32)

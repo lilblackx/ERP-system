@@ -52,6 +52,7 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     SEARCH_QSS,
@@ -64,7 +65,7 @@ from app.ui.toolbar_popups import BotonFiltros
 logger = logging.getLogger(__name__)
 
 POR_PAGINA = 50
-COLS_VISIBLES = ["Fecha", "Usuario", "Módulo", "Acción", "Detalle"]
+COLS_VISIBLES = ["FECHA", "USUARIO", "MÓDULO", "ACCIÓN", "DETALLE"]
 LIMITE_RESUMEN_DETALLE = 80
 
 # AuditoriaService.registrar_evento() guarda `detalle` como JSON crudo (ver
@@ -247,7 +248,7 @@ QCalendarWidget QWidget#qt_calendar_navigationbar {{
     border-top-right-radius: 8px;
 }}
 QCalendarWidget QToolButton {{
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     background-color: transparent;
     border: none;
     border-radius: 4px;
@@ -277,7 +278,7 @@ QCalendarWidget QAbstractItemView:enabled {{
     background-color: {COLOR_CARD_BG};
     color: {COLOR_TEXT_DARK};
     selection-background-color: {COLOR_PRIMARY};
-    selection-color: #FFFFFF;
+    selection-color: {COLOR_WHITE};
     outline: none;
 }}
 QCalendarWidget QAbstractItemView:disabled {{

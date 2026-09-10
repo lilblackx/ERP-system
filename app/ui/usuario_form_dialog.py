@@ -25,16 +25,22 @@ from app.services.usuarios import APELLIDO_MAX, EMAIL_MAX, NOMBRE_MAX, NOMBRE_US
 from app.services.vendedores import VendedorService
 from app.ui.message_box import MessageBox
 from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_FIELD_BG,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_PRIMARY_DARK,
     COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    COLOR_WHITE,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     ComboBoxSinScroll,
@@ -54,7 +60,7 @@ QWidget#SectionCard {{
 QLabel.FormLabel {{
     font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: {COLOR_TEXT_DARK_SLATE};
     margin-bottom: 2px;
 }}
 QLabel.SectionTitle {{
@@ -69,7 +75,7 @@ QLabel.Hint {{
     color: {COLOR_TEXT_MUTED};
 }}
 QLineEdit, QComboBox {{
-    background-color: #FFFFFF;
+    background-color: {COLOR_WHITE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 5px 10px;
@@ -95,7 +101,7 @@ QComboBox::down-arrow {{
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 6px;
     padding: 8px 22px;
@@ -110,7 +116,7 @@ QPushButton#BtnPrimary:pressed {{
 }}
 QPushButton#BtnSecondary {{
     background-color: {COLOR_FIELD_BG};
-    color: #475569;
+    color: {COLOR_TEXT_MEDIUM};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
     padding: 8px 18px;
@@ -173,7 +179,8 @@ class UsuarioFormDialog(QDialog):
         fa_icon_name = "fa5s.user-edit" if self.usuario else "fa5s.user-plus"
         icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 1.5px solid #BFDBFE; border-radius: 8px; padding: 6px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
         icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -214,7 +221,7 @@ class UsuarioFormDialog(QDialog):
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
 
-        lbl_usuario = QLabel("Nombre de usuario <span style='color: #DC2626;'>*</span>")
+        lbl_usuario = QLabel(f"Nombre de usuario {ASTERISCO_REQUERIDO}")
         lbl_usuario.setProperty("class", "FormLabel")
         self.nombre_usuario_input = QLineEdit()
         self.nombre_usuario_input.setPlaceholderText("Ej: jperez")
@@ -239,7 +246,7 @@ class UsuarioFormDialog(QDialog):
         grid.addWidget(lbl_apellido, 2, 1)
         grid.addWidget(self.apellido_input, 3, 1)
 
-        lbl_email = QLabel("Correo electrónico <span style='color: #DC2626;'>*</span>")
+        lbl_email = QLabel(f"Correo electrónico {ASTERISCO_REQUERIDO}")
         lbl_email.setProperty("class", "FormLabel")
         self.email_input = QLineEdit()
         self.email_input.setPlaceholderText("Ej: usuario@empresa.com")
@@ -253,9 +260,7 @@ class UsuarioFormDialog(QDialog):
         lbl_hint_email.setWordWrap(True)
         grid.addWidget(lbl_hint_email, 6, 0, 1, 2)
 
-        lbl_clave = QLabel(
-            "Clave <span style='color: #DC2626;'>*</span>" if not self.usuario else "Nueva clave (opcional)"
-        )
+        lbl_clave = QLabel("Clave {ASTERISCO_REQUERIDO}" if not self.usuario else "Nueva clave (opcional)")
         lbl_clave.setProperty("class", "FormLabel")
         self.clave_input = QLineEdit()
         self.clave_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -277,9 +282,7 @@ class UsuarioFormDialog(QDialog):
         # nadie conoce hasta el primer intento de login fallido (auditoria de hallazgos
         # medios, 2026-09-01) -- mismo campo que ya pide solicitar_codigo_dialog.py al
         # restablecer, ausente aca hasta ahora.
-        texto_lbl_confirmar = (
-            "Confirmar clave" if self.usuario else "Confirmar clave <span style='color: #DC2626;'>*</span>"
-        )
+        texto_lbl_confirmar = "Confirmar clave" if self.usuario else "Confirmar clave {ASTERISCO_REQUERIDO}"
         lbl_confirmar_clave = QLabel(texto_lbl_confirmar)
         lbl_confirmar_clave.setProperty("class", "FormLabel")
         self.confirmar_clave_input = QLineEdit()
@@ -290,7 +293,7 @@ class UsuarioFormDialog(QDialog):
         grid.addWidget(lbl_confirmar_clave, 10, 0, 1, 2)
         grid.addWidget(self.confirmar_clave_input, 11, 0, 1, 2)
 
-        lbl_rol = QLabel("Rol <span style='color: #DC2626;'>*</span>")
+        lbl_rol = QLabel(f"Rol {ASTERISCO_REQUERIDO}")
         lbl_rol.setProperty("class", "FormLabel")
         self.rol_combo = ComboBoxSinScroll()
         self.rol_combo.setFixedHeight(32)

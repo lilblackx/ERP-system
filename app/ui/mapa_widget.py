@@ -111,7 +111,7 @@ html, body, #mapa {{ height: 100%; margin: 0; padding: 0; }}
    etiqueta numerada, no como un mensaje emergente. */
 .zona-vertice-tooltip {{
     background: #1D4ED8;
-    color: #FFFFFF;
+    color: {COLOR_WHITE};
     border: none;
     border-radius: 8px;
     padding: 0px 5px;

@@ -66,15 +66,15 @@ logger = logging.getLogger(__name__)
 # Columnas visibles en la tabla (índice oculto 0 = ID interno)
 COLS_VISIBLES = [
     "ID",
-    "Nombre Completo",
-    "Identificación",
-    "Email",
-    "Teléfono",
-    "Dirección",
-    "Vendedor",
-    "Crédito",
-    "Días",
-    "Estado",
+    "NOMBRE COMPLETO",
+    "IDENTIFICACIÓN",
+    "EMAIL",
+    "TELÉFONO",
+    "DIRECCIÓN",
+    "VENDEDOR",
+    "CRÉDITO",
+    "DÍAS",
+    "ESTADO",
 ]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20

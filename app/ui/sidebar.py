@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.models import Usuario
-from app.ui.styles import COLOR_PRIMARY_DARK, COLOR_SIDEBAR_ACTIVE, COLOR_SIDEBAR_BG
+from app.ui.styles import COLOR_PRIMARY_DARK, COLOR_SIDEBAR_ACTIVE, COLOR_SIDEBAR_BG, COLOR_WHITE
 
 # ── Constantes de tamaño ────────────────────────────────────────────────────
 SIDEBAR_EXPANDED = 230  # px cuando está abierto
@@ -123,7 +123,7 @@ _SIDEBAR_CSS = f"""
     /* Raíz */
     QWidget#Sidebar, QScrollArea, QScrollArea > QWidget > QWidget {{
         background-color: {COLOR_SIDEBAR_BG};
-        color: #FFFFFF;
+        color: {COLOR_WHITE};
         border: none;
     }}
     QScrollBar:vertical {{
@@ -160,7 +160,7 @@ _SIDEBAR_CSS = f"""
 
     /* Logo / empresa */
     QLabel#SidebarLogo {{
-        color: #FFFFFF;
+        color: {COLOR_WHITE};
         font-size: 14px;
         font-weight: bold;
         letter-spacing: 1px;
@@ -180,11 +180,11 @@ _SIDEBAR_CSS = f"""
     }}
     QPushButton#SidebarBtn:hover {{
         background-color: rgba(255,255,255,0.14);
-        color: #FFFFFF;
+        color: {COLOR_WHITE};
     }}
     QPushButton#SidebarBtn[active="true"] {{
         background-color: rgba(255,255,255,0.22);
-        color: #FFFFFF;
+        color: {COLOR_WHITE};
         font-weight: bold;
     }}
     QPushButton#SidebarBtn[collapsed="true"] {{
@@ -204,7 +204,7 @@ _SIDEBAR_CSS = f"""
     }}
     QPushButton#ToggleBtn:hover {{
         background-color: rgba(255,255,255,0.15);
-        color: #FFFFFF;
+        color: {COLOR_WHITE};
     }}
 
     /* Botón cerrar sesión (pie de sidebar) */
@@ -340,7 +340,7 @@ class Sidebar(QWidget):
         self._lbl_logo.setFixedSize(32, 32)
         self._lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._lbl_logo.setStyleSheet(
-            f"background-color: #FFFFFF; color: {COLOR_PRIMARY_DARK}; border: none;"
+            f"background-color: {COLOR_WHITE}; color: {COLOR_PRIMARY_DARK}; border: none;"
             " border-radius: 16px; font-size: 12px; font-weight: bold;"
         )
 
@@ -354,7 +354,7 @@ class Sidebar(QWidget):
         self._lbl_empresa = QLabel(self._empresa.upper()[:18])
         self._lbl_empresa.setObjectName("SidebarLogo")
         self._lbl_empresa.setStyleSheet(
-            "background: transparent; border: none; color: #FFFFFF; font-size: 14px;"
+            "background: transparent; border: none; color: {COLOR_WHITE}; font-size: 14px;"
             " font-weight: bold; letter-spacing: 1px;"
         )
         self._lbl_empresa.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -451,7 +451,7 @@ class Sidebar(QWidget):
         self._lbl_avatar.setFixedSize(34, 34)
         self._lbl_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._lbl_avatar.setStyleSheet(
-            f"background-color: {COLOR_SIDEBAR_ACTIVE}; color: #FFFFFF; border: none;"
+            f"background-color: {COLOR_SIDEBAR_ACTIVE}; color: {COLOR_WHITE}; border: none;"
             " border-radius: 17px; font-size: 12px; font-weight: bold;"
         )
 
@@ -464,7 +464,7 @@ class Sidebar(QWidget):
 
         lbl_nombre = QLabel(nombre[:20])
         lbl_nombre.setStyleSheet(
-            "color: #FFFFFF; font-size: 12px; font-weight: bold; background: transparent; border: none;"
+            "color: {COLOR_WHITE}; font-size: 12px; font-weight: bold; background: transparent; border: none;"
         )
         lbl_rol = QLabel(rol)
         lbl_rol.setStyleSheet("color: rgba(255,255,255,0.60); font-size: 10px; background: transparent; border: none;")

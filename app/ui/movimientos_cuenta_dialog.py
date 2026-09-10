@@ -16,6 +16,8 @@ from app.db.models import CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
+    COLOR_BLUE_LIGHTER,
+    COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
@@ -56,7 +58,8 @@ class MovimientosCuentaDialog(QDialog):
         icon_lbl = QLabel()
         icon_lbl.setPixmap(qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(28, 28))
         icon_lbl.setStyleSheet(
-            "background-color: #EFF6FF; border: 2px solid #BFDBFE; border-radius: 10px; padding: 8px;"
+            f"background-color: {COLOR_INFO_BG}; border: 2px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 10px; padding: 8px;"
         )
         icon_lbl.setFixedSize(44, 44)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)

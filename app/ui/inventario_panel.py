@@ -62,7 +62,7 @@ from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "Código", "Nombre", "Categoría", "Cantidad", "Costo", "Precio Venta", "Estado"]
+COLS_VISIBLES = ["ID", "CÓDIGO", "NOMBRE", "CATEGORÍA", "CANTIDAD", "COSTO", "PRECIO VENTA", "ESTADO"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 # Mismo horizonte que ProductoService.obtener_alertas_stock(dias_vencimiento=30) --

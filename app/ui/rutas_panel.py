@@ -51,7 +51,7 @@ from app.ui.styles import (
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "Nombre", "Descripción", "Estado"]
+COLS_VISIBLES = ["ID", "NOMBRE", "DESCRIPCIÓN", "ESTADO"]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 

@@ -33,6 +33,16 @@ from app.services.tesoreria import BancoService, CajaService
 logger = logging.getLogger(__name__)
 
 
+def _escapar_like(texto: str) -> str:
+    """Escapa caracteres especiales en búsquedas LIKE: % y _ son wildcards,
+    necesitan escape para búsquedas literales. Sin esto, una búsqueda de '%' devuelve
+    todos los registros, '%_' devuelve cualquier registro con N caracteres, etc. Mismo
+    helper (duplicado a proposito, ver clientes.py/inventario.py) usado en
+    listar_facturas() (hallazgo nuevo, auditoria 2026-09-05 -- mismo patron que 1.5 pero
+    en este archivo, no cubierto por el plan original)."""
+    return texto.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+
+
 def _numero_factura_temporal() -> str:
     """Placeholder unico para el INSERT inicial: numero_factura es NOT NULL UNIQUE y el
     numero definitivo (FV-{id_factura:06d}) solo se conoce despues del flush que asigna
@@ -906,11 +916,11 @@ class VentaService:
         if condicion_pago:
             query = query.filter(FacturaVenta.condicion_pago == condicion_pago)
         if numero_factura:
-            query = query.filter(FacturaVenta.numero_factura.ilike(f"%{numero_factura}%"))
+            query = query.filter(FacturaVenta.numero_factura.ilike(f"%{_escapar_like(numero_factura)}%", escape="\\"))
         if nombre_cliente:
             # Usar subquery para filtrar por nombre de cliente sin afectar los joinedloads
             subq_cliente = session.query(Cliente.id_cliente).filter(
-                Cliente.nombre_razon_social.ilike(f"%{nombre_cliente}%")
+                Cliente.nombre_razon_social.ilike(f"%{_escapar_like(nombre_cliente)}%", escape="\\")
             )
             query = query.filter(FacturaVenta.id_cliente_factura.in_(subq_cliente))
         if texto_busqueda:
@@ -919,11 +929,15 @@ class VentaService:
             # vendedor -- en vez de exigir que el cajero sepa en cual de dos/tres cajas
             # separadas escribir. numero_factura/nombre_cliente (arriba) se mantienen
             # aparte para uso programatico/tests que quieran un filtro AND preciso.
-            like = f"%{texto_busqueda}%"
-            subq_cliente_texto = session.query(Cliente.id_cliente).filter(Cliente.nombre_razon_social.ilike(like))
-            subq_vendedor_texto = session.query(Vendedor.id_vendedor).filter(Vendedor.nombre_vendedor.ilike(like))
+            like = f"%{_escapar_like(texto_busqueda)}%"
+            subq_cliente_texto = session.query(Cliente.id_cliente).filter(
+                Cliente.nombre_razon_social.ilike(like, escape="\\")
+            )
+            subq_vendedor_texto = session.query(Vendedor.id_vendedor).filter(
+                Vendedor.nombre_vendedor.ilike(like, escape="\\")
+            )
             query = query.filter(
-                FacturaVenta.numero_factura.ilike(like)
+                FacturaVenta.numero_factura.ilike(like, escape="\\")
                 | FacturaVenta.id_cliente_factura.in_(subq_cliente_texto)
                 | FacturaVenta.id_vendedor.in_(subq_vendedor_texto)
             )

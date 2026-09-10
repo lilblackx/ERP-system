@@ -1121,6 +1121,34 @@ def test_listar_facturas_filtra_por_numero_parcial(db_session):
     assert resultado["items"][0].numero_factura == factura.numero_factura
 
 
+def test_listar_facturas_nombre_cliente_escapa_wildcards(db_session):
+    """Hallazgo nuevo (auditoria 2026-09-05, mismo patron que 1.5 pero en este archivo):
+    sin escapar wildcards de LIKE, un '_' literal en el texto buscado matchea CUALQUIER
+    caracter en esa posicion -- buscar 'A_C' sin escapar tambien matchearia 'ABC'."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "20.00")
+    cliente_sin_guion = crear_cliente(db_session, nombre_razon_social="ABC Distribuidora")
+    cliente_con_guion = crear_cliente(db_session, nombre_razon_social="A_C Distribuidora")
+
+    for cliente in (cliente_sin_guion, cliente_con_guion):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            pagos=pago_contado(db_session),
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        )
+
+    resultado = VentaService.listar_facturas(db_session, nombre_cliente="A_C", id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 1
+    assert resultado["items"][0].id_cliente_factura == cliente_con_guion.id_cliente
+
+
 def test_listar_facturas_texto_busqueda_matchea_numero_cliente_o_vendedor(db_session):
     """texto_busqueda es la barra de busqueda unica de FacturacionPanel: un solo termino
     debe matchear numero de factura, nombre de cliente O nombre de vendedor -- antes eran
