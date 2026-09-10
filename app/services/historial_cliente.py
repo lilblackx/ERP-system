@@ -120,38 +120,27 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     tasa_usada = None
                     tipo_tasa = ""
 
-                    if (
+                    if pago.tasa.tasa_dolar_bcv and pago.monto / pago.monto_moneda_origen == float(
                         pago.tasa.tasa_dolar_bcv
-                        and pago.monto / pago.monto_moneda_origen
-                        == float(pago.tasa.tasa_dolar_bcv)
                     ):
                         tasa_usada = pago.tasa.tasa_dolar_bcv
                         tipo_tasa = "BCV"
-                    elif (
+                    elif pago.tasa.tasa_dolar_paralelo and pago.monto / pago.monto_moneda_origen == float(
                         pago.tasa.tasa_dolar_paralelo
-                        and pago.monto / pago.monto_moneda_origen
-                        == float(pago.tasa.tasa_dolar_paralelo)
                     ):
                         tasa_usada = pago.tasa.tasa_dolar_paralelo
                         tipo_tasa = "Paralelo"
-                    elif (
-                        pago.tasa.tasa_cop
-                        and pago.monto / pago.monto_moneda_origen
-                        == float(pago.tasa.tasa_cop)
-                    ):
+                    elif pago.tasa.tasa_cop and pago.monto / pago.monto_moneda_origen == float(pago.tasa.tasa_cop):
                         tasa_usada = pago.tasa.tasa_cop
                         tipo_tasa = "COP"
 
                     if tasa_usada:
-                        observaciones = (
-                            f"Bs({pago.monto_moneda_origen:,.2f}) - {tipo_tasa}: {tasa_usada:,.2f}"
-                        )
+                        observaciones = f"Bs({pago.monto_moneda_origen:,.2f}) - {tipo_tasa}: {tasa_usada:,.2f}"
                     else:
                         # Fallback: mostrar BCV si no se puede determinar
                         if pago.tasa.tasa_dolar_bcv:
                             observaciones = (
-                                f"Bs({pago.monto_moneda_origen:,.2f}) - BCV: "
-                                f"{pago.tasa.tasa_dolar_bcv:,.2f}"
+                                f"Bs({pago.monto_moneda_origen:,.2f}) - BCV: {pago.tasa.tasa_dolar_bcv:,.2f}"
                             )
                         else:
                             observaciones = f"Bs({pago.monto_moneda_origen:,.2f})"
