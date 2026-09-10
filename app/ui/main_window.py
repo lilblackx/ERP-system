@@ -14,8 +14,10 @@ que se accede a cada módulo para minimizar el tiempo de arranque.
 
 import logging
 
+from PySide6.QtCore import QEvent, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
@@ -116,6 +118,26 @@ MODULO_PERMISO: dict[str, tuple[str, str]] = {
     "auditoria": ("auditoria", "ver"),
 }
 
+# Hallazgo 4.1 (auditoria 2026-09-05): sin esto, una sesion de escritorio abierta y
+# olvidada quedaba operable indefinidamente -- el chequeo de estado/bloqueo en
+# require_permiso() solo corta el acceso si OTRO admin desactiva al usuario mientras
+# tanto (C17), no por simple inactividad. 30 min es el mismo criterio de espera "normal"
+# ya usado para LOCK_TIMEOUT_MS en db_utils.py, reutilizado aca por consistencia.
+TIMEOUT_INACTIVIDAD_MS = 30 * 60 * 1000
+
+# Tipos de evento que cuentan como "el usuario sigue ahi" -- deliberadamente NO se incluye
+# QEvent.Type.Timer/Paint/etc: esos disparan solos aunque nadie este frente a la pantalla
+# (QueryWorker terminando, un repintado del ticker de tasas) y reiniciarian el timer sin
+# actividad real.
+_EVENTOS_ACTIVIDAD = frozenset(
+    {
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseMove,
+        QEvent.Type.KeyPress,
+        QEvent.Type.Wheel,
+    }
+)
+
 
 class MainWindow(QMainWindow):
     def __init__(self, usuario: Usuario):
@@ -143,6 +165,37 @@ class MainWindow(QMainWindow):
             else next(iter(self._modulos_visibles), "panel_general")
         )
         self._ir_a_modulo(destino_inicial)
+
+        # Timeout de sesion por inactividad (hallazgo 4.1) -- instalado al final del
+        # __init__, despues de que la ventana ya esta armada, para no contar como
+        # "actividad" ningun evento sintetico que Qt dispare mientras se construye la UI.
+        self._timer_inactividad = QTimer(self)
+        self._timer_inactividad.setInterval(TIMEOUT_INACTIVIDAD_MS)
+        self._timer_inactividad.setSingleShot(True)
+        self._timer_inactividad.timeout.connect(self._cerrar_por_inactividad)
+        self._timer_inactividad.start()
+        # A nivel de QApplication (no self.installEventFilter) porque la actividad puede
+        # ocurrir dentro de un dialogo modal (ej. facturando) -- esos son ventanas
+        # top-level propias, no hijos de MainWindow, y no le llegarian eventos si el
+        # filtro estuviera instalado solo aca.
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() in _EVENTOS_ACTIVIDAD:
+            self._timer_inactividad.start()  # reinicia la cuenta regresiva
+        return super().eventFilter(watched, event)
+
+    def _cerrar_por_inactividad(self) -> None:
+        if QApplication.activeModalWidget() is not None:
+            # Hay un dialogo modal abierto (ej. FacturaFormDialog) -- cerrar MainWindow
+            # ahora lo dejaria a mitad de una operacion con datos sin guardar. Se pospone
+            # en vez de forzar el cierre; si de verdad no hay actividad, el modal mismo
+            # tampoco genera eventos y esto se repite hasta que se cierre o se retome.
+            self._timer_inactividad.start()
+            return
+        logger.info("Sesion de usuario %s cerrada por inactividad", self.usuario.id_usuario)
+        MessageBox.information(self, "Sesión cerrada", "Tu sesión se cerró automáticamente por inactividad.")
+        self.close()
 
     # ── RBAC del sidebar ───────────────────────────────────────────────────
 
@@ -247,6 +300,12 @@ class MainWindow(QMainWindow):
         return self._paneles[clave]
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        # El filtro de eventFilter() esta instalado sobre la QApplication (persiste entre
+        # logins, ver __init__), no sobre self -- sin sacarlo aca, el siguiente login
+        # (nueva MainWindow, misma QApplication) dejaria dos filtros activos, y Qt seguiria
+        # invocando eventFilter() de esta instancia ya cerrada.
+        QApplication.instance().removeEventFilter(self)
+        self._timer_inactividad.stop()
         # DashboardPanel y TasaTicker cargan datos en un QThread aparte
         # (QueryWorker) que puede seguir corriendo al cerrar la ventana --
         # destruir esos widgets con el hilo todavia activo aborta el proceso

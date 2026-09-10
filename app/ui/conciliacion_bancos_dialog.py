@@ -648,6 +648,7 @@ class MovimientoManualDialog(QDialog):
         self.referencia_input = QLineEdit()
         self.referencia_input.setPlaceholderText("Ej: Cheque #12345")
         self.referencia_input.setFixedHeight(36)
+        self.referencia_input.setMaxLength(100)  # columna referencia_bancaria VARCHAR(100)
         form_layout.addWidget(lbl_referencia, 1, 0)
         form_layout.addWidget(self.referencia_input, 1, 1)
 

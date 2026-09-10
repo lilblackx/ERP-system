@@ -303,6 +303,7 @@ class PagoCobroDialog(QDialog):
         self.referencia_input = QLineEdit()
         self.referencia_input.setPlaceholderText("Opcional")
         self.referencia_input.setFixedHeight(32)
+        self.referencia_input.setMaxLength(100)  # columna referencia VARCHAR(100)
         layout.addWidget(lbl_ref)
         layout.addWidget(self.referencia_input)
 

@@ -631,6 +631,13 @@ class CuentaPorCobrar(Base):
 
 class CuentaPorPagar(Base):
     __tablename__ = "cuentas_por_pagar"
+    # implicit_returning=False por simetria con CuentaPorCobrar (arriba): hoy no hay
+    # ningun trigger AFTER UPDATE sobre cuentas_por_pagar (trg_compras_cxp esta sobre
+    # dbo.compras, no aca), asi que esto no cambia comportamiento actual -- pero si el
+    # dia de manana se agrega un equivalente a trg_cxc_libera_comisiones del lado de
+    # compras, este modelo ya no quedaria como el unico desalineado con el resto de las
+    # tablas con trigger (hallazgo 4.4, auditoria 2026-09-05).
+    __table_args__ = {"implicit_returning": False}
 
     id_cuenta: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     saldo_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)

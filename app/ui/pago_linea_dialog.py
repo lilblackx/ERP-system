@@ -254,6 +254,7 @@ class PagoLineaDialog(QDialog):
         self.referencia_input = QLineEdit()
         self.referencia_input.setPlaceholderText("Opcional (confirmación, últimos dígitos, etc.)")
         self.referencia_input.setFixedHeight(32)
+        self.referencia_input.setMaxLength(100)  # columna referencia VARCHAR(100)
         card_layout.addWidget(lbl_ref)
         card_layout.addWidget(self.referencia_input)
 
