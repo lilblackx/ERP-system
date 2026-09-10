@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -40,6 +39,7 @@ from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.reportes import ReporteService
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     COLOR_BORDER,
@@ -1703,9 +1703,10 @@ class ReportesPanel(QWidget):
 
         lbl_dias = QLabel("Horizonte (días):")
         lbl_dias.setStyleSheet(LABEL_QSS)
-        self.dias_horizonte_input = QSpinBox()
-        self.dias_horizonte_input.setRange(1, 365)
-        self.dias_horizonte_input.setValue(30)
+        self.dias_horizonte_input = NumericLineEdit(
+            NumericFieldType.COUNT, min_value=Decimal(1), max_value=Decimal(365)
+        )
+        self.dias_horizonte_input.set_value(Decimal(30))
         self.dias_horizonte_input.setFixedHeight(32)
         self.dias_horizonte_input.setFixedWidth(80)
 
@@ -1950,11 +1951,11 @@ class ReportesPanel(QWidget):
 
         lbl_dias = QLabel("Días horizonte:")
         lbl_dias.setStyleSheet(LABEL_QSS)
-        self.dias_horizonte_ppv_input = QSpinBox()
-        self.dias_horizonte_ppv_input.setRange(1, 365)
-        self.dias_horizonte_ppv_input.setValue(30)
+        self.dias_horizonte_ppv_input = NumericLineEdit(
+            NumericFieldType.COUNT, min_value=Decimal(1), max_value=Decimal(365)
+        )
+        self.dias_horizonte_ppv_input.set_value(Decimal(30))
         self.dias_horizonte_ppv_input.setFixedWidth(100)
-        self.dias_horizonte_ppv_input.setStyleSheet(COMBO_QSS)
 
         lbl_categoria = QLabel("Categoría:")
         lbl_categoria.setStyleSheet(LABEL_QSS)
@@ -2560,7 +2561,7 @@ class ReportesPanel(QWidget):
                 self.session_factory,
                 _tarea_proximos_vencimientos,
                 id_usuario=self.usuario.id_usuario,
-                dias_horizonte=self.dias_horizonte_input.value(),
+                dias_horizonte=int(self.dias_horizonte_input.get_value()),
                 id_proveedor=self.proveedor_combo_pv.currentData(),
             )
         elif modo == REPORTE_CXP_OTRAS:
@@ -2658,7 +2659,7 @@ class ReportesPanel(QWidget):
                 id_vendedor=self.vendedor_combo_comv.currentData(),
             )
         elif modo == REPORTE_PRODUCTOS_PROXIMOS_VENCER:
-            dias_horizonte = self.dias_horizonte_ppv_input.value()
+            dias_horizonte = int(self.dias_horizonte_ppv_input.get_value())
             if dias_horizonte <= 0:
                 MessageBox.warning(self, "Valor inválido", "El horizonte de días debe ser mayor a 0.")
                 return

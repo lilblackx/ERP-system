@@ -13,7 +13,6 @@ from PySide6.QtPrintSupport import QPrinterInfo
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -30,6 +29,7 @@ from app.db.models import Usuario
 from app.services.empresa import _SENTINEL, EmpresaService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -41,7 +41,6 @@ from app.ui.styles import (
     COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
 )
 
 logger = logging.getLogger(__name__)
@@ -218,11 +217,8 @@ class ConfigEmpresaPanel(QWidget):
         self.iva_activo_check = QCheckBox("Aplicar IVA en las facturas")
         self.iva_activo_check.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 14px; background: transparent;")
 
-        self.iva_porcentaje_input = QDoubleSpinBox()
-        self.iva_porcentaje_input.setRange(0, 100)
-        self.iva_porcentaje_input.setDecimals(2)
-        self.iva_porcentaje_input.setSuffix(" %")
-        self.iva_porcentaje_input.setValue(16.00)
+        self.iva_porcentaje_input = NumericLineEdit(NumericFieldType.PERCENTAGE, suffix=" %")
+        self.iva_porcentaje_input.set_value(Decimal("16.00"))
         self.iva_porcentaje_input.setFixedWidth(110)
         self.iva_porcentaje_input.setMinimumHeight(38)
         # Estilo propio (no confiar en heredar GLOBAL_QSS, ver comentario de
@@ -232,7 +228,7 @@ class ConfigEmpresaPanel(QWidget):
         # estado del check, lo que no dejaba claro si el porcentaje aplicaba o no
         # (hallazgo del usuario, 2026-08-28).
         self.iva_porcentaje_input.setStyleSheet(f"""
-            QDoubleSpinBox {{
+            QLineEdit {{
                 background-color: #FFFFFF;
                 border: 1px solid {COLOR_BORDER};
                 border-radius: 6px;
@@ -240,40 +236,12 @@ class ConfigEmpresaPanel(QWidget):
                 font-size: 14px;
                 color: {COLOR_TEXT_DARK};
             }}
-            QDoubleSpinBox:focus {{
+            QLineEdit:focus {{
                 border: 1px solid {COLOR_PRIMARY};
             }}
-            QDoubleSpinBox:disabled {{
+            QLineEdit:disabled {{
                 background-color: {COLOR_CONTENT_BG};
                 color: {COLOR_TEXT_LIGHT};
-            }}
-            QDoubleSpinBox::up-button {{
-                subcontrol-origin: border;
-                subcontrol-position: top right;
-                width: 18px;
-                border: none;
-                border-left: 1px solid {COLOR_BORDER};
-                border-top-right-radius: 6px;
-                background: transparent;
-            }}
-            QDoubleSpinBox::down-button {{
-                subcontrol-origin: border;
-                subcontrol-position: bottom right;
-                width: 18px;
-                border: none;
-                border-left: 1px solid {COLOR_BORDER};
-                border-bottom-right-radius: 6px;
-                background: transparent;
-            }}
-            QDoubleSpinBox::up-arrow {{
-                image: url({ICON_CHEVRON_UP_URL});
-                width: 10px;
-                height: 10px;
-            }}
-            QDoubleSpinBox::down-arrow {{
-                image: url({ICON_CHEVRON_DOWN_URL});
-                width: 10px;
-                height: 10px;
             }}
         """)
         self.iva_porcentaje_input.setEnabled(self.iva_activo_check.isChecked())
@@ -408,7 +376,7 @@ class ConfigEmpresaPanel(QWidget):
                 # setChecked() solo emite toggled si el valor cambia, y si lo cargado
                 # coincide con el default (desmarcado) del constructor no dispararia nada.
                 self.iva_porcentaje_input.setEnabled(self.iva_activo_check.isChecked())
-                self.iva_porcentaje_input.setValue(float(config.iva_porcentaje))
+                self.iva_porcentaje_input.set_value(config.iva_porcentaje)
                 self._cargar_impresoras_disponibles(config.impresora_predeterminada)
 
                 if config.logotipo_empresa:
@@ -477,7 +445,7 @@ class ConfigEmpresaPanel(QWidget):
                 logo_bytes=self.logo_bytes,
                 pie_pagina=self.footer_input.toPlainText().strip() or None,
                 iva_activo=self.iva_activo_check.isChecked(),
-                iva_porcentaje=Decimal(str(self.iva_porcentaje_input.value())),
+                iva_porcentaje=self.iva_porcentaje_input.get_value(),
                 impresora_predeterminada=self.impresora_combo.currentData(),
                 modificado_por=self.usuario.id_usuario,
             )

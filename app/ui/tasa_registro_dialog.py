@@ -3,11 +3,12 @@ caja_apertura_dialog.py (tarjeta unica + footer). A diferencia de otros formular
 alta, TasaService no tiene actualizar/eliminar: cada registro es un snapshot historico
 inmutable (ver app/services/tasas.py), asi que este dialogo tampoco tiene modo edicion."""
 
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QDialog,
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -28,8 +30,6 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
-    ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     aplicar_sombra,
 )
 
@@ -48,42 +48,6 @@ QLabel.FormLabel {{
     font-weight: 600;
     color: #334155;
     margin-bottom: 2px;
-}}
-QDoubleSpinBox {{
-    background-color: #FFFFFF;
-    border: 1px solid {COLOR_BORDER};
-    border-radius: 6px;
-    padding: 5px 10px;
-    font-size: 13px;
-    color: {COLOR_TEXT_DARK};
-    min-height: 20px;
-}}
-QDoubleSpinBox:focus {{
-    border: 1.5px solid {COLOR_PRIMARY};
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -166,27 +130,25 @@ class TasaRegistroDialog(QDialog):
 
         lbl_bcv = QLabel("Tasa BCV (Bs./USD) <span style='color: #DC2626;'>*</span>")
         lbl_bcv.setProperty("class", "FormLabel")
-        self.bcv_input = QDoubleSpinBox()
-        self.bcv_input.setRange(0, 9_999_999.99)
-        self.bcv_input.setDecimals(2)
+        self.bcv_input = NumericLineEdit(NumericFieldType.RATE, min_value=Decimal("0"), max_value=Decimal("9999999.99"))
         self.bcv_input.setFixedHeight(32)
         layout.addWidget(lbl_bcv)
         layout.addWidget(self.bcv_input)
 
         lbl_paralelo = QLabel("Dólar paralelo (Bs./USD)")
         lbl_paralelo.setProperty("class", "FormLabel")
-        self.paralelo_input = QDoubleSpinBox()
-        self.paralelo_input.setRange(0, 9_999_999.99)
-        self.paralelo_input.setDecimals(2)
+        self.paralelo_input = NumericLineEdit(
+            NumericFieldType.RATE, min_value=Decimal("0"), max_value=Decimal("9999999.99")
+        )
         self.paralelo_input.setFixedHeight(32)
         layout.addWidget(lbl_paralelo)
         layout.addWidget(self.paralelo_input)
 
         lbl_cop = QLabel("Peso colombiano (COP/USD)")
         lbl_cop.setProperty("class", "FormLabel")
-        self.cop_input = QDoubleSpinBox()
-        self.cop_input.setRange(0, 99_999_999.99)
-        self.cop_input.setDecimals(2)
+        self.cop_input = NumericLineEdit(
+            NumericFieldType.RATE, min_value=Decimal("0"), max_value=Decimal("99999999.99")
+        )
         self.cop_input.setFixedHeight(32)
         layout.addWidget(lbl_cop)
         layout.addWidget(self.cop_input)
@@ -219,7 +181,7 @@ class TasaRegistroDialog(QDialog):
         root.addLayout(footer)
 
     def _validar_y_aceptar(self) -> None:
-        if self.bcv_input.value() <= 0:
+        if self.bcv_input.get_value() <= 0:
             MessageBox.warning(self, "Dato requerido", "La tasa BCV es obligatoria y debe ser mayor a cero.")
             self.bcv_input.setFocus()
             return
@@ -227,7 +189,7 @@ class TasaRegistroDialog(QDialog):
 
     def get_data(self) -> dict:
         return {
-            "tasa_bcv": self.bcv_input.value(),
-            "tasa_paralelo": self.paralelo_input.value() or None,
-            "tasa_cop": self.cop_input.value() or None,
+            "tasa_bcv": self.bcv_input.get_value(),
+            "tasa_paralelo": self.paralelo_input.get_value() or None,
+            "tasa_cop": self.cop_input.get_value() or None,
         }

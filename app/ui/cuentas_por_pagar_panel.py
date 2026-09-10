@@ -11,6 +11,7 @@ pago, no crea/edita cuentas por pagar directamente.
 """
 
 import logging
+from decimal import Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
@@ -19,7 +20,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -39,6 +39,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
@@ -58,7 +59,6 @@ from app.ui.styles import (
     COLOR_WARNING,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     TABLE_QSS,
     EstadoBadge,
     alinear_encabezados,
@@ -101,7 +101,7 @@ QLabel.FormLabel {{
     color: #334155;
     margin-bottom: 2px;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox {{
+QLineEdit, QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -110,10 +110,10 @@ QLineEdit, QComboBox, QDoubleSpinBox {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {{
+QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
 }}
-QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled {{
+QLineEdit:disabled, QComboBox:disabled {{
     background-color: {COLOR_CONTENT_BG};
     color: {COLOR_TEXT_LIGHT};
 }}
@@ -126,30 +126,6 @@ QComboBox::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -248,11 +224,10 @@ class PagoProveedorDialog(QDialog):
 
         lbl_monto = QLabel("Monto (USD) <span style='color: #DC2626;'>*</span>")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = QDoubleSpinBox()
-        self.monto_input.setRange(0.01, float(self.cuenta.saldo_pendiente))
-        self.monto_input.setDecimals(2)
-        self.monto_input.setPrefix("$ ")
-        self.monto_input.setValue(float(self.cuenta.saldo_pendiente))
+        self.monto_input = NumericLineEdit(
+            NumericFieldType.AMOUNT, min_value=Decimal("0.01"), max_value=self.cuenta.saldo_pendiente, prefix="$ "
+        )
+        self.monto_input.set_value(self.cuenta.saldo_pendiente)
         self.monto_input.setFixedHeight(32)
         layout.addWidget(lbl_monto)
         layout.addWidget(self.monto_input)
@@ -341,7 +316,7 @@ class PagoProveedorDialog(QDialog):
                 lambda: PagoService.registrar_pago_proveedor(
                     self.session,
                     id_cuenta_por_pagar=self.cuenta.id_cuenta,
-                    monto=self.monto_input.value(),
+                    monto=self.monto_input.get_value(),
                     metodo_pago=self.metodo_combo.currentData(),
                     id_caja=id_origen if tipo_origen == "caja" else None,
                     id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,

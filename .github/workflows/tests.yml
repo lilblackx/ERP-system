@@ -14,6 +14,10 @@ env:
   DB_DRIVER: ODBC Driver 18 for SQL Server
   DB_TRUST_SERVER_CERTIFICATE: "yes"
   DB_TRUSTED_CONNECTION: "no"
+  # pytest-qt (tests/ui/test_numeric_inputs.py y demas tests de widgets) instancia
+  # QApplication real -- el runner ubuntu-22.04 no tiene servidor X, "offscreen" evita que
+  # Qt intente abrir un display y cuelgue/falle el job.
+  QT_QPA_PLATFORM: offscreen
 
 jobs:
   test:

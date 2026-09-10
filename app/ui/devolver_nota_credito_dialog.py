@@ -6,11 +6,12 @@ autorizacion), esto SI mueve dinero real y SIEMPRE exige autorizacion de un supe
 importar el metodo -- reusa AutorizacionDialog tal cual, mismo patron que el vuelto
 bancario de facturacion (app/ui/factura_form_dialog.py)."""
 
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QDialog,
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -25,6 +26,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.autorizacion_dialog import AutorizacionDialog
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -38,7 +40,6 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_LIGHT,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     ComboBoxSinScroll,
     aplicar_sombra,
 )
@@ -65,7 +66,7 @@ QLabel.FormLabel {{
     color: #334155;
     margin-bottom: 2px;
 }}
-QComboBox, QDoubleSpinBox {{
+QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -74,10 +75,10 @@ QComboBox, QDoubleSpinBox {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QComboBox:focus, QDoubleSpinBox:focus {{
+QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
 }}
-QComboBox:disabled, QDoubleSpinBox:disabled {{
+QComboBox:disabled {{
     background-color: {COLOR_CONTENT_BG};
     color: {COLOR_TEXT_LIGHT};
 }}
@@ -93,30 +94,6 @@ QComboBox::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -219,8 +196,7 @@ class DevolverNotaCreditoDialog(QDialog):
 
         lbl_monto = QLabel("Monto a devolver <span style='color: #DC2626;'>*</span>")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = QDoubleSpinBox()
-        self.monto_input.setDecimals(2)
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)
         card_layout.addWidget(lbl_monto)
         card_layout.addWidget(self.monto_input)
@@ -277,9 +253,9 @@ class DevolverNotaCreditoDialog(QDialog):
 
     def _on_nota_cambiada(self) -> None:
         nota = self._nota_seleccionada()
-        maximo = float(nota.saldo_disponible) if nota else 0.0
-        self.monto_input.setRange(0.01, maximo if maximo > 0 else 0.01)
-        self.monto_input.setValue(maximo)
+        maximo = nota.saldo_disponible if nota else Decimal("0")
+        self.monto_input.max_value = maximo if maximo > 0 else Decimal("0.01")
+        self.monto_input.set_value(maximo)
 
     def _nota_seleccionada(self) -> NotaCreditoCliente | None:
         id_nota = self.nota_combo.currentData()
@@ -335,7 +311,7 @@ class DevolverNotaCreditoDialog(QDialog):
             return
 
         metodo = self.metodo_combo.currentData()
-        monto = self.monto_input.value()
+        monto = self.monto_input.get_value()
         tipo_origen, id_origen = origen
 
         mensaje = (

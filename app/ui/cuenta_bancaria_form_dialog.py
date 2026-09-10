@@ -3,7 +3,6 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -16,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Banco, CuentaBancaria
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -88,19 +88,6 @@ QComboBox QAbstractItemView {{
     selection-background-color: #DBEAFE;
     selection-color: {COLOR_TEXT_DARK};
     padding: 4px;
-}}
-QDoubleSpinBox {{
-    background-color: #FFFFFF;
-    border: 1px solid {COLOR_BORDER};
-    border-radius: 6px;
-    padding: 5px 10px;
-    font-size: 13px;
-    color: {COLOR_TEXT_DARK};
-    min-height: 20px;
-}}
-QDoubleSpinBox:focus {{
-    border: 1.5px solid {COLOR_PRIMARY};
-    background-color: #FFFFFF;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -242,10 +229,7 @@ class CuentaBancariaFormDialog(QDialog):
         # es el unico camino que debe modificar saldo_total_banco despues de la creacion.
         self.lbl_saldo = QLabel("Saldo Inicial")
         self.lbl_saldo.setProperty("class", "FormLabel")
-        self.saldo_input = QDoubleSpinBox()
-        self.saldo_input.setRange(0, 999999999.99)
-        self.saldo_input.setDecimals(2)
-        self.saldo_input.setPrefix("$ ")
+        self.saldo_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.saldo_input.setFixedHeight(36)
         grid.addWidget(self.lbl_saldo, 4, 1)
         grid.addWidget(self.saldo_input, 5, 1)
@@ -331,7 +315,7 @@ class CuentaBancariaFormDialog(QDialog):
         self.numero_input.setText(cuenta.numero_cuenta or "")
         self.nombre_input.setText(cuenta.nombre_titular or "")
         self.identificacion_input.setText(cuenta.identificacion_titular or "")
-        self.saldo_input.setValue(float(cuenta.saldo_total_banco or 0))
+        self.saldo_input.set_value(cuenta.saldo_total_banco or 0)
         self.saldo_input.setEnabled(False)
         self.saldo_input.setToolTip("El saldo se actualiza registrando movimientos bancarios, no editando este campo.")
         self.lbl_saldo.setText("Saldo Actual (solo lectura)")
@@ -392,5 +376,5 @@ class CuentaBancariaFormDialog(QDialog):
         # CuentaBancariaService.actualizar() nunca reciba un cambio de saldo sin el
         # BancoMovimiento que lo explique.
         if self.cuenta is None:
-            datos["saldo_total_banco"] = self.saldo_input.value()
+            datos["saldo_total_banco"] = self.saldo_input.get_value()
         return datos

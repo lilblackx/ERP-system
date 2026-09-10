@@ -17,24 +17,23 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
-    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import FacturaVenta, Usuario
-from app.services.clientes import list_clientes
+from app.services.clientes import create_cliente, list_clientes
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.inventario import PrecioService, ProductoService
@@ -44,7 +43,9 @@ from app.services.tesoreria import BancoService, CajaService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
 from app.ui.autorizacion_dialog import AutorizacionDialog
+from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS, PagoLineaDialog
 from app.ui.styles import (
     COLOR_BORDER,
@@ -61,7 +62,6 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     TABLE_QSS,
     TABS_QSS,
     ComboBoxSinScroll,
@@ -115,7 +115,7 @@ QLabel.SectionTitle {{
     letter-spacing: 0.8px;
     padding-bottom: 2px;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QDateEdit {{
+QLineEdit, QComboBox, QDateEdit {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -124,7 +124,7 @@ QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QDateEdit {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus, QDateEdit:focus {{
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
     background-color: #FFFFFF;
 }}
@@ -141,30 +141,6 @@ QComboBox::down-arrow, QDateEdit::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QSpinBox::up-button, QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QSpinBox::down-button, QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QComboBox QAbstractItemView {{
     background-color: #FFFFFF;
@@ -224,6 +200,23 @@ QPushButton#BtnQuitar {{
 }}
 QPushButton#BtnQuitar:hover {{
     background-color: #FEE2E2;
+}}
+QPushButton#BtnQuitarIcono {{
+    background-color: transparent;
+    border: none;
+    padding: 2px;
+}}
+QPushButton#BtnQuitarIcono:hover {{
+    background-color: #FEE2E2;
+    border-radius: 4px;
+}}
+QPushButton#BtnNuevoCliente {{
+    background-color: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 6px;
+}}
+QPushButton#BtnNuevoCliente:hover {{
+    background-color: #DBEAFE;
 }}
 {TABS_QSS}
 """
@@ -461,12 +454,26 @@ class FacturaFormDialog(QDialog):
         # (auditoria UX de facturacion, cajero).
         self.cliente_buscar_input.returnPressed.connect(self._on_cliente_buscar_return_pressed)
 
+        self.btn_nuevo_cliente = QPushButton()
+        self.btn_nuevo_cliente.setIcon(qta.icon("fa5s.plus", color=COLOR_PRIMARY))
+        self.btn_nuevo_cliente.setFixedSize(30, 30)
+        self.btn_nuevo_cliente.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_nuevo_cliente.setToolTip("Crear nuevo cliente")
+        self.btn_nuevo_cliente.setObjectName("BtnNuevoCliente")
+        self.btn_nuevo_cliente.clicked.connect(self._abrir_nuevo_cliente)
+
+        cliente_buscar_hbox = QHBoxLayout()
+        cliente_buscar_hbox.setSpacing(6)
+        cliente_buscar_hbox.setContentsMargins(0, 0, 0, 0)
+        cliente_buscar_hbox.addWidget(self.cliente_buscar_input, 1)
+        cliente_buscar_hbox.addWidget(self.btn_nuevo_cliente)
+
         self.cliente_combo = QComboBox()
         self.cliente_combo.setFixedHeight(32)
         self.cliente_combo.currentIndexChanged.connect(self._on_cliente_cambiado)
 
         grid.addWidget(lbl_cliente, 0, 0, 1, 2)
-        grid.addWidget(self.cliente_buscar_input, 1, 0, 1, 2)
+        grid.addLayout(cliente_buscar_hbox, 1, 0, 1, 2)
         grid.addWidget(self.cliente_combo, 2, 0, 1, 2)
 
         # Vendedor
@@ -529,9 +536,9 @@ class FacturaFormDialog(QDialog):
         self.chk_dias_configurados.toggled.connect(self._on_toggle_dias_configurados)
         self.lbl_dias_configurados = QLabel()
         self.lbl_dias_configurados.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-        self.dias_credito_custom_input = QSpinBox()
-        self.dias_credito_custom_input.setRange(1, 365)
-        self.dias_credito_custom_input.setSuffix(" días")
+        self.dias_credito_custom_input = NumericLineEdit(
+            NumericFieldType.COUNT, min_value=Decimal(1), max_value=Decimal(365), suffix=" días"
+        )
         self.dias_credito_custom_input.setFixedHeight(32)
         self.dias_credito_custom_input.valueChanged.connect(self._actualizar_vencimiento_calculado)
         self.dias_credito_custom_input.hide()
@@ -708,7 +715,13 @@ class FacturaFormDialog(QDialog):
 
     def _convertir_pago_a_usd(self, pago: dict) -> float:
         moneda = pago["moneda"]
-        monto = pago["monto_moneda_origen"]
+        # monto_moneda_origen es Decimal desde que PagoLineaDialog.get_data() lo lee de
+        # NumericLineEdit.get_value() -- esta funcion sigue siendo float de punta a punta
+        # (se suma con otros totales float en _refrescar_tabla_pagos/_agregar_pago), asi
+        # que se castea una sola vez aca en vez de en cada branch. Bug real reportado por
+        # el usuario: "TypeError: unsupported operand type(s) for +=: 'float' and
+        # 'decimal.Decimal'" al agregar una forma de pago en USD.
+        monto = float(pago["monto_moneda_origen"])
         if moneda in ("USD", "USDT"):
             return monto
         if self._tasa_vigente is None:
@@ -749,6 +762,10 @@ class FacturaFormDialog(QDialog):
             btn_quitar.clicked.connect(lambda checked, i=fila: self._quitar_pago(i))
             self.tabla_pagos.setCellWidget(fila, 4, btn_quitar)
 
+        # Ver comentario equivalente en _refrescar_tabla_items(): setCellWidget() no
+        # ajusta la altura de fila por si solo.
+        self.tabla_pagos.resizeRowsToContents()
+
         total_factura = self._total_factura_actual()
         falta = total_factura - total_usd
         if falta > 0.005:
@@ -771,7 +788,7 @@ class FacturaFormDialog(QDialog):
 
     def _total_factura_actual(self) -> float:
         total = sum(it["cantidad"] * it["precio_unitario"] for it in self.items)
-        subtotal_con_descuento = max(total - self.descuento_input.value(), 0.0)
+        subtotal_con_descuento = max(total - float(self.descuento_input.get_value()), 0.0)
         return subtotal_con_descuento + self._calcular_iva(subtotal_con_descuento)
 
     def _make_card_carrito(self) -> QWidget:
@@ -804,24 +821,19 @@ class FacturaFormDialog(QDialog):
         self.producto_combo.setMinimumWidth(220)
         self.producto_combo.currentIndexChanged.connect(self._on_producto_cambiado)
 
-        self.cantidad_input = QDoubleSpinBox()
-        self.cantidad_input.setRange(0.01, 999999.99)
-        self.cantidad_input.setDecimals(2)
-        self.cantidad_input.setValue(1)
+        self.cantidad_input = NumericLineEdit(NumericFieldType.QUANTITY, min_value=Decimal("0.01"))
+        self.cantidad_input.set_value(1)
         self.cantidad_input.setFixedHeight(32)
         self.cantidad_input.setFixedWidth(100)
         # Enter en Cantidad o Precio agrega directo -- ya se vio/confirmo el producto en
         # el combo antes de llegar aca, cerrando el ciclo escaneo/tipeo -> agregar sin
         # tocar el mouse (auditoria UX de facturacion, cajero).
-        self.cantidad_input.lineEdit().returnPressed.connect(self._agregar_item)
+        self.cantidad_input.returnPressed.connect(self._agregar_item)
 
-        self.precio_input = QDoubleSpinBox()
-        self.precio_input.setRange(0.01, 999999999.99)
-        self.precio_input.setDecimals(2)
-        self.precio_input.setPrefix("$ ")
+        self.precio_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         self.precio_input.setFixedHeight(32)
         self.precio_input.setFixedWidth(130)
-        self.precio_input.lineEdit().returnPressed.connect(self._agregar_item)
+        self.precio_input.returnPressed.connect(self._agregar_item)
 
         btn_agregar = QPushButton(" Agregar")
         btn_agregar.setObjectName("BtnAgregar")
@@ -879,10 +891,7 @@ class FacturaFormDialog(QDialog):
 
         lbl_descuento = QLabel("Descuento de factura:")
         lbl_descuento.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
-        self.descuento_input = QDoubleSpinBox()
-        self.descuento_input.setRange(0, 999999999.99)
-        self.descuento_input.setDecimals(2)
-        self.descuento_input.setPrefix("$ ")
+        self.descuento_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.descuento_input.setFixedWidth(130)
         self.descuento_input.setFixedHeight(30)
         self.descuento_input.valueChanged.connect(self._refrescar_tabla_items)
@@ -928,14 +937,19 @@ class FacturaFormDialog(QDialog):
     def _cargar_clientes(self) -> None:
         self._buscar_clientes(None)
 
-    def _buscar_clientes(self, texto: str | None) -> None:
+    def _buscar_clientes(self, texto: str | None, *, abrir_dropdown: bool = False) -> None:
         resultado = list_clientes(self.session, texto, id_usuario=self.id_usuario, por_pagina=LIMITE_CATALOGO)
         self._clientes = [c for c in resultado["items"] if (c.estado_cliente or "ACTIVO") == "ACTIVO"]
-        self._poblar_combo_clientes(self._clientes)
+        self._poblar_combo_clientes(self._clientes, abrir_dropdown=abrir_dropdown)
 
-    def _poblar_combo_clientes(self, clientes: list) -> None:
+    def _poblar_combo_clientes(self, clientes: list, *, abrir_dropdown: bool = False) -> None:
         self.cliente_combo.blockSignals(True)
         self.cliente_combo.clear()
+        # Placeholder SIEMPRE primero, con data=None -- nunca se preselecciona un cliente
+        # real de la lista solo por ser el primero en llegar. Pedido explicito del
+        # usuario 2026-09-09: un cliente equivocado quedando preseleccionado sin que el
+        # cajero lo haya elegido a proposito es un riesgo real de facturar a quien no es.
+        self.cliente_combo.addItem("Seleccione un cliente…", None)
         if not clientes:
             self.cliente_combo.addItem("Sin resultados", None)
         for cliente in clientes:
@@ -946,24 +960,97 @@ class FacturaFormDialog(QDialog):
             etiqueta = f"{cliente.nombre_razon_social} ({identificacion})"
             self.cliente_combo.addItem(etiqueta, cliente.id_cliente)
         self.cliente_combo.blockSignals(False)
-        self.cliente_combo.setEnabled(bool(clientes))
+        self.cliente_combo.setEnabled(True)
         self._on_cliente_cambiado()
+        # Sacar la preseleccion automatica (arriba) dejo al cajero sin ninguna senal
+        # visible de que la busqueda encontro algo -- el combo se queda mostrando
+        # "Seleccione un cliente…" cerrado, igual este con 0 o 10 resultados. Abrir el
+        # desplegable con las coincidencias mientras tipea restaura esa retroalimentacion
+        # sin volver a autoseleccionar nada (abrir la lista no es lo mismo que elegir un
+        # item). Reportado por el usuario 2026-09-09: "la barra de busqueda parece que no
+        # funciona, no me muestra ninguna sugerencia cuando escribo".
+        if abrir_dropdown and clientes:
+            self.cliente_combo.showPopup()
+
+    def _abrir_nuevo_cliente(self) -> None:
+        """Boton "+" junto a la busqueda de cliente -- crea un cliente sin salir de la
+        factura en curso (pedido del usuario 2026-09-09): abre ClienteFormDialog modal
+        sobre este mismo dialogo y, si se guarda, recarga el combo y deja el cliente
+        recien creado ya seleccionado -- el cajero no pierde ni el carrito ni el resto de
+        los datos que ya habia cargado."""
+        dialogo = ClienteFormDialog(self.session, cliente=None, id_usuario=self.id_usuario, parent=self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
+            return
+        datos = dialogo.get_data()
+        datos["creado_por"] = self.id_usuario
+        try:
+            nuevo_cliente = create_cliente(self.session, **datos)
+        except IntegrityError:
+            self.session.rollback()
+            MessageBox.warning(
+                self, "Dato duplicado", "El código o la identificación ya están registrados en otro cliente."
+            )
+            return
+        except ValueError as exc:
+            self.session.rollback()
+            MessageBox.warning(self, "Dato inválido", str(exc))
+            return
+        except PermisoDenegadoError:
+            self.session.rollback()
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear clientes.")
+            return
+        except Exception:
+            self.session.rollback()
+            logger.exception("Fallo al crear cliente desde Nueva Factura")
+            MessageBox.critical(self, "Error", "No se pudo crear el cliente.")
+            return
+
+        # Si ya habia una busqueda tipeada con el debounce pendiente, cancelarla tambien
+        # -- mismo motivo que el blockSignals de abajo.
+        if hasattr(self, "_timer_busqueda_cliente"):
+            self._timer_busqueda_cliente.stop()
+        # blockSignals: setText() dispara textChanged -> _filtrar_clientes, que arranca
+        # el debounce de 300ms -- sin bloquear, esa busqueda diferida repoblaria el combo
+        # (con el placeholder siempre primero) DESPUES de esta seleccion manual y
+        # desharia justo lo que se acaba de elegir.
+        self.cliente_buscar_input.blockSignals(True)
+        self.cliente_buscar_input.setText(nuevo_cliente.nombre_razon_social)
+        self.cliente_buscar_input.blockSignals(False)
+        self._buscar_clientes(nuevo_cliente.nombre_razon_social)
+        indice = self.cliente_combo.findData(nuevo_cliente.id_cliente)
+        if indice >= 0:
+            self.cliente_combo.setCurrentIndex(indice)
 
     def _filtrar_clientes(self, texto: str) -> None:
         if not hasattr(self, "_timer_busqueda_cliente"):
             self._timer_busqueda_cliente = QTimer(self)
             self._timer_busqueda_cliente.setSingleShot(True)
-            self._timer_busqueda_cliente.timeout.connect(
-                lambda: self._buscar_clientes(self.cliente_buscar_input.text().strip() or None)
-            )
+            self._timer_busqueda_cliente.timeout.connect(self._buscar_clientes_tras_debounce)
         self._timer_busqueda_cliente.start(DEBOUNCE_BUSQUEDA_MS)
+
+    def _buscar_clientes_tras_debounce(self) -> None:
+        texto = self.cliente_buscar_input.text().strip() or None
+        # abrir_dropdown solo mientras hay texto tipeado -- abrirlo tambien al borrar el
+        # campo de vuelta a vacio (volviendo a la lista completa) seria una sorpresa poco
+        # pedida, no una sugerencia util.
+        self._buscar_clientes(texto, abrir_dropdown=bool(texto))
 
     def _on_cliente_buscar_return_pressed(self) -> None:
         if hasattr(self, "_timer_busqueda_cliente"):
             self._timer_busqueda_cliente.stop()
         self._buscar_clientes(self.cliente_buscar_input.text().strip() or None)
-        if self.cliente_combo.currentData() is not None:
+        if len(self._clientes) == 1:
+            # Enter es una accion explicita e inequivoca del cajero -- a diferencia de
+            # tipear (que solo abre sugerencias, ver _filtrar_clientes), un unico
+            # resultado tras Enter es seguro de autoseleccionar sin volver a caer en el
+            # riesgo de "cliente equivocado" que motivo sacar la preseleccion en
+            # _poblar_combo_clientes.
+            indice = self.cliente_combo.findData(self._clientes[0].id_cliente)
+            if indice >= 0:
+                self.cliente_combo.setCurrentIndex(indice)
             self.producto_buscar_input.setFocus()
+        elif len(self._clientes) > 1:
+            self.cliente_combo.showPopup()
 
     def _cliente_seleccionado(self):
         id_cliente = self.cliente_combo.currentData()
@@ -992,7 +1079,7 @@ class FacturaFormDialog(QDialog):
         if not checked:
             cliente = self._cliente_seleccionado()
             self.dias_credito_custom_input.blockSignals(True)
-            self.dias_credito_custom_input.setValue(cliente.dias_credito if cliente else 30)
+            self.dias_credito_custom_input.set_value(cliente.dias_credito if cliente else 30)
             self.dias_credito_custom_input.blockSignals(False)
         self._actualizar_vencimiento_calculado()
 
@@ -1004,7 +1091,7 @@ class FacturaFormDialog(QDialog):
             cliente = self._cliente_seleccionado()
             dias = cliente.dias_credito if cliente else 0
         else:
-            dias = self.dias_credito_custom_input.value()
+            dias = int(self.dias_credito_custom_input.get_value())
         self.vencimiento_input.setDate(QDate.currentDate().addDays(dias))
 
     def _actualizar_alerta_credito(self) -> None:
@@ -1150,14 +1237,14 @@ class FacturaFormDialog(QDialog):
 
     def _on_producto_cambiado(self) -> None:
         id_producto = self.producto_combo.currentData()
-        self.cantidad_input.setValue(1)
+        self.cantidad_input.set_value(1)
         if id_producto is None:
-            self.precio_input.setValue(0)
+            self.precio_input.set_value(0)
             self._precio_lista_actual = None
             return
         precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         self._precio_lista_actual = float(precio.precio_venta) if precio else None
-        self.precio_input.setValue(self._precio_lista_actual or 0)
+        self.precio_input.set_value(self._precio_lista_actual or 0)
 
     # ── Carrito ────────────────────────────────────────────────────────────
 
@@ -1166,8 +1253,8 @@ class FacturaFormDialog(QDialog):
         if id_producto is None:
             MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
             return
-        cantidad = self.cantidad_input.value()
-        precio = self.precio_input.value()
+        cantidad = float(self.cantidad_input.get_value())
+        precio = float(self.precio_input.get_value())
         if cantidad <= 0:
             MessageBox.warning(self, "Cantidad inválida", "La cantidad debe ser mayor a cero.")
             return
@@ -1264,14 +1351,23 @@ class FacturaFormDialog(QDialog):
             self.tabla_items.setItem(fila, 3, item_subtotal)
 
             btn_quitar = QPushButton()
-            btn_quitar.setObjectName("BtnQuitar")
+            btn_quitar.setObjectName("BtnQuitarIcono")
             btn_quitar.setIcon(qta.icon("fa5s.trash-alt", color=COLOR_DANGER))
+            btn_quitar.setIconSize(QSize(14, 14))
+            btn_quitar.setFixedSize(26, 26)
             btn_quitar.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_quitar.setToolTip("Quitar de la factura")
             btn_quitar.clicked.connect(lambda checked, i=fila: self._quitar_item(i))
             self.tabla_items.setCellWidget(fila, 4, btn_quitar)
 
-        descuento = self.descuento_input.value()
+        # setCellWidget() no ajusta la altura de fila sola (a diferencia de un
+        # QTableWidgetItem de texto, cuyo sizeHint si participa del calculo automatico) --
+        # sin este resize, un widget mas alto que la fila calculada a partir de las demas
+        # columnas queda recortado. Reportado por el usuario: el icono de papelera se veia
+        # cortado a la mitad tras sacarle el borde/fondo al boton (2026-09-09).
+        self.tabla_items.resizeRowsToContents()
+
+        descuento = float(self.descuento_input.get_value())
         subtotal_con_descuento = max(total - descuento, 0.0)
         monto_iva = self._calcular_iva(subtotal_con_descuento)
         if descuento > 0 or monto_iva > 0:
@@ -1296,7 +1392,7 @@ class FacturaFormDialog(QDialog):
         hay_precio_bajo_lista = any(
             it.get("precio_lista") is not None and it["precio_unitario"] < it["precio_lista"] for it in self.items
         )
-        return hay_precio_bajo_lista or self.descuento_input.value() > 0
+        return hay_precio_bajo_lista or self.descuento_input.get_value() > 0
 
     def _validar_datos_basicos(self) -> bool:
         """Cliente/vendedor/carrito -- lo mismo que valida el paso "Siguiente" antes de
@@ -1501,11 +1597,11 @@ class FacturaFormDialog(QDialog):
             # fuente de verdad, evita divergencias de fecha entre UI y servidor.
             "fecha_vencimiento": None,
             "observaciones": self.observaciones_input.text().strip() or None,
-            "monto_descuento": self.descuento_input.value(),
+            "monto_descuento": self.descuento_input.get_value(),
             "motivo_descuento": self._motivo_descuento,
             "id_autorizador_descuento": self._id_autorizador_descuento,
             "dias_credito_personalizados": (
-                self.dias_credito_custom_input.value() if es_credito and not usar_dias_configurados else None
+                int(self.dias_credito_custom_input.get_value()) if es_credito and not usar_dias_configurados else None
             ),
             "motivo_dias_credito": self._motivo_dias_credito,
             "id_autorizador_dias_credito": self._id_autorizador_dias_credito,

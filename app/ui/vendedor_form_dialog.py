@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
@@ -8,7 +10,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -18,6 +19,7 @@ from app.db.models import Vendedor
 from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -256,9 +258,8 @@ class VendedorFormDialog(QDialog):
 
         lbl_meta = QLabel("Meta de Activación (ventas/mes por cliente)")
         lbl_meta.setProperty("class", "FormLabel")
-        self.meta_activacion_input = QSpinBox()
-        self.meta_activacion_input.setRange(0, 999)
-        self.meta_activacion_input.setSpecialValueText("Sin meta")
+        self.meta_activacion_input = NumericLineEdit(NumericFieldType.COUNT, max_value=Decimal(999))
+        self.meta_activacion_input.setToolTip("0 = sin meta de activación")
         self.meta_activacion_input.setFixedHeight(32)
         grid.addWidget(lbl_meta, 10, 0, 1, 2)
         grid.addWidget(self.meta_activacion_input, 11, 0, 1, 2)
@@ -302,7 +303,7 @@ class VendedorFormDialog(QDialog):
         idx_ruta = self.ruta_combo.findData(vendedor.id_ruta)
         if idx_ruta >= 0:
             self.ruta_combo.setCurrentIndex(idx_ruta)
-        self.meta_activacion_input.setValue(vendedor.meta_activacion or 0)
+        self.meta_activacion_input.set_value(vendedor.meta_activacion or 0)
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_input.text().strip():
@@ -336,5 +337,5 @@ class VendedorFormDialog(QDialog):
             "email_vendedor": self.email_input.text().strip() or None,
             "direccion_vendedor": self.direccion_input.text().strip() or None,
             "id_ruta": self.ruta_combo.currentData(),
-            "meta_activacion": self.meta_activacion_input.value() or None,
+            "meta_activacion": int(self.meta_activacion_input.get_value()) or None,
         }

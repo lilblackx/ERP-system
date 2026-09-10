@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
-    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
@@ -55,6 +54,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
 from app.services.usuarios import UsuarioService
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
 from app.ui.styles import (
@@ -75,7 +75,6 @@ from app.ui.styles import (
     COLOR_WARNING,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     SEARCH_QSS,
     TABLE_QSS,
     TABS_QSS,
@@ -135,7 +134,7 @@ QLabel.SectionTitle {{
     letter-spacing: 0.8px;
     padding-bottom: 2px;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
+QLineEdit, QComboBox, QDateEdit {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -144,7 +143,7 @@ QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
     background-color: #FFFFFF;
 }}
@@ -157,30 +156,6 @@ QComboBox::down-arrow, QDateEdit::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QComboBox QAbstractItemView {{
     background-color: #FFFFFF;
@@ -229,17 +204,14 @@ QPushButton#BtnAgregar {{
 QPushButton#BtnAgregar:hover {{
     background-color: #DBEAFE;
 }}
-QPushButton#BtnQuitar {{
-    background-color: #FEF2F2;
-    color: {COLOR_DANGER};
-    border: 1px solid #FECACA;
-    border-radius: 5px;
-    padding: 3px 8px;
-    font-size: 11px;
-    font-weight: bold;
+QPushButton#BtnQuitarIcono {{
+    background-color: transparent;
+    border: none;
+    padding: 2px;
 }}
-QPushButton#BtnQuitar:hover {{
+QPushButton#BtnQuitarIcono:hover {{
     background-color: #FEE2E2;
+    border-radius: 4px;
 }}
 """
 
@@ -395,16 +367,13 @@ class OrdenCompraFormDialog(QDialog):
         self.producto_combo.setFixedHeight(32)
         self.producto_combo.setMinimumWidth(220)
         self.producto_combo.currentIndexChanged.connect(self._on_producto_cambiado)
-        self.cantidad_input = QDoubleSpinBox()
-        self.cantidad_input.setRange(0.01, 999999.99)
-        self.cantidad_input.setDecimals(2)
-        self.cantidad_input.setValue(1)
+        # cantidad_solicitada/precio_unitario de compra_oc_detalle son Numeric(18,4) --
+        # decimals=4, no el default de 2 (ver app/db/models.py CompraOCDetalle).
+        self.cantidad_input = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, min_value=Decimal("0.01"))
+        self.cantidad_input.set_value(1)
         self.cantidad_input.setFixedHeight(32)
         self.cantidad_input.setFixedWidth(100)
-        self.precio_input = QDoubleSpinBox()
-        self.precio_input.setRange(0.01, 999999999.99)
-        self.precio_input.setDecimals(2)
-        self.precio_input.setPrefix("$ ")
+        self.precio_input = NumericLineEdit(NumericFieldType.AMOUNT, decimals=4, min_value=Decimal("0.01"), prefix="$ ")
         self.precio_input.setFixedHeight(32)
         self.precio_input.setFixedWidth(130)
         btn_agregar = QPushButton(" Agregar")
@@ -528,12 +497,12 @@ class OrdenCompraFormDialog(QDialog):
 
     def _on_producto_cambiado(self) -> None:
         id_producto = self.producto_combo.currentData()
-        self.cantidad_input.setValue(1)
+        self.cantidad_input.set_value(1)
         if id_producto is None:
-            self.precio_input.setValue(0)
+            self.precio_input.set_value(0)
             return
         producto = next((p for p in self._productos if p.id_producto == id_producto), None)
-        self.precio_input.setValue(float(producto.costo_producto) if producto and producto.costo_producto else 0)
+        self.precio_input.set_value(producto.costo_producto if producto and producto.costo_producto else 0)
 
     # ── Carrito ────────────────────────────────────────────────────────────
 
@@ -542,8 +511,11 @@ class OrdenCompraFormDialog(QDialog):
         if id_producto is None:
             MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
             return
-        cantidad = self.cantidad_input.value()
-        precio = self.precio_input.value()
+        # Se conservan como Decimal (no float) de aca en adelante: cantidad_solicitada/
+        # precio_unitario de compra_oc_detalle son Numeric(18,4) y CompraOCService.crear_oc
+        # los usa con precision completa -- pasar por float perderia esos 4 decimales.
+        cantidad = self.cantidad_input.get_value()
+        precio = self.precio_input.get_value()
         if cantidad <= 0 or precio <= 0:
             MessageBox.warning(self, "Datos inválidos", "Cantidad y precio deben ser mayores a cero.")
             return
@@ -564,7 +536,7 @@ class OrdenCompraFormDialog(QDialog):
 
     def _refrescar_tabla(self) -> None:
         self.tabla_items.setRowCount(len(self.items))
-        total = 0.0
+        total = Decimal("0")
         for fila, item in enumerate(self.items):
             subtotal = item["cantidad"] * item["precio"]
             total += subtotal
@@ -582,11 +554,21 @@ class OrdenCompraFormDialog(QDialog):
             item_subtotal.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_items.setItem(fila, 3, item_subtotal)
             btn_quitar = QPushButton()
-            btn_quitar.setObjectName("BtnQuitar")
+            btn_quitar.setObjectName("BtnQuitarIcono")
             btn_quitar.setIcon(qta.icon("fa5s.trash-alt", color=COLOR_DANGER))
+            btn_quitar.setIconSize(QSize(14, 14))
+            btn_quitar.setFixedSize(26, 26)
             btn_quitar.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_quitar.clicked.connect(lambda checked, i=fila: self._quitar_item(i))
             self.tabla_items.setCellWidget(fila, 4, btn_quitar)
+
+        # setCellWidget() no ajusta la altura de fila sola (a diferencia de un
+        # QTableWidgetItem de texto, cuyo sizeHint si participa del calculo automatico) --
+        # sin este resize, un widget mas alto que la fila calculada a partir de las demas
+        # columnas queda recortado. Reportado por el usuario en factura_form_dialog.py: el
+        # icono de papelera se veia cortado a la mitad tras sacarle el borde/fondo al
+        # boton (2026-09-09) -- mismo patron aca.
+        self.tabla_items.resizeRowsToContents()
         self.lbl_total.setText(f"Total: ${total:,.2f}")
 
     # ── Validacion / datos ────────────────────────────────────────────────
@@ -739,20 +721,19 @@ class EnmiendaOCDialog(QDialog):
 
         self.lbl_cantidad = QLabel("Nueva Cantidad Solicitada (total de la ODC)")
         self.lbl_cantidad.setProperty("class", "FormLabel")
-        self.cantidad_nueva_input = QDoubleSpinBox()
-        self.cantidad_nueva_input.setRange(0.01, 999999.99)
-        self.cantidad_nueva_input.setDecimals(2)
-        self.cantidad_nueva_input.setValue(float(self.oc.cantidad_solicitada))
+        # CompraOC.cantidad_solicitada es Numeric(18,4) -- decimals=4 (ver app/db/models.py).
+        self.cantidad_nueva_input = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, min_value=Decimal("0.01"))
+        self.cantidad_nueva_input.set_value(self.oc.cantidad_solicitada)
         self.cantidad_nueva_input.setFixedHeight(32)
         layout.addWidget(self.lbl_cantidad)
         layout.addWidget(self.cantidad_nueva_input)
 
         self.lbl_precio = QLabel("Nuevo Precio (referencial, no ajusta lineas)")
         self.lbl_precio.setProperty("class", "FormLabel")
-        self.precio_nuevo_input = QDoubleSpinBox()
-        self.precio_nuevo_input.setRange(0.01, 999999999.99)
-        self.precio_nuevo_input.setDecimals(2)
-        self.precio_nuevo_input.setPrefix("$ ")
+        # CompraOCEnmienda.precio_nuevo tambien es Numeric(18,4).
+        self.precio_nuevo_input = NumericLineEdit(
+            NumericFieldType.AMOUNT, decimals=4, min_value=Decimal("0.01"), prefix="$ "
+        )
         self.precio_nuevo_input.setFixedHeight(32)
         layout.addWidget(self.lbl_precio)
         layout.addWidget(self.precio_nuevo_input)
@@ -820,8 +801,8 @@ class EnmiendaOCDialog(QDialog):
                 id_oc=self.oc.id_oc,
                 tipo_cambio=tipo,
                 motivo=motivo,
-                cantidad_nueva=self.cantidad_nueva_input.value() if tipo == "CANTIDAD" else None,
-                precio_nuevo=self.precio_nuevo_input.value() if tipo == "PRECIO" else None,
+                cantidad_nueva=self.cantidad_nueva_input.get_value() if tipo == "CANTIDAD" else None,
+                precio_nuevo=self.precio_nuevo_input.get_value() if tipo == "PRECIO" else None,
                 fecha_entrega_nueva=self.fecha_nueva_input.date().toPython() if tipo == "FECHA" else None,
                 id_usuario=self.id_usuario,
             )
@@ -915,8 +896,8 @@ class NotaRecepcionFormDialog(QDialog):
                 },
             )
             self.tabla.setRowCount(len(self.detalles_pendientes))
-            self._spins_recibida: list[QDoubleSpinBox] = []
-            self._spins_rechazada: list[QDoubleSpinBox] = []
+            self._spins_recibida: list[NumericLineEdit] = []
+            self._spins_rechazada: list[NumericLineEdit] = []
             for fila, detalle in enumerate(self.detalles_pendientes):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
@@ -924,17 +905,19 @@ class NotaRecepcionFormDialog(QDialog):
                 item_pendiente.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 1, item_pendiente)
 
-                spin_recibida = QDoubleSpinBox()
-                spin_recibida.setRange(0, float(detalle.cantidad_pendiente))
-                spin_recibida.setDecimals(2)
-                spin_recibida.setValue(0)
+                # cantidad_recibida/cantidad_rechazada de nota_recepcion_detalle son
+                # Numeric(18,4) -- decimals=4 (ver app/db/models.py).
+                spin_recibida = NumericLineEdit(
+                    NumericFieldType.QUANTITY, decimals=4, max_value=detalle.cantidad_pendiente
+                )
+                spin_recibida.set_value(0)
                 spin_recibida.valueChanged.connect(lambda v, i=fila: self._on_recibida_cambiada(i, v))
                 self.tabla.setCellWidget(fila, 2, spin_recibida)
                 self._spins_recibida.append(spin_recibida)
 
-                spin_rechazada = QDoubleSpinBox()
-                spin_rechazada.setRange(0, 0)
-                spin_rechazada.setDecimals(2)
+                # Tope inicial 0 (nada recibido todavia) -- _on_recibida_cambiada lo va
+                # subiendo a medida que se carga la cantidad a recibir de la misma fila.
+                spin_rechazada = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, max_value=Decimal("0"))
                 self.tabla.setCellWidget(fila, 3, spin_rechazada)
                 self._spins_rechazada.append(spin_rechazada)
 
@@ -965,20 +948,27 @@ class NotaRecepcionFormDialog(QDialog):
         footer.addWidget(self.btn_registrar)
         root.addLayout(footer)
 
-    def _on_recibida_cambiada(self, fila: int, valor: float) -> None:
-        self._spins_rechazada[fila].setRange(0, valor)
+    def _on_recibida_cambiada(self, fila: int, valor: Decimal | None) -> None:
+        # NumericLineEdit no tiene un equivalente a QDoubleSpinBox.setRange() que reclame
+        # automaticamente el valor actual si queda fuera del nuevo tope -- se hace a mano
+        # aca, igual que hacia Qt por debajo.
+        nuevo_max = valor if valor is not None else Decimal("0")
+        spin_rechazada = self._spins_rechazada[fila]
+        spin_rechazada.max_value = nuevo_max
+        if spin_rechazada.get_value() > nuevo_max:
+            spin_rechazada.set_value(nuevo_max)
 
     def _validar_y_aceptar(self) -> None:
         items = []
         for fila, detalle in enumerate(self.detalles_pendientes):
-            cantidad_recibida = self._spins_recibida[fila].value()
+            cantidad_recibida = self._spins_recibida[fila].get_value()
             if cantidad_recibida <= 0:
                 continue
             items.append(
                 {
                     "id_oc_detalle": detalle.id_detalle,
                     "cantidad_recibida": cantidad_recibida,
-                    "cantidad_rechazada": self._spins_rechazada[fila].value(),
+                    "cantidad_rechazada": self._spins_rechazada[fila].get_value(),
                 }
             )
         if not items:
@@ -1076,16 +1066,15 @@ class NotaDevolucionFormDialog(QDialog):
                 },
             )
             self.tabla.setRowCount(len(self.lineas_disponibles))
-            self._spins: list[QDoubleSpinBox] = []
+            self._spins: list[NumericLineEdit] = []
             for fila, (detalle, disponible) in enumerate(self.lineas_disponibles):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
                 item_disponible = QTableWidgetItem(f"{float(disponible):,.2f}")
                 item_disponible.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 1, item_disponible)
-                spin = QDoubleSpinBox()
-                spin.setRange(0, float(disponible))
-                spin.setDecimals(2)
+                # NotaDevolucionDetalle.cantidad_devuelta es Numeric(18,4).
+                spin = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, max_value=disponible)
                 self.tabla.setCellWidget(fila, 2, spin)
                 self._spins.append(spin)
             root.addWidget(self.tabla, stretch=1)
@@ -1119,7 +1108,7 @@ class NotaDevolucionFormDialog(QDialog):
     def _validar_y_aceptar(self) -> None:
         items = []
         for fila, (detalle, _disponible) in enumerate(self.lineas_disponibles):
-            cantidad = self._spins[fila].value()
+            cantidad = self._spins[fila].get_value()
             if cantidad <= 0:
                 continue
             items.append({"id_producto": detalle.id_producto, "cantidad_devuelta": cantidad})
@@ -1211,7 +1200,7 @@ class CompraDesdeOCFormDialog(QDialog):
                 },
             )
             self.tabla.setRowCount(len(self.lineas_disponibles))
-            self._spins: list[QDoubleSpinBox] = []
+            self._spins: list[NumericLineEdit] = []
             for fila, (detalle, disponible) in enumerate(self.lineas_disponibles):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
@@ -1221,10 +1210,10 @@ class CompraDesdeOCFormDialog(QDialog):
                 item_costo = QTableWidgetItem(f"${float(detalle.precio_unitario):,.2f}")
                 item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 2, item_costo)
-                spin = QDoubleSpinBox()
-                spin.setRange(0, float(disponible))
-                spin.setDecimals(2)
-                spin.setValue(float(disponible))
+                # Termina en CompraDetalle.cantidad_producto, que es Numeric(12,2) (no el
+                # Numeric(18,4) de compra_oc_detalle) -- decimals=2, el default de QUANTITY.
+                spin = NumericLineEdit(NumericFieldType.QUANTITY, max_value=disponible)
+                spin.set_value(disponible)
                 spin.valueChanged.connect(self._refrescar_total)
                 self.tabla.setCellWidget(fila, 3, spin)
                 self._spins.append(spin)
@@ -1290,7 +1279,7 @@ class CompraDesdeOCFormDialog(QDialog):
         if not self.lineas_disponibles:
             return 0.0
         return sum(
-            spin.value() * float(detalle.precio_unitario)
+            float(spin.get_value()) * float(detalle.precio_unitario)
             for spin, (detalle, _) in zip(self._spins, self.lineas_disponibles, strict=True)
         )
 
@@ -1315,9 +1304,9 @@ class CompraDesdeOCFormDialog(QDialog):
     def _validar_y_aceptar(self) -> None:
         items = []
         for spin, (detalle, _disponible) in zip(self._spins, self.lineas_disponibles, strict=True):
-            if spin.value() <= 0:
+            if spin.get_value() <= 0:
                 continue
-            items.append({"id_oc_detalle": detalle.id_detalle, "cantidad": spin.value()})
+            items.append({"id_oc_detalle": detalle.id_detalle, "cantidad": spin.get_value()})
         if not items:
             MessageBox.warning(self, "Nada que facturar", "Ingrese al menos una cantidad a facturar mayor a cero.")
             return

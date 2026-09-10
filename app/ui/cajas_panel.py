@@ -11,6 +11,7 @@ tesoreria.py, no el RBAC generico de 'cajas'/'editar') -- un cajero sin ese rol 
 listado (con 'cajas'/'ver') pero el boton de cierre le devuelve PermisoDenegadoError."""
 
 import logging
+from decimal import Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
@@ -19,7 +20,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -36,6 +36,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.ui.caja_cierre_dialog import CajaCierreDialog
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -62,7 +63,7 @@ QDialog {{
     background-color: {COLOR_CONTENT_BG};
     font-family: '{FONT_FAMILY}', Arial, sans-serif;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox {{
+QLineEdit, QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -133,10 +134,7 @@ class MovimientoManualDialog(QDialog):
         layout.addWidget(self.tipo_combo)
 
         layout.addWidget(QLabel("Monto"))
-        self.monto_input = QDoubleSpinBox()
-        self.monto_input.setRange(0.01, 999999999.99)
-        self.monto_input.setDecimals(2)
-        self.monto_input.setPrefix("$ ")
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         layout.addWidget(self.monto_input)
 
         layout.addWidget(QLabel("Descripción"))
@@ -160,7 +158,7 @@ class MovimientoManualDialog(QDialog):
     def get_data(self) -> dict:
         return {
             "tipo": self.tipo_combo.currentData(),
-            "monto": self.monto_input.value(),
+            "monto": self.monto_input.get_value(),
             "descripcion": self.descripcion_input.text().strip() or None,
         }
 

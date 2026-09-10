@@ -8,11 +8,12 @@ origen, solo que nota y que factura.
 `notas_disponibles`/`facturas_pendientes` se cargan afuera (HistorialClienteWindow, que
 ya tiene ambas listas del cliente) para no reconsultar la base desde este dialogo."""
 
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QDialog,
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -25,6 +26,7 @@ from app.db.models import NotaCreditoCliente
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -38,7 +40,6 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     ComboBoxSinScroll,
     aplicar_sombra,
 )
@@ -59,7 +60,7 @@ QLabel.FormLabel {{
     color: #334155;
     margin-bottom: 2px;
 }}
-QComboBox, QDoubleSpinBox {{
+QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -68,7 +69,7 @@ QComboBox, QDoubleSpinBox {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QComboBox:focus, QDoubleSpinBox:focus {{
+QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
 }}
 QComboBox {{
@@ -83,30 +84,6 @@ QComboBox::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -218,8 +195,7 @@ class AplicarNotaCreditoDialog(QDialog):
 
         lbl_monto = QLabel("Monto a aplicar <span style='color: #DC2626;'>*</span>")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = QDoubleSpinBox()
-        self.monto_input.setDecimals(2)
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)
         card_layout.addWidget(lbl_monto)
         card_layout.addWidget(self.monto_input)
@@ -261,15 +237,19 @@ class AplicarNotaCreditoDialog(QDialog):
         origen_factura = self.factura_combo.currentData()
         nota = next((n for n in self.notas_disponibles if n.id_nota_credito == id_nota), None)
         if nota is None or origen_factura is None:
-            self.monto_input.setRange(0, 0)
+            self.monto_input.min_value = Decimal("0")
+            self.monto_input.max_value = Decimal("0")
+            self.monto_input.set_value(Decimal("0"))
             self.btn_aplicar.setEnabled(False)
             self.lbl_ayuda.setText("No hay notas de crédito o facturas con saldo pendiente disponibles.")
             return
 
         _, saldo_pendiente_factura = origen_factura
         maximo = min(float(nota.saldo_disponible), saldo_pendiente_factura)
-        self.monto_input.setRange(0.01, maximo if maximo > 0 else 0.01)
-        self.monto_input.setValue(maximo)
+        maximo_decimal = Decimal(str(maximo))
+        self.monto_input.min_value = Decimal("0.01")
+        self.monto_input.max_value = maximo_decimal if maximo_decimal > 0 else Decimal("0.01")
+        self.monto_input.set_value(maximo_decimal)
         self.btn_aplicar.setEnabled(maximo > 0)
         self.lbl_ayuda.setText(
             f"Disponible en la nota: ${float(nota.saldo_disponible):,.2f} · "
@@ -288,7 +268,7 @@ class AplicarNotaCreditoDialog(QDialog):
                 self.session,
                 id_nota_credito=id_nota,
                 id_factura_destino=id_factura_destino,
-                monto=self.monto_input.value(),
+                monto=self.monto_input.get_value(),
                 id_usuario=self.id_usuario,
             )
         except ValueError as exc:

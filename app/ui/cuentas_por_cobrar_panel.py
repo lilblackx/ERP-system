@@ -15,6 +15,7 @@ en el campo de monto.
 """
 
 import logging
+from decimal import Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
@@ -23,7 +24,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -43,6 +43,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
@@ -62,7 +63,6 @@ from app.ui.styles import (
     COLOR_WARNING,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     SEARCH_QSS,
     TABLE_QSS,
     EstadoBadge,
@@ -106,7 +106,7 @@ QLabel.FormLabel {{
     color: #334155;
     margin-bottom: 2px;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox {{
+QLineEdit, QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -115,10 +115,10 @@ QLineEdit, QComboBox, QDoubleSpinBox {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {{
+QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
 }}
-QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled {{
+QLineEdit:disabled, QComboBox:disabled {{
     background-color: {COLOR_CONTENT_BG};
     color: {COLOR_TEXT_LIGHT};
 }}
@@ -131,30 +131,6 @@ QComboBox::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -260,11 +236,8 @@ class PagoCobroDialog(QDialog):
 
         lbl_monto = QLabel("Monto (USD) <span style='color: #DC2626;'>*</span>")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = QDoubleSpinBox()
-        self.monto_input.setRange(0.01, 999999999.99)
-        self.monto_input.setDecimals(2)
-        self.monto_input.setPrefix("$ ")
-        self.monto_input.setValue(float(self.cuenta.saldo_pendiente))
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
+        self.monto_input.set_value(self.cuenta.saldo_pendiente)
         self.monto_input.setFixedHeight(32)
         layout.addWidget(lbl_monto)
         layout.addWidget(self.monto_input)
@@ -282,9 +255,7 @@ class PagoCobroDialog(QDialog):
         col_bolivares = QVBoxLayout()
         lbl_bolivares = QLabel("Monto (Bs)")
         lbl_bolivares.setProperty("class", "FormLabel")
-        self.bolivares_input = QDoubleSpinBox()
-        self.bolivares_input.setRange(0, 999999999999)
-        self.bolivares_input.setDecimals(2)
+        self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
         col_bolivares.addWidget(lbl_bolivares)
@@ -293,9 +264,7 @@ class PagoCobroDialog(QDialog):
         col_tasa = QVBoxLayout()
         lbl_tasa = QLabel("Tasa del día (Bs/USD)")
         lbl_tasa.setProperty("class", "FormLabel")
-        self.tasa_input = QDoubleSpinBox()
-        self.tasa_input.setRange(0.01, 999999)
-        self.tasa_input.setDecimals(2)
+        self.tasa_input = NumericLineEdit(NumericFieldType.RATE)
         self.tasa_input.setFixedHeight(32)
         self.tasa_input.valueChanged.connect(self._calcular_monto_usd)
         col_tasa.addWidget(lbl_tasa)
@@ -402,7 +371,7 @@ class PagoCobroDialog(QDialog):
 
         # Pre-seleccionar la tasa BCV si está disponible
         if self.tasa_bcv:
-            self.tasa_input.setValue(self.tasa_bcv)
+            self.tasa_input.set_value(self.tasa_bcv)
 
     def _on_metodo_cambiado(self) -> None:
         self._toggle_origen()
@@ -452,7 +421,7 @@ class PagoCobroDialog(QDialog):
         """Carga la tasa seleccionada del combo al campo de tasa."""
         tasa = self.tasa_combo.currentData()
         if tasa is not None:
-            self.tasa_input.setValue(tasa)
+            self.tasa_input.set_value(tasa)
             self._calcular_monto_usd()
 
     def _calcular_monto_usd(self) -> None:
@@ -461,12 +430,17 @@ class PagoCobroDialog(QDialog):
         if metodo != "transferencia":
             return
 
-        bolivares = self.bolivares_input.value()
-        tasa = self.tasa_input.value()
+        bolivares = self.bolivares_input.get_value() or Decimal("0")
+        tasa = self.tasa_input.get_value() or Decimal("0")
 
         if tasa > 0:
             monto_usd = bolivares / tasa
-            self.monto_input.setValue(monto_usd)
+            self.monto_input.set_value(monto_usd)
+            # set_value() reformatea con el estilo base del widget -- reaplicar el
+            # resaltado de solo-lectura para que no desaparezca en cada recalculo
+            # mientras el metodo de pago siga siendo transferencia.
+            if self.monto_input.isReadOnly():
+                self.monto_input.setStyleSheet("background-color: #F1F5F9;")
 
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
@@ -483,8 +457,8 @@ class PagoCobroDialog(QDialog):
 
             # Si es transferencia, guardar bolivares y buscar tasa
             if metodo == "transferencia":
-                bolivares = self.bolivares_input.value()
-                tasa = self.tasa_input.value()
+                bolivares = self.bolivares_input.get_value() or Decimal("0")
+                tasa = self.tasa_input.get_value() or Decimal("0")
                 if bolivares > 0:
                     monto_moneda_origen = bolivares
                     # Buscar la tasa en la base de datos
@@ -503,7 +477,7 @@ class PagoCobroDialog(QDialog):
                 lambda: PagoService.registrar_pago_cobro(
                     self.session,
                     id_cuenta_por_cobrar=self.cuenta.id_cuenta_por_cobrar,
-                    monto=self.monto_input.value(),
+                    monto=self.monto_input.get_value(),
                     metodo_pago=metodo,
                     moneda="USD",
                     monto_moneda_origen=monto_moneda_origen,

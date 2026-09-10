@@ -7,12 +7,13 @@ No ofrece abrir un turno de caja desde aca: FacturacionPanel exige una caja con 
 abierto para poder entrar a facturar (ver FacturacionPanel._verificar_caja_abierta /
 CajaAperturaDialog), asi que si se llego hasta este dialogo ya deberia existir una."""
 
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -38,7 +40,6 @@ from app.ui.styles import (
     COLOR_TEXT_LIGHT,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     aplicar_sombra,
 )
 
@@ -58,7 +59,7 @@ QLabel.FormLabel {{
     color: #334155;
     margin-bottom: 2px;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox {{
+QLineEdit, QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -67,10 +68,10 @@ QLineEdit, QComboBox, QDoubleSpinBox {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {{
+QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
 }}
-QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled {{
+QLineEdit:disabled, QComboBox:disabled {{
     background-color: {COLOR_CONTENT_BG};
     color: {COLOR_TEXT_LIGHT};
 }}
@@ -86,30 +87,6 @@ QComboBox::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -193,7 +170,7 @@ class PagoLineaDialog(QDialog):
         # (selectAll) para poder sobreescribirlo de un tiro si el cajero va a repartir el
         # pago entre varias formas/monedas.
         if monto_sugerido is not None and monto_sugerido > 0:
-            self.monto_input.setValue(monto_sugerido)
+            self.monto_input.set_value(monto_sugerido)
             self.monto_input.setFocus()
             self.monto_input.selectAll()
 
@@ -251,15 +228,13 @@ class PagoLineaDialog(QDialog):
         col_monto = QVBoxLayout()
         lbl_monto = QLabel("Monto <span style='color: #DC2626;'>*</span>")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = QDoubleSpinBox()
-        self.monto_input.setRange(0.01, 999999999.99)
-        self.monto_input.setDecimals(2)
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)
         # Con el monto ya precargado (ver __init__/monto_sugerido) y seleccionado, Enter
         # aca confirma de una -- para el caso comun (efectivo, monto sugerido correcto)
         # el flujo completo queda en "Agregar forma de pago" + Enter, sin mouse
         # (auditoria UX de facturacion, cajero).
-        self.monto_input.lineEdit().returnPressed.connect(self._validar_y_aceptar)
+        self.monto_input.returnPressed.connect(self._validar_y_aceptar)
         col_monto.addWidget(lbl_monto)
         col_monto.addWidget(self.monto_input)
 
@@ -369,7 +344,7 @@ class PagoLineaDialog(QDialog):
     # ── Validación / datos ────────────────────────────────────────────────
 
     def _validar_y_aceptar(self) -> None:
-        if self.monto_input.value() <= 0:
+        if self.monto_input.get_value() <= 0:
             MessageBox.warning(self, "Monto requerido", "Ingrese un monto mayor a cero.")
             return
         origen = self.origen_combo.currentData()
@@ -393,7 +368,7 @@ class PagoLineaDialog(QDialog):
         return {
             "metodo_pago": self.metodo_combo.currentData(),
             "moneda": self.moneda_combo.currentData(),
-            "monto_moneda_origen": self.monto_input.value(),
+            "monto_moneda_origen": self.monto_input.get_value(),
             "id_caja": id_origen if tipo_origen == "caja" else None,
             "id_cuenta_bancaria": id_origen if tipo_origen == "banco" else None,
             "referencia": self.referencia_input.text().strip() or None,

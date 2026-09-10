@@ -12,7 +12,6 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,6 +26,7 @@ from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -40,7 +40,6 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     aplicar_sombra,
 )
 
@@ -60,7 +59,7 @@ QLabel.FormLabel {{
     color: #334155;
     margin-bottom: 2px;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox {{
+QLineEdit, QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -69,7 +68,7 @@ QLineEdit, QComboBox, QDoubleSpinBox {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {{
+QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
 }}
 QComboBox {{
@@ -84,30 +83,6 @@ QComboBox::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QLineEdit:disabled {{
     background-color: {COLOR_FIELD_BG};
@@ -261,10 +236,7 @@ class CajaAperturaDialog(QDialog):
 
         lbl_saldo = QLabel("Saldo de Apertura")
         lbl_saldo.setProperty("class", "FormLabel")
-        self.saldo_input = QDoubleSpinBox()
-        self.saldo_input.setRange(0, 999999999.99)
-        self.saldo_input.setDecimals(2)
-        self.saldo_input.setPrefix("$ ")
+        self.saldo_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.saldo_input.setFixedHeight(32)
         layout.addWidget(lbl_saldo)
         layout.addWidget(self.saldo_input)
@@ -344,7 +316,7 @@ class CajaAperturaDialog(QDialog):
                 self.session,
                 id_caja,
                 id_usuario=self.usuario_autenticado.id_usuario,
-                saldo_apertura=self.saldo_input.value(),
+                saldo_apertura=self.saldo_input.get_value(),
             )
         except (ValueError, PermisoDenegadoError) as exc:
             MessageBox.warning(self, "No se pudo abrir la caja", str(exc))

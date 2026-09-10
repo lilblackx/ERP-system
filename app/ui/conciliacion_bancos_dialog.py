@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QCalendarWidget,
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -22,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Banco, BancoMovimiento, CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -136,10 +136,7 @@ class ConciliacionBancosDialog(QDialog):
         saldo_final_layout.setSpacing(4)
         lbl_saldo_final = QLabel("Saldo Final (Manual):")
         lbl_saldo_final.setStyleSheet("font-size: 13px; font-weight: 600; color: #475569;")
-        self.saldo_final_input = QDoubleSpinBox()
-        self.saldo_final_input.setRange(-999999999.99, 999999999.99)
-        self.saldo_final_input.setDecimals(2)
-        self.saldo_final_input.setPrefix("$ ")
+        self.saldo_final_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, prefix="$ ")
         self.saldo_final_input.setFixedHeight(36)
         self.saldo_final_input.valueChanged.connect(self._calcular_conciliacion)
         saldo_final_layout.addWidget(lbl_saldo_final)
@@ -404,7 +401,7 @@ class ConciliacionBancosDialog(QDialog):
             return
 
         # Verificar que la diferencia sea 0
-        saldo_final_manual = self.saldo_final_input.value()
+        saldo_final_manual = float(self.saldo_final_input.get_value())
         id_cuenta = self.cuenta_combo.currentData()
         fecha = self._fecha_conciliacion.toPyDate()
 
@@ -586,7 +583,7 @@ class ConciliacionBancosDialog(QDialog):
                 total_salidas += mov["monto"]
 
         # Saldo final manual ingresado por el usuario
-        saldo_final_manual = self.saldo_final_input.value()
+        saldo_final_manual = float(self.saldo_final_input.get_value())
 
         # Cálculo: (Saldo Inicial + Entradas - Salidas) - Saldo Final Manual = Diferencia
         saldo_calculado = saldo_inicial + total_entradas - total_salidas
@@ -641,10 +638,7 @@ class MovimientoManualDialog(QDialog):
 
         lbl_monto = QLabel("Monto:")
         lbl_monto.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
-        self.monto_input = QDoubleSpinBox()
-        self.monto_input.setRange(0, 999999999.99)
-        self.monto_input.setDecimals(2)
-        self.monto_input.setPrefix("$ ")
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.monto_input.setFixedHeight(36)
         form_layout.addWidget(lbl_monto, 0, 0)
         form_layout.addWidget(self.monto_input, 0, 1)
@@ -685,7 +679,7 @@ class MovimientoManualDialog(QDialog):
         layout.addLayout(botones_layout)
 
     def _validar_y_aceptar(self):
-        if self.monto_input.value() <= 0:
+        if self.monto_input.get_value() <= 0:
             MessageBox.warning(self, "Dato requerido", "El monto debe ser mayor a 0.")
             return
         if not self.referencia_input.text().strip():
@@ -695,7 +689,7 @@ class MovimientoManualDialog(QDialog):
 
     def get_data(self) -> dict:
         return {
-            "monto": self.monto_input.value(),
+            "monto": float(self.monto_input.get_value()),
             "referencia": self.referencia_input.text().strip(),
             "descripcion": self.descripcion_input.text().strip(),
         }

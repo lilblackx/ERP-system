@@ -3,6 +3,8 @@ app/ui/cliente_form_dialog.py (paleta y tipografia de app/ui/styles.py, layout d
 columnas con tarjetas, Font Awesome via qtawesome) para mantener consistencia entre
 modulos."""
 
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtWidgets import (
@@ -10,7 +12,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
-    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QInputDialog,
@@ -27,6 +28,7 @@ from app.services.categorias import CategoriaService
 from app.services.inventario import PrecioService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -42,7 +44,6 @@ from app.ui.styles import (
     FONT_FAMILY,
     ICON_CHECK_URL,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     aplicar_sombra,
 )
 
@@ -69,7 +70,7 @@ QLabel.SectionTitle {{
     letter-spacing: 0.8px;
     padding-bottom: 2px;
 }}
-QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
+QLineEdit, QComboBox, QDateEdit {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -78,11 +79,11 @@ QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
     background-color: #FFFFFF;
 }}
-QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled, QDateEdit:disabled {{
+QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled {{
     background-color: {COLOR_CONTENT_BG};
     color: {COLOR_TEXT_LIGHT};
 }}
@@ -99,30 +100,6 @@ QComboBox::down-arrow, QDateEdit::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QComboBox QAbstractItemView {{
     background-color: #FFFFFF;
@@ -372,10 +349,7 @@ class ProductoFormDialog(QDialog):
         # Costo
         lbl_costo = QLabel("Costo ($) <span style='color: #DC2626;'>*</span>")
         lbl_costo.setProperty("class", "FormLabel")
-        self.costo_input = QDoubleSpinBox()
-        self.costo_input.setRange(0, 999999999.99)
-        self.costo_input.setDecimals(2)
-        self.costo_input.setPrefix("$ ")
+        self.costo_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.costo_input.setFixedHeight(32)
         self.costo_input.valueChanged.connect(self._actualizar_margen)
         grid.addWidget(lbl_costo, 0, 0)
@@ -384,10 +358,7 @@ class ProductoFormDialog(QDialog):
         # Precio de venta
         lbl_precio = QLabel("Precio de Venta ($)")
         lbl_precio.setProperty("class", "FormLabel")
-        self.precio_venta_input = QDoubleSpinBox()
-        self.precio_venta_input.setRange(0, 999999999.99)
-        self.precio_venta_input.setDecimals(2)
-        self.precio_venta_input.setPrefix("$ ")
+        self.precio_venta_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.precio_venta_input.setFixedHeight(32)
         self.precio_venta_input.valueChanged.connect(self._actualizar_margen)
         grid.addWidget(lbl_precio, 0, 1)
@@ -404,9 +375,7 @@ class ProductoFormDialog(QDialog):
         # con una conversion caja->unidad real mas adelante.
         lbl_unidad = QLabel("Cantidad en Stock")
         lbl_unidad.setProperty("class", "FormLabel")
-        self.cantidad_unidad_input = QDoubleSpinBox()
-        self.cantidad_unidad_input.setRange(0, 999999.99)
-        self.cantidad_unidad_input.setDecimals(2)
+        self.cantidad_unidad_input = NumericLineEdit(NumericFieldType.QUANTITY)
         self.cantidad_unidad_input.setFixedHeight(32)
         grid.addWidget(lbl_unidad, 3, 0, 1, 2)
         grid.addWidget(self.cantidad_unidad_input, 4, 0, 1, 2)
@@ -415,9 +384,7 @@ class ProductoFormDialog(QDialog):
         # configurado, el producto no aparece en ese reporte.
         lbl_minima = QLabel("Stock Mínimo (alerta)")
         lbl_minima.setProperty("class", "FormLabel")
-        self.cantidad_minima_input = QDoubleSpinBox()
-        self.cantidad_minima_input.setRange(0, 999999.99)
-        self.cantidad_minima_input.setDecimals(2)
+        self.cantidad_minima_input = NumericLineEdit(NumericFieldType.QUANTITY)
         self.cantidad_minima_input.setFixedHeight(32)
         grid.addWidget(lbl_minima, 5, 0, 1, 2)
         grid.addWidget(self.cantidad_minima_input, 6, 0, 1, 2)
@@ -496,9 +463,9 @@ class ProductoFormDialog(QDialog):
         self.vencimiento_input.setEnabled(activo)
 
     def _actualizar_margen(self) -> None:
-        costo = self.costo_input.value()
-        precio = self.precio_venta_input.value()
-        margen = ((precio - costo) / costo * 100) if costo else 0.0
+        costo = self.costo_input.get_value()
+        precio = self.precio_venta_input.get_value()
+        margen = ((precio - costo) / costo * 100) if costo else Decimal("0")
         self.lbl_margen.setText(f"Margen: {margen:.2f}%")
 
     # ── Precarga (edición) ────────────────────────────────────────────────
@@ -507,9 +474,9 @@ class ProductoFormDialog(QDialog):
         self.codigo_input.setText(producto.cod_producto or "")
         self.nombre_input.setText(producto.nombre_producto or "")
         self.descripcion_input.setText(producto.descripcion_producto or "")
-        self.costo_input.setValue(float(producto.costo_producto or 0))
-        self.cantidad_unidad_input.setValue(float(producto.cantidad_unidad or 0))
-        self.cantidad_minima_input.setValue(float(producto.cantidad_minima or 0))
+        self.costo_input.set_value(producto.costo_producto or 0)
+        self.cantidad_unidad_input.set_value(producto.cantidad_unidad or 0)
+        self.cantidad_minima_input.set_value(producto.cantidad_minima or 0)
 
         idx_categoria = self.categoria_combo.findData(producto.id_categoria)
         if idx_categoria >= 0:
@@ -521,7 +488,7 @@ class ProductoFormDialog(QDialog):
 
         precio = PrecioService.obtener_precio(self.session, producto.id_producto, id_usuario=self.id_usuario)
         if precio:
-            self.precio_venta_input.setValue(float(precio.precio_venta or 0))
+            self.precio_venta_input.set_value(precio.precio_venta or 0)
         self._actualizar_margen()
 
     # ── Validación / datos ────────────────────────────────────────────────
@@ -546,13 +513,13 @@ class ProductoFormDialog(QDialog):
             "nombre_producto": self.nombre_input.text().strip(),
             "descripcion_producto": self.descripcion_input.text().strip() or None,
             "id_categoria": self.categoria_combo.currentData(),
-            "costo_producto": self.costo_input.value(),
-            "cantidad_unidad": self.cantidad_unidad_input.value(),
-            "cantidad_minima": self.cantidad_minima_input.value(),
+            "costo_producto": self.costo_input.get_value(),
+            "cantidad_unidad": self.cantidad_unidad_input.get_value(),
+            "cantidad_minima": self.cantidad_minima_input.get_value(),
             "fecha_vencimiento": (
                 self.vencimiento_input.date().toPython() if self.tiene_vencimiento_check.isChecked() else None
             ),
         }
 
-    def get_precio_venta(self) -> float:
-        return self.precio_venta_input.value()
+    def get_precio_venta(self) -> Decimal:
+        return self.precio_venta_input.get_value()

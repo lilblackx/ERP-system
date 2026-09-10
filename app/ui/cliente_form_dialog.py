@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import QRegularExpression, QSize, Qt
@@ -6,13 +7,11 @@ from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +22,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from app.ui.mapa_widget import MapaWidget
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -36,7 +36,6 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
-    ICON_CHEVRON_UP_URL,
     aplicar_sombra,
 )
 
@@ -65,7 +64,7 @@ QLabel.SectionTitle {{
     letter-spacing: 0.8px;
     padding-bottom: 2px;
 }}
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+QLineEdit, QComboBox {{
     background-color: #FFFFFF;
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
@@ -74,7 +73,7 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
 }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
+QLineEdit:focus, QComboBox:focus {{
     border: 1.5px solid {COLOR_PRIMARY};
     background-color: #FFFFFF;
 }}
@@ -91,30 +90,6 @@ QComboBox::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QSpinBox::up-button, QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QSpinBox::down-button, QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 18px;
-    border: none;
-    border-left: 1px solid {COLOR_BORDER};
-}}
-QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-    image: url({ICON_CHEVRON_UP_URL});
-    width: 10px;
-    height: 10px;
-}}
-QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 10px;
-    height: 10px;
 }}
 QComboBox QAbstractItemView {{
     background-color: #FFFFFF;
@@ -246,13 +221,16 @@ class ClienteFormDialog(QDialog):
         self.codigo_input.setPlaceholderText("Ej: CLI-001")
         self.codigo_input.setMaxLength(20)
         self.codigo_input.setFixedHeight(32)
-        grid1.addWidget(lbl_cod, 0, 0)
-        grid1.addWidget(self.codigo_input, 1, 0)
+        grid1.addWidget(lbl_cod, 0, 0, 1, 2)
+        grid1.addWidget(self.codigo_input, 1, 0, 1, 2)
 
-        # ID Fiscal
+        # ID Fiscal -- fila propia a ancho completo (no compartida con Código): a media
+        # columna, el combo de tipo (V/J/G/E/P) mas el placeholder largo del numero
+        # ("Ej: 30489713 / 12345678-0") no entraban y el campo quedaba visualmente
+        # cortado. Reportado por el usuario 2026-09-09.
         lbl_id = QLabel("ID Fiscal / Identificación <span style='color: #DC2626;'>*</span>")
         lbl_id.setProperty("class", "FormLabel")
-        grid1.addWidget(lbl_id, 0, 1)
+        grid1.addWidget(lbl_id, 2, 0, 1, 2)
 
         id_hbox = QHBoxLayout()
         id_hbox.setSpacing(4)
@@ -273,7 +251,7 @@ class ClienteFormDialog(QDialog):
 
         id_hbox.addWidget(self.tipo_id_combo)
         id_hbox.addWidget(self.identificacion_input)
-        grid1.addLayout(id_hbox, 1, 1)
+        grid1.addLayout(id_hbox, 3, 0, 1, 2)
 
         # Razón Social
         lbl_nom = QLabel("Razón Social o Nombre Completo <span style='color: #DC2626;'>*</span>")
@@ -282,8 +260,8 @@ class ClienteFormDialog(QDialog):
         self.nombre_input.setPlaceholderText("Ej: Distribuidora Central, C.A.")
         self.nombre_input.setMaxLength(200)
         self.nombre_input.setFixedHeight(32)
-        grid1.addWidget(lbl_nom, 2, 0, 1, 2)
-        grid1.addWidget(self.nombre_input, 3, 0, 1, 2)
+        grid1.addWidget(lbl_nom, 4, 0, 1, 2)
+        grid1.addWidget(self.nombre_input, 5, 0, 1, 2)
 
         # Vendedor Asignado
         lbl_vend = QLabel("Vendedor Asignado")
@@ -296,8 +274,8 @@ class ClienteFormDialog(QDialog):
         ):
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
 
-        grid1.addWidget(lbl_vend, 4, 0)
-        grid1.addWidget(self.vendedor_combo, 5, 0)
+        grid1.addWidget(lbl_vend, 6, 0)
+        grid1.addWidget(self.vendedor_combo, 7, 0)
 
         # Categoría
         lbl_cat = QLabel("Categoría de Cliente")
@@ -308,8 +286,8 @@ class ClienteFormDialog(QDialog):
         for categoria in self.session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):
             self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
 
-        grid1.addWidget(lbl_cat, 4, 1)
-        grid1.addWidget(self.categoria_combo, 5, 1)
+        grid1.addWidget(lbl_cat, 6, 1)
+        grid1.addWidget(self.categoria_combo, 7, 1)
 
         col1_layout.addLayout(grid1)
         col1_layout.addStretch()
@@ -369,10 +347,7 @@ class ClienteFormDialog(QDialog):
         # Límite de Crédito
         lbl_limite = QLabel("Límite de Crédito ($)")
         lbl_limite.setProperty("class", "FormLabel")
-        self.limite_credito_input = QDoubleSpinBox()
-        self.limite_credito_input.setRange(0, 999999999.99)
-        self.limite_credito_input.setDecimals(2)
-        self.limite_credito_input.setPrefix("$ ")
+        self.limite_credito_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.limite_credito_input.setFixedHeight(32)
         grid2.addWidget(lbl_limite, 4, 0)
         grid2.addWidget(self.limite_credito_input, 5, 0)
@@ -380,9 +355,7 @@ class ClienteFormDialog(QDialog):
         # Días de Crédito
         lbl_dias = QLabel("Días de Crédito")
         lbl_dias.setProperty("class", "FormLabel")
-        self.dias_credito_input = QSpinBox()
-        self.dias_credito_input.setRange(0, 365)
-        self.dias_credito_input.setSuffix(" días")
+        self.dias_credito_input = NumericLineEdit(NumericFieldType.COUNT, max_value=Decimal(365), suffix=" días")
         self.dias_credito_input.setFixedHeight(32)
         self.dias_credito_input.setToolTip("0 = cliente de contado, no podrá facturarse a crédito")
         grid2.addWidget(lbl_dias, 4, 1)
@@ -540,8 +513,8 @@ class ClienteFormDialog(QDialog):
         self.telefono_input.setText(cliente.telefono or "")
         self.email_input.setText(cliente.email or "")
         self.direccion_input.setText(cliente.direccion or "")
-        self.limite_credito_input.setValue(float(cliente.limite_credito or 0))
-        self.dias_credito_input.setValue(cliente.dias_credito or 0)
+        self.limite_credito_input.set_value(cliente.limite_credito or 0)
+        self.dias_credito_input.set_value(cliente.dias_credito or 0)
 
         idx_vendedor = self.vendedor_combo.findData(cliente.vendedor_cliente)
         self.vendedor_combo.setCurrentIndex(idx_vendedor if idx_vendedor >= 0 else 0)
@@ -655,8 +628,8 @@ class ClienteFormDialog(QDialog):
             "telefono": self.telefono_input.text().strip() or None,
             "email": self.email_input.text().strip() or None,
             "direccion": self.direccion_input.text().strip() or None,
-            "limite_credito": self.limite_credito_input.value(),
-            "dias_credito": self.dias_credito_input.value(),
+            "limite_credito": self.limite_credito_input.get_value(),
+            "dias_credito": int(self.dias_credito_input.get_value()),
             "vendedor_cliente": self.vendedor_combo.currentData(),
             "id_categoria_cliente": self.categoria_combo.currentData(),
             "latitud": lat,
