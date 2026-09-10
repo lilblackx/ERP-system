@@ -184,7 +184,7 @@ class ClientesPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        lbl = QLabel("LISTA DE CLIENTES")
+        lbl = QLabel("Clientes")
         lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")

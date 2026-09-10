@@ -120,7 +120,7 @@ class BancosPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        lbl = QLabel("LISTA DE BANCOS")
+        lbl = QLabel("Bancos")
         lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")

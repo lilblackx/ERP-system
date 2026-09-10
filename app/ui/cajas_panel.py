@@ -194,7 +194,7 @@ class CajasPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        lbl = QLabel("CAJAS")
+        lbl = QLabel("Cajas")
         lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
