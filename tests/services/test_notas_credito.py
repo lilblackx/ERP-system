@@ -80,7 +80,7 @@ def _crear_compra(session):
 
 
 def test_crear_nota_credito_cliente_ok(db_session):
-    cliente, factura, _ = _crear_factura(db_session)
+    cliente, factura, admin = _crear_factura(db_session)
 
     nota = NotaCreditoService.crear_nota_credito_cliente(
         db_session,
@@ -88,7 +88,7 @@ def test_crear_nota_credito_cliente_ok(db_session):
         id_factura_origen=factura.id_factura,
         monto=Decimal("25.00"),
         motivo="Factura anulada con pago ya aplicado",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
 
     assert nota.id_nota_credito is not None
@@ -103,7 +103,7 @@ def test_crear_nota_credito_cliente_correlativo_es_unico_y_valido(db_session):
     # que en tests puede no coincidir con lo que uno esperaria a simple vista porque el
     # IDENTITY real no se resetea entre tests aunque las filas se limpien -- por eso no
     # se afirma un valor exacto ni un incremento de +1 puntual, solo formato y unicidad.
-    cliente, factura, _ = _crear_factura(db_session)
+    cliente, factura, admin = _crear_factura(db_session)
 
     primera = NotaCreditoService.crear_nota_credito_cliente(
         db_session,
@@ -111,7 +111,7 @@ def test_crear_nota_credito_cliente_correlativo_es_unico_y_valido(db_session):
         id_factura_origen=factura.id_factura,
         monto=Decimal("10.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     segunda = NotaCreditoService.crear_nota_credito_cliente(
         db_session,
@@ -119,7 +119,7 @@ def test_crear_nota_credito_cliente_correlativo_es_unico_y_valido(db_session):
         id_factura_origen=factura.id_factura,
         monto=Decimal("5.00"),
         motivo="y",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
 
     assert primera.numero_nota_credito != segunda.numero_nota_credito
@@ -129,7 +129,7 @@ def test_crear_nota_credito_cliente_correlativo_es_unico_y_valido(db_session):
 
 
 def test_crear_nota_credito_cliente_monto_invalido(db_session):
-    cliente, factura, _ = _crear_factura(db_session)
+    cliente, factura, admin = _crear_factura(db_session)
 
     with pytest.raises(ValueError, match="mayor a cero"):
         NotaCreditoService.crear_nota_credito_cliente(
@@ -138,7 +138,7 @@ def test_crear_nota_credito_cliente_monto_invalido(db_session):
             id_factura_origen=factura.id_factura,
             monto=Decimal("0.00"),
             motivo="x",
-            id_usuario=None,
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -150,7 +150,7 @@ def test_listar_notas_credito_cliente(db_session):
         id_factura_origen=factura.id_factura,
         monto=Decimal("10.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     NotaCreditoService.crear_nota_credito_cliente(
         db_session,
@@ -158,7 +158,7 @@ def test_listar_notas_credito_cliente(db_session):
         id_factura_origen=factura.id_factura,
         monto=Decimal("5.00"),
         motivo="y",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
 
     notas = NotaCreditoService.listar_notas_credito_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
@@ -182,7 +182,7 @@ def test_listar_notas_credito_clientes_reporte_filtra_por_cliente_y_pagina(db_se
         id_factura_origen=factura_a.id_factura,
         monto=Decimal("10.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     NotaCreditoService.crear_nota_credito_cliente(
         db_session,
@@ -190,7 +190,7 @@ def test_listar_notas_credito_clientes_reporte_filtra_por_cliente_y_pagina(db_se
         id_factura_origen=factura_b.id_factura,
         monto=Decimal("20.00"),
         motivo="y",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
 
     reporte = NotaCreditoService.listar_notas_credito_clientes(
@@ -237,7 +237,7 @@ def test_aplicar_nota_credito_cliente_ok(db_session):
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     # limite_credito por defecto de crear_cliente() es 0 -- no califica para credito.
     cliente.limite_credito = Decimal("1000.00")
@@ -268,7 +268,7 @@ def test_aplicar_nota_credito_cliente_parcial_deja_saldo_disponible(db_session):
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     cliente.limite_credito = Decimal("1000.00")
     db_session.commit()
@@ -294,7 +294,7 @@ def test_aplicar_nota_credito_cliente_excede_saldo_disponible_falla(db_session):
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("20.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     cliente.limite_credito = Decimal("1000.00")
     db_session.commit()
@@ -318,7 +318,7 @@ def test_aplicar_nota_credito_cliente_excede_saldo_pendiente_factura_falla(db_se
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("100.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     cliente.limite_credito = Decimal("1000.00")
     db_session.commit()
@@ -342,7 +342,7 @@ def test_aplicar_nota_credito_cliente_de_otro_cliente_falla(db_session):
         id_factura_origen=factura_origen_a.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     cliente_b = crear_cliente(db_session, limite_credito=Decimal("1000.00"), dias_credito=30)
     factura_destino_b = _crear_factura_credito(db_session, cliente_b, monto="80.00")
@@ -365,7 +365,7 @@ def test_aplicar_nota_credito_cliente_ya_aplicada_falla(db_session):
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     cliente.limite_credito = Decimal("1000.00")
     db_session.commit()
@@ -390,14 +390,14 @@ def test_aplicar_nota_credito_cliente_ya_aplicada_falla(db_session):
 
 
 def test_aplicar_nota_credito_cliente_sin_usuario_autorizado_falla(db_session):
-    cliente, factura_origen, _ = _crear_factura(db_session)
+    cliente, factura_origen, admin = _crear_factura(db_session)
     nota = NotaCreditoService.crear_nota_credito_cliente(
         db_session,
         id_cliente=cliente.id_cliente,
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     cliente.limite_credito = Decimal("1000.00")
     db_session.commit()
@@ -424,7 +424,7 @@ def test_devolver_nota_credito_cliente_efectivo_ok(db_session):
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
@@ -460,7 +460,7 @@ def test_devolver_nota_credito_cliente_bancario_ok(db_session):
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("1000.00"))
 
@@ -496,7 +496,7 @@ def test_devolver_nota_credito_cliente_sin_autorizador_falla(db_session):
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
@@ -524,7 +524,7 @@ def test_devolver_nota_credito_cliente_autorizador_sin_permiso_editar_falla(db_s
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
@@ -554,7 +554,7 @@ def test_devolver_nota_credito_cliente_efectivo_saldo_insuficiente_falla(db_sess
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("0.00"))
@@ -579,7 +579,7 @@ def test_devolver_nota_credito_cliente_bancario_sin_referencia_falla(db_session)
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("50.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("1000.00"))
 
@@ -603,7 +603,7 @@ def test_devolver_nota_credito_cliente_excede_saldo_disponible_falla(db_session)
         id_factura_origen=factura_origen.id_factura,
         monto=Decimal("20.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
@@ -624,7 +624,7 @@ def test_devolver_nota_credito_cliente_excede_saldo_disponible_falla(db_session)
 
 
 def test_crear_nota_credito_proveedor_ok(db_session):
-    proveedor, compra, _ = _crear_compra(db_session)
+    proveedor, compra, admin = _crear_compra(db_session)
 
     nota = NotaCreditoService.crear_nota_credito_proveedor(
         db_session,
@@ -632,7 +632,7 @@ def test_crear_nota_credito_proveedor_ok(db_session):
         id_compra_origen=compra.id_compra,
         monto=Decimal("15.00"),
         motivo="Compra anulada con pago ya aplicado",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
 
     assert nota.id_nota_credito is not None
@@ -641,7 +641,7 @@ def test_crear_nota_credito_proveedor_ok(db_session):
 
 
 def test_crear_nota_credito_proveedor_monto_invalido(db_session):
-    proveedor, compra, _ = _crear_compra(db_session)
+    proveedor, compra, admin = _crear_compra(db_session)
 
     with pytest.raises(ValueError, match="mayor a cero"):
         NotaCreditoService.crear_nota_credito_proveedor(
@@ -650,7 +650,7 @@ def test_crear_nota_credito_proveedor_monto_invalido(db_session):
             id_compra_origen=compra.id_compra,
             monto=Decimal("-5.00"),
             motivo="x",
-            id_usuario=None,
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -662,7 +662,7 @@ def test_listar_notas_credito_proveedor(db_session):
         id_compra_origen=compra.id_compra,
         monto=Decimal("15.00"),
         motivo="x",
-        id_usuario=None,
+        id_usuario=admin.id_usuario,
     )
 
     notas = NotaCreditoService.listar_notas_credito_proveedor(
