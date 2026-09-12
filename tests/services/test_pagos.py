@@ -134,7 +134,7 @@ def test_registrar_pago_cobro_por_banco_actualiza_saldo(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("500.00"))
 
-    pago = PagoService.registrar_pago_cobro(
+    PagoService.registrar_pago_cobro(
         db_session,
         id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
         monto=Decimal("30.00"),
@@ -147,6 +147,8 @@ def test_registrar_pago_cobro_por_banco_actualiza_saldo(db_session):
     assert cuenta.saldo_total_banco == Decimal("530.00")
 
     movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta).one()
+    assert movimiento.tipo_movimiento == "abono"
+    assert movimiento.monto_movimiento == Decimal("30.00")
 
 
 def test_registrar_pago_cobro_por_banco_con_tasa_y_bolivares(db_session):
@@ -436,7 +438,7 @@ def test_registrar_pago_proveedor_por_banco_completo(db_session):
     cxp, admin = _crear_cxp(db_session, Decimal("80.00"))
     cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("500.00"))
 
-    PagoService.registrar_pago_proveedor(
+    pago = PagoService.registrar_pago_proveedor(
         db_session,
         id_cuenta_por_pagar=cxp.id_cuenta,
         monto=Decimal("80.00"),
@@ -445,6 +447,7 @@ def test_registrar_pago_proveedor_por_banco_completo(db_session):
         id_usuario=admin.id_usuario,
     )
 
+    assert pago.id_pago_proveedor is not None
     db_session.refresh(cuenta)
     assert cuenta.saldo_total_banco == Decimal("420.00")
 
@@ -453,6 +456,7 @@ def test_registrar_pago_proveedor_por_banco_completo(db_session):
 
     movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta).one()
     assert movimiento.tipo_movimiento == "cargo"
+    assert movimiento.monto_movimiento == Decimal("80.00")
 
 
 def test_registrar_pago_proveedor_excede_saldo(db_session):
