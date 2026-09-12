@@ -244,10 +244,11 @@ class PagoCobroDialog(QDialog):
         self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         self.monto_input.set_value(self.cuenta.saldo_pendiente)
         self.monto_input.setFixedHeight(32)
+        self.monto_input.valueChanged.connect(self._calcular_bolivares_desde_usd)
         layout.addWidget(lbl_monto)
         layout.addWidget(self.monto_input)
 
-        # Campos para cálculo en bolivares (solo visible para transferencia)
+        # Campos para cálculo en bolivares (visible para todos los pagos bancarios)
         self.campos_bolivares_widget = QWidget()
         self.campos_bolivares_widget.setVisible(False)
         campos_bolivares_layout = QVBoxLayout(self.campos_bolivares_widget)
@@ -299,6 +300,7 @@ class PagoCobroDialog(QDialog):
         lbl_origen.setProperty("class", "FormLabel")
         self.origen_combo = QComboBox()
         self.origen_combo.setFixedHeight(32)
+        self.origen_combo.currentIndexChanged.connect(self._toggle_campos_bolivares)
         layout.addWidget(lbl_origen)
         layout.addWidget(self.origen_combo)
 
@@ -411,34 +413,54 @@ class PagoCobroDialog(QDialog):
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}", ("banco", cuenta.id_cuenta)
                     )
         self.origen_combo.blockSignals(False)
+        # Actualizar campos de bolivares cuando cambia el origen
+        self._toggle_campos_bolivares()
 
     def _toggle_campos_bolivares(self) -> None:
-        """Muestra/oculta los campos de bolivares según el método de pago."""
+        """Muestra/oculta los campos de bolivares según el método de pago y origen."""
         metodo = self.metodo_combo.currentData()
-        es_transferencia = metodo == "transferencia"
-        self.campos_bolivares_widget.setVisible(es_transferencia)
-        if es_transferencia:
+        origen = self.origen_combo.currentData()
+        
+        # Mostrar campos de bolivares para todos los métodos bancarios (no efectivo)
+        # Esto incluye: transferencia, zelle, binance, punto_de_venta
+        es_banco = origen and origen[0] == "banco"
+        es_efectivo = metodo == "efectivo"
+        
+        mostrar_bolivares = es_banco and not es_efectivo
+        self.campos_bolivares_widget.setVisible(mostrar_bolivares)
+        
+        if mostrar_bolivares:
             # Habilitar cálculo automático
             self.monto_input.setReadOnly(True)
             self.monto_input.setStyleSheet("background-color: #F1F5F9;")
+            # Si no hay tasa seleccionada, seleccionar automáticamente la primera disponible (BCV)
+            if self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
+                self.tasa_combo.setCurrentIndex(1)  # El índice 0 es "-- Seleccionar --"
         else:
             # Restaurar campo de monto manual
             self.monto_input.setReadOnly(False)
             self.monto_input.setStyleSheet("")
 
     def _on_tasa_seleccionada(self) -> None:
-        """Carga la tasa seleccionada del combo al campo de tasa."""
+        """Carga la tasa seleccionada del combo al campo de tasa y calcula bolivares."""
         tasa_data = self.tasa_combo.currentData()
         if tasa_data is not None:
             id_tasa, valor_tasa = tasa_data
             self._id_tasa_seleccionada = id_tasa
             self.tasa_input.set_value(valor_tasa)
+            # Calcular automáticamente el monto en bolivares
+            monto_usd = self.monto_input.get_value() or Decimal("0")
+            if valor_tasa > 0 and monto_usd > 0:
+                bolivares = monto_usd * Decimal(str(valor_tasa))
+                self.bolivares_input.set_value(bolivares)
             self._calcular_monto_usd()
 
     def _calcular_monto_usd(self) -> None:
         """Calcula el monto USD automáticamente: bolivares / tasa."""
         metodo = self.metodo_combo.currentData()
-        if metodo != "transferencia":
+        origen = self.origen_combo.currentData()
+        # Solo calcular para métodos bancarios (no efectivo)
+        if metodo == "efectivo" or not origen or origen[0] != "banco":
             return
 
         bolivares = self.bolivares_input.get_value() or Decimal("0")
@@ -449,9 +471,24 @@ class PagoCobroDialog(QDialog):
             self.monto_input.set_value(monto_usd)
             # set_value() reformatea con el estilo base del widget -- reaplicar el
             # resaltado de solo-lectura para que no desaparezca en cada recalculo
-            # mientras el metodo de pago siga siendo transferencia.
+            # mientras el metodo de pago siga siendo bancario.
             if self.monto_input.isReadOnly():
                 self.monto_input.setStyleSheet("background-color: #F1F5F9;")
+
+    def _calcular_bolivares_desde_usd(self) -> None:
+        """Calcula el monto en bolivares automáticamente: USD * tasa."""
+        metodo = self.metodo_combo.currentData()
+        origen = self.origen_combo.currentData()
+        # Solo calcular para métodos bancarios (no efectivo)
+        if metodo == "efectivo" or not origen or origen[0] != "banco":
+            return
+
+        monto_usd = self.monto_input.get_value() or Decimal("0")
+        tasa = self.tasa_input.get_value() or Decimal("0")
+
+        if tasa > 0 and monto_usd > 0:
+            bolivares = monto_usd * tasa
+            self.bolivares_input.set_value(bolivares)
 
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
@@ -464,15 +501,36 @@ class PagoCobroDialog(QDialog):
         try:
             metodo = self.metodo_combo.currentData()
             monto_moneda_origen = None
+            monto_bolivares = None
+            tasa_cambio = None
             id_tasa = None
 
-            # Si es transferencia, guardar bolivares y tasa seleccionada
-            if metodo == "transferencia":
+            # Si es pago bancario (no efectivo), guardar bolivares y tasa seleccionada
+            # Esto incluye: transferencia, zelle, binance, punto_de_venta
+            if metodo != "efectivo" and tipo_origen == "banco":
                 bolivares = self.bolivares_input.get_value() or Decimal("0")
+                tasa = self.tasa_input.get_value() or Decimal("0")
+                
+                # Si no hay tasa manual, usar la tasa seleccionada del combo
+                if tasa == 0 and self._id_tasa_seleccionada:
+                    tasa_data = self.tasa_combo.currentData()
+                    if tasa_data:
+                        _, valor_tasa = tasa_data
+                        tasa = Decimal(str(valor_tasa))
+                
+                # Calcular bolivares si no se ingresaron pero hay tasa
+                if bolivares == 0 and tasa > 0:
+                    bolivares = self.monto_input.get_value() * tasa
+                
+                # Siempre guardar los valores para pagos bancarios
+                # Esto asegura que el trigger tenga los datos para crear el movimiento bancario
                 if bolivares > 0:
                     monto_moneda_origen = bolivares
-                    # Usar el ID de la tasa seleccionada del combo
-                    id_tasa = self._id_tasa_seleccionada
+                    monto_bolivares = bolivares
+                if tasa > 0:
+                    tasa_cambio = tasa
+                # Siempre guardar el ID de la tasa si está seleccionada
+                id_tasa = self._id_tasa_seleccionada
 
             self.pago_creado = reintentar_en_deadlock(
                 lambda: PagoService.registrar_pago_cobro(
@@ -482,6 +540,8 @@ class PagoCobroDialog(QDialog):
                     metodo_pago=metodo,
                     moneda="USD",
                     monto_moneda_origen=monto_moneda_origen,
+                    monto_bolivares=monto_bolivares,
+                    tasa_cambio=tasa_cambio,
                     id_caja=id_origen if tipo_origen == "caja" else None,
                     id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
                     id_tasa=id_tasa,

@@ -147,6 +147,37 @@ def test_registrar_pago_cobro_por_banco_actualiza_saldo(db_session):
     assert cuenta.saldo_total_banco == Decimal("530.00")
 
     movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta).one()
+
+
+def test_registrar_pago_cobro_por_banco_con_tasa_y_bolivares(db_session):
+    """Verifica que el pago bancario con tasa y bolivares se registre correctamente en el movimiento bancario."""
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("500.00"))
+
+    # Registrar pago con tasa y bolivares
+    pago = PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto=Decimal("10.00"),
+        metodo_pago="zelle",
+        moneda="USD",
+        monto_bolivares=Decimal("9000.00"),
+        tasa_cambio=Decimal("900.00"),
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    # Verificar que el pago se registró
+    assert pago.id_pago_cobro is not None
+    db_session.refresh(pago)
+    assert pago.monto_bolivares == Decimal("9000.00")
+    assert pago.tasa_cambio == Decimal("900.00")
+
+    # Verificar que el movimiento bancario tiene los valores de tasa y bolivares
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_pago_cobro=pago.id_pago_cobro).one()
+    assert movimiento.monto_bolivares == Decimal("9000.00")
+    assert movimiento.tasa_cambio == Decimal("900.00")
+    assert movimiento.monto_movimiento == Decimal("10.00")
     assert movimiento.tipo_movimiento == "abono"
     assert movimiento.id_pago_cobro == pago.id_pago_cobro
 

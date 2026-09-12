@@ -1,64 +1,10 @@
--- Permite que una factura de CONTADO tambien abra y liquide una cuenta por cobrar en la
--- misma transaccion (antes solo credito abria cuenta por cobrar), y agrega soporte de
--- multiples formas de pago / monedas por factura de contado (VES, COP, USDT ademas de
--- USD) en pagos_cobros. Ver docs/ESTADO_DEL_PROYECTO.md seccion 3 y CLAUDE.md.
-
-ALTER TABLE dbo.pagos_cobros
-ADD [moneda] VARCHAR(10) NOT NULL CONSTRAINT DF_pagos_cobros_moneda DEFAULT 'USD';
-GO
-
-ALTER TABLE dbo.pagos_cobros
-ADD CONSTRAINT CK_pagos_cobros_moneda CHECK ([moneda] IN ('USD','VES','COP','USDT'));
-GO
-
-ALTER TABLE dbo.pagos_cobros
-ADD [monto_moneda_origen] DECIMAL(18,2) NULL;
-GO
-
-ALTER TABLE dbo.pagos_cobros
-DROP CONSTRAINT CK_pagos_cobros_metodo;
-GO
-
-ALTER TABLE dbo.pagos_cobros
-ADD CONSTRAINT CK_pagos_cobros_metodo CHECK ([metodo_pago] IN ('efectivo','transferencia','cheque','tarjeta','punto_de_venta','zelle','binance'));
-GO
-
-DROP TRIGGER trg_factura_venta_cxc;
-GO
-
--- Identico al original salvo que ya no restringe la apertura/actualizacion de la cuenta
--- por cobrar a condicion_pago = 'credito': una factura de contado tambien pasa por aca
--- (se abre y se liquida con pagos_cobros en la misma transaccion, ver VentaService.
--- emitir_factura). El trigger solo reacciona a un cambio de total_venta, igual que antes.
-CREATE TRIGGER trg_factura_venta_cxc ON dbo.factura_venta
-AFTER UPDATE AS
-BEGIN
-	SET NOCOUNT ON;
-
-	INSERT INTO dbo.cuentas_por_cobrar ([id_factura], [saldo_pendiente], [fecha_vencimiento], [estado], [creado_por], [fecha_creacion])
-	SELECT i.[id_factura], i.[total_venta], i.[fecha_vencimiento], 'pendiente', i.[id_usuario_factura], GETDATE()
-	FROM inserted i
-	JOIN deleted d ON d.[id_factura] = i.[id_factura]
-	WHERE i.[total_venta] <> d.[total_venta]
-		AND NOT EXISTS (SELECT 1 FROM dbo.cuentas_por_cobrar c WHERE c.[id_factura] = i.[id_factura]);
-
-	UPDATE c
-	SET c.[saldo_pendiente] = i.[total_venta]
-	FROM dbo.cuentas_por_cobrar c
-	JOIN inserted i ON i.[id_factura] = c.[id_factura]
-	JOIN deleted d ON d.[id_factura] = i.[id_factura]
-	WHERE i.[total_venta] <> d.[total_venta]
-		AND c.[estado] = 'pendiente';
-END
-GO
+-- Corregir el trigger trg_pagos_cobros_io para incluir monto_bolivares y tasa_cambio
+-- en el INSERT a banco_movimientos, conectando así los pagos de clientes con
+-- la tabla de movimientos bancarios con la información de tasa y monto en bolívares
 
 DROP TRIGGER trg_pagos_cobros_io;
 GO
 
--- Identico al original salvo que ahora tambien propaga [moneda]/[monto_moneda_origen]
--- (el INSTEAD OF INSERT original solo copiaba las columnas que existian antes de este
--- migration -- sin esto, esas dos columnas nuevas se quedarian siempre en su DEFAULT sin
--- importar lo que el caller intente insertar, ver PagoService._aplicar_pago_cobro).
 CREATE TRIGGER trg_pagos_cobros_io ON dbo.pagos_cobros
 INSTEAD OF INSERT AS
 BEGIN
