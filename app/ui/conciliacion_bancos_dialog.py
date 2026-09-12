@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import Banco, BancoMovimiento, CuentaBancaria, ControlDeTasa, Usuario
+from app.db.models import Banco, BancoMovimiento, ControlDeTasa, CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
@@ -52,13 +52,13 @@ class ConciliacionBancosDialog(QDialog):
 
         # Aumentar el tamaño para asegurar que todos los campos sean visibles
         self.resize(1050, 700)
-        
+
         # Centrar la ventana en la pantalla
         self._centrar_ventana()
 
         self._build_ui()
         self._cargar_cuentas()
-    
+
     def _centrar_ventana(self):
         """Centra la ventana en la pantalla."""
         screen = self.screen()
@@ -270,7 +270,9 @@ class ConciliacionBancosDialog(QDialog):
         # ── Tabla de movimientos del día ──
         self.table = QTableWidget()
         self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels(["Fecha", "Tipo", "Monto", "Tasa", "Monto BS", "Origen", "Referencia", "Descripción"])
+        self.table.setHorizontalHeaderLabels(
+            ["Fecha", "Tipo", "Monto", "Tasa", "Monto BS", "Origen", "Referencia", "Descripción"]
+        )
         self.table.setMinimumHeight(240)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -340,7 +342,7 @@ class ConciliacionBancosDialog(QDialog):
         """Calcula el saldo final USD basado en el saldo final BS y la tasa."""
         saldo_final_bs = self.saldo_final_bs_input.get_value()
         tasa = self.tasa_input.get_value()
-        
+
         if saldo_final_bs is not None and tasa is not None and tasa > 0:
             saldo_final_usd = saldo_final_bs / tasa
             self.saldo_final_input.set_value(saldo_final_usd)
@@ -367,7 +369,7 @@ class ConciliacionBancosDialog(QDialog):
         tasa_actual = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
 
         dialog = MovimientoManualDialog(tipo, parent=self, tasa_inicial=tasa_actual)
-        
+
         if dialog.exec() == QDialog.DialogCode.Accepted:
             datos = dialog.get_data()
             movimiento = {
@@ -426,7 +428,7 @@ class ConciliacionBancosDialog(QDialog):
                 monto_bs = float(mov.monto_bolivares)
             elif mov.monto_movimiento and mov.tasa_cambio and mov.tasa_cambio > 0:
                 monto_bs = float(mov.monto_movimiento) * float(mov.tasa_cambio)
-            
+
             if mov.tasa_cambio:
                 tasa = float(mov.tasa_cambio)
 
@@ -449,7 +451,7 @@ class ConciliacionBancosDialog(QDialog):
             monto = mov["monto"]
             monto_bs = mov.get("monto_bs", 0.0)
             tasa = mov.get("tasa", 0.0)
-            
+
             # Si no se proporcionó monto_bs, calcularlo como monto * tasa
             if monto_bs == 0.0 and tasa > 0:
                 monto_bs = monto * tasa
@@ -490,12 +492,12 @@ class ConciliacionBancosDialog(QDialog):
             self.table.setItem(row, 2, item_monto)
 
             # Tasa
-            item_tasa = QTableWidgetItem(f"{movimiento['tasa']:,.2f}" if movimiento['tasa'] > 0 else "N/A")
+            item_tasa = QTableWidgetItem(f"{movimiento['tasa']:,.2f}" if movimiento["tasa"] > 0 else "N/A")
             item_tasa.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 3, item_tasa)
 
             # Monto BS
-            item_monto_bs = QTableWidgetItem(f"{movimiento['monto_bs']:,.2f}" if movimiento['monto_bs'] > 0 else "0.00")
+            item_monto_bs = QTableWidgetItem(f"{movimiento['monto_bs']:,.2f}" if movimiento["monto_bs"] > 0 else "0.00")
             item_monto_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 4, item_monto_bs)
 
@@ -527,12 +529,12 @@ class ConciliacionBancosDialog(QDialog):
         saldo_final_manual_bs = float(saldo_final_bs_value) if saldo_final_bs_value is not None else 0.0
         tasa_value = self.tasa_input.get_value()
         tasa_cambio = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
-        
+
         # Calcular saldo final en USD
         saldo_final_manual = 0.0
         if tasa_cambio > 0:
             saldo_final_manual = saldo_final_manual_bs / tasa_cambio
-        
+
         if tasa_cambio == 0:
             MessageBox.warning(self, "Tasa requerida", "Debe ingresar una tasa de cambio para conciliar.")
             return
@@ -565,7 +567,7 @@ class ConciliacionBancosDialog(QDialog):
                     saldo_inicial += monto
                 elif mov.tipo_movimiento == "cargo":
                     saldo_inicial -= monto
-                
+
                 # Calcular en bolívares
                 if mov.monto_bolivares:
                     monto_bs = float(mov.monto_bolivares)
@@ -573,7 +575,7 @@ class ConciliacionBancosDialog(QDialog):
                     monto_bs = monto * float(mov.tasa_cambio)
                 else:
                     monto_bs = 0.0
-                
+
                 if mov.tipo_movimiento == "abono":
                     saldo_inicial_bs += monto_bs
                 elif mov.tipo_movimiento == "cargo":
@@ -601,7 +603,7 @@ class ConciliacionBancosDialog(QDialog):
                     total_entradas += monto
                 elif mov.tipo_movimiento == "cargo":
                     total_salidas += monto
-                
+
                 # Calcular en bolívares
                 if mov.monto_bolivares:
                     monto_bs = float(mov.monto_bolivares)
@@ -609,7 +611,7 @@ class ConciliacionBancosDialog(QDialog):
                     monto_bs = monto * float(mov.tasa_cambio)
                 else:
                     monto_bs = 0.0
-                
+
                 if mov.tipo_movimiento == "abono":
                     total_entradas_bs += monto_bs
                 elif mov.tipo_movimiento == "cargo":
@@ -620,23 +622,22 @@ class ConciliacionBancosDialog(QDialog):
                 total_entradas += mov["monto"]
             else:
                 total_salidas += mov["monto"]
-            
+
             # Calcular en bolívares para movimientos manuales
             monto_bs = mov.get("monto_bs", 0.0)
             tasa_mov = mov.get("tasa", tasa_cambio)
-            
+
             # Si no se proporcionó monto_bs, calcularlo
             if monto_bs == 0.0 and tasa_mov > 0:
                 monto_bs = mov["monto"] * tasa_mov
-            
+
             if mov["tipo"] == "abono":
                 total_entradas_bs += monto_bs
             else:
                 total_salidas_bs += monto_bs
 
-        saldo_calculado = saldo_inicial + total_entradas - total_salidas
         saldo_calculado_bs = saldo_inicial_bs + total_entradas_bs - total_salidas_bs
-        
+
         saldo_final_manual_bs = saldo_final_manual * tasa_cambio
         diferencia_bs = saldo_calculado_bs - saldo_final_manual_bs
 
@@ -678,11 +679,7 @@ class ConciliacionBancosDialog(QDialog):
         # Obtener la tasa actual de control_de_tasas si existe
         tasa_registro = None
         if tasa_cambio > 0:
-            tasa_registro = (
-                self.session.query(ControlDeTasa)
-                .order_by(ControlDeTasa.fecha_tasa.desc())
-                .first()
-            )
+            tasa_registro = self.session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc()).first()
 
         try:
             for movimiento in self._movimientos_manuales:
@@ -690,7 +687,7 @@ class ConciliacionBancosDialog(QDialog):
                 monto = movimiento["monto"]
                 monto_bs = movimiento.get("monto_bs", 0.0)
                 tasa_mov = movimiento.get("tasa", tasa_cambio)
-                
+
                 # Si no se proporcionó monto_bs, calcularlo
                 if monto_bs == 0.0 and tasa_mov is not None and tasa_mov > 0:
                     monto_bs = monto * tasa_mov
@@ -762,7 +759,7 @@ class ConciliacionBancosDialog(QDialog):
                     saldo_inicial += monto
                 elif mov.tipo_movimiento == "cargo":
                     saldo_inicial -= monto
-                
+
                 # Calcular en bolívares
                 if mov.monto_bolivares:
                     monto_bs = float(mov.monto_bolivares)
@@ -770,7 +767,7 @@ class ConciliacionBancosDialog(QDialog):
                     monto_bs = monto * float(mov.tasa_cambio)
                 else:
                     monto_bs = 0.0
-                
+
                 if mov.tipo_movimiento == "abono":
                     saldo_inicial_bs += monto_bs
                 elif mov.tipo_movimiento == "cargo":
@@ -799,7 +796,7 @@ class ConciliacionBancosDialog(QDialog):
                     total_entradas += monto
                 elif mov.tipo_movimiento == "cargo":
                     total_salidas += monto
-                
+
                 # Calcular en bolívares
                 if mov.monto_bolivares:
                     monto_bs = float(mov.monto_bolivares)
@@ -807,7 +804,7 @@ class ConciliacionBancosDialog(QDialog):
                     monto_bs = monto * float(mov.tasa_cambio)
                 else:
                     monto_bs = 0.0
-                
+
                 if mov.tipo_movimiento == "abono":
                     total_entradas_bs += monto_bs
                 elif mov.tipo_movimiento == "cargo":
@@ -819,15 +816,15 @@ class ConciliacionBancosDialog(QDialog):
                 total_entradas += mov["monto"]
             else:
                 total_salidas += mov["monto"]
-            
+
             # Calcular en bolívares para movimientos manuales
             monto_bs = mov.get("monto_bs", 0.0)
             tasa_mov = mov.get("tasa", tasa_cambio)
-            
+
             # Si no se proporcionó monto_bs, calcularlo
             if monto_bs == 0.0 and tasa_mov > 0:
                 monto_bs = mov["monto"] * tasa_mov
-            
+
             if mov["tipo"] == "abono":
                 total_entradas_bs += monto_bs
             else:
@@ -888,7 +885,7 @@ class MovimientoManualDialog(QDialog):
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
-        
+
         # Pre-llenar la tasa si se proporcionó
         if self.tasa_inicial > 0:
             self.tasa_input.set_value(self.tasa_inicial)
@@ -972,7 +969,7 @@ class MovimientoManualDialog(QDialog):
         """Calcula el monto en USD basado en el monto BS y la tasa."""
         monto_bs = self.monto_bs_input.get_value()
         tasa = self.tasa_input.get_value()
-        
+
         if monto_bs is not None and tasa is not None and monto_bs > 0 and tasa > 0:
             monto = monto_bs / tasa
             self.monto_input.set_value(monto)
@@ -982,7 +979,7 @@ class MovimientoManualDialog(QDialog):
     def _validar_y_aceptar(self):
         monto_bs = self.monto_bs_input.get_value()
         tasa = self.tasa_input.get_value()
-        
+
         if monto_bs is None or monto_bs <= 0:
             MessageBox.warning(self, "Dato requerido", "El monto BS debe ser mayor a 0.")
             return
