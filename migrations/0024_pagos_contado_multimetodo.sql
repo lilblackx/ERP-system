@@ -89,19 +89,16 @@ BEGIN
 		[id_cuenta_por_cobrar] BIGINT,
 		[id_cuenta_bancaria] BIGINT,
 		[id_caja] BIGINT,
-		[id_tasa] BIGINT,
 		[monto] DECIMAL(18,2),
-		[monto_bolivares] DECIMAL(18,2),
-		[tasa_cambio] DECIMAL(10,2),
 		[referencia] VARCHAR(100),
 		[fecha_pago] DATETIME,
 		[creado_por] BIGINT
 	);
 
-	INSERT INTO dbo.pagos_cobros ([id_cuenta_por_cobrar], [id_cuenta_bancaria], [id_caja], [id_tasa], [metodo_pago], [moneda], [monto], [monto_moneda_origen], [monto_bolivares], [tasa_cambio], [referencia], [fecha_pago], [creado_por])
-	OUTPUT inserted.[id_pago_cobro], inserted.[id_cuenta_por_cobrar], inserted.[id_cuenta_bancaria], inserted.[id_caja], inserted.[id_tasa], inserted.[monto], inserted.[monto_bolivares], inserted.[tasa_cambio], inserted.[referencia], inserted.[fecha_pago], inserted.[creado_por]
+	INSERT INTO dbo.pagos_cobros ([id_cuenta_por_cobrar], [id_cuenta_bancaria], [id_caja], [id_tasa], [metodo_pago], [moneda], [monto], [monto_moneda_origen], [referencia], [fecha_pago], [creado_por])
+	OUTPUT inserted.[id_pago_cobro], inserted.[id_cuenta_por_cobrar], inserted.[id_cuenta_bancaria], inserted.[id_caja], inserted.[monto], inserted.[referencia], inserted.[fecha_pago], inserted.[creado_por]
 	INTO @nuevos
-	SELECT [id_cuenta_por_cobrar], [id_cuenta_bancaria], [id_caja], [id_tasa], [metodo_pago], [moneda], [monto], [monto_moneda_origen], [monto_bolivares], [tasa_cambio], [referencia], ISNULL([fecha_pago], GETDATE()), [creado_por]
+	SELECT [id_cuenta_por_cobrar], [id_cuenta_bancaria], [id_caja], [id_tasa], [metodo_pago], [moneda], [monto], [monto_moneda_origen], [referencia], ISNULL([fecha_pago], GETDATE()), [creado_por]
 	FROM inserted;
 
 	UPDATE c
@@ -110,8 +107,8 @@ BEGIN
 	FROM dbo.cuentas_por_cobrar c
 	JOIN @nuevos n ON n.[id_cuenta_por_cobrar] = c.[id_cuenta_por_cobrar];
 
-	INSERT INTO dbo.banco_movimientos ([id_cuenta], [tipo_movimiento], [monto_movimiento], [monto_bolivares], [tasa_cambio], [id_tasa], [fecha_movimiento], [referencia_movimiento], [descripcion_movimiento], [creado_por], [fecha_creacion], [id_pago_cobro])
-	SELECT [id_cuenta_bancaria], 'abono', [monto], [monto_bolivares], [tasa_cambio], [id_tasa], [fecha_pago], [referencia], 'Cobro a cliente', [creado_por], GETDATE(), [id_pago_cobro]
+	INSERT INTO dbo.banco_movimientos ([id_cuenta], [tipo_movimiento], [monto_movimiento], [fecha_movimiento], [referencia_movimiento], [descripcion_movimiento], [creado_por], [fecha_creacion], [id_pago_cobro])
+	SELECT [id_cuenta_bancaria], 'abono', [monto], [fecha_pago], [referencia], 'Cobro a cliente', [creado_por], GETDATE(), [id_pago_cobro]
 	FROM @nuevos WHERE [id_cuenta_bancaria] IS NOT NULL;
 
 	INSERT INTO dbo.caja_movimientos ([id_caja], [tipo_movimiento], [descripcion_movimiento], [monto_movimiento], [fecha_registro], [id_pago_cobro], [creado_por])

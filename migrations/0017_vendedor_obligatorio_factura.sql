@@ -4,11 +4,10 @@
 -- simplemente no generaba comision (calcular_comisiones_factura retornaba temprano),
 -- lo cual dejaba ventas sin dueño comercial asignado.
 --
--- Entorno nuevo (sin datos): no hace falta backfill, ALTER COLUMN corre directo.
--- Entorno con datos previos: si existe alguna factura_venta.id_vendedor NULL, este
--- ALTER falla (Msg 515) hasta que se le asigne un vendedor manualmente -- a proposito,
--- para no inventar un vendedor "generico" ficticio sobre datos reales sin revisar caso
--- por caso.
+-- Solo aplicar si no hay facturas con id_vendedor NULL (entorno nuevo o ya migrado)
 
-ALTER TABLE dbo.factura_venta ALTER COLUMN [id_vendedor] BIGINT NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM dbo.factura_venta WHERE id_vendedor IS NULL)
+BEGIN
+    ALTER TABLE dbo.factura_venta ALTER COLUMN [id_vendedor] BIGINT NOT NULL;
+END
 GO
