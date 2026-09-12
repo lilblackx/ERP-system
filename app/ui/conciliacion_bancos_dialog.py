@@ -492,7 +492,7 @@ class ConciliacionBancosDialog(QDialog):
             self.table.setItem(row, 2, item_monto)
 
             # Tasa
-            item_tasa = QTableWidgetItem(f"{movimiento['tasa']:,.2f}" if movimiento["tasa"] > 0 else "N/A")
+            item_tasa = QTableWidgetItem(f"{movimiento['tasa']:,.2f}" if movimiento["tasa"] is not None and movimiento["tasa"] > 0 else "N/A")
             item_tasa.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 3, item_tasa)
 

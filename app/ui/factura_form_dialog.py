@@ -1100,7 +1100,7 @@ class FacturaFormDialog(QDialog):
         es_credito = self.condicion_combo.currentData() == "credito"
         cliente = self._cliente_seleccionado()
         cliente_tiene_credito = cliente is not None and (cliente.dias_credito or 0) > 0
-        self.dias_credito_widget.setVisible(es_credito and cliente_tiene_credito)
+        self.dias_credito_widget.setVisible(bool(es_credito and cliente_tiene_credito))
         if es_credito and cliente_tiene_credito:
             # Cada vez que cambia el cliente se vuelve a partir de "usar los
             # configurados" -- no se arrastra un override de un cliente anterior.

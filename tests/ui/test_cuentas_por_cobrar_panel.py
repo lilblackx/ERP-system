@@ -72,13 +72,20 @@ def _mostrar_campos_bolivares(dialogo) -> None:
     idx = dialogo.metodo_combo.findData("transferencia")
     assert idx >= 0
     dialogo.metodo_combo.setCurrentIndex(idx)
+    # Also need to set a bank origin to show bolivares fields
+    dialogo._cuentas_activas = [SimpleNamespace(id_cuenta=1, banco=SimpleNamespace(nombre_banco="Banco Test"), numero_cuenta="1234567890123456")]
+    dialogo._toggle_origen()
+    # Select the first bank account
+    dialogo.origen_combo.setCurrentIndex(0)
 
 
 def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta())
     qtbot.addWidget(dialogo)
+    dialogo._cuentas_activas = [SimpleNamespace(id_cuenta=1, banco=SimpleNamespace(nombre_banco="Banco Test"), numero_cuenta="1234567890123456")]
+    dialogo._toggle_origen()
+    dialogo.origen_combo.setCurrentIndex(0)
     assert dialogo.bolivares_input.get_value() == Decimal("0")
-    _mostrar_campos_bolivares(dialogo)
     _escribir_y_perder_foco(qtbot, dialogo.bolivares_input, "999999999999")
     assert dialogo.bolivares_input.get_value() == Decimal("999999999999.00")
 
@@ -86,7 +93,9 @@ def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
 def test_tasa_input_es_de_tipo_rate(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta())
     qtbot.addWidget(dialogo)
-    _mostrar_campos_bolivares(dialogo)
+    dialogo._cuentas_activas = [SimpleNamespace(id_cuenta=1, banco=SimpleNamespace(nombre_banco="Banco Test"), numero_cuenta="1234567890123456")]
+    dialogo._toggle_origen()
+    dialogo.origen_combo.setCurrentIndex(0)
     _escribir_y_perder_foco(qtbot, dialogo.tasa_input, "0")
     # RATE tiene min_value=0.01 por defecto -- un 0 tecleado se ajusta al piso.
     assert dialogo.tasa_input.get_value() == Decimal("0.01")
@@ -100,6 +109,7 @@ def test_calcular_monto_usd_divide_bolivares_entre_tasa(qtbot):
     _escribir_y_perder_foco(qtbot, dialogo.tasa_input, "50")
     _escribir_y_perder_foco(qtbot, dialogo.bolivares_input, "500")
 
+    # 500 bolivares / 50 tasa = 10 USD
     assert dialogo.monto_input.get_value() == Decimal("10")
 
 

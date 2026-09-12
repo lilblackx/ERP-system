@@ -190,6 +190,7 @@ class NumericLineEdit(QLineEdit):
         parent=None,
     ) -> None:
         super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         defaults = _DEFAULTS[field_type]
         self.field_type = field_type
         self.decimals = defaults["decimals"] if decimals is None else decimals

@@ -423,11 +423,11 @@ class PagoCobroDialog(QDialog):
 
         # Mostrar campos de bolivares para todos los métodos bancarios (no efectivo)
         # Esto incluye: transferencia, zelle, binance, punto_de_venta
-        es_banco = origen and origen[0] == "banco"
+        es_banco = origen is not None and origen[0] == "banco"
         es_efectivo = metodo == "efectivo"
 
         mostrar_bolivares = es_banco and not es_efectivo
-        self.campos_bolivares_widget.setVisible(mostrar_bolivares)
+        self.campos_bolivares_widget.setVisible(bool(mostrar_bolivares))
 
         if mostrar_bolivares:
             # Habilitar cálculo automático

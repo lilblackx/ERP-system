@@ -787,12 +787,12 @@ class EnmiendaOCDialog(QDialog):
 
     def _toggle_campos(self) -> None:
         tipo = self.tipo_combo.currentData()
-        self.lbl_cantidad.setVisible(tipo == "CANTIDAD")
-        self.cantidad_nueva_input.setVisible(tipo == "CANTIDAD")
-        self.lbl_precio.setVisible(tipo == "PRECIO")
-        self.precio_nuevo_input.setVisible(tipo == "PRECIO")
-        self.lbl_fecha.setVisible(tipo == "FECHA")
-        self.fecha_nueva_input.setVisible(tipo == "FECHA")
+        self.lbl_cantidad.setVisible(bool(tipo == "CANTIDAD"))
+        self.cantidad_nueva_input.setVisible(bool(tipo == "CANTIDAD"))
+        self.lbl_precio.setVisible(bool(tipo == "PRECIO"))
+        self.precio_nuevo_input.setVisible(bool(tipo == "PRECIO"))
+        self.lbl_fecha.setVisible(bool(tipo == "FECHA"))
+        self.fecha_nueva_input.setVisible(bool(tipo == "FECHA"))
 
     def _validar_y_aceptar(self) -> None:
         motivo = self.motivo_input.text().strip()
