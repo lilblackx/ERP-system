@@ -73,7 +73,13 @@ def _mostrar_campos_bolivares(dialogo) -> None:
     assert idx >= 0
     dialogo.metodo_combo.setCurrentIndex(idx)
     # Also need to set a bank origin to show bolivares fields
-    dialogo._cuentas_activas = [SimpleNamespace(id_cuenta=1, banco=SimpleNamespace(nombre_banco="Banco Test"), numero_cuenta="1234567890123456")]
+    dialogo._cuentas_activas = [
+        SimpleNamespace(
+            id_cuenta=1,
+            banco=SimpleNamespace(nombre_banco="Banco Test"),
+            numero_cuenta="1234567890123456",
+        )
+    ]
     dialogo._toggle_origen()
     # Select the first bank account
     dialogo.origen_combo.setCurrentIndex(0)
@@ -82,7 +88,13 @@ def _mostrar_campos_bolivares(dialogo) -> None:
 def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta())
     qtbot.addWidget(dialogo)
-    dialogo._cuentas_activas = [SimpleNamespace(id_cuenta=1, banco=SimpleNamespace(nombre_banco="Banco Test"), numero_cuenta="1234567890123456")]
+    dialogo._cuentas_activas = [
+        SimpleNamespace(
+            id_cuenta=1,
+            banco=SimpleNamespace(nombre_banco="Banco Test"),
+            numero_cuenta="1234567890123456",
+        )
+    ]
     dialogo._toggle_origen()
     dialogo.origen_combo.setCurrentIndex(0)
     assert dialogo.bolivares_input.get_value() == Decimal("0")
@@ -93,7 +105,13 @@ def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
 def test_tasa_input_es_de_tipo_rate(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta())
     qtbot.addWidget(dialogo)
-    dialogo._cuentas_activas = [SimpleNamespace(id_cuenta=1, banco=SimpleNamespace(nombre_banco="Banco Test"), numero_cuenta="1234567890123456")]
+    dialogo._cuentas_activas = [
+        SimpleNamespace(
+            id_cuenta=1,
+            banco=SimpleNamespace(nombre_banco="Banco Test"),
+            numero_cuenta="1234567890123456",
+        )
+    ]
     dialogo._toggle_origen()
     dialogo.origen_combo.setCurrentIndex(0)
     _escribir_y_perder_foco(qtbot, dialogo.tasa_input, "0")
