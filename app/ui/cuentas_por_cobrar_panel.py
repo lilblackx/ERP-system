@@ -420,15 +420,15 @@ class PagoCobroDialog(QDialog):
         """Muestra/oculta los campos de bolivares según el método de pago y origen."""
         metodo = self.metodo_combo.currentData()
         origen = self.origen_combo.currentData()
-        
+
         # Mostrar campos de bolivares para todos los métodos bancarios (no efectivo)
         # Esto incluye: transferencia, zelle, binance, punto_de_venta
         es_banco = origen and origen[0] == "banco"
         es_efectivo = metodo == "efectivo"
-        
+
         mostrar_bolivares = es_banco and not es_efectivo
         self.campos_bolivares_widget.setVisible(mostrar_bolivares)
-        
+
         if mostrar_bolivares:
             # Habilitar cálculo automático
             self.monto_input.setReadOnly(True)
@@ -510,18 +510,18 @@ class PagoCobroDialog(QDialog):
             if metodo != "efectivo" and tipo_origen == "banco":
                 bolivares = self.bolivares_input.get_value() or Decimal("0")
                 tasa = self.tasa_input.get_value() or Decimal("0")
-                
+
                 # Si no hay tasa manual, usar la tasa seleccionada del combo
                 if tasa == 0 and self._id_tasa_seleccionada:
                     tasa_data = self.tasa_combo.currentData()
                     if tasa_data:
                         _, valor_tasa = tasa_data
                         tasa = Decimal(str(valor_tasa))
-                
+
                 # Calcular bolivares si no se ingresaron pero hay tasa
                 if bolivares == 0 and tasa > 0:
                     bolivares = self.monto_input.get_value() * tasa
-                
+
                 # Siempre guardar los valores para pagos bancarios
                 # Esto asegura que el trigger tenga los datos para crear el movimiento bancario
                 if bolivares > 0:
