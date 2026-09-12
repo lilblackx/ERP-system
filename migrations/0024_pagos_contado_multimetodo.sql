@@ -3,27 +3,45 @@
 -- multiples formas de pago / monedas por factura de contado (VES, COP, USDT ademas de
 -- USD) en pagos_cobros. Ver docs/ESTADO_DEL_PROYECTO.md seccion 3 y CLAUDE.md.
 
-ALTER TABLE dbo.pagos_cobros
-ADD [moneda] VARCHAR(10) NOT NULL CONSTRAINT DF_pagos_cobros_moneda DEFAULT 'USD';
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE Name = N'moneda' AND Object_ID = OBJECT_ID(N'dbo.pagos_cobros'))
+BEGIN
+	ALTER TABLE dbo.pagos_cobros
+	ADD [moneda] VARCHAR(10) NOT NULL CONSTRAINT DF_pagos_cobros_moneda DEFAULT 'USD';
+END
 GO
 
-ALTER TABLE dbo.pagos_cobros
-ADD CONSTRAINT CK_pagos_cobros_moneda CHECK ([moneda] IN ('USD','VES','COP','USDT'));
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE Name = N'CK_pagos_cobros_moneda' AND parent_object_id = OBJECT_ID(N'dbo.pagos_cobros'))
+BEGIN
+	ALTER TABLE dbo.pagos_cobros
+	ADD CONSTRAINT CK_pagos_cobros_moneda CHECK ([moneda] IN ('USD','VES','COP','USDT'));
+END
 GO
 
-ALTER TABLE dbo.pagos_cobros
-ADD [monto_moneda_origen] DECIMAL(18,2) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE Name = N'monto_moneda_origen' AND Object_ID = OBJECT_ID(N'dbo.pagos_cobros'))
+BEGIN
+	ALTER TABLE dbo.pagos_cobros
+	ADD [monto_moneda_origen] DECIMAL(18,2) NULL;
+END
 GO
 
-ALTER TABLE dbo.pagos_cobros
-DROP CONSTRAINT CK_pagos_cobros_metodo;
+IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE Name = N'CK_pagos_cobros_metodo' AND parent_object_id = OBJECT_ID(N'dbo.pagos_cobros'))
+BEGIN
+	ALTER TABLE dbo.pagos_cobros
+	DROP CONSTRAINT CK_pagos_cobros_metodo;
+END
 GO
 
-ALTER TABLE dbo.pagos_cobros
-ADD CONSTRAINT CK_pagos_cobros_metodo CHECK ([metodo_pago] IN ('efectivo','transferencia','cheque','tarjeta','punto_de_venta','zelle','binance'));
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE Name = N'CK_pagos_cobros_metodo' AND parent_object_id = OBJECT_ID(N'dbo.pagos_cobros'))
+BEGIN
+	ALTER TABLE dbo.pagos_cobros
+	ADD CONSTRAINT CK_pagos_cobros_metodo CHECK ([metodo_pago] IN ('efectivo','transferencia','cheque','tarjeta','punto_de_venta','zelle','binance'));
+END
 GO
 
-DROP TRIGGER trg_factura_venta_cxc;
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = 'trg_factura_venta_cxc' AND parent_id = OBJECT_ID('dbo.factura_venta'))
+BEGIN
+	DROP TRIGGER trg_factura_venta_cxc;
+END
 GO
 
 -- Identico al original salvo que ya no restringe la apertura/actualizacion de la cuenta
@@ -52,12 +70,15 @@ BEGIN
 END
 GO
 
-DROP TRIGGER trg_pagos_cobros_io;
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = 'trg_pagos_cobros_io' AND parent_id = OBJECT_ID('dbo.pagos_cobros'))
+BEGIN
+	DROP TRIGGER trg_pagos_cobros_io;
+END
 GO
 
--- Identico al original salvo que ahora tambien propaga [moneda]/[monto_moneda_origen]
+-- Identico al original salvo que ahora tambien propaga [moneda]/[monto_moneda_origen]/[monto_bolivares]/[tasa_cambio]/[id_tasa]
 -- (el INSTEAD OF INSERT original solo copiaba las columnas que existian antes de este
--- migration -- sin esto, esas dos columnas nuevas se quedarian siempre en su DEFAULT sin
+-- migration -- sin esto, estas columnas nuevas se quedarian siempre en su DEFAULT sin
 -- importar lo que el caller intente insertar, ver PagoService._aplicar_pago_cobro).
 CREATE TRIGGER trg_pagos_cobros_io ON dbo.pagos_cobros
 INSTEAD OF INSERT AS

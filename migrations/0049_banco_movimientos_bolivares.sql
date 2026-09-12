@@ -3,7 +3,7 @@
 
 -- Agregar campos de bolívares y tasa a banco_movimientos
 IF NOT EXISTS (
-    SELECT * FROM sys.columns 
+    SELECT 1 FROM sys.columns 
     WHERE object_id = OBJECT_ID('dbo.banco_movimientos') 
     AND name = 'monto_bolivares'
 )
@@ -14,7 +14,7 @@ END
 GO
 
 IF NOT EXISTS (
-    SELECT * FROM sys.columns 
+    SELECT 1 FROM sys.columns 
     WHERE object_id = OBJECT_ID('dbo.banco_movimientos') 
     AND name = 'tasa_cambio'
 )
@@ -25,7 +25,7 @@ END
 GO
 
 IF NOT EXISTS (
-    SELECT * FROM sys.columns 
+    SELECT 1 FROM sys.columns 
     WHERE object_id = OBJECT_ID('dbo.banco_movimientos') 
     AND name = 'id_tasa'
 )
@@ -37,7 +37,7 @@ GO
 
 -- Agregar foreign key a control_de_tasas
 IF NOT EXISTS (
-    SELECT * FROM sys.foreign_keys 
+    SELECT 1 FROM sys.foreign_keys 
     WHERE name = 'FK_banco_movimientos_id_tasa'
     AND parent_object_id = OBJECT_ID('dbo.banco_movimientos')
 )

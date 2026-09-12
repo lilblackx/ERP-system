@@ -3,7 +3,7 @@
 
 -- Agregar campos de bolívares y tasa a pagos_cobros
 IF NOT EXISTS (
-    SELECT * FROM sys.columns 
+    SELECT 1 FROM sys.columns 
     WHERE object_id = OBJECT_ID('dbo.pagos_cobros') 
     AND name = 'monto_bolivares'
 )
@@ -14,7 +14,7 @@ END
 GO
 
 IF NOT EXISTS (
-    SELECT * FROM sys.columns 
+    SELECT 1 FROM sys.columns 
     WHERE object_id = OBJECT_ID('dbo.pagos_cobros') 
     AND name = 'tasa_cambio'
 )
