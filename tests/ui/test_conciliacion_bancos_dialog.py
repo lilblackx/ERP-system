@@ -17,9 +17,9 @@ from app.ui.conciliacion_bancos_dialog import ConciliacionBancosDialog, Movimien
 
 def _dar_foco(qtbot, campo):
     campo.window().show()
-    qtbot.waitExposed(campo.window())
+    qtbot.waitExposed(campo.window(), timeout=15000)
     campo.setFocus()
-    qtbot.waitUntil(campo.hasFocus)
+    qtbot.waitUntil(campo.hasFocus, timeout=15000)
 
 
 def _escribir_y_perder_foco(qtbot, campo, texto):
@@ -37,6 +37,8 @@ def _session_sin_cuentas() -> MagicMock:
 def test_saldo_final_input_arranca_en_cero_formateado(qtbot):
     dialogo = ConciliacionBancosDialog(_session_sin_cuentas(), MagicMock())
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     assert dialogo.saldo_final_input.text() == "$ 0,00"
     assert dialogo.saldo_final_input.get_value() == Decimal("0")
 
@@ -44,6 +46,8 @@ def test_saldo_final_input_arranca_en_cero_formateado(qtbot):
 def test_saldo_final_input_admite_valores_negativos(qtbot):
     dialogo = ConciliacionBancosDialog(_session_sin_cuentas(), MagicMock())
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     # saldo_final_input is read-only (disabled), so we test via set_value instead
     dialogo.saldo_final_input.setEnabled(True)  # Temporarily enable for testing
     _escribir_y_perder_foco(qtbot, dialogo.saldo_final_input, "-1500,25")
@@ -54,6 +58,8 @@ def test_saldo_final_input_admite_valores_negativos(qtbot):
 def test_saldo_final_input_formatea_miles_al_perder_foco(qtbot):
     dialogo = ConciliacionBancosDialog(_session_sin_cuentas(), MagicMock())
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     # saldo_final_input is read-only (disabled), so we test via set_value instead
     dialogo.saldo_final_input.setEnabled(True)  # Temporarily enable for testing
     _escribir_y_perder_foco(qtbot, dialogo.saldo_final_input, "250000")
@@ -64,6 +70,8 @@ def test_saldo_final_input_formatea_miles_al_perder_foco(qtbot):
 def test_movimiento_manual_monto_input_arranca_en_cero_formateado(qtbot):
     dialogo = MovimientoManualDialog("abono")
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     assert dialogo.monto_input.text() == "$ 0,00"
     assert dialogo.monto_input.get_value() == Decimal("0")
 
@@ -71,6 +79,8 @@ def test_movimiento_manual_monto_input_arranca_en_cero_formateado(qtbot):
 def test_movimiento_manual_monto_input_no_admite_negativos(qtbot):
     dialogo = MovimientoManualDialog("cargo")
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     # monto_input is read-only (disabled), so we test via set_value instead
     dialogo.monto_input.setEnabled(True)  # Temporarily enable for testing
     _dar_foco(qtbot, dialogo.monto_input)
@@ -81,6 +91,8 @@ def test_movimiento_manual_monto_input_no_admite_negativos(qtbot):
 def test_movimiento_manual_get_data_devuelve_monto_float(qtbot):
     dialogo = MovimientoManualDialog("abono")
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     # monto_input is read-only (disabled), so we test via set_value instead
     dialogo.monto_input.setEnabled(True)  # Temporarily enable for testing
     _escribir_y_perder_foco(qtbot, dialogo.monto_input, "1234,56")

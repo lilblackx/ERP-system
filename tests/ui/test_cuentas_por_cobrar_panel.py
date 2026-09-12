@@ -25,9 +25,9 @@ from app.ui.cuentas_por_cobrar_panel import PagoCobroDialog
 
 def _dar_foco(qtbot, campo):
     campo.window().show()
-    qtbot.waitExposed(campo.window())
+    qtbot.waitExposed(campo.window(), timeout=15000)
     campo.setFocus()
-    qtbot.waitUntil(campo.hasFocus)
+    qtbot.waitUntil(campo.hasFocus, timeout=15000)
 
 
 def _escribir_y_perder_foco(qtbot, campo, texto):
@@ -54,6 +54,8 @@ def _crear_cuenta(saldo=Decimal("1250.75")) -> SimpleNamespace:
 def test_monto_input_arranca_en_saldo_pendiente(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta(Decimal("1250.75")))
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     assert dialogo.monto_input.get_value() == Decimal("1250.75")
     assert dialogo.monto_input.text() == "$ 1.250,75"
 
@@ -61,11 +63,13 @@ def test_monto_input_arranca_en_saldo_pendiente(qtbot):
 def test_monto_input_respeta_minimo_de_0_01(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta())
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     _escribir_y_perder_foco(qtbot, dialogo.monto_input, "0")
     assert dialogo.monto_input.get_value() == Decimal("0.01")
 
 
-def _mostrar_campos_bolivares(dialogo) -> None:
+def _mostrar_campos_bolivares(dialogo, qtbot) -> None:
     # bolivares_input/tasa_input viven en campos_bolivares_widget, oculto salvo que el
     # metodo de pago sea "transferencia" (_toggle_campos_bolivares) -- un campo oculto
     # nunca puede recibir foco, hay que seleccionar ese metodo primero.
@@ -84,10 +88,20 @@ def _mostrar_campos_bolivares(dialogo) -> None:
     # Select the first bank account
     dialogo.origen_combo.setCurrentIndex(0)
 
+    # Wait for the bolivares fields to be visible and enabled
+    qtbot.waitUntil(
+        lambda: dialogo.bolivares_input is not None and dialogo.bolivares_input.isEnabled(),
+        timeout=15000,
+    )
+    qtbot.wait(50)  # Small delay to ensure UI is ready
+
 
 def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta())
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
+
     dialogo._cuentas_activas = [
         SimpleNamespace(
             id_cuenta=1,
@@ -97,6 +111,14 @@ def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
     ]
     dialogo._toggle_origen()
     dialogo.origen_combo.setCurrentIndex(0)
+
+    # Wait for the widget to be fully initialized and enabled
+    qtbot.waitUntil(
+        lambda: dialogo.bolivares_input is not None and dialogo.bolivares_input.isEnabled(),
+        timeout=15000,
+    )
+    qtbot.wait(50)  # Small delay to ensure UI is ready
+
     assert dialogo.bolivares_input.get_value() == Decimal("0")
     _escribir_y_perder_foco(qtbot, dialogo.bolivares_input, "999999999999")
     assert dialogo.bolivares_input.get_value() == Decimal("999999999999.00")
@@ -105,6 +127,9 @@ def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
 def test_tasa_input_es_de_tipo_rate(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta())
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
+
     dialogo._cuentas_activas = [
         SimpleNamespace(
             id_cuenta=1,
@@ -114,6 +139,13 @@ def test_tasa_input_es_de_tipo_rate(qtbot):
     ]
     dialogo._toggle_origen()
     dialogo.origen_combo.setCurrentIndex(0)
+
+    # Wait for the widget to be fully initialized and enabled
+    qtbot.waitUntil(
+        lambda: dialogo.tasa_input is not None and dialogo.tasa_input.isEnabled(),
+        timeout=15000,
+    )
+    qtbot.wait(50)  # Small delay to ensure UI is ready
     _escribir_y_perder_foco(qtbot, dialogo.tasa_input, "0")
     # RATE tiene min_value=0.01 por defecto -- un 0 tecleado se ajusta al piso.
     assert dialogo.tasa_input.get_value() == Decimal("0.01")
@@ -122,7 +154,9 @@ def test_tasa_input_es_de_tipo_rate(qtbot):
 def test_calcular_monto_usd_divide_bolivares_entre_tasa(qtbot):
     dialogo = PagoCobroDialog(_crear_sesion(), None, _crear_cuenta())
     qtbot.addWidget(dialogo)
-    _mostrar_campos_bolivares(dialogo)  # tambien fuerza metodo "transferencia"
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
+    _mostrar_campos_bolivares(dialogo, qtbot)  # tambien fuerza metodo "transferencia"
 
     _escribir_y_perder_foco(qtbot, dialogo.tasa_input, "50")
     _escribir_y_perder_foco(qtbot, dialogo.bolivares_input, "500")
@@ -134,6 +168,8 @@ def test_calcular_monto_usd_divide_bolivares_entre_tasa(qtbot):
 def test_validar_y_aceptar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     dialogo = PagoCobroDialog(_crear_sesion(), 1, _crear_cuenta(Decimal("300")))
     qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
     dialogo._cajas_abiertas = [SimpleNamespace(id_caja=1, nombre_caja="Caja 1", fecha_apertura=1, fecha_cierre=None)]
     dialogo._toggle_origen()
     dialogo.origen_combo.setCurrentIndex(0)
