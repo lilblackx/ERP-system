@@ -460,9 +460,7 @@ class PrecioService:
                 session, id_producto, precio_venta, precio_2_float, precio_3_float, id_usuario
             )
         else:
-            return PrecioService.establecer_precio(
-                session, id_producto, precio_venta, None, None, id_usuario
-            )
+            return PrecioService.establecer_precio(session, id_producto, precio_venta, None, None, id_usuario)
 
     @staticmethod
     def eliminar_precio(session: Session, id_producto_precio: int, id_usuario: int | None = None) -> None:

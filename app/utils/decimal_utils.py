@@ -3,7 +3,7 @@ from decimal import Decimal, getcontext
 getcontext().prec = 28  # ajustar precisión si es necesario
 
 
-def to_decimal(value, default=Decimal('0')):
+def to_decimal(value, default=Decimal("0")):
     """Convierte varios tipos a Decimal de forma segura.
 
     Convierte float/int/str/Decimal a Decimal, usando str(float) para evitar
