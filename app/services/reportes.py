@@ -1541,13 +1541,17 @@ class ReporteService:
                 continue
             if detalle.get("id_producto") != id_producto:
                 continue
+
+            # Adaptar a la nueva estructura del detalle de PrecioService.establecer_precio
+            # Ahora usa precio_nuevo y margen_nuevo en lugar de precio_venta y porcentaje_ganancia
+            precio_valor = detalle.get("precio_nuevo") or detalle.get("precio_venta")
+            margen_valor = detalle.get("margen_nuevo") or detalle.get("porcentaje_ganancia")
+
             filas.append(
                 {
                     "fecha_evento": evento.fecha_evento,
-                    "precio_venta": Decimal(detalle["precio_venta"]) if detalle.get("precio_venta") else None,
-                    "porcentaje_ganancia": (
-                        Decimal(detalle["porcentaje_ganancia"]) if detalle.get("porcentaje_ganancia") else None
-                    ),
+                    "precio_venta": Decimal(precio_valor) if precio_valor else None,
+                    "porcentaje_ganancia": Decimal(margen_valor) if margen_valor else None,
                     "usuario": evento.usuario.nombre_usuario if evento.usuario else None,
                 }
             )
