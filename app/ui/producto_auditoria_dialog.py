@@ -53,7 +53,9 @@ class ProductoAuditoriaDialog(QDialog):
         self.producto_nombre = self._obtener_nombre_producto()
 
         if self.producto_id:
-            titulo = f"Auditoría de Producto: {self.producto_nombre}" if self.producto_nombre else "Auditoría de Producto"
+            titulo = (
+                f"Auditoría de Producto: {self.producto_nombre}" if self.producto_nombre else "Auditoría de Producto"
+            )
         else:
             titulo = "Auditoría General de Productos"
 
