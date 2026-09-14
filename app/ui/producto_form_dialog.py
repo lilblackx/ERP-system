@@ -515,9 +515,9 @@ class ProductoFormDialog(QDialog):
 
         precio = PrecioService.obtener_precio(self.session, producto.id_producto, id_usuario=self.id_usuario)
         if precio:
-            self.precio_1_input.set_value(precio.precio_1 or 0)
-            self.precio_2_input.set_value(precio.precio_2 or 0)
-            self.precio_3_input.set_value(precio.precio_3 or 0)
+            self.precio_1_input.set_value(getattr(precio, "precio_1", None) or 0)
+            self.precio_2_input.set_value(getattr(precio, "precio_2", None) or 0)
+            self.precio_3_input.set_value(getattr(precio, "precio_3", None) or 0)
         self._actualizar_margen()
 
     # ── Validación / datos ────────────────────────────────────────────────
