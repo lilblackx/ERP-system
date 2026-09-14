@@ -249,8 +249,8 @@ class ProductoPrecio(Base):
     tipo_precio: Mapped[str] = mapped_column(String(10), nullable=False)
     porcentaje_ganancia: Mapped[decimal.Decimal] = mapped_column(Numeric(10, 2), server_default="0.00")
     precio_1: Mapped[float] = mapped_column(Float, nullable=False)
-    precio_2: Mapped[float] = mapped_column(Float, nullable=False)
-    precio_3: Mapped[float] = mapped_column(Float, nullable=False)
+    precio_2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    precio_3: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     producto = relationship("Inventario")
 

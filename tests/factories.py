@@ -69,7 +69,9 @@ def crear_precio_producto(
     datos = {
         "id_producto": producto.id_producto,
         "tipo_precio": "UNICO",
-        "precio_venta": Decimal(str(precio_venta)),
+        "precio_1": Decimal(str(precio_venta)),
+        "precio_2": None,
+        "precio_3": None,
     }
     datos.update(overrides)
     precio = ProductoPrecio(**datos)

@@ -40,7 +40,7 @@ def _mock_session(precio_existente: Decimal | None = None) -> MagicMock:
         elif nombre == "ProductoPrecio":
             precio_mock = None
             if precio_existente is not None:
-                precio_mock = SimpleNamespace(precio_venta=precio_existente)
+                precio_mock = SimpleNamespace(precio_1=precio_existente)
             query_mock.filter.return_value.first.return_value = precio_mock
         return query_mock
 
