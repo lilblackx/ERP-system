@@ -20,6 +20,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class ComisionService:
 
         ids_producto = {detalle.id_producto_factura for detalle in detalles}
         precios_lista = {
-            precio.id_producto: precio.precio_venta
+            precio.id_producto: to_decimal(precio.precio_1)
             for precio in session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto)).all()
         }
 
@@ -69,9 +70,10 @@ class ComisionService:
             # detalle recien se flusheo (no se refresco): precio_unitario/cantidad_producto
             # pueden seguir siendo el tipo crudo que llego del caller (ej. str), no Decimal
             # todavia -- misma coercion defensiva que usa el resto del codebase.
-            cantidad = Decimal(str(detalle.cantidad_producto))
+            cantidad = to_decimal(detalle.cantidad_producto)
+            precio_unitario = to_decimal(detalle.precio_unitario)
             monto_base = precio_lista * cantidad
-            monto_venta = Decimal(str(detalle.precio_unitario)) * cantidad
+            monto_venta = precio_unitario * cantidad
             monto_comision = max(Decimal("0.00"), monto_venta - monto_base)
 
             if monto_comision <= 0:

@@ -5,6 +5,8 @@ from decimal import Decimal
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.utils.decimal_utils import to_decimal
+
 from app.db.models import (
     Caja,
     Compra,
@@ -55,7 +57,7 @@ class PagoService:
         if (id_cuenta_bancaria is None) == (id_caja is None):
             raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
 
-        monto = Decimal(str(monto))
+        monto = to_decimal(monto)
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
 
@@ -111,9 +113,9 @@ class PagoService:
             metodo_pago=metodo_pago,
             moneda=moneda,
             monto=monto,
-            monto_moneda_origen=Decimal(str(monto_moneda_origen)) if monto_moneda_origen is not None else None,
-            monto_bolivares=Decimal(str(monto_bolivares)) if monto_bolivares is not None else None,
-            tasa_cambio=Decimal(str(tasa_cambio)) if tasa_cambio is not None else None,
+            monto_moneda_origen=to_decimal(monto_moneda_origen) if monto_moneda_origen is not None else None,
+            monto_bolivares=to_decimal(monto_bolivares) if monto_bolivares is not None else None,
+            tasa_cambio=to_decimal(tasa_cambio) if tasa_cambio is not None else None,
             referencia=referencia,
             fecha_pago=fecha_pago,
             creado_por=id_usuario,
@@ -217,7 +219,7 @@ class PagoService:
         if (id_cuenta_bancaria is None) == (id_caja is None):
             raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
 
-        monto = Decimal(str(monto))
+        monto = to_decimal(monto)
         if monto <= 0:
             raise ValueError("El monto debe ser mayor a cero")
 

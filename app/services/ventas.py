@@ -6,6 +6,8 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.decimal_utils import to_decimal
+
 from app.db.models import (
     Caja,
     Cliente,
@@ -115,16 +117,19 @@ def _convertir_a_usd(monto_moneda_origen: Decimal, moneda: str, tasa: ControlDeT
     """Equivalente en USD de un monto tendido en `moneda` -- USD/USDT es 1:1 (USDT se
     trata como stablecoin fijo al dolar, practica estandar), VES/COP se convierten con la
     tasa vigente snapshoteada en la factura."""
+    monto_moneda_origen = to_decimal(monto_moneda_origen)
     if moneda in ("USD", "USDT"):
         return monto_moneda_origen
     if tasa is None:
         raise ValueError(f"No hay tasa de cambio configurada para convertir un pago en {moneda}")
     if moneda == "VES":
-        return (monto_moneda_origen / tasa.tasa_dolar_bcv).quantize(Decimal("0.01"))
+        tasa_dolar = to_decimal(tasa.tasa_dolar_bcv)
+        return (monto_moneda_origen / tasa_dolar).quantize(Decimal("0.01"))
     if moneda == "COP":
         if not tasa.tasa_cop:
             raise ValueError("No hay tasa COP configurada para convertir este pago")
-        return (monto_moneda_origen / tasa.tasa_cop).quantize(Decimal("0.01"))
+        tasa_cop = to_decimal(tasa.tasa_cop)
+        return (monto_moneda_origen / tasa_cop).quantize(Decimal("0.01"))
     raise ValueError(f"moneda de pago invalida: {moneda}")
 
 
@@ -338,11 +343,11 @@ class VentaService:
         )
         if monto_descuento > total_factura:
             raise ValueError("monto_descuento no puede ser mayor al subtotal de la factura")
-        subtotal_con_descuento = total_factura - monto_descuento
+        subtotal_con_descuento = to_decimal(total_factura) - to_decimal(monto_descuento)
 
         config_empresa = session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
         iva_activo = bool(config_empresa.iva_activo) if config_empresa else False
-        porcentaje_iva = config_empresa.iva_porcentaje if iva_activo else Decimal("0.00")
+        porcentaje_iva = to_decimal(config_empresa.iva_porcentaje) if iva_activo else Decimal("0.00")
         monto_iva = (
             (subtotal_con_descuento * porcentaje_iva / Decimal("100")).quantize(Decimal("0.01"))
             if iva_activo

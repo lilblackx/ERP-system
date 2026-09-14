@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models import Inventario, ProductoPrecio
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+from app.utils.decimal_utils import to_decimal
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 # C14: un solo precio de lista por producto (antes hasta 3, DETAL/MAYOR/ESPECIAL) -- ver
@@ -330,6 +331,8 @@ class ProductoService:
 class PrecioService:
     @staticmethod
     def _calcular_margen(costo: Decimal, precio_venta: Decimal) -> Decimal:
+        costo = to_decimal(costo)
+        precio_venta = to_decimal(precio_venta)
         if not costo:
             return Decimal("0.00")
         margen = (precio_venta - costo) / costo * Decimal("100")
@@ -339,9 +342,9 @@ class PrecioService:
     def establecer_precio(
         session: Session,
         id_producto: int,
-        precio_1: float,
-        precio_2: float | None = None,
-        precio_3: float | None = None,
+        precio_1: float | Decimal | str,
+        precio_2: float | Decimal | str | None = None,
+        precio_3: float | Decimal | str | None = None,
         id_usuario: int | None = None,
     ) -> ProductoPrecio:
         require_permiso(session, id_usuario, "inventario", "editar")
@@ -351,10 +354,10 @@ class PrecioService:
         if producto.estado_producto != "ACTIVO":
             raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo, no se puede modificar su precio")
 
-        precio_1 = float(precio_1)
-        precio_2 = float(precio_2) if precio_2 is not None else 0.0
-        precio_3 = float(precio_3) if precio_3 is not None else 0.0
-        margen = PrecioService._calcular_margen(producto.costo_producto, Decimal(str(precio_1)))
+        precio_1 = to_decimal(precio_1)
+        precio_2 = to_decimal(precio_2) if precio_2 is not None else Decimal("0.00")
+        precio_3 = to_decimal(precio_3) if precio_3 is not None else Decimal("0.00")
+        margen = PrecioService._calcular_margen(producto.costo_producto, precio_1)
 
         # WITH (UPDLOCK, ROWLOCK): sin esto, dos ediciones de precio concurrentes sobre el
         # mismo producto pueden ambas ver "no existe fila" y ambas insertar -- dejando dos
@@ -379,10 +382,10 @@ class PrecioService:
             precio = ProductoPrecio(
                 id_producto=id_producto,
                 tipo_precio=TIPO_PRECIO_UNICO,
-                precio_1=precio_1,
-                precio_2=precio_2,
-                precio_3=precio_3,
-                porcentaje_ganancia=margen,
+                precio_1=to_decimal(precio_1),
+                precio_2=to_decimal(precio_2),
+                precio_3=to_decimal(precio_3),
+                porcentaje_ganancia=to_decimal(margen),
             )
             session.add(precio)
         else:
@@ -393,10 +396,10 @@ class PrecioService:
                 or precio.precio_3 != precio_3
                 or precio.porcentaje_ganancia != margen
             ):
-                precio.precio_1 = precio_1
-                precio.precio_2 = precio_2
-                precio.precio_3 = precio_3
-                precio.porcentaje_ganancia = margen
+                precio.precio_1 = to_decimal(precio_1)
+                precio.precio_2 = to_decimal(precio_2)
+                precio.precio_3 = to_decimal(precio_3)
+                precio.porcentaje_ganancia = to_decimal(margen)
             else:
                 # Si no hubo cambios, no registrar nada
                 return precio
@@ -452,11 +455,11 @@ class PrecioService:
         precio = PrecioService.obtener_precio(session, id_producto, id_usuario)
         if precio:
             return PrecioService.establecer_precio(
-                session, id_producto, precio_venta, precio.precio_2, precio.precio_3, id_usuario
+                session, id_producto, precio_venta, float(precio.precio_2) if precio.precio_2 is not None else None, float(precio.precio_3) if precio.precio_3 is not None else None, id_usuario
             )
         else:
             return PrecioService.establecer_precio(
-                session, id_producto, precio_venta, Decimal("0.00"), Decimal("0.00"), id_usuario
+                session, id_producto, precio_venta, None, None, id_usuario
             )
 
     @staticmethod
