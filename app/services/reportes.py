@@ -518,9 +518,7 @@ class ReporteService:
             cantidad_facturas = conteo_facturas.get(cliente.id_cliente, 0)
             meta = cliente.vendedor.meta_activacion if cliente.vendedor else None
             if meta:
-                efectividad_pct = round(
-                    to_decimal(cantidad_facturas) / to_decimal(meta) * Decimal("100"), 2
-                )
+                efectividad_pct = round(to_decimal(cantidad_facturas) / to_decimal(meta) * Decimal("100"), 2)
             else:
                 efectividad_pct = None
             filas.append(
@@ -536,9 +534,7 @@ class ReporteService:
 
         efectividades = [f["efectividad_pct"] for f in filas if f["efectividad_pct"] is not None]
         if efectividades:
-            efectividad_promedio = round(
-                to_decimal(sum(efectividades)) / to_decimal(len(efectividades)), 2
-            )
+            efectividad_promedio = round(to_decimal(sum(efectividades)) / to_decimal(len(efectividades)), 2)
         else:
             efectividad_promedio = None
         return {
@@ -796,9 +792,7 @@ class ReporteService:
                 "condicion_pago": condicion,
                 "cantidad_facturas": grupo["cantidad_facturas"],
                 "total": grupo["total"],
-                "porcentaje": (
-                    to_decimal(grupo["total"]) / to_decimal(total_general) * Decimal("100")
-                )
+                "porcentaje": (to_decimal(grupo["total"]) / to_decimal(total_general) * Decimal("100"))
                 if total_general
                 else Decimal("0.00"),
             }
@@ -855,9 +849,7 @@ class ReporteService:
         for grupo in grupos.values():
             margen = to_decimal(grupo["ingreso"]) - to_decimal(grupo["costo"])
             if grupo["ingreso"]:
-                margen_pct = (
-                    margen / to_decimal(grupo["ingreso"]) * Decimal("100")
-                )
+                margen_pct = margen / to_decimal(grupo["ingreso"]) * Decimal("100")
             else:
                 margen_pct = Decimal("0.00")
             filas.append({**grupo, "margen": margen, "margen_pct": margen_pct})
@@ -1407,7 +1399,9 @@ class ReporteService:
         filas = []
         totales_por_categoria: dict[str, Decimal] = {}
         for producto in productos:
-            valor = to_decimal(producto.cantidad_unidad or Decimal("0.00")) * to_decimal(producto.costo_producto or Decimal("0.00"))
+            valor: Decimal = to_decimal(producto.cantidad_unidad or Decimal("0.00")) * to_decimal(
+                producto.costo_producto or Decimal("0.00")
+            )
             categoria = producto.categoria.nombre if producto.categoria else "Sin categoría"
             totales_por_categoria[categoria] = totales_por_categoria.get(categoria, Decimal("0.00")) + valor
             filas.append(
