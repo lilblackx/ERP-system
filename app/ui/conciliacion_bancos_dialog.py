@@ -50,8 +50,9 @@ class ConciliacionBancosDialog(QDialog):
         self.setStyleSheet(TABLE_QSS)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
-        # Aumentar el tamaño para asegurar que todos los campos sean visibles
-        self.resize(1050, 700)
+        # Tamaño mínimo adaptativo y permitir redimensionamiento
+        self.setMinimumSize(1100, 750)
+        self.resize(1200, 800)
 
         # Centrar la ventana en la pantalla
         self._centrar_ventana()
@@ -86,7 +87,7 @@ class ConciliacionBancosDialog(QDialog):
             f"background-color: {COLOR_INFO_BG}; border: 2px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
         )
-        icon_lbl.setFixedSize(38, 38)
+        icon_lbl.setMinimumSize(38, 38)  # Tamaño mínimo en lugar de fijo
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         lbl_titulo = QLabel("Conciliación de Bancos")
@@ -111,7 +112,7 @@ class ConciliacionBancosDialog(QDialog):
         self.calendar.setGridVisible(True)
         self.calendar.setSelectedDate(self._fecha_conciliacion)
         self.calendar.selectionChanged.connect(self._on_fecha_cambiada)
-        self.calendar.setFixedSize(200, 160)
+        self.calendar.setMinimumSize(220, 180)  # Tamaño mínimo en lugar de fijo
         calendar_layout.addWidget(lbl_fecha)
         calendar_layout.addWidget(self.calendar)
 
@@ -121,7 +122,7 @@ class ConciliacionBancosDialog(QDialog):
         lbl_cuenta = QLabel("Cuenta Bancaria:")
         lbl_cuenta.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.cuenta_combo = QComboBox()
-        self.cuenta_combo.setFixedHeight(32)
+        self.cuenta_combo.setMinimumHeight(32)  # Altura mínima en lugar de fija
         self.cuenta_combo.currentIndexChanged.connect(self._on_cuenta_cambiada)
         cuenta_layout.addWidget(lbl_cuenta)
         cuenta_layout.addWidget(self.cuenta_combo)
@@ -138,6 +139,9 @@ class ConciliacionBancosDialog(QDialog):
         resumen_layout = QGridLayout(resumen_card)
         resumen_layout.setContentsMargins(12, 10, 12, 10)
         resumen_layout.setSpacing(10)
+        resumen_layout.setColumnStretch(0, 1)  # Columnas flexibles
+        resumen_layout.setColumnStretch(1, 1)
+        resumen_layout.setColumnStretch(2, 1)
 
         self.lbl_saldo_inicial = QLabel("Saldo Inicial: $0.00")
         self.lbl_saldo_inicial.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
@@ -170,7 +174,7 @@ class ConciliacionBancosDialog(QDialog):
         lbl_saldo_final_bs = QLabel("Saldo Final BS:")
         lbl_saldo_final_bs.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         self.saldo_final_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, decimals=2)
-        self.saldo_final_bs_input.setFixedHeight(32)
+        self.saldo_final_bs_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
         self.saldo_final_bs_input.valueChanged.connect(self._calcular_saldo_final_usd)
         saldo_final_bs_layout.addWidget(lbl_saldo_final_bs)
         saldo_final_bs_layout.addWidget(self.saldo_final_bs_input)
@@ -182,7 +186,7 @@ class ConciliacionBancosDialog(QDialog):
         lbl_tasa = QLabel("Tasa de Cambio:")
         lbl_tasa.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         self.tasa_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=False, decimals=2)
-        self.tasa_input.setFixedHeight(32)
+        self.tasa_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
         self.tasa_input.valueChanged.connect(self._calcular_saldo_final_usd)
         tasa_layout.addWidget(lbl_tasa)
         tasa_layout.addWidget(self.tasa_input)
@@ -194,7 +198,7 @@ class ConciliacionBancosDialog(QDialog):
         lbl_saldo_final = QLabel("Saldo Final USD (Calc):")
         lbl_saldo_final.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         self.saldo_final_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, prefix="$ ")
-        self.saldo_final_input.setFixedHeight(32)
+        self.saldo_final_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
         self.saldo_final_input.setEnabled(False)  # Solo lectura, calculado automáticamente
         saldo_final_layout.addWidget(lbl_saldo_final)
         saldo_final_layout.addWidget(self.saldo_final_input)
@@ -231,35 +235,35 @@ class ConciliacionBancosDialog(QDialog):
         btn_agregar_entrada = QPushButton("Agregar Entrada")
         btn_agregar_entrada.setIcon(qta.icon("fa5s.plus", color="#16A34A"))
         btn_agregar_entrada.setStyleSheet(BUTTON_PRIMARY_QSS)
-        btn_agregar_entrada.setFixedHeight(32)
+        btn_agregar_entrada.setMinimumHeight(32)  # Altura mínima en lugar de fija
         btn_agregar_entrada.clicked.connect(self._on_agregar_entrada)
         botones_layout.addWidget(btn_agregar_entrada)
 
         btn_agregar_salida = QPushButton("Agregar Salida")
         btn_agregar_salida.setIcon(qta.icon("fa5s.minus", color="#DC2626"))
         btn_agregar_salida.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_agregar_salida.setFixedHeight(32)
+        btn_agregar_salida.setMinimumHeight(32)  # Altura mínima en lugar de fija
         btn_agregar_salida.clicked.connect(self._on_agregar_salida)
         botones_layout.addWidget(btn_agregar_salida)
 
         btn_marcar_conciliado = QPushButton("Marcar como Conciliado")
         btn_marcar_conciliado.setIcon(qta.icon("fa5s.check", color="#16A34A"))
         btn_marcar_conciliado.setStyleSheet(BUTTON_PRIMARY_QSS)
-        btn_marcar_conciliado.setFixedHeight(32)
+        btn_marcar_conciliado.setMinimumHeight(32)  # Altura mínima en lugar de fija
         btn_marcar_conciliado.clicked.connect(self._marcar_conciliado)
         botones_layout.addWidget(btn_marcar_conciliado)
 
         btn_calcular = QPushButton("Calcular Conciliación")
         btn_calcular.setIcon(qta.icon("fa5s.calculator", color=COLOR_PRIMARY))
         btn_calcular.setStyleSheet(BUTTON_PRIMARY_QSS)
-        btn_calcular.setFixedHeight(32)
+        btn_calcular.setMinimumHeight(32)  # Altura mínima en lugar de fija
         btn_calcular.clicked.connect(self._calcular_conciliacion)
         botones_layout.addWidget(btn_calcular)
 
         btn_guardar = QPushButton("Guardar Movimientos")
         btn_guardar.setIcon(qta.icon("fa5s.save", color="#16A34A"))
         btn_guardar.setStyleSheet(BUTTON_PRIMARY_QSS)
-        btn_guardar.setFixedHeight(32)
+        btn_guardar.setMinimumHeight(32)  # Altura mínima en lugar de fija
         btn_guardar.clicked.connect(self._guardar_movimientos)
         botones_layout.addWidget(btn_guardar)
 
@@ -273,16 +277,18 @@ class ConciliacionBancosDialog(QDialog):
         self.table.setHorizontalHeaderLabels(
             ["Fecha", "Tipo", "Monto", "Tasa", "Monto BS", "Origen", "Referencia", "Descripción"]
         )
-        self.table.setMinimumHeight(240)
+        self.table.setMinimumHeight(280)  # Altura mínima aumentada
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setColumnWidth(0, 95)
-        self.table.setColumnWidth(1, 55)
-        self.table.setColumnWidth(2, 75)
-        self.table.setColumnWidth(3, 55)
-        self.table.setColumnWidth(4, 75)
-        self.table.setColumnWidth(5, 65)
-        self.table.setColumnWidth(6, 80)
+        # Usar tamaños mínimos y permitir estiramiento en lugar de anchos fijos
+        self.table.horizontalHeader().setMinimumSectionSize(60)
+        self.table.setColumnWidth(0, 100)
+        self.table.setColumnWidth(1, 60)
+        self.table.setColumnWidth(2, 80)
+        self.table.setColumnWidth(3, 60)
+        self.table.setColumnWidth(4, 80)
+        self.table.setColumnWidth(5, 70)
+        self.table.setColumnWidth(6, 90)
         alinear_encabezados(
             self.table,
             {
@@ -296,7 +302,7 @@ class ConciliacionBancosDialog(QDialog):
                 7: Qt.AlignmentFlag.AlignLeft,
             },
         )
-        layout.addWidget(self.table)
+        layout.addWidget(self.table, stretch=1)  # Tabla ocupa espacio disponible
 
         # ── Footer ──
         footer_layout = QHBoxLayout()
@@ -308,7 +314,7 @@ class ConciliacionBancosDialog(QDialog):
         btn_cerrar = QPushButton("Cerrar")
         btn_cerrar.setIcon(qta.icon("fa5s.times", color=COLOR_TEXT_DARK))
         btn_cerrar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_cerrar.setFixedHeight(32)
+        btn_cerrar.setMinimumHeight(32)  # Altura mínima en lugar de fija
         btn_cerrar.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_cerrar.clicked.connect(self.accept)
         footer_layout.addWidget(btn_cerrar)
@@ -883,7 +889,8 @@ class MovimientoManualDialog(QDialog):
         self.tipo = tipo
         self.tasa_inicial = tasa_inicial
         self.setWindowTitle(f"Agregar {'Entrada' if tipo == 'abono' else 'Salida'} Manual")
-        self.setFixedSize(450, 400)
+        self.setMinimumSize(450, 400)  # Tamaño mínimo en lugar de fijo
+        self.resize(500, 450)  # Tamaño inicial mayor
         self.setStyleSheet(TABLE_QSS)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -907,11 +914,13 @@ class MovimientoManualDialog(QDialog):
         # Formulario
         form_layout = QGridLayout()
         form_layout.setSpacing(12)
+        form_layout.setColumnStretch(0, 1)  # Columnas flexibles
+        form_layout.setColumnStretch(1, 2)
 
         lbl_monto_bs = QLabel("Monto BS:")
         lbl_monto_bs.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.monto_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, decimals=2)
-        self.monto_bs_input.setFixedHeight(36)
+        self.monto_bs_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
         self.monto_bs_input.valueChanged.connect(self._calcular_monto)
         form_layout.addWidget(lbl_monto_bs, 0, 0)
         form_layout.addWidget(self.monto_bs_input, 0, 1)
@@ -919,7 +928,7 @@ class MovimientoManualDialog(QDialog):
         lbl_tasa = QLabel("Tasa de Cambio:")
         lbl_tasa.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.tasa_input = NumericLineEdit(NumericFieldType.AMOUNT, decimals=2)
-        self.tasa_input.setFixedHeight(36)
+        self.tasa_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
         self.tasa_input.valueChanged.connect(self._calcular_monto)
         form_layout.addWidget(lbl_tasa, 1, 0)
         form_layout.addWidget(self.tasa_input, 1, 1)
@@ -927,7 +936,7 @@ class MovimientoManualDialog(QDialog):
         lbl_monto = QLabel("Monto USD (Calc):")
         lbl_monto.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
-        self.monto_input.setFixedHeight(36)
+        self.monto_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
         self.monto_input.setEnabled(False)  # Solo lectura, calculado automáticamente
         form_layout.addWidget(lbl_monto, 2, 0)
         form_layout.addWidget(self.monto_input, 2, 1)
@@ -936,7 +945,7 @@ class MovimientoManualDialog(QDialog):
         lbl_referencia.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.referencia_input = QLineEdit()
         self.referencia_input.setPlaceholderText("Ej: Cheque #12345")
-        self.referencia_input.setFixedHeight(36)
+        self.referencia_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
         self.referencia_input.setMaxLength(100)  # columna referencia_bancaria VARCHAR(100)
         form_layout.addWidget(lbl_referencia, 3, 0)
         form_layout.addWidget(self.referencia_input, 3, 1)
@@ -945,7 +954,7 @@ class MovimientoManualDialog(QDialog):
         lbl_descripcion.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.descripcion_input = QLineEdit()
         self.descripcion_input.setPlaceholderText("Ej: Pago de servicios")
-        self.descripcion_input.setFixedHeight(36)
+        self.descripcion_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
         form_layout.addWidget(lbl_descripcion, 4, 0)
         form_layout.addWidget(self.descripcion_input, 4, 1)
 
@@ -958,11 +967,13 @@ class MovimientoManualDialog(QDialog):
 
         btn_cancelar = QPushButton("Cancelar")
         btn_cancelar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_cancelar.setMinimumHeight(32)  # Altura mínima en lugar de fija
         btn_cancelar.clicked.connect(self.reject)
         botones_layout.addWidget(btn_cancelar)
 
         btn_aceptar = QPushButton("Aceptar")
         btn_aceptar.setStyleSheet(BUTTON_PRIMARY_QSS)
+        btn_aceptar.setMinimumHeight(32)  # Altura mínima en lugar de fija
         btn_aceptar.clicked.connect(self._validar_y_aceptar)
         botones_layout.addWidget(btn_aceptar)
 
