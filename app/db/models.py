@@ -253,6 +253,21 @@ class ProductoPrecio(Base):
 
     producto = relationship("Inventario")
 
+    def __init__(self, *args, precio_venta=None, **kwargs):
+        # Aceptar precio_venta como alias para precio_1 para compatibilidad
+        if precio_venta is not None:
+            kwargs.setdefault("precio_1", precio_venta)
+        super().__init__(*args, **kwargs)
+
+    # Propiedad para compatibilidad con código existente que usa precio_venta
+    @property
+    def precio_venta(self) -> decimal.Decimal:
+        return self.precio_1
+
+    @precio_venta.setter
+    def precio_venta(self, value: decimal.Decimal):
+        self.precio_1 = value
+
 
 class ControlDeTasa(Base):
     __tablename__ = "control_de_tasas"

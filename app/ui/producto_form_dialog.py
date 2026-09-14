@@ -392,6 +392,9 @@ class ProductoFormDialog(QDialog):
         self.lbl_margen.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; margin-top: -4px;")
         grid.addWidget(self.lbl_margen, 4, 0, 1, 2)
 
+        # Compatibilidad: mantener precio_venta_input como alias de precio_1_input
+        self.precio_venta_input = self.precio_1_input
+
         # Cantidad en stock -- "Cantidad por Caja" se saco del formulario (auditoria de
         # Productos 2026-08-28): se capturaba y guardaba, pero ningun flujo de ventas/
         # compras/alertas la usaba, solo cantidad_unidad cuenta para el stock real. La
