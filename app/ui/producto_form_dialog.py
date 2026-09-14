@@ -562,10 +562,10 @@ class ProductoFormDialog(QDialog):
             ),
         }
 
-    def get_precio_venta(self) -> Decimal:
+    def get_precio_venta(self) -> float:
         return self.precio_1_input.get_value()
 
-    def get_precios(self) -> tuple[Decimal, Decimal, Decimal]:
+    def get_precios(self) -> tuple[float, float, float]:
         return (
             self.precio_1_input.get_value(),
             self.precio_2_input.get_value(),

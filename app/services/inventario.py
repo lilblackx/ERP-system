@@ -339,9 +339,9 @@ class PrecioService:
     def establecer_precio(
         session: Session,
         id_producto: int,
-        precio_1: Decimal,
-        precio_2: Decimal | None = None,
-        precio_3: Decimal | None = None,
+        precio_1: float,
+        precio_2: float | None = None,
+        precio_3: float | None = None,
         id_usuario: int | None = None,
     ) -> ProductoPrecio:
         require_permiso(session, id_usuario, "inventario", "editar")
@@ -351,10 +351,10 @@ class PrecioService:
         if producto.estado_producto != "ACTIVO":
             raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo, no se puede modificar su precio")
 
-        precio_1 = Decimal(str(precio_1))
-        precio_2 = Decimal(str(precio_2)) if precio_2 is not None else Decimal("0.00")
-        precio_3 = Decimal(str(precio_3)) if precio_3 is not None else Decimal("0.00")
-        margen = PrecioService._calcular_margen(producto.costo_producto, precio_1)
+        precio_1 = float(precio_1)
+        precio_2 = float(precio_2) if precio_2 is not None else 0.0
+        precio_3 = float(precio_3) if precio_3 is not None else 0.0
+        margen = PrecioService._calcular_margen(producto.costo_producto, Decimal(str(precio_1)))
 
         # WITH (UPDLOCK, ROWLOCK): sin esto, dos ediciones de precio concurrentes sobre el
         # mismo producto pueden ambas ver "no existe fila" y ambas insertar -- dejando dos

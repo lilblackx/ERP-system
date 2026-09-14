@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -247,9 +248,9 @@ class ProductoPrecio(Base):
     id_producto: Mapped[int] = mapped_column(BigInteger, ForeignKey("inventario.id_producto"), nullable=False)
     tipo_precio: Mapped[str] = mapped_column(String(10), nullable=False)
     porcentaje_ganancia: Mapped[decimal.Decimal] = mapped_column(Numeric(10, 2), server_default="0.00")
-    precio_1: Mapped[decimal.Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    precio_2: Mapped[decimal.Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    precio_3: Mapped[decimal.Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    precio_1: Mapped[float] = mapped_column(Float, nullable=False)
+    precio_2: Mapped[float] = mapped_column(Float, nullable=False)
+    precio_3: Mapped[float] = mapped_column(Float, nullable=False)
 
     producto = relationship("Inventario")
 
@@ -261,11 +262,11 @@ class ProductoPrecio(Base):
 
     # Propiedad para compatibilidad con código existente que usa precio_venta
     @property
-    def precio_venta(self) -> decimal.Decimal:
+    def precio_venta(self) -> float:
         return self.precio_1
 
     @precio_venta.setter
-    def precio_venta(self, value: decimal.Decimal):
+    def precio_venta(self, value: float):
         self.precio_1 = value
 
 
