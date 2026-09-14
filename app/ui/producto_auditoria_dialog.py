@@ -52,7 +52,12 @@ class ProductoAuditoriaDialog(QDialog):
         self.producto_id = producto_id
         self.producto_nombre = self._obtener_nombre_producto()
 
-        self.setWindowTitle(f"Auditoría de Producto{f': {self.producto_nombre}' if self.producto_nombre else ''}")
+        if self.producto_id:
+            titulo = f"Auditoría de Producto: {self.producto_nombre}" if self.producto_nombre else "Auditoría de Producto"
+        else:
+            titulo = "Auditoría General de Productos"
+
+        self.setWindowTitle(titulo)
         self.setMinimumSize(1000, 600)
         self.resize(1200, 700)
         self.setStyleSheet(TABLE_QSS)
@@ -166,9 +171,9 @@ class ProductoAuditoriaDialog(QDialog):
 
         # Tabla de auditoría
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(
-            ["Fecha", "Usuario", "Acción", "Módulo", "Detalle", "Categoría", "ID Producto"]
+            ["Fecha", "Usuario", "Acción", "Módulo", "Detalle", "Categoría", "Nombre", "ID Producto"]
         )
         self.table.setMinimumHeight(350)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -177,9 +182,10 @@ class ProductoAuditoriaDialog(QDialog):
         self.table.setColumnWidth(1, 150)
         self.table.setColumnWidth(2, 130)
         self.table.setColumnWidth(3, 90)
-        self.table.setColumnWidth(4, 400)
+        self.table.setColumnWidth(4, 350)
         self.table.setColumnWidth(5, 100)
-        self.table.setColumnWidth(6, 90)
+        self.table.setColumnWidth(6, 150)
+        self.table.setColumnWidth(7, 90)
 
         alinear_encabezados(
             self.table,
@@ -190,7 +196,8 @@ class ProductoAuditoriaDialog(QDialog):
                 3: Qt.AlignmentFlag.AlignLeft,
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignCenter,
-                6: Qt.AlignmentFlag.AlignCenter,
+                6: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignCenter,
             },
         )
 
@@ -323,10 +330,15 @@ class ProductoAuditoriaDialog(QDialog):
             tipo_item = QTableWidgetItem(tipo)
             self.table.setItem(row, 5, tipo_item)
 
+            # Nombre del producto (extraído del detalle)
+            nombre_producto = self._extraer_nombre_producto(aud.detalle)
+            nombre_item = QTableWidgetItem(nombre_producto if nombre_producto else "N/A")
+            self.table.setItem(row, 6, nombre_item)
+
             # ID relacionado (extraído del detalle)
             id_relacionado = self._extraer_id_relacionado(aud.detalle)
             id_item = QTableWidgetItem(str(id_relacionado) if id_relacionado else "N/A")
-            self.table.setItem(row, 6, id_item)
+            self.table.setItem(row, 7, id_item)
 
     def _colorear_accion(self, row, accion, item):
         """Colorea la celda de acción según el tipo."""
@@ -547,6 +559,31 @@ class ProductoAuditoriaDialog(QDialog):
                     return int(detalle[inicio:fin].strip())
                 except (ValueError, IndexError):
                     pass
+        return None
+
+    def _extraer_nombre_producto(self, detalle):
+        """Extrae el nombre del producto del detalle JSON."""
+        if not detalle:
+            return None
+
+        try:
+            datos = json.loads(detalle)
+            if "nombre_producto" in datos:
+                return datos["nombre_producto"]
+        except (json.JSONDecodeError, Exception):
+            pass
+
+        # Si no está en el detalle, intentar obtenerlo del ID del producto
+        producto_id = self._extraer_id_relacionado(detalle)
+        if producto_id:
+            try:
+                from app.db.models import Inventario
+
+                producto = self.session.get(Inventario, producto_id)
+                return producto.nombre_producto if producto else None
+            except Exception:
+                pass
+
         return None
 
     def _actualizar_resumen(self, resultados):

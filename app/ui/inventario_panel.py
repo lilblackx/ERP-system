@@ -502,12 +502,9 @@ class InventarioPanel(QWidget):
 
     def abrir_auditoria(self) -> None:
         """Abre el diálogo de auditoría de productos."""
-        producto_id = self._fila_seleccionada_id()
-        if producto_id is None:
-            return
         session = self.session_factory()
         try:
-            dialogo = ProductoAuditoriaDialog(session, self.usuario, producto_id, parent=self)
+            dialogo = ProductoAuditoriaDialog(session, self.usuario, None, parent=self)
             dialogo.exec()
         except Exception as exc:
             logger.exception("Error al abrir auditoría de productos")
