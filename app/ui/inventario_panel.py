@@ -37,6 +37,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
+from app.ui.producto_auditoria_dialog import ProductoAuditoriaDialog
 from app.ui.producto_form_dialog import ProductoFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -45,6 +46,7 @@ from app.ui.styles import (
     COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
+    COLOR_PRIMARY,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
@@ -232,11 +234,17 @@ class InventarioPanel(QWidget):
         self.btn_nuevo.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_nuevo.clicked.connect(self.nuevo_producto)
 
+        self.btn_auditoria = QPushButton("Auditoría")
+        self.btn_auditoria.setIcon(qta.icon("fa5s.history", color=COLOR_PRIMARY))
+        self.btn_auditoria.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_auditoria.clicked.connect(self.abrir_auditoria)
+
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_productos, on_pdf=self.exportar_pdf_productos)
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nuevo)
+        h.addWidget(self.btn_auditoria)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -462,7 +470,11 @@ class InventarioPanel(QWidget):
         if not filas:
             MessageBox.information(self, "Selección requerida", "Selecciona un producto de la lista.")
             return None
-        return int(self.tabla.item(filas[0].row(), 0).text())
+        item = self.tabla.item(filas[0].row(), 0)
+        if item is None:
+            MessageBox.information(self, "Error de selección", "No se pudo obtener el ID del producto seleccionado.")
+            return None
+        return int(item.text())
 
     def nuevo_producto(self) -> None:
         session = self.session_factory()
@@ -484,14 +496,22 @@ class InventarioPanel(QWidget):
             MessageBox.warning(self, "Dato duplicado", "El código de producto ya está registrado.")
         except ValueError as exc:
             session.rollback()
-            MessageBox.warning(self, "Dato inválido", str(exc))
-        except PermisoDenegadoError:
-            session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear productos.")
-        except Exception:
-            session.rollback()
-            logger.exception("Fallo al crear producto")
-            MessageBox.critical(self, "Error", "No se pudo crear el producto.")
+            MessageBox.warning(self, "Error de validación", str(exc))
+        finally:
+            session.close()
+
+    def abrir_auditoria(self) -> None:
+        """Abre el diálogo de auditoría de productos."""
+        producto_id = self._fila_seleccionada_id()
+        if producto_id is None:
+            return
+        session = self.session_factory()
+        try:
+            dialogo = ProductoAuditoriaDialog(session, self.usuario, producto_id, parent=self)
+            dialogo.exec()
+        except Exception as exc:
+            logger.exception("Error al abrir auditoría de productos")
+            MessageBox.critical(self, "Error", f"No se pudo abrir la auditoría: {str(exc)}")
         finally:
             session.close()
 

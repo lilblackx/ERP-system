@@ -75,18 +75,136 @@ class ProductoService:
         nuevo_codigo = datos.get("cod_producto")
         if nuevo_codigo and nuevo_codigo != producto.cod_producto:
             ProductoService._validar_codigo_unico(session, nuevo_codigo, excluir_id=id_producto)
+
+        # Capturar todos los valores anteriores antes de la actualización
+        campos_auditoria = [
+            "nombre_producto",
+            "descripcion_producto",
+            "cantidad_unidad",
+            "cantidad_caja",
+            "cantidad_minima",
+            "costo_producto",
+        ]
+        valores_anteriores = {}
+        for campo in campos_auditoria:
+            if campo in datos:
+                valores_anteriores[campo] = getattr(producto, campo, None)
+
         for campo, valor in datos.items():
             setattr(producto, campo, valor)
         session.commit()
         session.refresh(producto)
 
-        AuditoriaService.registrar_evento(
-            session,
-            id_usuario=id_usuario,
-            accion="ACTUALIZAR_PRODUCTO",
-            modulo="INVENTARIO",
-            detalle={"id_producto": producto.id_producto, "campos": list(datos.keys())},
-        )
+        # Registrar cambios específicos - solo lo que realmente cambió
+        cambios_relevantes = []
+        cambios_stock = []
+        cambios_descripcion = []
+        cambios_nombre = []
+
+        for campo in datos.keys():
+            if campo in campos_auditoria:
+                valor_anterior = valores_anteriores.get(campo)
+                valor_nuevo = datos[campo]
+
+                # Solo registrar si realmente cambió
+                if valor_anterior != valor_nuevo:
+                    cambio = {
+                        "campo": campo,
+                        "valor_anterior": str(valor_anterior) if valor_anterior is not None else "None",
+                        "valor_nuevo": str(valor_nuevo) if valor_nuevo is not None else "None",
+                    }
+                    cambios_relevantes.append(cambio)
+
+                    # Movimientos de stock
+                    if campo in ["cantidad_unidad", "cantidad_caja"]:
+                        try:
+                            valor_anterior_num = float(valor_anterior) if valor_anterior else 0
+                            valor_nuevo_num = float(valor_nuevo) if valor_nuevo else 0
+                            diferencia = valor_nuevo_num - valor_anterior_num
+                            tipo_movimiento = "AUMENTO" if diferencia > 0 else "DISMINUCIÓN"
+
+                            cambios_stock.append(
+                                {
+                                    "campo": campo,
+                                    "valor_anterior": str(valor_anterior),
+                                    "valor_nuevo": str(valor_nuevo),
+                                    "diferencia": str(diferencia),
+                                    "tipo_movimiento": tipo_movimiento,
+                                }
+                            )
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Cambios de descripción
+                    elif campo == "descripcion_producto":
+                        cambios_descripcion.append(
+                            {
+                                "campo": campo,
+                                "valor_anterior": str(valor_anterior) if valor_anterior else "Sin descripción",
+                                "valor_nuevo": str(valor_nuevo) if valor_nuevo else "Sin descripción",
+                            }
+                        )
+
+                    # Cambios de nombre
+                    elif campo == "nombre_producto":
+                        cambios_nombre.append(
+                            {"campo": campo, "valor_anterior": str(valor_anterior), "valor_nuevo": str(valor_nuevo)}
+                        )
+
+        # Registrar eventos específicos solo si hay cambios
+        if cambios_stock:
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="MOVIMIENTO_STOCK",
+                modulo="INVENTARIO",
+                detalle={
+                    "id_producto": producto.id_producto,
+                    "cod_producto": producto.cod_producto,
+                    "movimientos": cambios_stock,
+                },
+            )
+
+        if cambios_descripcion:
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="CAMBIO_DESCRIPCION",
+                modulo="INVENTARIO",
+                detalle={
+                    "id_producto": producto.id_producto,
+                    "cod_producto": producto.cod_producto,
+                    "cambios": cambios_descripcion,
+                },
+            )
+
+        if cambios_nombre:
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="CAMBIO_NOMBRE",
+                modulo="INVENTARIO",
+                detalle={
+                    "id_producto": producto.id_producto,
+                    "cod_producto": producto.cod_producto,
+                    "cambios": cambios_nombre,
+                },
+            )
+
+        # Registrar la actualización general solo con los campos que realmente cambiaron
+        if cambios_relevantes:
+            campos_modificados = [c["campo"] for c in cambios_relevantes]
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="ACTUALIZAR_PRODUCTO",
+                modulo="INVENTARIO",
+                detalle={
+                    "id_producto": producto.id_producto,
+                    "campos": campos_modificados,
+                    "cambios_relevantes": cambios_relevantes,
+                },
+            )
         return producto
 
     # Un producto nunca se borra fisicamente: FK_factura_detalle_id_producto_factura,
@@ -249,6 +367,14 @@ class PrecioService:
             .where(ProductoPrecio.id_producto == id_producto)
             .with_hint(ProductoPrecio, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
         ).scalar_one_or_none()
+
+        # Capturar valor anterior si existe
+        precio_anterior = None
+        margen_anterior = None
+        if precio is not None:
+            precio_anterior = precio.precio_venta
+            margen_anterior = precio.porcentaje_ganancia
+
         if precio is None:
             precio = ProductoPrecio(
                 id_producto=id_producto,
@@ -258,23 +384,49 @@ class PrecioService:
             )
             session.add(precio)
         else:
-            precio.precio_venta = precio_venta
-            precio.porcentaje_ganancia = margen
+            # Solo actualizar si realmente cambió
+            if precio.precio_venta != precio_venta or precio.porcentaje_ganancia != margen:
+                precio.precio_venta = precio_venta
+                precio.porcentaje_ganancia = margen
+            else:
+                # Si no hubo cambios, no registrar nada
+                return precio
 
         session.commit()
         session.refresh(precio)
 
-        AuditoriaService.registrar_evento(
-            session,
-            id_usuario=id_usuario,
-            accion="CAMBIO_PRECIO",
-            modulo="INVENTARIO",
-            detalle={
-                "id_producto": id_producto,
-                "precio_venta": str(precio.precio_venta),
-                "porcentaje_ganancia": str(precio.porcentaje_ganancia),
-            },
-        )
+        # Registrar solo si hubo cambios reales
+        if precio_anterior is not None and (precio_anterior != precio_venta or margen_anterior != margen):
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="CAMBIO_PRECIO",
+                modulo="INVENTARIO",
+                detalle={
+                    "id_producto": id_producto,
+                    "cod_producto": producto.cod_producto,
+                    "precio_anterior": str(precio_anterior),
+                    "precio_nuevo": str(precio.precio_venta),
+                    "margen_anterior": str(margen_anterior),
+                    "margen_nuevo": str(precio.porcentaje_ganancia),
+                },
+            )
+        elif precio_anterior is None:
+            # Nuevo precio (creación)
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="CAMBIO_PRECIO",
+                modulo="INVENTARIO",
+                detalle={
+                    "id_producto": id_producto,
+                    "cod_producto": producto.cod_producto,
+                    "precio_nuevo": str(precio.precio_venta),
+                    "margen_nuevo": str(precio.porcentaje_ganancia),
+                    "tipo": "CREACION",
+                },
+            )
+
         return precio
 
     @staticmethod
