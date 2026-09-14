@@ -1,11 +1,8 @@
 import logging
 from datetime import date, datetime
-from decimal import Decimal
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
-
-from app.utils.decimal_utils import to_decimal
 
 from app.db.models import (
     Caja,
@@ -20,6 +17,7 @@ from app.db.models import (
 from app.services.auditoria import AuditoriaService
 from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
 from app.services.permisos import require_permiso
+from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
 

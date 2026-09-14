@@ -454,8 +454,10 @@ class PrecioService:
         """Método simple para compatibilidad con código existente - solo actualiza precio_1."""
         precio = PrecioService.obtener_precio(session, id_producto, id_usuario)
         if precio:
+            precio_2_float = float(precio.precio_2) if precio.precio_2 is not None else None
+            precio_3_float = float(precio.precio_3) if precio.precio_3 is not None else None
             return PrecioService.establecer_precio(
-                session, id_producto, precio_venta, float(precio.precio_2) if precio.precio_2 is not None else None, float(precio.precio_3) if precio.precio_3 is not None else None, id_usuario
+                session, id_producto, precio_venta, precio_2_float, precio_3_float, id_usuario
             )
         else:
             return PrecioService.establecer_precio(

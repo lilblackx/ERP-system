@@ -6,8 +6,6 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.utils.decimal_utils import to_decimal
-
 from app.db.models import (
     Caja,
     Cliente,
@@ -31,6 +29,7 @@ from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
+from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
 

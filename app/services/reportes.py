@@ -32,8 +32,6 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.utils.decimal_utils import to_decimal
-
 from app.db.models import (
     Auditoria,
     BancoMovimiento,
@@ -67,6 +65,7 @@ from app.db.models import (
 from app.services.otros_movimientos import ESTADOS_CXC_OTRO
 from app.services.permisos import require_permiso
 from app.services.tesoreria import TIPOS_MOVIMIENTO_CAJA
+from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -518,7 +517,12 @@ class ReporteService:
         for cliente in clientes:
             cantidad_facturas = conteo_facturas.get(cliente.id_cliente, 0)
             meta = cliente.vendedor.meta_activacion if cliente.vendedor else None
-            efectividad_pct = round(to_decimal(cantidad_facturas) / to_decimal(meta) * Decimal("100"), 2) if meta else None
+            if meta:
+                efectividad_pct = round(
+                    to_decimal(cantidad_facturas) / to_decimal(meta) * Decimal("100"), 2
+                )
+            else:
+                efectividad_pct = None
             filas.append(
                 {
                     "cliente": cliente.nombre_razon_social,
@@ -531,13 +535,19 @@ class ReporteService:
             )
 
         efectividades = [f["efectividad_pct"] for f in filas if f["efectividad_pct"] is not None]
+        if efectividades:
+            efectividad_promedio = round(
+                to_decimal(sum(efectividades)) / to_decimal(len(efectividades)), 2
+            )
+        else:
+            efectividad_promedio = None
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
             "total_clientes": len(filas),
             "total_activos": sum(1 for f in filas if f["activo"]),
-            "efectividad_promedio": round(to_decimal(sum(efectividades)) / to_decimal(len(efectividades)), 2) if efectividades else None,
+            "efectividad_promedio": efectividad_promedio,
         }
 
     @staticmethod
@@ -786,7 +796,11 @@ class ReporteService:
                 "condicion_pago": condicion,
                 "cantidad_facturas": grupo["cantidad_facturas"],
                 "total": grupo["total"],
-                "porcentaje": (to_decimal(grupo["total"]) / to_decimal(total_general) * Decimal("100")) if total_general else Decimal("0.00"),
+                "porcentaje": (
+                    to_decimal(grupo["total"]) / to_decimal(total_general) * Decimal("100")
+                )
+                if total_general
+                else Decimal("0.00"),
             }
             for condicion, grupo in resumen.items()
         ]
@@ -840,7 +854,12 @@ class ReporteService:
         filas = []
         for grupo in grupos.values():
             margen = to_decimal(grupo["ingreso"]) - to_decimal(grupo["costo"])
-            margen_pct = (margen / to_decimal(grupo["ingreso"]) * Decimal("100")) if grupo["ingreso"] else Decimal("0.00")
+            if grupo["ingreso"]:
+                margen_pct = (
+                    margen / to_decimal(grupo["ingreso"]) * Decimal("100")
+                )
+            else:
+                margen_pct = Decimal("0.00")
             filas.append({**grupo, "margen": margen, "margen_pct": margen_pct})
         filas.sort(key=lambda f: f["margen"], reverse=True)
 
@@ -1218,9 +1237,13 @@ class ReporteService:
         movimientos = query.order_by(CajaMovimiento.fecha_registro).all()
 
         total_entradas = sum(
-            (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "entrada"), Decimal("0.00")
+            (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "entrada"),
+            Decimal("0.00"),
         )
-        total_salidas = sum((to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "salida"), Decimal("0.00"))
+        total_salidas = sum(
+            (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "salida"),
+            Decimal("0.00"),
+        )
         saldo_apertura = caja.saldo_apertura or Decimal("0.00")
         saldo_esperado = saldo_apertura + total_entradas - total_salidas
         diferencia = (caja.saldo_cierre - saldo_esperado) if caja.saldo_cierre is not None else None
