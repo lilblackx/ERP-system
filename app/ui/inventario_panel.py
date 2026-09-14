@@ -393,7 +393,7 @@ class InventarioPanel(QWidget):
         if not ids_producto:
             return {}
         filas = session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto)).all()
-        return {fila.id_producto: float(fila.precio_venta) for fila in filas}
+        return {fila.id_producto: float(fila.precio_1) for fila in filas}
 
     def _actualizar_alertas(self, session) -> None:
         alertas = ProductoService.obtener_alertas_stock(session, id_usuario=self.usuario.id_usuario)
@@ -484,10 +484,15 @@ class InventarioPanel(QWidget):
                 datos = dialogo.get_data()
                 datos["creado_por"] = self.usuario.id_usuario
                 producto = ProductoService.crear(session, **datos)
-                precio_venta = dialogo.get_precio_venta()
-                if precio_venta > 0:
+                precio_1, precio_2, precio_3 = dialogo.get_precios()
+                if precio_1 > 0:
                     PrecioService.establecer_precio(
-                        session, producto.id_producto, precio_venta, id_usuario=self.usuario.id_usuario
+                        session,
+                        producto.id_producto,
+                        precio_1,
+                        precio_2,
+                        precio_3,
+                        id_usuario=self.usuario.id_usuario,
                     )
                 self._cargar_categorias_filtro()
                 self.cargar_productos()
@@ -524,10 +529,10 @@ class InventarioPanel(QWidget):
             if dialogo.exec():
                 datos = dialogo.get_data()
                 ProductoService.actualizar(session, id_producto, id_usuario=self.usuario.id_usuario, **datos)
-                precio_venta = dialogo.get_precio_venta()
-                if precio_venta > 0:
+                precio_1, precio_2, precio_3 = dialogo.get_precios()
+                if precio_1 > 0:
                     PrecioService.establecer_precio(
-                        session, id_producto, precio_venta, id_usuario=self.usuario.id_usuario
+                        session, id_producto, precio_1, precio_2, precio_3, id_usuario=self.usuario.id_usuario
                     )
                 self._cargar_categorias_filtro()
                 self.cargar_productos()

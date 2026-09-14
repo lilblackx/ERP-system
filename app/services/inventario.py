@@ -336,15 +336,13 @@ class PrecioService:
         return margen.quantize(Decimal("0.01"))
 
     @staticmethod
-    def obtener_precio(session: Session, id_producto: int, id_usuario: int | None = None) -> ProductoPrecio | None:
-        """Reemplaza el listar_precios() de antes de C14 -- a lo sumo 1 fila por producto
-        ahora (ver TIPO_PRECIO_UNICO)."""
-        require_permiso(session, id_usuario, "inventario", "ver")
-        return session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).first()
-
-    @staticmethod
     def establecer_precio(
-        session: Session, id_producto: int, precio_venta, id_usuario: int | None = None
+        session: Session,
+        id_producto: int,
+        precio_1: Decimal,
+        precio_2: Decimal,
+        precio_3: Decimal,
+        id_usuario: int | None = None,
     ) -> ProductoPrecio:
         require_permiso(session, id_usuario, "inventario", "editar")
         producto = session.get(Inventario, id_producto)
@@ -353,8 +351,10 @@ class PrecioService:
         if producto.estado_producto != "ACTIVO":
             raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo, no se puede modificar su precio")
 
-        precio_venta = Decimal(str(precio_venta))
-        margen = PrecioService._calcular_margen(producto.costo_producto, precio_venta)
+        precio_1 = Decimal(str(precio_1))
+        precio_2 = Decimal(str(precio_2))
+        precio_3 = Decimal(str(precio_3))
+        margen = PrecioService._calcular_margen(producto.costo_producto, precio_1)
 
         # WITH (UPDLOCK, ROWLOCK): sin esto, dos ediciones de precio concurrentes sobre el
         # mismo producto pueden ambas ver "no existe fila" y ambas insertar -- dejando dos
@@ -372,21 +372,30 @@ class PrecioService:
         precio_anterior = None
         margen_anterior = None
         if precio is not None:
-            precio_anterior = precio.precio_venta
+            precio_anterior = precio.precio_1
             margen_anterior = precio.porcentaje_ganancia
 
         if precio is None:
             precio = ProductoPrecio(
                 id_producto=id_producto,
                 tipo_precio=TIPO_PRECIO_UNICO,
-                precio_venta=precio_venta,
+                precio_1=precio_1,
+                precio_2=precio_2,
+                precio_3=precio_3,
                 porcentaje_ganancia=margen,
             )
             session.add(precio)
         else:
             # Solo actualizar si realmente cambió
-            if precio.precio_venta != precio_venta or precio.porcentaje_ganancia != margen:
-                precio.precio_venta = precio_venta
+            if (
+                precio.precio_1 != precio_1
+                or precio.precio_2 != precio_2
+                or precio.precio_3 != precio_3
+                or precio.porcentaje_ganancia != margen
+            ):
+                precio.precio_1 = precio_1
+                precio.precio_2 = precio_2
+                precio.precio_3 = precio_3
                 precio.porcentaje_ganancia = margen
             else:
                 # Si no hubo cambios, no registrar nada
@@ -396,7 +405,7 @@ class PrecioService:
         session.refresh(precio)
 
         # Registrar solo si hubo cambios reales
-        if precio_anterior is not None and (precio_anterior != precio_venta or margen_anterior != margen):
+        if precio_anterior is not None and (precio_anterior != precio_1 or margen_anterior != margen):
             AuditoriaService.registrar_evento(
                 session,
                 id_usuario=id_usuario,
@@ -406,7 +415,7 @@ class PrecioService:
                     "id_producto": id_producto,
                     "cod_producto": producto.cod_producto,
                     "precio_anterior": str(precio_anterior),
-                    "precio_nuevo": str(precio.precio_venta),
+                    "precio_nuevo": str(precio.precio_1),
                     "margen_anterior": str(margen_anterior),
                     "margen_nuevo": str(precio.porcentaje_ganancia),
                 },
@@ -421,13 +430,34 @@ class PrecioService:
                 detalle={
                     "id_producto": id_producto,
                     "cod_producto": producto.cod_producto,
-                    "precio_nuevo": str(precio.precio_venta),
+                    "precio_nuevo": str(precio.precio_1),
                     "margen_nuevo": str(precio.porcentaje_ganancia),
-                    "tipo": "CREACION",
                 },
             )
 
         return precio
+
+    @staticmethod
+    def obtener_precio(session: Session, id_producto: int, id_usuario: int | None = None) -> ProductoPrecio | None:
+        """Reemplaza el listar_precios() de antes de C14 -- a lo sumo 1 fila por producto
+        ahora (ver TIPO_PRECIO_UNICO)."""
+        require_permiso(session, id_usuario, "inventario", "ver")
+        return session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).first()
+
+    @staticmethod
+    def establecer_precio_simple(
+        session: Session, id_producto: int, precio_venta, id_usuario: int | None = None
+    ) -> ProductoPrecio:
+        """Método simple para compatibilidad con código existente - solo actualiza precio_1."""
+        precio = PrecioService.obtener_precio(session, id_producto, id_usuario)
+        if precio:
+            return PrecioService.establecer_precio(
+                session, id_producto, precio_venta, precio.precio_2, precio.precio_3, id_usuario
+            )
+        else:
+            return PrecioService.establecer_precio(
+                session, id_producto, precio_venta, Decimal("0.00"), Decimal("0.00"), id_usuario
+            )
 
     @staticmethod
     def eliminar_precio(session: Session, id_producto_precio: int, id_usuario: int | None = None) -> None:

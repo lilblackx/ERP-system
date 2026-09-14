@@ -363,18 +363,34 @@ class ProductoFormDialog(QDialog):
         grid.addWidget(lbl_costo, 0, 0)
         grid.addWidget(self.costo_input, 1, 0)
 
-        # Precio de venta
-        lbl_precio = QLabel("Precio de Venta ($)")
-        lbl_precio.setProperty("class", "FormLabel")
-        self.precio_venta_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
-        self.precio_venta_input.setFixedHeight(32)
-        self.precio_venta_input.valueChanged.connect(self._actualizar_margen)
-        grid.addWidget(lbl_precio, 0, 1)
-        grid.addWidget(self.precio_venta_input, 1, 1)
+        # Precio 1 (Precio de venta)
+        lbl_precio_1 = QLabel("Precio 1 ($)")
+        lbl_precio_1.setProperty("class", "FormLabel")
+        self.precio_1_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
+        self.precio_1_input.setFixedHeight(32)
+        self.precio_1_input.valueChanged.connect(self._actualizar_margen)
+        grid.addWidget(lbl_precio_1, 0, 1)
+        grid.addWidget(self.precio_1_input, 1, 1)
+
+        # Precio 2
+        lbl_precio_2 = QLabel("Precio 2 ($)")
+        lbl_precio_2.setProperty("class", "FormLabel")
+        self.precio_2_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
+        self.precio_2_input.setFixedHeight(32)
+        grid.addWidget(lbl_precio_2, 2, 0)
+        grid.addWidget(self.precio_2_input, 3, 0)
+
+        # Precio 3
+        lbl_precio_3 = QLabel("Precio 3 ($)")
+        lbl_precio_3.setProperty("class", "FormLabel")
+        self.precio_3_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
+        self.precio_3_input.setFixedHeight(32)
+        grid.addWidget(lbl_precio_3, 2, 1)
+        grid.addWidget(self.precio_3_input, 3, 1)
 
         self.lbl_margen = QLabel("Margen: 0.00%")
         self.lbl_margen.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; margin-top: -4px;")
-        grid.addWidget(self.lbl_margen, 2, 0, 1, 2)
+        grid.addWidget(self.lbl_margen, 4, 0, 1, 2)
 
         # Cantidad en stock -- "Cantidad por Caja" se saco del formulario (auditoria de
         # Productos 2026-08-28): se capturaba y guardaba, pero ningun flujo de ventas/
@@ -385,8 +401,8 @@ class ProductoFormDialog(QDialog):
         lbl_unidad.setProperty("class", "FormLabel")
         self.cantidad_unidad_input = NumericLineEdit(NumericFieldType.QUANTITY)
         self.cantidad_unidad_input.setFixedHeight(32)
-        grid.addWidget(lbl_unidad, 3, 0, 1, 2)
-        grid.addWidget(self.cantidad_unidad_input, 4, 0, 1, 2)
+        grid.addWidget(lbl_unidad, 5, 0, 1, 2)
+        grid.addWidget(self.cantidad_unidad_input, 6, 0, 1, 2)
 
         # Umbral para el reporte "Stock bajo minimo" (migrations/0037). 0 = sin minimo
         # configurado, el producto no aparece en ese reporte.
@@ -394,8 +410,8 @@ class ProductoFormDialog(QDialog):
         lbl_minima.setProperty("class", "FormLabel")
         self.cantidad_minima_input = NumericLineEdit(NumericFieldType.QUANTITY)
         self.cantidad_minima_input.setFixedHeight(32)
-        grid.addWidget(lbl_minima, 5, 0, 1, 2)
-        grid.addWidget(self.cantidad_minima_input, 6, 0, 1, 2)
+        grid.addWidget(lbl_minima, 7, 0, 1, 2)
+        grid.addWidget(self.cantidad_minima_input, 8, 0, 1, 2)
 
         layout.addLayout(grid)
         layout.addStretch()
@@ -472,7 +488,7 @@ class ProductoFormDialog(QDialog):
 
     def _actualizar_margen(self) -> None:
         costo = self.costo_input.get_value()
-        precio = self.precio_venta_input.get_value()
+        precio = self.precio_1_input.get_value()
         margen = ((precio - costo) / costo * 100) if costo else Decimal("0")
         self.lbl_margen.setText(f"Margen: {margen:.2f}%")
 
@@ -496,7 +512,9 @@ class ProductoFormDialog(QDialog):
 
         precio = PrecioService.obtener_precio(self.session, producto.id_producto, id_usuario=self.id_usuario)
         if precio:
-            self.precio_venta_input.set_value(precio.precio_venta or 0)
+            self.precio_1_input.set_value(precio.precio_1 or 0)
+            self.precio_2_input.set_value(precio.precio_2 or 0)
+            self.precio_3_input.set_value(precio.precio_3 or 0)
         self._actualizar_margen()
 
     # ── Validación / datos ────────────────────────────────────────────────
@@ -512,6 +530,18 @@ class ProductoFormDialog(QDialog):
             return
         if self.categoria_combo.currentData() is None:
             MessageBox.warning(self, "Dato requerido", "Seleccione o cree una categoría para el producto.")
+            return
+        if self.precio_1_input.get_value() <= 0:
+            MessageBox.warning(self, "Dato requerido", "El Precio 1 es obligatorio y debe ser mayor a 0.")
+            self.precio_1_input.setFocus()
+            return
+        if self.precio_2_input.get_value() <= 0:
+            MessageBox.warning(self, "Dato requerido", "El Precio 2 es obligatorio y debe ser mayor a 0.")
+            self.precio_2_input.setFocus()
+            return
+        if self.precio_3_input.get_value() <= 0:
+            MessageBox.warning(self, "Dato requerido", "El Precio 3 es obligatorio y debe ser mayor a 0.")
+            self.precio_3_input.setFocus()
             return
         self.accept()
 
@@ -530,4 +560,11 @@ class ProductoFormDialog(QDialog):
         }
 
     def get_precio_venta(self) -> Decimal:
-        return self.precio_venta_input.get_value()
+        return self.precio_1_input.get_value()
+
+    def get_precios(self) -> tuple[Decimal, Decimal, Decimal]:
+        return (
+            self.precio_1_input.get_value(),
+            self.precio_2_input.get_value(),
+            self.precio_3_input.get_value(),
+        )
