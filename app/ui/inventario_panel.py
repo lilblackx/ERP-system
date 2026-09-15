@@ -64,7 +64,18 @@ from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "CÓDIGO", "NOMBRE", "CATEGORÍA", "CANTIDAD", "COSTO", "PRECIO VENTA", "ESTADO"]
+COLS_VISIBLES = [
+    "ID",
+    "CÓDIGO",
+    "NOMBRE",
+    "CATEGORÍA",
+    "CANTIDAD",
+    "COSTO",
+    "PRECIO VENTA",
+    "PRECIO 2",
+    "PRECIO 3",
+    "ESTADO",
+]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 # Mismo horizonte que ProductoService.obtener_alertas_stock(dias_vencimiento=30) --
@@ -91,7 +102,9 @@ def _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usua
             p.categoria.nombre if p.categoria else None,
             float(p.cantidad_unidad),
             float(p.costo_producto),
-            precios.get(p.id_producto),
+            precios.get(p.id_producto, {}).get("precio_1"),
+            precios.get(p.id_producto, {}).get("precio_2"),
+            precios.get(p.id_producto, {}).get("precio_3"),
             p.estado_producto,
         ]
         for p in resultado["items"]
@@ -261,7 +274,9 @@ class InventarioPanel(QWidget):
                 4: Qt.AlignmentFlag.AlignRight,
                 5: Qt.AlignmentFlag.AlignRight,
                 6: Qt.AlignmentFlag.AlignRight,
-                7: Qt.AlignmentFlag.AlignCenter,
+                7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignRight,
+                9: Qt.AlignmentFlag.AlignCenter,
             },
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -273,8 +288,8 @@ class InventarioPanel(QWidget):
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.tabla.setColumnWidth(7, 110)
+        self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(9, 110)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)
@@ -386,14 +401,21 @@ class InventarioPanel(QWidget):
             session.close()
 
     @staticmethod
-    def _obtener_precios(session, ids_producto: list[int]) -> dict[int, float]:
+    def _obtener_precios(session, ids_producto: list[int]) -> dict[int, dict[str, float]]:
         """Lookup de solo-lectura directo (mismo criterio que cliente_form_dialog.py
         consultando Vendedor/CategoriaCliente sin pasar por un servicio): evita N
         consultas de PrecioService.obtener_precio(), una por fila de la tabla."""
         if not ids_producto:
             return {}
         filas = session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto)).all()
-        return {fila.id_producto: float(fila.precio_1) for fila in filas}
+        return {
+            fila.id_producto: {
+                "precio_1": float(fila.precio_1),
+                "precio_2": float(fila.precio_2),
+                "precio_3": float(fila.precio_3),
+            }
+            for fila in filas
+        }
 
     def _actualizar_alertas(self, session) -> None:
         alertas = ProductoService.obtener_alertas_stock(session, id_usuario=self.usuario.id_usuario)
@@ -446,15 +468,25 @@ class InventarioPanel(QWidget):
             item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 5, item_costo)
 
-            precio_venta = precios.get(p.id_producto)
+            precio_venta = precios.get(p.id_producto, {}).get("precio_1")
             item_precio = QTableWidgetItem(f"${precio_venta:,.2f}" if precio_venta is not None else "Sin precio")
             item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_precio)
 
+            precio_2 = precios.get(p.id_producto, {}).get("precio_2")
+            item_precio_2 = QTableWidgetItem(f"${precio_2:,.2f}" if precio_2 is not None and precio_2 > 0 else "-")
+            item_precio_2.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 7, item_precio_2)
+
+            precio_3 = precios.get(p.id_producto, {}).get("precio_3")
+            item_precio_3 = QTableWidgetItem(f"${precio_3:,.2f}" if precio_3 is not None and precio_3 > 0 else "-")
+            item_precio_3.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 8, item_precio_3)
+
             estado_producto = p.estado_producto or "ACTIVO"
             color_estado = COLOR_SUCCESS if estado_producto.upper() == "ACTIVO" else COLOR_DANGER
             badge = EstadoBadge(estado_producto.capitalize(), color_estado)
-            self.tabla.setCellWidget(fila, 7, badge)
+            self.tabla.setCellWidget(fila, 9, badge)
 
         total = resultado["total"]
         self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math

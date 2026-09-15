@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -134,6 +135,14 @@ class ProductoAuditoriaDialog(QDialog):
         self.accion_combo.setMinimumHeight(32)
         self.accion_combo.currentIndexChanged.connect(self._aplicar_filtros)
 
+        # Filtro por nombre de producto
+        lbl_nombre = QLabel("Nombre Producto:")
+        lbl_nombre.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
+        self.nombre_input = QLineEdit()
+        self.nombre_input.setPlaceholderText("Filtrar por nombre...")
+        self.nombre_input.setMinimumHeight(32)
+        self.nombre_input.textChanged.connect(self._aplicar_filtros)
+
         # Filtro por rango de fechas
         lbl_fecha_inicio = QLabel("Desde:")
         lbl_fecha_inicio.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
@@ -160,14 +169,17 @@ class ProductoAuditoriaDialog(QDialog):
 
         filtros_layout.addWidget(lbl_accion, 0, 0)
         filtros_layout.addWidget(self.accion_combo, 0, 1)
-        filtros_layout.addWidget(lbl_fecha_inicio, 0, 2)
-        filtros_layout.addWidget(self.fecha_inicio, 0, 3)
-        filtros_layout.addWidget(lbl_fecha_fin, 0, 4)
-        filtros_layout.addWidget(self.fecha_fin, 0, 5)
-        filtros_layout.addWidget(btn_limpiar, 0, 6)
+        filtros_layout.addWidget(lbl_nombre, 0, 2)
+        filtros_layout.addWidget(self.nombre_input, 0, 3)
+        filtros_layout.addWidget(lbl_fecha_inicio, 0, 4)
+        filtros_layout.addWidget(self.fecha_inicio, 0, 5)
+        filtros_layout.addWidget(lbl_fecha_fin, 0, 6)
+        filtros_layout.addWidget(self.fecha_fin, 0, 7)
+        filtros_layout.addWidget(btn_limpiar, 0, 8)
         filtros_layout.setColumnStretch(1, 1)
         filtros_layout.setColumnStretch(3, 1)
         filtros_layout.setColumnStretch(5, 1)
+        filtros_layout.setColumnStretch(7, 1)
 
         layout.addWidget(filtros_card)
 
@@ -287,6 +299,17 @@ class ProductoAuditoriaDialog(QDialog):
             query = query.order_by(Auditoria.fecha_evento.desc())
 
             resultados = query.all()
+
+            # Aplicar filtro por nombre de producto (client-side filtering)
+            nombre_filtro = self.nombre_input.text().strip()
+            if nombre_filtro:
+                resultados_filtrados = []
+                for aud in resultados:
+                    nombre_producto = self._extraer_nombre_producto(aud.detalle)
+                    if nombre_producto and nombre_filtro.lower() in nombre_producto.lower():
+                        resultados_filtrados.append(aud)
+                resultados = resultados_filtrados
+
             self._poblar_tabla(resultados)
             self._actualizar_resumen(resultados)
 
@@ -453,12 +476,24 @@ class ProductoAuditoriaDialog(QDialog):
             if "cod_producto" in datos:
                 partes.append(f"Código: {datos['cod_producto']}")
 
-            if "precio_nuevo" in datos:
-                partes.append(f"Precio Nuevo: ${datos['precio_nuevo']}")
-            if "precio_anterior" in datos:
-                partes.append(f"Precio Anterior: ${datos['precio_anterior']}")
-            if "precio_venta" in datos:
-                partes.append(f"Precio: ${datos['precio_venta']}")
+            if "cambios_precio" in datos and datos["cambios_precio"]:
+                cambios_precio = datos["cambios_precio"]
+                for precio_key, cambio in cambios_precio.items():
+                    campo_legible = precio_key.replace("_", " ").title()
+                    valor_anterior = cambio.get("anterior")
+                    valor_nuevo = cambio.get("nuevo")
+                    if valor_anterior is not None:
+                        partes.append(f"{campo_legible}: ${valor_anterior} → ${valor_nuevo}")
+                    else:
+                        partes.append(f"{campo_legible}: ${valor_nuevo} (nuevo)")
+            else:
+                # Compatibilidad con formato antiguo
+                if "precio_nuevo" in datos:
+                    partes.append(f"Precio Nuevo: ${datos['precio_nuevo']}")
+                if "precio_anterior" in datos:
+                    partes.append(f"Precio Anterior: ${datos['precio_anterior']}")
+                if "precio_venta" in datos:
+                    partes.append(f"Precio: ${datos['precio_venta']}")
 
             if "margen_nuevo" in datos:
                 partes.append(f"Ganancia Nueva: {datos['margen_nuevo']}%")
@@ -615,6 +650,7 @@ class ProductoAuditoriaDialog(QDialog):
     def _limpiar_filtros(self):
         """Limpia todos los filtros y recarga los datos."""
         self.accion_combo.setCurrentIndex(0)
+        self.nombre_input.clear()
         self.fecha_inicio.setDate(self.fecha_inicio.date().addDays(-30))
         self.fecha_fin.setDate(self.fecha_fin.date().currentDate())
         self._cargar_datos()

@@ -373,10 +373,17 @@ class PrecioService:
 
         # Capturar valor anterior si existe
         precio_anterior = None
+        precio_2_anterior = None
+        precio_3_anterior = None
         margen_anterior = None
+        es_nuevo = False
         if precio is not None:
             precio_anterior = precio.precio_1
+            precio_2_anterior = precio.precio_2
+            precio_3_anterior = precio.precio_3
             margen_anterior = precio.porcentaje_ganancia
+        else:
+            es_nuevo = True
 
         if precio is None:
             precio = ProductoPrecio(
@@ -408,34 +415,36 @@ class PrecioService:
         session.refresh(precio)
 
         # Registrar solo si hubo cambios reales
-        if precio_anterior is not None and (precio_anterior != precio_1 or margen_anterior != margen):
+        cambios_precio = {}
+        if es_nuevo:
+            # Nuevo precio (creación) - registrar todos los valores
+            cambios_precio["precio_1"] = {"anterior": None, "nuevo": str(precio.precio_1)}
+            cambios_precio["precio_2"] = {"anterior": None, "nuevo": str(precio.precio_2)}
+            cambios_precio["precio_3"] = {"anterior": None, "nuevo": str(precio.precio_3)}
+            cambios_precio["margen"] = {"anterior": None, "nuevo": str(precio.porcentaje_ganancia)}
+        else:
+            # Actualización - registrar solo lo que cambió
+            if precio_anterior is not None and precio_anterior != precio_1:
+                cambios_precio["precio_1"] = {"anterior": str(precio_anterior), "nuevo": str(precio.precio_1)}
+            if precio_2_anterior is not None and precio_2_anterior != precio_2:
+                cambios_precio["precio_2"] = {"anterior": str(precio_2_anterior), "nuevo": str(precio.precio_2)}
+            if precio_3_anterior is not None and precio_3_anterior != precio_3:
+                cambios_precio["precio_3"] = {"anterior": str(precio_3_anterior), "nuevo": str(precio.precio_3)}
+            if margen_anterior != margen:
+                cambios_precio["margen"] = {"anterior": str(margen_anterior), "nuevo": str(precio.porcentaje_ganancia)}
+
+        if cambios_precio:
+            detalle = {
+                "id_producto": id_producto,
+                "cod_producto": producto.cod_producto,
+                "cambios_precio": cambios_precio,
+            }
             AuditoriaService.registrar_evento(
                 session,
                 id_usuario=id_usuario,
                 accion="CAMBIO_PRECIO",
                 modulo="INVENTARIO",
-                detalle={
-                    "id_producto": id_producto,
-                    "cod_producto": producto.cod_producto,
-                    "precio_anterior": str(precio_anterior),
-                    "precio_nuevo": str(precio.precio_1),
-                    "margen_anterior": str(margen_anterior),
-                    "margen_nuevo": str(precio.porcentaje_ganancia),
-                },
-            )
-        elif precio_anterior is None:
-            # Nuevo precio (creación)
-            AuditoriaService.registrar_evento(
-                session,
-                id_usuario=id_usuario,
-                accion="CAMBIO_PRECIO",
-                modulo="INVENTARIO",
-                detalle={
-                    "id_producto": id_producto,
-                    "cod_producto": producto.cod_producto,
-                    "precio_nuevo": str(precio.precio_1),
-                    "margen_nuevo": str(precio.porcentaje_ganancia),
-                },
+                detalle=detalle,
             )
 
         return precio
