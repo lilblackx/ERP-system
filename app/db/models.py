@@ -1,5 +1,6 @@
 import datetime
 import decimal
+from typing import ClassVar
 
 from sqlalchemy import (
     BigInteger,
@@ -21,6 +22,7 @@ from app.db.session import Base
 
 class Rol(Base):
     __tablename__ = "roles"
+    __table_args__ = {"extend_existing": True}
 
     id_rol: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     nombre: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
@@ -368,8 +370,8 @@ class FacturaVenta(Base):
     fecha_autorizacion_vuelto: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
     # Dynamic attributes (not mapped, set by service layer for UI display)
-    estado_visual: str = "EMITIDA"  # Calculated by VentaService for UI display
-    metodo_pago: str | None = None  # Set by VentaService for cash sales
+    estado_visual: ClassVar[str] = "EMITIDA"  # Calculated by VentaService for UI display
+    metodo_pago: ClassVar[str | None] = None  # Set by VentaService for cash sales
 
     cliente = relationship("Cliente")
     usuario = relationship("Usuario", foreign_keys=[id_usuario_factura])

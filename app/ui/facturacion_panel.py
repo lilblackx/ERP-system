@@ -460,7 +460,7 @@ class FacturacionPanel(QWidget):
             item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_total)
 
-            estado_visual = getattr(f, "estado_visual", "EMITIDA")
+            estado_visual = getattr(f, "estado_visual", "EMITIDA") or "EMITIDA"
             color_estado = COLORES_ESTADO_FACTURA.get(estado_visual, COLOR_TEXT_MUTED)
             badge = EstadoBadge(estado_visual.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 8, badge)
