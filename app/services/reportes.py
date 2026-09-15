@@ -1564,9 +1564,25 @@ class ReporteService:
                 continue
 
             # Adaptar a la nueva estructura del detalle de PrecioService.establecer_precio
-            # Ahora usa precio_nuevo y margen_nuevo en lugar de precio_venta y porcentaje_ganancia
-            precio_valor = detalle.get("precio_nuevo") or detalle.get("precio_venta")
-            margen_valor = detalle.get("margen_nuevo") or detalle.get("porcentaje_ganancia")
+            # Ahora usa cambios_precio con objetos anidados para precio_1, precio_2, precio_3, margen
+            precio_valor = None
+            margen_valor = None
+
+            # Intentar nueva estructura con cambios_precio
+            cambios_precio = detalle.get("cambios_precio", {})
+            if cambios_precio:
+                # Obtener precio_1 (precio de venta principal)
+                precio_1_cambio = cambios_precio.get("precio_1", {})
+                if precio_1_cambio:
+                    precio_valor = precio_1_cambio.get("nuevo")
+                # Obtener margen
+                margen_cambio = cambios_precio.get("margen", {})
+                if margen_cambio:
+                    margen_valor = margen_cambio.get("nuevo")
+            else:
+                # Fallback a estructura antigua para compatibilidad
+                precio_valor = detalle.get("precio_nuevo") or detalle.get("precio_venta")
+                margen_valor = detalle.get("margen_nuevo") or detalle.get("porcentaje_ganancia")
 
             filas.append(
                 {
