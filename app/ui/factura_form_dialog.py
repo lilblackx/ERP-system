@@ -893,19 +893,19 @@ class FacturaFormDialog(QDialog):
         # Fila para seleccionar el precio a facturar y mostrar la comisión
         fila_precio_seleccion = QHBoxLayout()
         fila_precio_seleccion.setSpacing(8)
-        
+
         lbl_seleccion_precio = QLabel("Precio a facturar:")
         lbl_seleccion_precio.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MEDIUM}; font-weight: 600;")
-        
+
         self.precio_seleccion_combo = QComboBox()
         self.precio_seleccion_combo.setFixedHeight(32)
         self.precio_seleccion_combo.setMinimumWidth(150)
         self.precio_seleccion_combo.currentIndexChanged.connect(self._on_precio_seleccion_cambiado)
-        
+
         self.lbl_comision = QLabel("Comisión: $0.00")
         self.lbl_comision.setStyleSheet(f"font-size: 12px; color: {COLOR_SUCCESS}; font-weight: 600;")
         self.lbl_comision.setVisible(False)
-        
+
         fila_precio_seleccion.addWidget(lbl_seleccion_precio)
         fila_precio_seleccion.addWidget(self.precio_seleccion_combo)
         fila_precio_seleccion.addWidget(self.lbl_comision)
@@ -1312,28 +1312,28 @@ class FacturaFormDialog(QDialog):
         precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         self._precio_lista_actual = float(precio.precio_venta) if precio else None
         self.precio_input.set_value(self._precio_lista_actual or 0)
-        
+
         # Poblar el combo de selección de precio
         self.precio_seleccion_combo.blockSignals(True)
         self.precio_seleccion_combo.clear()
-        
+
         if precio:
             self.precio_seleccion_combo.setEnabled(True)
             self.precio_seleccion_combo.addItem(f"Precio 1: ${precio.precio_1:,.2f}", 1)
-            
+
             if precio.precio_2 is not None:
                 self.precio_seleccion_combo.addItem(f"Precio 2: ${precio.precio_2:,.2f}", 2)
-            
+
             if precio.precio_3 is not None:
                 self.precio_seleccion_combo.addItem(f"Precio 3: ${precio.precio_3:,.2f}", 3)
-            
+
             # Por defecto seleccionar Precio 1
             self.precio_seleccion_combo.setCurrentIndex(0)
             self.lbl_comision.setVisible(False)
         else:
             self.precio_seleccion_combo.setEnabled(False)
             self.lbl_comision.setVisible(False)
-        
+
         self.precio_seleccion_combo.blockSignals(False)
         self._on_precio_seleccion_cambiado()
 
@@ -1343,12 +1343,12 @@ class FacturaFormDialog(QDialog):
         if id_producto is None:
             self.lbl_comision.setVisible(False)
             return
-        
+
         precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         if not precio:
             self.lbl_comision.setVisible(False)
             return
-        
+
         precio_seleccionado = self.precio_seleccion_combo.currentData()
         if precio_seleccionado == 1:
             precio_facturar = precio.precio_1
@@ -1358,10 +1358,10 @@ class FacturaFormDialog(QDialog):
             precio_facturar = precio.precio_3
         else:
             precio_facturar = precio.precio_1
-        
+
         # Actualizar el precio de facturación en el input
         self.precio_input.set_value(precio_facturar)
-        
+
         # Calcular comisión: Precio 1 - Precio seleccionado
         if precio_seleccionado in (2, 3):
             comision = precio.precio_1 - precio_facturar
@@ -1413,12 +1413,12 @@ class FacturaFormDialog(QDialog):
         nota = self.nota_item_input.text().strip() or None
         precio_lista = self._precio_lista_actual
         precio_unitario = float(self.precio_input.get_value())
-        
+
         # Calcular comisión si se seleccionó Precio 2 o 3
         precio_info = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         tipo_precio_seleccionado = self.precio_seleccion_combo.currentData()
         comision = 0.0
-        
+
         if precio_info and tipo_precio_seleccionado in (2, 3):
             if tipo_precio_seleccionado == 2 and precio_info.precio_2 is not None:
                 comision = precio_info.precio_1 - precio_info.precio_2
