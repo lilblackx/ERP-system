@@ -367,6 +367,10 @@ class FacturaVenta(Base):
     autorizado_por_vuelto: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_autorizacion_vuelto: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
+    # Dynamic attributes (not mapped, set by service layer for UI display)
+    estado_visual: str = "EMITIDA"  # Calculated by VentaService for UI display
+    metodo_pago: str | None = None  # Set by VentaService for cash sales
+
     cliente = relationship("Cliente")
     usuario = relationship("Usuario", foreign_keys=[id_usuario_factura])
     tasa = relationship("ControlDeTasa")

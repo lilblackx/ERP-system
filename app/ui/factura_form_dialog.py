@@ -890,6 +890,28 @@ class FacturaFormDialog(QDialog):
         fila_agregar.addWidget(btn_agregar)
         layout.addLayout(fila_agregar)
 
+        # Fila para seleccionar el precio a facturar y mostrar la comisión
+        fila_precio_seleccion = QHBoxLayout()
+        fila_precio_seleccion.setSpacing(8)
+        
+        lbl_seleccion_precio = QLabel("Precio a facturar:")
+        lbl_seleccion_precio.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MEDIUM}; font-weight: 600;")
+        
+        self.precio_seleccion_combo = QComboBox()
+        self.precio_seleccion_combo.setFixedHeight(32)
+        self.precio_seleccion_combo.setMinimumWidth(150)
+        self.precio_seleccion_combo.currentIndexChanged.connect(self._on_precio_seleccion_cambiado)
+        
+        self.lbl_comision = QLabel("Comisión: $0.00")
+        self.lbl_comision.setStyleSheet(f"font-size: 12px; color: {COLOR_SUCCESS}; font-weight: 600;")
+        self.lbl_comision.setVisible(False)
+        
+        fila_precio_seleccion.addWidget(lbl_seleccion_precio)
+        fila_precio_seleccion.addWidget(self.precio_seleccion_combo)
+        fila_precio_seleccion.addWidget(self.lbl_comision)
+        fila_precio_seleccion.addStretch()
+        layout.addLayout(fila_precio_seleccion)
+
         self.nota_item_input = QLineEdit()
         self.nota_item_input.setPlaceholderText("Nota para este item (opcional)…")
         self.nota_item_input.setMaxLength(255)
@@ -1281,10 +1303,75 @@ class FacturaFormDialog(QDialog):
         if id_producto is None:
             self.precio_input.set_value(0)
             self._precio_lista_actual = None
+            self.precio_seleccion_combo.blockSignals(True)
+            self.precio_seleccion_combo.clear()
+            self.precio_seleccion_combo.setEnabled(False)
+            self.precio_seleccion_combo.blockSignals(False)
+            self.lbl_comision.setVisible(False)
             return
         precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         self._precio_lista_actual = float(precio.precio_venta) if precio else None
         self.precio_input.set_value(self._precio_lista_actual or 0)
+        
+        # Poblar el combo de selección de precio
+        self.precio_seleccion_combo.blockSignals(True)
+        self.precio_seleccion_combo.clear()
+        
+        if precio:
+            self.precio_seleccion_combo.setEnabled(True)
+            self.precio_seleccion_combo.addItem(f"Precio 1: ${precio.precio_1:,.2f}", 1)
+            
+            if precio.precio_2 is not None:
+                self.precio_seleccion_combo.addItem(f"Precio 2: ${precio.precio_2:,.2f}", 2)
+            
+            if precio.precio_3 is not None:
+                self.precio_seleccion_combo.addItem(f"Precio 3: ${precio.precio_3:,.2f}", 3)
+            
+            # Por defecto seleccionar Precio 1
+            self.precio_seleccion_combo.setCurrentIndex(0)
+            self.lbl_comision.setVisible(False)
+        else:
+            self.precio_seleccion_combo.setEnabled(False)
+            self.lbl_comision.setVisible(False)
+        
+        self.precio_seleccion_combo.blockSignals(False)
+        self._on_precio_seleccion_cambiado()
+
+    def _on_precio_seleccion_cambiado(self) -> None:
+        """Maneja el cambio de selección de precio y calcula la comisión."""
+        id_producto = self.producto_combo.currentData()
+        if id_producto is None:
+            self.lbl_comision.setVisible(False)
+            return
+        
+        precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
+        if not precio:
+            self.lbl_comision.setVisible(False)
+            return
+        
+        precio_seleccionado = self.precio_seleccion_combo.currentData()
+        if precio_seleccionado == 1:
+            precio_facturar = precio.precio_1
+        elif precio_seleccionado == 2 and precio.precio_2 is not None:
+            precio_facturar = precio.precio_2
+        elif precio_seleccionado == 3 and precio.precio_3 is not None:
+            precio_facturar = precio.precio_3
+        else:
+            precio_facturar = precio.precio_1
+        
+        # Actualizar el precio de facturación en el input
+        self.precio_input.set_value(precio_facturar)
+        
+        # Calcular comisión: Precio 1 - Precio seleccionado
+        if precio_seleccionado in (2, 3):
+            comision = precio.precio_1 - precio_facturar
+            if comision > 0:
+                self.lbl_comision.setText(f"Comisión: ${comision:,.2f}")
+                self.lbl_comision.setVisible(True)
+            else:
+                self.lbl_comision.setVisible(False)
+        else:
+            self.lbl_comision.setVisible(False)
 
     # ── Carrito ────────────────────────────────────────────────────────────
 
@@ -1294,11 +1381,11 @@ class FacturaFormDialog(QDialog):
             MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
             return
         cantidad = float(self.cantidad_input.get_value())
-        precio = float(self.precio_input.get_value())
+        precio_unitario = float(self.precio_input.get_value())
         if cantidad <= 0:
             MessageBox.warning(self, "Cantidad inválida", "La cantidad debe ser mayor a cero.")
             return
-        if precio <= 0:
+        if precio_unitario <= 0:
             MessageBox.warning(self, "Precio inválido", "El precio unitario debe ser mayor a cero.")
             return
 
@@ -1325,6 +1412,18 @@ class FacturaFormDialog(QDialog):
         nombre_producto = self.producto_combo.currentText()
         nota = self.nota_item_input.text().strip() or None
         precio_lista = self._precio_lista_actual
+        precio_unitario = float(self.precio_input.get_value())
+        
+        # Calcular comisión si se seleccionó Precio 2 o 3
+        precio_info = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
+        tipo_precio_seleccionado = self.precio_seleccion_combo.currentData()
+        comision = 0.0
+        
+        if precio_info and tipo_precio_seleccionado in (2, 3):
+            if tipo_precio_seleccionado == 2 and precio_info.precio_2 is not None:
+                comision = precio_info.precio_1 - precio_info.precio_2
+            elif tipo_precio_seleccionado == 3 and precio_info.precio_3 is not None:
+                comision = precio_info.precio_1 - precio_info.precio_3
 
         # Misma linea que una ya agregada (mismo producto, precio y nota): suma cantidad en
         # vez de crear una fila duplicada. Si el precio o la nota difieren, se agrega como
@@ -1335,27 +1434,37 @@ class FacturaFormDialog(QDialog):
                 it
                 for it in self.items
                 if it["id_producto"] == id_producto
-                and abs(it["precio_unitario"] - precio) < 0.0001
+                and abs(it["precio_unitario"] - precio_unitario) < 0.0001
                 and it["observaciones_item"] == nota
+                and it.get("tipo_precio_seleccionado") == tipo_precio_seleccionado
             ),
             None,
         )
         if existente is not None:
             existente["cantidad"] += cantidad
+            existente["comision"] += comision
         else:
             self.items.append(
                 {
                     "id_producto": id_producto,
                     "nombre_producto": nombre_producto,
                     "cantidad": cantidad,
-                    "precio_unitario": precio,
+                    "precio_unitario": precio_unitario,
                     "observaciones_item": nota,
                     "precio_lista": precio_lista,
+                    "tipo_precio_seleccionado": tipo_precio_seleccionado,
+                    "comision": comision,
                 }
             )
         self._refrescar_tabla_items()
         self.producto_buscar_input.clear()
         self.nota_item_input.clear()
+        # Resetear selección de precio y comisión
+        self.precio_seleccion_combo.blockSignals(True)
+        self.precio_seleccion_combo.clear()
+        self.precio_seleccion_combo.setEnabled(False)
+        self.precio_seleccion_combo.blockSignals(False)
+        self.lbl_comision.setVisible(False)
         # Vuelve el foco a la busqueda para el siguiente item sin tocar el mouse --
         # cierra el ciclo escaneo/tipeo -> agregar -> escaneo/tipeo (auditoria UX de
         # facturacion, cajero).

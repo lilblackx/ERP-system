@@ -71,7 +71,7 @@ COLS_VISIBLES = [
     "CATEGORÍA",
     "CANTIDAD",
     "COSTO",
-    "PRECIO VENTA",
+    "PRECIO 1",
     "PRECIO 2",
     "PRECIO 3",
     "ESTADO",
@@ -436,7 +436,7 @@ class InventarioPanel(QWidget):
         else:
             self.lbl_alertas.setVisible(False)
 
-    def _poblar_tabla(self, resultado: dict, precios: dict[int, float]) -> None:
+    def _poblar_tabla(self, resultado: dict, precios: dict[int, dict[str, float]]) -> None:
         productos: list[Inventario] = resultado["items"]
         self.tabla.setRowCount(len(productos))
         limite_vencimiento = date.today() + timedelta(days=DIAS_VENCIMIENTO_ALERTA)

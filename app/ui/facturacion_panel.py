@@ -460,8 +460,9 @@ class FacturacionPanel(QWidget):
             item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_total)
 
-            color_estado = COLORES_ESTADO_FACTURA.get(f.estado_visual, COLOR_TEXT_MUTED)
-            badge = EstadoBadge(f.estado_visual.capitalize(), color_estado)
+            estado_visual = getattr(f, "estado_visual", "EMITIDA")
+            color_estado = COLORES_ESTADO_FACTURA.get(estado_visual, COLOR_TEXT_MUTED)
+            badge = EstadoBadge(estado_visual.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 8, badge)
 
         total = resultado["total"]
@@ -542,6 +543,7 @@ class FacturacionPanel(QWidget):
 
         self.btn_nueva_factura.setEnabled(False)
         session = self.session_factory()
+        factura_emitida = None
         try:
             # FacturaFormDialog emite la factura el mismo adentro (ver
             # FacturaFormDialog._validar_y_aceptar/self.factura_emitida) -- si
@@ -552,6 +554,7 @@ class FacturacionPanel(QWidget):
             dialogo = FacturaFormDialog(session, self.usuario.id_usuario, parent=self)
             if dialogo.exec() and dialogo.factura_emitida is not None:
                 factura = dialogo.factura_emitida
+                factura_emitida = factura
                 self.cargar_facturas()
                 # La impresion se dispara en segundo plano (no bloquea este mensaje ni
                 # el resto de la UI) -- ver _disparar_impresion_automatica.
@@ -561,7 +564,9 @@ class FacturacionPanel(QWidget):
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
         except Exception:
             logger.exception("Fallo al procesar la emision de la factura")
-            MessageBox.critical(self, "Error", "No se pudo emitir la factura.")
+            # Solo mostrar error si la factura no fue emitida exitosamente
+            if factura_emitida is None:
+                MessageBox.critical(self, "Error", "No se pudo emitir la factura.")
         finally:
             session.close()
             self.btn_nueva_factura.setEnabled(True)

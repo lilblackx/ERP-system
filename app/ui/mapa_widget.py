@@ -72,7 +72,7 @@ from PySide6.QtWidgets import (
 
 from app.ui.geo_http import HttpWorker, buscar_lugares, obtener_ubicacion_dispositivo
 from app.ui.geo_windows import obtener_ubicacion_precisa_windows
-from app.ui.styles import COLOR_PRIMARY
+from app.ui.styles import COLOR_PRIMARY, COLOR_WHITE
 
 logger = logging.getLogger(__name__)
 
@@ -276,9 +276,11 @@ class _MapaPage(QWebEnginePage):
     def _on_permission_requested(self, permission: QWebEnginePermission) -> None:
         permission.deny()
 
-    def acceptNavigationRequest(self, url: QUrl, tipo, es_frame_principal: bool) -> bool:  # noqa: N802 (override de Qt)
-        if url.scheme() == "mapaclick":
-            query = QUrlQuery(url)
+    def acceptNavigationRequest(self, url: QUrl | str, tipo, es_frame_principal: bool) -> bool:  # noqa: N802 (override de Qt)
+        # Ensure url is a QUrl object (handle both QUrl and str from base class signature)
+        url_obj = QUrl(url) if isinstance(url, str) else url
+        if url_obj.scheme() == "mapaclick":
+            query = QUrlQuery(url_obj)
             try:
                 lat = float(query.queryItemValue("lat"))
                 lng = float(query.queryItemValue("lng"))
@@ -435,6 +437,7 @@ class MapaWidget(QWidget):
             zoom=_ZOOM_DEFAULT,
             zoom_marcador=_ZOOM_MARCADOR,
             editable="true" if self.editable else "false",
+            COLOR_WHITE=COLOR_WHITE,
         )
         self.view.setHtml(html, _LEAFLET_BASE_URL)
 
@@ -495,7 +498,7 @@ class MapaWidget(QWidget):
         self.completer = QCompleter(self)
         self.completer.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.completer.activated[str].connect(self._on_sugerencia_seleccionada)
+        self.completer.activated.connect(self._on_sugerencia_seleccionada)
         self.busqueda_input.setCompleter(self.completer)
 
         # Feedback transitorio (errores de geolocalizacion precisa) -- oculto salvo
@@ -557,9 +560,10 @@ class MapaWidget(QWidget):
             # escribiendo para refinar sin interrupcion.
             self.completer.complete()
 
-    def _on_sugerencia_seleccionada(self, texto: str) -> None:
+    def _on_sugerencia_seleccionada(self, texto) -> None:
+        texto_str = str(texto) if texto is not None else ""
         for r in self._resultados_busqueda:
-            if r["nombre"] == texto:
+            if r["nombre"] == texto_str:
                 self._aplicar_punto(r["lat"], r["lng"])
                 return
 
