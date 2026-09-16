@@ -52,7 +52,17 @@ from app.ui.workers import QueryWorker
 logger = logging.getLogger(__name__)
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
-COLS_VISIBLES = ["ID", "BANCO", "NÚMERO DE CUENTA", "TIPO", "TITULAR", "IDENTIFICACIÓN", "SALDO", "ESTADO"]
+COLS_VISIBLES = [
+    "ID",
+    "BANCO",
+    "NÚMERO DE CUENTA",
+    "TIPO",
+    "TITULAR",
+    "IDENTIFICACIÓN",
+    "SALDO",
+    "MONTO EN BS",
+    "ESTADO",
+]
 
 ESTADOS_FILTRO = [
     ("Todos los estados", None),
@@ -77,6 +87,20 @@ def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_ba
         por_pagina=1_000_000,
     )
     cuentas = resultado["items"]
+
+    # Obtener tasa de cambio actual
+    tasa_bcv = 0.0
+    try:
+        from app.db.models import ControlDeTasa
+
+        tasa_registro = (
+            session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc()).first()
+        )
+        if tasa_registro and tasa_registro.tasa_dolar_bcv:
+            tasa_bcv = float(tasa_registro.tasa_dolar_bcv)
+    except Exception:
+        pass
+
     return [
         [
             cuenta.id_cuenta,
@@ -86,6 +110,7 @@ def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_ba
             cuenta.nombre_titular,
             cuenta.identificacion_titular,
             float(cuenta.saldo_total_banco or 0),
+            float(cuenta.saldo_total_banco or 0) * tasa_bcv if tasa_bcv > 0 else 0.0,
             cuenta.estado_cuenta,
         ]
         for cuenta in cuentas
@@ -222,7 +247,8 @@ class CuentasBancariasPanel(QWidget):
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignLeft,
                 6: Qt.AlignmentFlag.AlignRight,
-                7: Qt.AlignmentFlag.AlignCenter,
+                7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignCenter,
             },
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -354,6 +380,24 @@ class CuentasBancariasPanel(QWidget):
 
     def _actualizar_tabla(self):
         """Actualiza la tabla con las cuentas cargadas."""
+        # Obtener tasa de cambio actual
+        session = self.session_factory()
+        tasa_bcv = 0.0
+        try:
+            from app.db.models import ControlDeTasa
+
+            tasa_registro = (
+                session.query(ControlDeTasa)
+                .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
+                .first()
+            )
+            if tasa_registro and tasa_registro.tasa_dolar_bcv:
+                tasa_bcv = float(tasa_registro.tasa_dolar_bcv)
+        except Exception:
+            pass
+        finally:
+            session.close()
+
         self.table.setRowCount(0)
         for row, cuenta in enumerate(self._cuentas):
             self.table.insertRow(row)
@@ -368,10 +412,17 @@ class CuentasBancariasPanel(QWidget):
             item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 6, item_saldo)
 
+            # Calcular monto en BS
+            saldo_usd = float(cuenta.saldo_total_banco or 0)
+            saldo_bs = saldo_usd * tasa_bcv if tasa_bcv > 0 else 0.0
+            item_saldo_bs = QTableWidgetItem(f"{saldo_bs:,.2f}" if saldo_bs > 0 else "0.00")
+            item_saldo_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 7, item_saldo_bs)
+
             estado = cuenta.estado_cuenta or "N/A"
             color_estado = COLORES_ESTADO_CUENTA.get(estado, COLOR_TEXT_MUTED)
             estado_widget = EstadoBadge(estado, color_estado)
-            self.table.setCellWidget(row, 7, estado_widget)
+            self.table.setCellWidget(row, 8, estado_widget)
 
     def _actualizar_paginacion(self):
         """Actualiza los controles de paginación."""
@@ -606,7 +657,7 @@ class CuentasBancariasPanel(QWidget):
             "Banco": self.banco_combo.currentText(),
             "Estado": self.estado_combo.currentText(),
         }
-        col_widths = [0.5, 1.5, 1.5, 1.0, 1.5, 1.3, 1.0, 1.0]
+        col_widths = [0.5, 1.5, 1.5, 1.0, 1.5, 1.3, 1.0, 1.0, 1.0]
 
         self.btn_exportar.setEnabled(False)
         self._worker_export = QueryWorker(

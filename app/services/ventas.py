@@ -587,6 +587,8 @@ class VentaService:
                         metodo_pago=pago_linea["metodo_pago"],
                         moneda=pago_linea["moneda"],
                         monto_moneda_origen=pago_linea["monto_moneda_origen"],
+                        monto_bolivares=pago_linea.get("monto_bolivares"),
+                        tasa_cambio=pago_linea.get("tasa_cambio"),
                         id_cuenta_bancaria=pago_linea.get("id_cuenta_bancaria"),
                         id_caja=pago_linea.get("id_caja"),
                         id_tasa=id_tasa,

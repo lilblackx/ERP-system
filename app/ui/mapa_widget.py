@@ -608,11 +608,14 @@ class MapaWidget(QWidget):
         self.btn_ubicacion_precisa.setEnabled(True)
         error = resultado.get("error")
         if error:
-            logger.info("MapaWidget: geolocalización precisa falló (%s)", error)
+            logger.info("MapaWidget: geolocalización precisa falló (%s) - resultado completo: %s", error, resultado)
             textos_error = {
                 "denied": "Ubicación denegada. Habilítala en Configuración de Windows > Privacidad > Ubicación.",
                 "timeout": "No se pudo obtener tu ubicación a tiempo. Intenta de nuevo.",
-                "unavailable": "No se pudo obtener tu ubicación precisa.",
+                "unavailable": (
+                    "No se pudo obtener tu ubicación precisa. "
+                    "Verifica que el servicio de ubicación de Windows esté activo."
+                ),
             }
             self._mostrar_estado_temporal(textos_error.get(error, textos_error["unavailable"]), color="#B45309")
             return
@@ -629,7 +632,18 @@ class MapaWidget(QWidget):
         self.lbl_estado.setStyleSheet(f"color: {color}; font-size: 11px;")
         self.lbl_estado.setText(texto)
         self.lbl_estado.setVisible(True)
-        QTimer.singleShot(6000, lambda: self.lbl_estado.setVisible(False))
+        # Use a bound method instead of lambda to avoid C++ object deletion issues
+        QTimer.singleShot(6000, self._ocultar_estado_temporal)
+
+    def _ocultar_estado_temporal(self) -> None:
+        """Safely hide the status label, checking if the widget still exists."""
+        # Check if the widget still exists before trying to hide it
+        if hasattr(self, "lbl_estado") and self.lbl_estado is not None:
+            try:
+                self.lbl_estado.setVisible(False)
+            except RuntimeError:
+                # Widget was already deleted, ignore the error
+                pass
 
     def _on_load_finished(self, ok: bool) -> None:
         logger.info("MapaWidget: carga de pagina %s", "OK" if ok else "FALLO")

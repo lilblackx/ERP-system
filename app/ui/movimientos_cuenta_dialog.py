@@ -85,9 +85,20 @@ class MovimientosCuentaDialog(QDialog):
 
         # ── Tabla de Movimientos ──
         self.table = QTableWidget()
-        self.table.setColumnCount(8)
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels(
-            ["Fecha", "Tipo", "Monto", "Origen", "Referencia", "Descripción", "Usuario", "Pago Relacionado"]
+            [
+                "Fecha",
+                "Tipo",
+                "Monto",
+                "Monto BS",
+                "Tasa",
+                "Origen",
+                "Referencia",
+                "Descripción",
+                "Usuario",
+                "Pago Relacionado",
+            ]
         )
         self.table.setFixedHeight(450)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -97,20 +108,24 @@ class MovimientosCuentaDialog(QDialog):
         self.table.setColumnWidth(1, 80)
         self.table.setColumnWidth(2, 100)
         self.table.setColumnWidth(3, 100)
-        self.table.setColumnWidth(4, 120)
-        self.table.setColumnWidth(5, 150)
-        self.table.setColumnWidth(6, 100)
+        self.table.setColumnWidth(4, 80)
+        self.table.setColumnWidth(5, 100)
+        self.table.setColumnWidth(6, 120)
+        self.table.setColumnWidth(7, 150)
+        self.table.setColumnWidth(8, 100)
         alinear_encabezados(
             self.table,
             {
                 0: Qt.AlignmentFlag.AlignLeft,
                 1: Qt.AlignmentFlag.AlignLeft,
                 2: Qt.AlignmentFlag.AlignRight,
-                3: Qt.AlignmentFlag.AlignLeft,
-                4: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
                 5: Qt.AlignmentFlag.AlignLeft,
                 6: Qt.AlignmentFlag.AlignLeft,
                 7: Qt.AlignmentFlag.AlignLeft,
+                8: Qt.AlignmentFlag.AlignLeft,
+                9: Qt.AlignmentFlag.AlignLeft,
             },
         )
         layout.addWidget(self.table)
@@ -127,6 +142,14 @@ class MovimientosCuentaDialog(QDialog):
         self.lbl_total_salidas = QLabel("Total Salidas: $0.00")
         self.lbl_total_salidas.setStyleSheet("color: #DC2626; font-size: 13px; font-weight: 600;")
         footer_layout.addWidget(self.lbl_total_salidas)
+
+        self.lbl_total_entradas_bs = QLabel("Total Entradas BS: 0.00")
+        self.lbl_total_entradas_bs.setStyleSheet("color: #16A34A; font-size: 13px; font-weight: 600;")
+        footer_layout.addWidget(self.lbl_total_entradas_bs)
+
+        self.lbl_total_salidas_bs = QLabel("Total Salidas BS: 0.00")
+        self.lbl_total_salidas_bs.setStyleSheet("color: #DC2626; font-size: 13px; font-weight: 600;")
+        footer_layout.addWidget(self.lbl_total_salidas_bs)
 
         footer_layout.addStretch()
 
@@ -172,6 +195,27 @@ class MovimientosCuentaDialog(QDialog):
             item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 2, item_monto)
 
+            # Monto BS
+            monto_bs = 0.0
+            if movimiento.monto_bolivares:
+                monto_bs = float(movimiento.monto_bolivares)
+            elif movimiento.monto_movimiento and movimiento.tasa_cambio and movimiento.tasa_cambio > 0:
+                monto_bs = float(movimiento.monto_movimiento) * float(movimiento.tasa_cambio)
+
+            monto_bs_str = f"{monto_bs:,.2f}" if monto_bs > 0 else "0.00"
+            item_monto_bs = QTableWidgetItem(monto_bs_str)
+            item_monto_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 3, item_monto_bs)
+
+            # Tasa
+            if movimiento.tasa_cambio and movimiento.tasa_cambio > 0:
+                tasa_str = f"{float(movimiento.tasa_cambio):,.2f}"
+            else:
+                tasa_str = "N/A"
+            item_tasa = QTableWidgetItem(tasa_str)
+            item_tasa.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 4, item_tasa)
+
             # Origen (Cliente, Proveedor, Comisión, Manual, Otro)
             origen = "Manual"
             if movimiento.id_pago_cobro:
@@ -180,17 +224,17 @@ class MovimientosCuentaDialog(QDialog):
                 origen = "Proveedor"
             elif movimiento.id_pago_comision:
                 origen = "Comisión"
-            self.table.setItem(row, 3, QTableWidgetItem(origen))
+            self.table.setItem(row, 5, QTableWidgetItem(origen))
 
             # Referencia
-            self.table.setItem(row, 4, QTableWidgetItem(movimiento.referencia_movimiento or "N/A"))
+            self.table.setItem(row, 6, QTableWidgetItem(movimiento.referencia_movimiento or "N/A"))
 
             # Descripción
-            self.table.setItem(row, 5, QTableWidgetItem(movimiento.descripcion_movimiento or "N/A"))
+            self.table.setItem(row, 7, QTableWidgetItem(movimiento.descripcion_movimiento or "N/A"))
 
             # Usuario
             nombre_usuario = movimiento.creador.nombre if movimiento.creador else "N/A"
-            self.table.setItem(row, 6, QTableWidgetItem(nombre_usuario))
+            self.table.setItem(row, 8, QTableWidgetItem(nombre_usuario))
 
             # Pago Relacionado
             pago_rel = "N/A"
@@ -200,12 +244,14 @@ class MovimientosCuentaDialog(QDialog):
                 pago_rel = f"Prov. #{movimiento.id_pago_proveedor}"
             elif movimiento.id_pago_comision:
                 pago_rel = f"Comisión #{movimiento.id_pago_comision}"
-            self.table.setItem(row, 7, QTableWidgetItem(pago_rel))
+            self.table.setItem(row, 9, QTableWidgetItem(pago_rel))
 
     def _calcular_totales(self):
         """Calcula y muestra los totales de entradas y salidas."""
         total_entradas = 0.0
         total_salidas = 0.0
+        total_entradas_bs = 0.0
+        total_salidas_bs = 0.0
 
         for movimiento in self._movimientos:
             if movimiento.monto_movimiento:
@@ -215,5 +261,19 @@ class MovimientosCuentaDialog(QDialog):
                 elif movimiento.tipo_movimiento == "cargo":
                     total_salidas += monto
 
+            # Calcular monto en bolívares
+            monto_bs = 0.0
+            if movimiento.monto_bolivares:
+                monto_bs = float(movimiento.monto_bolivares)
+            elif movimiento.monto_movimiento and movimiento.tasa_cambio and movimiento.tasa_cambio > 0:
+                monto_bs = float(movimiento.monto_movimiento) * float(movimiento.tasa_cambio)
+
+            if movimiento.tipo_movimiento == "abono":
+                total_entradas_bs += monto_bs
+            elif movimiento.tipo_movimiento == "cargo":
+                total_salidas_bs += monto_bs
+
         self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
         self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
+        self.lbl_total_entradas_bs.setText(f"Total Entradas BS: {total_entradas_bs:,.2f}")
+        self.lbl_total_salidas_bs.setText(f"Total Salidas BS: {total_salidas_bs:,.2f}")
