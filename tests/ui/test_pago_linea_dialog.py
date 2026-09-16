@@ -8,7 +8,7 @@ mock de session.query(), que no es el objeto de este test (el widget numerico)."
 
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from PySide6.QtCore import Qt
 
@@ -35,7 +35,7 @@ def _crear_dialogo(qtbot, monto_sugerido=None):
         patch("app.ui.pago_linea_dialog.CajaService.listar_cajas", return_value=[_CAJA_ABIERTA]),
         patch("app.ui.pago_linea_dialog.BancoService.listar_cuentas", return_value=[]),
     ):
-        dialogo = PagoLineaDialog(MagicMock(), id_usuario=1, monto_sugerido=monto_sugerido)
+        dialogo = PagoLineaDialog(None, id_usuario=1, monto_sugerido=monto_sugerido)
     qtbot.addWidget(dialogo)
     return dialogo
 
