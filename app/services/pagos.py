@@ -1,11 +1,13 @@
 import logging
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     Caja,
+    Cliente,
     Compra,
     CuentaBancaria,
     CuentaPorCobrar,
@@ -427,3 +429,115 @@ class PagoService:
             )
 
         return {"items": cuentas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+
+    @staticmethod
+    def listar_cuentas_por_cobrar_por_cliente(
+        session: Session,
+        id_cliente: int | None = None,
+        id_vendedor: int | None = None,
+        estado: str | None = None,
+        pagina: int = 1,
+        por_pagina: int = 20,
+        id_usuario: int | None = None,
+    ) -> dict:
+        """Lista cuentas por cobrar agrupadas por cliente con el saldo total pendiente.
+        Retorna una fila por cliente con la suma de todos los saldos pendientes de sus facturas."""
+        require_permiso(session, id_usuario, "pagos", "ver")
+        hoy = date.today()
+
+        # Query base para obtener todas las cuentas relevantes
+        query = (
+            session.query(CuentaPorCobrar)
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+            .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
+            .filter(FacturaVenta.condicion_pago == "credito")
+        )
+
+        if id_cliente:
+            query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
+        if id_vendedor:
+            query = query.filter(Cliente.vendedor_cliente == id_vendedor)
+        if estado == "vencida":
+            query = query.filter(
+                CuentaPorCobrar.estado.in_(("pendiente", "parcial")),
+                CuentaPorCobrar.fecha_vencimiento < hoy,
+            )
+        elif estado in ("pendiente", "parcial"):
+            query = query.filter(
+                CuentaPorCobrar.estado == estado,
+                or_(CuentaPorCobrar.fecha_vencimiento.is_(None), CuentaPorCobrar.fecha_vencimiento >= hoy),
+            )
+        elif estado:
+            query = query.filter(CuentaPorCobrar.estado == estado)
+
+        # Obtener todas las cuentas (sin paginación para agrupar correctamente)
+        todas_las_cuentas = query.all()
+
+        # Agrupar por cliente
+        clientes_deuda = {}
+        for cuenta in todas_las_cuentas:
+            if cuenta.factura and cuenta.factura.cliente:
+                cliente = cuenta.factura.cliente
+                id_cliente_key = cliente.id_cliente
+
+                if id_cliente_key not in clientes_deuda:
+                    clientes_deuda[id_cliente_key] = {
+                        "cliente": cliente,
+                        "saldo_total": Decimal("0.00"),
+                        "cuentas": [],
+                        "fecha_vencimiento_mas_antigua": None,
+                        "fecha_emision_mas_antigua_pendiente": None,
+                    }
+
+                clientes_deuda[id_cliente_key]["saldo_total"] += cuenta.saldo_pendiente
+                clientes_deuda[id_cliente_key]["cuentas"].append(cuenta)
+
+                # Calcular fecha de vencimiento más antigua
+                if cuenta.fecha_vencimiento:
+                    if clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"] is None:
+                        clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"] = cuenta.fecha_vencimiento
+                    else:
+                        clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"] = min(
+                            clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"],
+                            cuenta.fecha_vencimiento,
+                        )
+
+                # Calcular fecha de emisión más antigua para facturas pendientes
+                if cuenta.estado in ("pendiente", "parcial") and cuenta.factura and cuenta.factura.fecha_emision:
+                    fecha_emision = cuenta.factura.fecha_emision.date()
+                    if clientes_deuda[id_cliente_key]["fecha_emision_mas_antigua_pendiente"] is None:
+                        clientes_deuda[id_cliente_key]["fecha_emision_mas_antigua_pendiente"] = fecha_emision
+                    else:
+                        clientes_deuda[id_cliente_key]["fecha_emision_mas_antigua_pendiente"] = min(
+                            clientes_deuda[id_cliente_key]["fecha_emision_mas_antigua_pendiente"],
+                            fecha_emision,
+                        )
+
+        # Convertir a lista y ordenar por saldo total (de mayor a menor)
+        clientes_lista = sorted(
+            clientes_deuda.values(),
+            key=lambda x: x["saldo_total"],
+            reverse=True,
+        )
+
+        # Aplicar paginación
+        total = len(clientes_lista)
+        inicio = (pagina - 1) * por_pagina
+        fin = inicio + por_pagina
+        clientes_paginados = clientes_lista[inicio:fin]
+
+        # Calcular días transcurridos para cada cliente
+        for cliente_data in clientes_paginados:
+            fecha_emision = cliente_data["fecha_emision_mas_antigua_pendiente"]
+            if fecha_emision:
+                dias_transcurridos = (hoy - fecha_emision).days
+                cliente_data["dias_transcurridos"] = dias_transcurridos
+            else:
+                cliente_data["dias_transcurridos"] = 0
+
+        return {
+            "items": clientes_paginados,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }

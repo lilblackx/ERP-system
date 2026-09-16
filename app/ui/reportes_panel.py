@@ -115,7 +115,7 @@ REPORTE_COMISIONES_VENDEDOR = "comisiones_vendedor"
 REPORTE_COMISIONES_PAGADAS_PENDIENTES = "comisiones_pagadas_pendientes"
 REPORTE_PRODUCTOS_PROXIMOS_VENCER = "productos_proximos_vencer"
 
-COLS_AGING_CXC = ["Factura", "Cliente", "Vencimiento", "Saldo Pendiente", "Días Vencido", "Rango"]
+COLS_AGING_CXC = ["Factura", "Cliente", "Vencimiento", "Saldo Pendiente", "Días Vencido", "Días Transcurridos", "Rango"]
 COLS_AGING_CXP = ["Compra", "Proveedor", "Vencimiento", "Saldo Pendiente", "Días Vencido", "Rango"]
 COLS_LIBRO_VENTAS = [
     "Fecha",
@@ -396,9 +396,9 @@ def _tarea_exportar_reporte_pdf(
     return ruta, len(filas)
 
 
-def _tarea_aging_cxc(session, id_usuario, fecha_corte, id_cliente, orden):
+def _tarea_aging_cxc(session, id_usuario, fecha_corte, id_cliente, id_vendedor, orden):
     return ReporteService.aging_cuentas_por_cobrar(
-        session, id_usuario=id_usuario, fecha_corte=fecha_corte, id_cliente=id_cliente, orden=orden
+        session, id_usuario=id_usuario, fecha_corte=fecha_corte, id_cliente=id_cliente, id_vendedor=id_vendedor, orden=orden
     )
 
 
@@ -939,10 +939,18 @@ class ReportesPanel(QWidget):
         self.orden_combo.addItem("Vencimiento", "fecha_vencimiento")
         self.orden_combo.addItem("Saldo pendiente", "saldo_pendiente")
 
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        self.vendedor_combo_aging = QComboBox()
+        self.vendedor_combo_aging.setStyleSheet(COMBO_QSS)
+        self.vendedor_combo_aging.setFixedWidth(200)
+
         h.addWidget(lbl_corte)
         h.addWidget(self.fecha_corte_input)
         h.addWidget(lbl_cliente)
         h.addWidget(self.cliente_combo)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_aging)
         h.addWidget(lbl_orden)
         h.addWidget(self.orden_combo)
         return w
@@ -2073,7 +2081,7 @@ class ReportesPanel(QWidget):
         session = self.session_factory()
         try:
             vendedores = session.query(Vendedor).order_by(Vendedor.nombre_vendedor).all()
-            for combo in (self.vendedor_combo_comv, self.vendedor_combo_cpp, self.vendedor_combo_ac):
+            for combo in (self.vendedor_combo_comv, self.vendedor_combo_cpp, self.vendedor_combo_ac, self.vendedor_combo_aging):
                 combo.clear()
                 combo.addItem("Todos los vendedores", None)
                 for vendedor in vendedores:
@@ -2168,6 +2176,7 @@ class ReportesPanel(QWidget):
                 id_usuario=self.usuario.id_usuario,
                 fecha_corte=self.fecha_corte_input.date().toPython(),
                 id_cliente=self.cliente_combo.currentData(),
+                id_vendedor=self.vendedor_combo_aging.currentData(),
                 orden=self.orden_combo.currentData(),
             )
         elif modo == REPORTE_AGING_CXP:
@@ -2817,7 +2826,8 @@ class ReportesPanel(QWidget):
                 2: Qt.AlignmentFlag.AlignLeft,
                 3: Qt.AlignmentFlag.AlignRight,
                 4: Qt.AlignmentFlag.AlignRight,
-                5: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
             },
         )
         filas = resultado["filas"]
@@ -2829,7 +2839,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 2, QTableWidgetItem(fecha_venc))
             self.tabla.setItem(row, 3, self._item_num(f"${float(f['saldo_pendiente']):,.2f}"))
             self.tabla.setItem(row, 4, self._item_num(str(f["dias_vencido"])))
-            self.tabla.setItem(row, 5, QTableWidgetItem(ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"])))
+            self.tabla.setItem(row, 5, self._item_num(str(f["dias_transcurridos"])))
+            self.tabla.setItem(row, 6, QTableWidgetItem(ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"])))
 
         self.lbl_total.setText(
             f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''} abierta{'s' if len(filas) != 1 else ''}"
@@ -4092,6 +4103,7 @@ class ReportesPanel(QWidget):
                     f["fecha_vencimiento"],
                     float(f["saldo_pendiente"]),
                     f["dias_vencido"],
+                    f["dias_transcurridos"],
                     ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"]),
                 ]
                 for f in self._ultimo_resultado["filas"]

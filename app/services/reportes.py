@@ -109,6 +109,7 @@ class ReporteService:
         id_usuario: int | None,
         fecha_corte: date | None = None,
         id_cliente: int | None = None,
+        id_vendedor: int | None = None,
         orden: str = "fecha_vencimiento",
     ) -> dict:
         """Antiguedad de saldos de cuentas por cobrar abiertas (pendiente/parcial/vencida),
@@ -122,17 +123,23 @@ class ReporteService:
         query = (
             session.query(CuentaPorCobrar)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+            .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
             .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente))
             .filter(CuentaPorCobrar.estado.in_(ESTADOS_CXC_ABIERTOS))
         )
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
+        if id_vendedor:
+            query = query.filter(Cliente.vendedor_cliente == id_vendedor)
         cuentas = query.order_by(_ORDEN_AGING_CXC[orden]).all()
 
         filas = []
         totales_por_bucket: dict[str, Decimal] = {}
         for cuenta in cuentas:
             dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
+            dias_transcurridos = (
+                (fecha_corte - cuenta.factura.fecha_emision.date()).days if cuenta.factura.fecha_emision else 0
+            )
             bucket = _bucket_aging(dias_vencido)
             totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
             filas.append(
@@ -143,6 +150,7 @@ class ReporteService:
                     "fecha_vencimiento": cuenta.fecha_vencimiento,
                     "saldo_pendiente": cuenta.saldo_pendiente,
                     "dias_vencido": dias_vencido,
+                    "dias_transcurridos": dias_transcurridos,
                     "bucket": bucket,
                 }
             )
