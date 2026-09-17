@@ -916,7 +916,7 @@ class FacturaFormDialog(QDialog):
         self.lbl_comision = QLabel("Comisión: $0.00")
         self.lbl_comision.setStyleSheet(f"font-size: 12px; color: {COLOR_SUCCESS}; font-weight: 600;")
         self.lbl_comision.setVisible(False)
-        
+
         self.lbl_tipo_precio = QLabel("(por bulto)")
         self.lbl_tipo_precio.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-style: italic;")
 
@@ -1289,8 +1289,12 @@ class FacturaFormDialog(QDialog):
         if not productos:
             self.producto_combo.addItem("Sin resultados")
         for producto in productos:
-            caja_info = f" | {producto.cantidad_caja:g} u/caja" if producto.cantidad_caja and producto.cantidad_caja > 0 else ""
-            etiqueta = f"{producto.cod_producto} - {producto.nombre_producto} (stock: {producto.cantidad_unidad:g}{caja_info})"
+            caja_info = (
+                f" | {producto.cantidad_caja:g} u/caja" if producto.cantidad_caja and producto.cantidad_caja > 0 else ""
+            )
+            etiqueta = (
+                f"{producto.cod_producto} - {producto.nombre_producto} (stock: {producto.cantidad_unidad:g}{caja_info})"
+            )
             self.producto_combo.addItem(etiqueta, producto.id_producto)
         self.producto_combo.blockSignals(False)
         self.producto_combo.setEnabled(bool(productos))
@@ -1327,7 +1331,7 @@ class FacturaFormDialog(QDialog):
             return
         precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         self._precio_lista_actual = float(precio.precio_venta) if precio else None
-        
+
         # Poblar el combo de selección de precio
         self.precio_seleccion_combo.blockSignals(True)
         self.precio_seleccion_combo.clear()
@@ -1350,7 +1354,7 @@ class FacturaFormDialog(QDialog):
             self.lbl_comision.setVisible(False)
 
         self.precio_seleccion_combo.blockSignals(False)
-        
+
         # Verificar si el producto tiene configuración de caja para habilitar/deshabilitar venta por unidad
         producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
         if producto_seleccionado and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
@@ -1362,13 +1366,13 @@ class FacturaFormDialog(QDialog):
             self.tipo_venta_combo.setCurrentIndex(0)  # "Bulto"
             self.tipo_venta_combo.setEnabled(False)
             self.tipo_venta_combo.blockSignals(False)
-        
+
         # Calcular el precio según el tipo de venta actual
         self._on_precio_seleccion_cambiado()
 
     def _on_precio_seleccion_cambiado(self) -> None:
         """Maneja el cambio de selección de precio y calcula la comisión.
-        
+
         Considera el tipo de venta actual (unidad o bulto) para calcular el precio
         correcto. Si está en modo unidad, divide el precio del bulto por la cantidad
         de unidades por caja.
@@ -1396,9 +1400,14 @@ class FacturaFormDialog(QDialog):
         # Obtener el tipo de venta actual
         tipo_venta = self.tipo_venta_combo.currentData()
         producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
-        
+
         # Calcular el precio de facturación según el tipo de venta
-        if tipo_venta == "unidad" and producto_seleccionado and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
+        if (
+            tipo_venta == "unidad"
+            and producto_seleccionado
+            and producto_seleccionado.cantidad_caja
+            and producto_seleccionado.cantidad_caja > 0
+        ):
             # Calcular precio por unidad
             cantidad_caja_float = float(producto_seleccionado.cantidad_caja)
             precio_facturar = precio_bulto / cantidad_caja_float
@@ -1422,7 +1431,7 @@ class FacturaFormDialog(QDialog):
 
     def _on_tipo_venta_cambiado(self) -> None:
         """Maneja el cambio entre venta por bulto y venta por unidad.
-        
+
         Cuando se selecciona 'unidad', divide el precio seleccionado por la cantidad
         de unidades que contiene la caja para obtener el precio unitario.
         Cuando se selecciona 'bulto', restaura el precio original del bulto.
@@ -1458,7 +1467,7 @@ class FacturaFormDialog(QDialog):
                         precio_bulto = precio_info.precio_3
                     else:
                         precio_bulto = precio_info.precio_1
-                    
+
                     if precio_bulto > 0:
                         # Convertir ambos valores al mismo tipo para la división
                         cantidad_caja_float = float(producto_seleccionado.cantidad_caja)
@@ -1467,9 +1476,10 @@ class FacturaFormDialog(QDialog):
             else:
                 # Si el producto no tiene cantidad_caja configurada, no se puede vender por unidad
                 MessageBox.warning(
-                    self, 
+                    self,
                     "Producto sin configuración de caja",
-                    "Este producto no tiene configurada la cantidad de unidades por caja. Solo se puede vender por bulto."
+                    "Este producto no tiene configurada la cantidad de unidades por caja. "
+                    "Solo se puede vender por bulto.",
                 )
                 # Volver a selección por bulto
                 self.tipo_venta_combo.blockSignals(True)
@@ -1507,31 +1517,43 @@ class FacturaFormDialog(QDialog):
         if producto_seleccionado is not None:
             # Obtener el tipo de venta actual
             tipo_venta = self.tipo_venta_combo.currentData()
-            
+
             # Calcular la cantidad en unidades reales según el tipo de venta
-            if tipo_venta == "bulto" and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
+            if (
+                tipo_venta == "bulto"
+                and producto_seleccionado.cantidad_caja
+                and producto_seleccionado.cantidad_caja > 0
+            ):
                 cantidad_unidades_reales = cantidad * float(producto_seleccionado.cantidad_caja)
             else:
                 cantidad_unidades_reales = cantidad
-            
+
             # Calcular el total de unidades ya en el carrito (considerando tipo de venta de cada item)
             cantidad_en_carrito_unidades = 0.0
             for it in self.items:
                 if it["id_producto"] == id_producto:
                     tipo_venta_item = it.get("tipo_venta", "bulto")
-                    if tipo_venta_item == "bulto" and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
+                    if (
+                        tipo_venta_item == "bulto"
+                        and producto_seleccionado.cantidad_caja
+                        and producto_seleccionado.cantidad_caja > 0
+                    ):
                         cantidad_en_carrito_unidades += it["cantidad"] * float(producto_seleccionado.cantidad_caja)
                     else:
                         cantidad_en_carrito_unidades += it["cantidad"]
-            
+
             stock_disponible = float(producto_seleccionado.cantidad_unidad)
             if cantidad_en_carrito_unidades + cantidad_unidades_reales > stock_disponible:
                 MessageBox.warning(
                     self,
                     "Stock insuficiente",
                     f"Stock disponible de '{producto_seleccionado.nombre_producto}': {stock_disponible:,.2f} unidades."
-                    + (f" Ya tiene {cantidad_en_carrito_unidades:,.2f} unidades en el carrito." if cantidad_en_carrito_unidades > 0 else "")
-                    + f" Intenta agregar {cantidad_unidades_reales:,.2f} unidades ({cantidad:,.2f} {tipo_venta})."
+                    + (
+                        f" Ya tiene {cantidad_en_carrito_unidades:,.2f} unidades en el carrito."
+                        if cantidad_en_carrito_unidades > 0
+                        else ""
+                    )
+                    + f" Intenta agregar {cantidad_unidades_reales:,.2f} unidades ({cantidad:,.2f} {tipo_venta}).",
                 )
                 return
 
@@ -1553,7 +1575,7 @@ class FacturaFormDialog(QDialog):
 
         # Obtener el tipo de venta actual
         tipo_venta = self.tipo_venta_combo.currentData()
-        
+
         # Misma linea que una ya agregada (mismo producto, precio, nota y tipo de venta): suma cantidad en
         # vez de crear una fila duplicada. Si el precio, la nota o el tipo de venta difieren, se agrega como
         # linea separada -- puede ser una venta legitima del mismo producto a dos precios/tipos distintos
@@ -1616,7 +1638,7 @@ class FacturaFormDialog(QDialog):
             if item["observaciones_item"]:
                 item_nombre.setToolTip(item["observaciones_item"])
             self.tabla_items.setItem(fila, 0, item_nombre)
-            
+
             # Mostrar cantidad con indicador de tipo de venta
             tipo_venta = item.get("tipo_venta", "bulto")
             tipo_venta_label = "u" if tipo_venta == "unidad" else "bulto"
@@ -1906,7 +1928,9 @@ class FacturaFormDialog(QDialog):
             "motivo_descuento": self._motivo_descuento,
             "id_autorizador_descuento": self._id_autorizador_descuento,
             "dias_credito_personalizados": (
-                int(self.dias_credito_custom_input.get_value() or 30) if es_credito and not usar_dias_configurados else None
+                int(self.dias_credito_custom_input.get_value() or 30)
+                if es_credito and not usar_dias_configurados
+                else None
             ),
             "motivo_dias_credito": self._motivo_dias_credito,
             "id_autorizador_dias_credito": self._id_autorizador_dias_credito,

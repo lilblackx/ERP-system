@@ -104,11 +104,7 @@ def _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usua
             p.categoria.nombre if p.categoria else None,
             float(p.cantidad_unidad),
             # Calcular cajas y unidades sueltas
-            (
-                int(p.cantidad_unidad // p.cantidad_caja)
-                if p.cantidad_caja and p.cantidad_caja > 0
-                else 0
-            ),
+            (int(p.cantidad_unidad // p.cantidad_caja) if p.cantidad_caja and p.cantidad_caja > 0 else 0),
             (
                 int(p.cantidad_unidad % p.cantidad_caja)
                 if p.cantidad_caja and p.cantidad_caja > 0
