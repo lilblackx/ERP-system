@@ -398,7 +398,12 @@ def _tarea_exportar_reporte_pdf(
 
 def _tarea_aging_cxc(session, id_usuario, fecha_corte, id_cliente, id_vendedor, orden):
     return ReporteService.aging_cuentas_por_cobrar(
-        session, id_usuario=id_usuario, fecha_corte=fecha_corte, id_cliente=id_cliente, id_vendedor=id_vendedor, orden=orden
+        session,
+        id_usuario=id_usuario,
+        fecha_corte=fecha_corte,
+        id_cliente=id_cliente,
+        id_vendedor=id_vendedor,
+        orden=orden,
     )
 
 
@@ -940,7 +945,9 @@ class ReportesPanel(QWidget):
         self.orden_combo.addItem("Saldo pendiente", "saldo_pendiente")
 
         lbl_vendedor = QLabel("Vendedor:")
-        lbl_vendedor.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        lbl_vendedor.setStyleSheet(
+            f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;"
+        )
         self.vendedor_combo_aging = QComboBox()
         self.vendedor_combo_aging.setStyleSheet(COMBO_QSS)
         self.vendedor_combo_aging.setFixedWidth(200)
@@ -2081,7 +2088,12 @@ class ReportesPanel(QWidget):
         session = self.session_factory()
         try:
             vendedores = session.query(Vendedor).order_by(Vendedor.nombre_vendedor).all()
-            for combo in (self.vendedor_combo_comv, self.vendedor_combo_cpp, self.vendedor_combo_ac, self.vendedor_combo_aging):
+            for combo in (
+                self.vendedor_combo_comv,
+                self.vendedor_combo_cpp,
+                self.vendedor_combo_ac,
+                self.vendedor_combo_aging,
+            ):
                 combo.clear()
                 combo.addItem("Todos los vendedores")
                 for vendedor in vendedores:
