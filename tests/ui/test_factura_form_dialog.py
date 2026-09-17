@@ -128,6 +128,7 @@ def test_agregar_item_usa_cantidad_y_precio_tecleados(qtbot, monkeypatch):
         cod_producto="PROD-1",
         nombre_producto="Producto Uno",
         cantidad_unidad=Decimal("1000.00"),
+        cantidad_caja=Decimal("1.00"),
         estado_producto="ACTIVO",
     )
     dialogo = _crear_dialogo(qtbot, monkeypatch, productos=[producto])

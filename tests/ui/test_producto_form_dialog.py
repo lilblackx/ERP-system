@@ -115,6 +115,7 @@ def test_precargar_setea_valores_desde_producto(qtbot):
         descripcion_producto=None,
         costo_producto=Decimal("8.50"),
         cantidad_unidad=Decimal("120.00"),
+        cantidad_caja=Decimal("1.00"),
         cantidad_minima=Decimal("10.00"),
         id_categoria=None,
         fecha_vencimiento=None,
