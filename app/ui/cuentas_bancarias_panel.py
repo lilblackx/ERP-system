@@ -219,7 +219,7 @@ class CuentasBancariasPanel(QWidget):
         # Filtros (banco + estado) agrupados detras de "Filtrar" -- GUIA_ESTILO_UI.md §3.3,
         # ningun dropdown suelto en la barra, ni siquiera uno solo.
         self.banco_combo = QComboBox()
-        self.banco_combo.addItem("Todos los bancos", None)
+        self.banco_combo.addItem("Todos los bancos")
         self.banco_combo.currentIndexChanged.connect(self._on_banco_cambiado)
 
         self.estado_combo = QComboBox()
@@ -336,7 +336,7 @@ class CuentasBancariasPanel(QWidget):
         try:
             bancos = BancoService.listar_bancos(session, id_usuario=self.usuario.id_usuario)
             self.banco_combo.clear()
-            self.banco_combo.addItem("Todos los bancos", None)
+            self.banco_combo.addItem("Todos los bancos")
             for banco in bancos:
                 if banco.estado_banco == "ACTIVO":
                     self.banco_combo.addItem(f"{banco.nombre_banco} ({banco.codigo_banco})", banco.id_banco)

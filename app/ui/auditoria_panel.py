@@ -434,12 +434,12 @@ class AuditoriaPanel(QWidget):
         self.fecha_hasta_input.dateChanged.connect(self._on_fecha_hasta_cambiada)
 
         self.modulo_combo = QComboBox()
-        self.modulo_combo.addItem("Todos los módulos", None)
+        self.modulo_combo.addItem("Todos los módulos")
         for modulo in sorted(MODULOS_SUGERIDOS):
             self.modulo_combo.addItem(modulo.replace("_", " ").title(), modulo)
 
         self.usuario_combo = QComboBox()
-        self.usuario_combo.addItem("Todos los usuarios", None)
+        self.usuario_combo.addItem("Todos los usuarios")
 
         self.btn_filtrar = BotonFiltros([("Módulo", self.modulo_combo), ("Usuario", self.usuario_combo)])
 

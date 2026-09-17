@@ -364,7 +364,7 @@ class UsuarioFormDialog(QDialog):
             )["items"]
         except PermisoDenegadoError:
             self._vendedores = []
-        self.vendedor_combo.addItem("Sin vincular", None)
+        self.vendedor_combo.addItem("Sin vincular")
         for vendedor in self._vendedores:
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
 

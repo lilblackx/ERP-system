@@ -300,7 +300,7 @@ class PagarComisionesDialog(QDialog):
         self.origen_combo.clear()
         if requiere_caja:
             if not self._cajas_abiertas:
-                self.origen_combo.addItem("Sin cajas abiertas", None)
+                self.origen_combo.addItem("Sin cajas abiertas")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
@@ -308,7 +308,7 @@ class PagarComisionesDialog(QDialog):
                     self.origen_combo.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", ("caja", caja.id_caja))
         else:
             if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas", None)
+                self.origen_combo.addItem("Sin cuentas bancarias activas")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
@@ -699,7 +699,7 @@ class ComisionesPanel(QWidget):
         self.vendedor_combo.blockSignals(True)
         self.vendedor_combo.clear()
         if not vendedores:
-            self.vendedor_combo.addItem("Sin vendedores activos", None)
+            self.vendedor_combo.addItem("Sin vendedores activos")
         for vendedor in vendedores:
             self.vendedor_combo.addItem(
                 vendedor.nombre_vendedor or f"Vendedor {vendedor.id_vendedor}", vendedor.id_vendedor

@@ -349,7 +349,7 @@ class ConfigEmpresaPanel(QWidget):
         pisarla con None solo por abrir y guardar esta pantalla sin tocar el combo."""
         self.impresora_combo.blockSignals(True)
         self.impresora_combo.clear()
-        self.impresora_combo.addItem("Ninguna (no imprimir automáticamente)", None)
+        self.impresora_combo.addItem("Ninguna (no imprimir automáticamente)")
 
         nombres_disponibles = [p.printerName() for p in QPrinterInfo.availablePrinters()]
         for nombre in nombres_disponibles:

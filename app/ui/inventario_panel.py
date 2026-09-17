@@ -229,7 +229,7 @@ class InventarioPanel(QWidget):
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
 
         self.categoria_filtro_combo = QComboBox()
-        self.categoria_filtro_combo.addItem("Todas las categorías", None)
+        self.categoria_filtro_combo.addItem("Todas las categorías")
         self.categoria_filtro_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         self.solo_stock_check = QCheckBox("Solo con stock")
@@ -366,7 +366,7 @@ class InventarioPanel(QWidget):
             actual = self.categoria_filtro_combo.currentData()
             self.categoria_filtro_combo.blockSignals(True)
             self.categoria_filtro_combo.clear()
-            self.categoria_filtro_combo.addItem("Todas las categorías", None)
+            self.categoria_filtro_combo.addItem("Todas las categorías")
             for categoria in CategoriaService.listar(session, id_usuario=self.usuario.id_usuario):
                 self.categoria_filtro_combo.addItem(categoria.nombre, categoria.id_categoria)
             idx = self.categoria_filtro_combo.findData(actual)

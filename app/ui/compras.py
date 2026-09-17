@@ -461,7 +461,7 @@ class OrdenCompraFormDialog(QDialog):
         self.proveedor_combo.blockSignals(True)
         self.proveedor_combo.clear()
         if not self._proveedores:
-            self.proveedor_combo.addItem("Sin resultados", None)
+            self.proveedor_combo.addItem("Sin resultados")
         for p in self._proveedores:
             self.proveedor_combo.addItem(p.nombre_razon_social, p.id_proveedor)
         self.proveedor_combo.blockSignals(False)
@@ -487,7 +487,7 @@ class OrdenCompraFormDialog(QDialog):
         self.producto_combo.blockSignals(True)
         self.producto_combo.clear()
         if not self._productos:
-            self.producto_combo.addItem("Sin resultados", None)
+            self.producto_combo.addItem("Sin resultados")
         for p in self._productos:
             self.producto_combo.addItem(f"{p.cod_producto} - {p.nombre_producto}", p.id_producto)
         self.producto_combo.blockSignals(False)

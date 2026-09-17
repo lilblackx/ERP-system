@@ -1642,7 +1642,7 @@ class ReportesPanel(QWidget):
         lbl_estado = QLabel("Estado:")
         lbl_estado.setStyleSheet(LABEL_QSS)
         self.estado_combo_cxco = _crear_combo(ancho=150)
-        self.estado_combo_cxco.addItem("Todos los estados", None)
+        self.estado_combo_cxco.addItem("Todos los estados")
         for valor, etiqueta in ETIQUETAS_ESTADO_CXC_OTRO.items():
             self.estado_combo_cxco.addItem(etiqueta, valor)
 
@@ -1746,7 +1746,7 @@ class ReportesPanel(QWidget):
         lbl_estado = QLabel("Estado:")
         lbl_estado.setStyleSheet(LABEL_QSS)
         self.estado_combo_cxpo = _crear_combo(ancho=150)
-        self.estado_combo_cxpo.addItem("Todos los estados", None)
+        self.estado_combo_cxpo.addItem("Todos los estados")
         for valor, etiqueta in ETIQUETAS_ESTADO_CXP_OTRO.items():
             self.estado_combo_cxpo.addItem(etiqueta, valor)
 
@@ -1778,7 +1778,7 @@ class ReportesPanel(QWidget):
         lbl_tipo = QLabel("Tipo:")
         lbl_tipo.setStyleSheet(LABEL_QSS)
         self.tipo_combo_mcp = _crear_combo(ancho=130)
-        self.tipo_combo_mcp.addItem("Todos", None)
+        self.tipo_combo_mcp.addItem("Todos")
         self.tipo_combo_mcp.addItem("Entrada", "entrada")
         self.tipo_combo_mcp.addItem("Salida", "salida")
 
@@ -2026,7 +2026,7 @@ class ReportesPanel(QWidget):
                 self.cliente_combo_cxco,
             ):
                 combo.clear()
-                combo.addItem("Todos los clientes", None)
+                combo.addItem("Todos los clientes")
                 for cliente in clientes:
                     combo.addItem(cliente.nombre_razon_social, cliente.id_cliente)
         finally:
@@ -2054,7 +2054,7 @@ class ReportesPanel(QWidget):
                 self.proveedor_combo_pv,
             ):
                 combo.clear()
-                combo.addItem("Todos los proveedores", None)
+                combo.addItem("Todos los proveedores")
                 for proveedor in proveedores:
                     combo.addItem(proveedor.nombre_razon_social, proveedor.id_proveedor)
         finally:
@@ -2071,7 +2071,7 @@ class ReportesPanel(QWidget):
             # diferencia de caja_combo (arqueo, siempre requiere una caja puntual) -- por
             # eso lleva su propia opcion "Todas" y no puede compartir instancia.
             self.caja_combo_mcp.clear()
-            self.caja_combo_mcp.addItem("Todas las cajas", None)
+            self.caja_combo_mcp.addItem("Todas las cajas")
             for caja in cajas:
                 self.caja_combo_mcp.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", caja.id_caja)
         finally:
@@ -2083,7 +2083,7 @@ class ReportesPanel(QWidget):
             vendedores = session.query(Vendedor).order_by(Vendedor.nombre_vendedor).all()
             for combo in (self.vendedor_combo_comv, self.vendedor_combo_cpp, self.vendedor_combo_ac, self.vendedor_combo_aging):
                 combo.clear()
-                combo.addItem("Todos los vendedores", None)
+                combo.addItem("Todos los vendedores")
                 for vendedor in vendedores:
                     combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
         finally:
@@ -2094,7 +2094,7 @@ class ReportesPanel(QWidget):
         try:
             usuarios = session.query(Usuario).filter(Usuario.estado == "ACTIVO").order_by(Usuario.nombre_usuario).all()
             self.usuario_combo_cierre.clear()
-            self.usuario_combo_cierre.addItem("Todos los cajeros", None)
+            self.usuario_combo_cierre.addItem("Todos los cajeros")
             for usuario in usuarios:
                 self.usuario_combo_cierre.addItem(usuario.nombre_usuario, usuario.id_usuario)
         finally:
@@ -2130,7 +2130,7 @@ class ReportesPanel(QWidget):
                 self.categoria_combo_ppv,
             ):
                 combo.clear()
-                combo.addItem("Todas las categorías", None)
+                combo.addItem("Todas las categorías")
                 for categoria in categorias:
                     combo.addItem(categoria.nombre, categoria.id_categoria)
         finally:
@@ -2142,7 +2142,7 @@ class ReportesPanel(QWidget):
             cuentas = session.query(CuentaBancaria).order_by(CuentaBancaria.numero_cuenta).all()
             for combo in (self.cuenta_bancaria_combo_cxpo, self.cuenta_bancaria_combo_conc):
                 combo.clear()
-                combo.addItem("Todas las cuentas", None)
+                combo.addItem("Todas las cuentas")
                 for cuenta in cuentas:
                     banco = cuenta.banco.nombre_banco if cuenta.banco else "N/A"
                     combo.addItem(f"{banco} - {cuenta.numero_cuenta}", cuenta.id_cuenta)

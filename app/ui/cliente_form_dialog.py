@@ -277,7 +277,7 @@ class ClienteFormDialog(QDialog):
         lbl_vend.setProperty("class", "FormLabel")
         self.vendedor_combo = QComboBox()
         self.vendedor_combo.setFixedHeight(32)
-        self.vendedor_combo.addItem("Sin asignar", None)
+        self.vendedor_combo.addItem("Sin asignar")
         for vendedor in (
             self.session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor)
         ):
@@ -291,7 +291,7 @@ class ClienteFormDialog(QDialog):
         lbl_cat.setProperty("class", "FormLabel")
         self.categoria_combo = QComboBox()
         self.categoria_combo.setFixedHeight(32)
-        self.categoria_combo.addItem("Sin asignar", None)
+        self.categoria_combo.addItem("Sin asignar")
         for categoria in self.session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):
             self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
 

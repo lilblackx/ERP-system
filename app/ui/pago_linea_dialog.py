@@ -295,7 +295,7 @@ class PagoLineaDialog(QDialog):
         lbl_usar_tasa.setStyleSheet("font-size: 12px; color: #64748B;")
         self.tasa_combo = QComboBox()
         self.tasa_combo.setFixedHeight(16)
-        self.tasa_combo.addItem("-- Seleccionar --", None)
+        self.tasa_combo.addItem("-- Seleccionar --")
         self.tasa_combo.currentIndexChanged.connect(self._on_tasa_seleccionada)
         fila_tasa_selector.addWidget(lbl_usar_tasa)
         fila_tasa_selector.addWidget(self.tasa_combo)
@@ -387,7 +387,7 @@ class PagoLineaDialog(QDialog):
         self.origen_combo.clear()
         if requiere_caja:
             if not self._cajas_abiertas:
-                self.origen_combo.addItem("Sin cajas abiertas", None)
+                self.origen_combo.addItem("Sin cajas abiertas")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
@@ -395,7 +395,7 @@ class PagoLineaDialog(QDialog):
                     self.origen_combo.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", ("caja", caja.id_caja))
         else:
             if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas", None)
+                self.origen_combo.addItem("Sin cuentas bancarias activas")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
@@ -423,7 +423,7 @@ class PagoLineaDialog(QDialog):
 
         self.tasa_combo.blockSignals(True)
         self.tasa_combo.clear()
-        self.tasa_combo.addItem("-- Seleccionar --", None)
+        self.tasa_combo.addItem("-- Seleccionar --")
 
         if tasa_registro:
             # Agregar tasa BCV

@@ -123,7 +123,7 @@ class ProductoAuditoriaDialog(QDialog):
         lbl_accion = QLabel("Acción:")
         lbl_accion.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.accion_combo = QComboBox()
-        self.accion_combo.addItem("Todas las acciones", None)
+        self.accion_combo.addItem("Todas las acciones")
         self.accion_combo.addItem("Creación", "CREAR_PRODUCTO")
         self.accion_combo.addItem("Actualización", "ACTUALIZAR_PRODUCTO")
         self.accion_combo.addItem("Cambio de Estado", "CAMBIAR_ESTADO_PRODUCTO")

@@ -288,7 +288,7 @@ class DevolverNotaCreditoDialog(QDialog):
         self.origen_combo.clear()
         if es_efectivo:
             if not self._cajas_abiertas:
-                self.origen_combo.addItem("Sin cajas abiertas", None)
+                self.origen_combo.addItem("Sin cajas abiertas")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
@@ -296,7 +296,7 @@ class DevolverNotaCreditoDialog(QDialog):
                     self.origen_combo.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", ("caja", caja.id_caja))
         else:
             if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas", None)
+                self.origen_combo.addItem("Sin cuentas bancarias activas")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)

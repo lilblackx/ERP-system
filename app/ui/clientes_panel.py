@@ -237,7 +237,7 @@ class ClientesPanel(QWidget):
 
         # Filtro de vendedor
         self.vendedor_combo = QComboBox()
-        self.vendedor_combo.addItem("Todos los vendedores", None)
+        self.vendedor_combo.addItem("Todos los vendedores")
         session = self.session_factory()
         try:
             vendedores = (
@@ -251,7 +251,7 @@ class ClientesPanel(QWidget):
 
         # Filtro de categoría
         self.categoria_combo = QComboBox()
-        self.categoria_combo.addItem("Todas las categorías", None)
+        self.categoria_combo.addItem("Todas las categorías")
         session = self.session_factory()
         try:
             for categoria in session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):

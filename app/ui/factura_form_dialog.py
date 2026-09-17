@@ -722,7 +722,7 @@ class FacturaFormDialog(QDialog):
         self.origen_vuelto_combo.clear()
         if es_efectivo:
             if not self._cajas_abiertas_vuelto:
-                self.origen_vuelto_combo.addItem("Sin cajas abiertas", None)
+                self.origen_vuelto_combo.addItem("Sin cajas abiertas")
                 self.origen_vuelto_combo.setEnabled(False)
             else:
                 self.origen_vuelto_combo.setEnabled(True)
@@ -730,7 +730,7 @@ class FacturaFormDialog(QDialog):
                     self.origen_vuelto_combo.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", ("caja", caja.id_caja))
         else:
             if not self._cuentas_activas_vuelto:
-                self.origen_vuelto_combo.addItem("Sin cuentas bancarias activas", None)
+                self.origen_vuelto_combo.addItem("Sin cuentas bancarias activas")
                 self.origen_vuelto_combo.setEnabled(False)
             else:
                 self.origen_vuelto_combo.setEnabled(True)
@@ -1011,9 +1011,9 @@ class FacturaFormDialog(QDialog):
         # real de la lista solo por ser el primero en llegar. Pedido explicito del
         # usuario 2026-09-09: un cliente equivocado quedando preseleccionado sin que el
         # cajero lo haya elegido a proposito es un riesgo real de facturar a quien no es.
-        self.cliente_combo.addItem("Seleccione un cliente…", None)
+        self.cliente_combo.addItem("Seleccione un cliente…")
         if not clientes:
-            self.cliente_combo.addItem("Sin resultados", None)
+            self.cliente_combo.addItem("Sin resultados")
         for cliente in clientes:
             if cliente.id_legal and cliente.identificacion_cliente:
                 identificacion = f"{cliente.id_legal}-{cliente.identificacion_cliente}"
@@ -1220,7 +1220,7 @@ class FacturaFormDialog(QDialog):
             self.session, id_usuario=self.id_usuario, estado_vendedor="ACTIVO", por_pagina=LIMITE_CATALOGO
         )["items"]
         if not vendedores:
-            self.vendedor_combo.addItem("Sin vendedores activos", None)
+            self.vendedor_combo.addItem("Sin vendedores activos")
         for vendedor in vendedores:
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
 
@@ -1272,7 +1272,7 @@ class FacturaFormDialog(QDialog):
         self.producto_combo.blockSignals(True)
         self.producto_combo.clear()
         if not productos:
-            self.producto_combo.addItem("Sin resultados", None)
+            self.producto_combo.addItem("Sin resultados")
         for producto in productos:
             etiqueta = f"{producto.cod_producto} - {producto.nombre_producto} (stock: {producto.cantidad_unidad:g})"
             self.producto_combo.addItem(etiqueta, producto.id_producto)
