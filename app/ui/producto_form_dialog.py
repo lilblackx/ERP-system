@@ -187,7 +187,7 @@ class ProductoFormDialog(QDialog):
         self.id_usuario = id_usuario
         self.producto = producto
         self.setWindowTitle("Editar Producto" if producto else "Nuevo Producto")
-        self.setFixedSize(860, 520)
+        self.setFixedSize(860, 580)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -404,6 +404,7 @@ class ProductoFormDialog(QDialog):
         lbl_unidad.setProperty("class", "FormLabel")
         self.cantidad_unidad_input = NumericLineEdit(NumericFieldType.QUANTITY)
         self.cantidad_unidad_input.setFixedHeight(32)
+        self.cantidad_unidad_input.valueChanged.connect(self._calcular_cajas_unidades)
         grid.addWidget(lbl_unidad, 5, 0, 1, 2)
         grid.addWidget(self.cantidad_unidad_input, 6, 0, 1, 2)
 
@@ -415,6 +416,24 @@ class ProductoFormDialog(QDialog):
         self.cantidad_minima_input.setFixedHeight(32)
         grid.addWidget(lbl_minima, 7, 0, 1, 2)
         grid.addWidget(self.cantidad_minima_input, 8, 0, 1, 2)
+
+        # Cantidad por caja (unidades por caja) - reactivado para calculo de cajas/unidades
+        lbl_caja = QLabel("Unidades por Caja")
+        lbl_caja.setProperty("class", "FormLabel")
+        self.cantidad_caja_input = NumericLineEdit(NumericFieldType.QUANTITY)
+        self.cantidad_caja_input.setFixedHeight(32)
+        self.cantidad_caja_input.setPlaceholderText("Ej: 12")
+        self.cantidad_caja_input.valueChanged.connect(self._calcular_cajas_unidades)
+        grid.addWidget(lbl_caja, 9, 0, 1, 2)
+        grid.addWidget(self.cantidad_caja_input, 10, 0, 1, 2)
+
+        # Campos de solo lectura para mostrar el calculo de cajas y unidades sueltas
+        self.lbl_cajas_calculadas = QLabel("Cajas: 0")
+        self.lbl_cajas_calculadas.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
+        self.lbl_unidades_sueltas = QLabel("Unidades sueltas: 0")
+        self.lbl_unidades_sueltas.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
+        grid.addWidget(self.lbl_cajas_calculadas, 11, 0)
+        grid.addWidget(self.lbl_unidades_sueltas, 11, 1)
 
         layout.addLayout(grid)
         layout.addStretch()
@@ -495,6 +514,21 @@ class ProductoFormDialog(QDialog):
         margen = ((precio - costo) / costo * 100) if costo else Decimal("0")
         self.lbl_margen.setText(f"Margen: {margen:.2f}%")
 
+    def _calcular_cajas_unidades(self) -> None:
+        """Calcula cajas y unidades sueltas basado en cantidad total y unidades por caja."""
+        cantidad_total = self.cantidad_unidad_input.get_value()
+        unidades_por_caja = self.cantidad_caja_input.get_value()
+
+        if unidades_por_caja and unidades_por_caja > 0:
+            cajas = int(cantidad_total // unidades_por_caja)
+            unidades_sueltas = int(cantidad_total % unidades_por_caja)
+        else:
+            cajas = 0
+            unidades_sueltas = int(cantidad_total)
+
+        self.lbl_cajas_calculadas.setText(f"Cajas: {cajas}")
+        self.lbl_unidades_sueltas.setText(f"Unidades sueltas: {unidades_sueltas}")
+
     # ── Precarga (edición) ────────────────────────────────────────────────
 
     def _precargar(self, producto: Inventario) -> None:
@@ -504,6 +538,7 @@ class ProductoFormDialog(QDialog):
         self.costo_input.set_value(producto.costo_producto or 0)
         self.cantidad_unidad_input.set_value(producto.cantidad_unidad or 0)
         self.cantidad_minima_input.set_value(producto.cantidad_minima or 0)
+        self.cantidad_caja_input.set_value(producto.cantidad_caja or 0)
 
         idx_categoria = self.categoria_combo.findData(producto.id_categoria)
         if idx_categoria >= 0:
@@ -519,6 +554,7 @@ class ProductoFormDialog(QDialog):
             self.precio_2_input.set_value(getattr(precio, "precio_2", None) or 0)
             self.precio_3_input.set_value(getattr(precio, "precio_3", None) or 0)
         self._actualizar_margen()
+        self._calcular_cajas_unidades()
 
     # ── Validación / datos ────────────────────────────────────────────────
 
@@ -557,6 +593,7 @@ class ProductoFormDialog(QDialog):
             "costo_producto": self.costo_input.get_value(),
             "cantidad_unidad": self.cantidad_unidad_input.get_value(),
             "cantidad_minima": self.cantidad_minima_input.get_value(),
+            "cantidad_caja": self.cantidad_caja_input.get_value(),
             "fecha_vencimiento": (
                 self.vencimiento_input.date().toPython() if self.tiene_vencimiento_check.isChecked() else None
             ),

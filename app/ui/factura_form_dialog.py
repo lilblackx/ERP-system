@@ -780,9 +780,9 @@ class FacturaFormDialog(QDialog):
             monto_usd = self._convertir_pago_a_usd(pago)
             total_usd += monto_usd
 
-            item_metodo = QTableWidgetItem(_ETIQUETAS_METODO.get(pago["metodo_pago"], pago["metodo_pago"]))
+            item_metodo = QTableWidgetItem(_ETIQUETAS_METODO.get(pago["metodo_pago"]) or pago["metodo_pago"] or "—")
             self.tabla_pagos.setItem(fila, 0, item_metodo)
-            item_moneda = QTableWidgetItem(_ETIQUETAS_MONEDA.get(pago["moneda"], pago["moneda"]))
+            item_moneda = QTableWidgetItem(_ETIQUETAS_MONEDA.get(pago["moneda"]) or pago["moneda"] or "—")
             self.tabla_pagos.setItem(fila, 1, item_moneda)
             texto_monto = f"{pago['monto_moneda_origen']:,.2f}"
             if pago["moneda"] not in ("USD", "USDT"):
@@ -828,7 +828,8 @@ class FacturaFormDialog(QDialog):
 
     def _total_factura_actual(self) -> float:
         total = sum(it["cantidad"] * it["precio_unitario"] for it in self.items)
-        subtotal_con_descuento = max(total - float(self.descuento_input.get_value()), 0.0)
+        descuento = float(self.descuento_input.get_value() or 0)
+        subtotal_con_descuento = max(total - descuento, 0.0)
         return subtotal_con_descuento + self._calcular_iva(subtotal_con_descuento)
 
     def _make_card_carrito(self) -> QWidget:
@@ -887,6 +888,16 @@ class FacturaFormDialog(QDialog):
         fila_agregar.addWidget(self.producto_combo, stretch=2)
         fila_agregar.addWidget(self.cantidad_input)
         fila_agregar.addWidget(self.precio_input)
+
+        # Selector de tipo de venta: Unidad vs Bulto
+        self.tipo_venta_combo = QComboBox()
+        self.tipo_venta_combo.setFixedHeight(32)
+        self.tipo_venta_combo.setFixedWidth(110)
+        self.tipo_venta_combo.addItem("Bulto", "bulto")
+        self.tipo_venta_combo.addItem("Unidad", "unidad")
+        self.tipo_venta_combo.currentIndexChanged.connect(self._on_tipo_venta_cambiado)
+
+        fila_agregar.addWidget(self.tipo_venta_combo)
         fila_agregar.addWidget(btn_agregar)
         layout.addLayout(fila_agregar)
 
@@ -905,10 +916,14 @@ class FacturaFormDialog(QDialog):
         self.lbl_comision = QLabel("Comisión: $0.00")
         self.lbl_comision.setStyleSheet(f"font-size: 12px; color: {COLOR_SUCCESS}; font-weight: 600;")
         self.lbl_comision.setVisible(False)
+        
+        self.lbl_tipo_precio = QLabel("(por bulto)")
+        self.lbl_tipo_precio.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-style: italic;")
 
         fila_precio_seleccion.addWidget(lbl_seleccion_precio)
         fila_precio_seleccion.addWidget(self.precio_seleccion_combo)
         fila_precio_seleccion.addWidget(self.lbl_comision)
+        fila_precio_seleccion.addWidget(self.lbl_tipo_precio)
         fila_precio_seleccion.addStretch()
         layout.addLayout(fila_precio_seleccion)
 
@@ -1123,7 +1138,7 @@ class FacturaFormDialog(QDialog):
         cliente = self._cliente_seleccionado()
         cliente_tiene_credito = cliente is not None and (cliente.dias_credito or 0) > 0
         self.dias_credito_widget.setVisible(bool(es_credito and cliente_tiene_credito))
-        if es_credito and cliente_tiene_credito:
+        if es_credito and cliente_tiene_credito and cliente is not None:
             # Cada vez que cambia el cliente se vuelve a partir de "usar los
             # configurados" -- no se arrastra un override de un cliente anterior.
             self.lbl_dias_configurados.setText(f"({cliente.dias_credito} días)")
@@ -1153,7 +1168,7 @@ class FacturaFormDialog(QDialog):
             cliente = self._cliente_seleccionado()
             dias = cliente.dias_credito if cliente else 0
         else:
-            dias = int(self.dias_credito_custom_input.get_value())
+            dias = int(self.dias_credito_custom_input.get_value() or 30)
         self.vencimiento_input.setDate(QDate.currentDate().addDays(dias))
 
     def _actualizar_alerta_credito(self) -> None:
@@ -1274,7 +1289,8 @@ class FacturaFormDialog(QDialog):
         if not productos:
             self.producto_combo.addItem("Sin resultados")
         for producto in productos:
-            etiqueta = f"{producto.cod_producto} - {producto.nombre_producto} (stock: {producto.cantidad_unidad:g})"
+            caja_info = f" | {producto.cantidad_caja:g} u/caja" if producto.cantidad_caja and producto.cantidad_caja > 0 else ""
+            etiqueta = f"{producto.cod_producto} - {producto.nombre_producto} (stock: {producto.cantidad_unidad:g}{caja_info})"
             self.producto_combo.addItem(etiqueta, producto.id_producto)
         self.producto_combo.blockSignals(False)
         self.producto_combo.setEnabled(bool(productos))
@@ -1311,8 +1327,7 @@ class FacturaFormDialog(QDialog):
             return
         precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         self._precio_lista_actual = float(precio.precio_venta) if precio else None
-        self.precio_input.set_value(self._precio_lista_actual or 0)
-
+        
         # Poblar el combo de selección de precio
         self.precio_seleccion_combo.blockSignals(True)
         self.precio_seleccion_combo.clear()
@@ -1335,10 +1350,29 @@ class FacturaFormDialog(QDialog):
             self.lbl_comision.setVisible(False)
 
         self.precio_seleccion_combo.blockSignals(False)
+        
+        # Verificar si el producto tiene configuración de caja para habilitar/deshabilitar venta por unidad
+        producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
+        if producto_seleccionado and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
+            # Habilitar venta por unidad
+            self.tipo_venta_combo.setEnabled(True)
+        else:
+            # Deshabilitar venta por unidad y forzar bulto
+            self.tipo_venta_combo.blockSignals(True)
+            self.tipo_venta_combo.setCurrentIndex(0)  # "Bulto"
+            self.tipo_venta_combo.setEnabled(False)
+            self.tipo_venta_combo.blockSignals(False)
+        
+        # Calcular el precio según el tipo de venta actual
         self._on_precio_seleccion_cambiado()
 
     def _on_precio_seleccion_cambiado(self) -> None:
-        """Maneja el cambio de selección de precio y calcula la comisión."""
+        """Maneja el cambio de selección de precio y calcula la comisión.
+        
+        Considera el tipo de venta actual (unidad o bulto) para calcular el precio
+        correcto. Si está en modo unidad, divide el precio del bulto por la cantidad
+        de unidades por caja.
+        """
         id_producto = self.producto_combo.currentData()
         if id_producto is None:
             self.lbl_comision.setVisible(False)
@@ -1351,20 +1385,33 @@ class FacturaFormDialog(QDialog):
 
         precio_seleccionado = self.precio_seleccion_combo.currentData()
         if precio_seleccionado == 1:
-            precio_facturar = precio.precio_1
+            precio_bulto = precio.precio_1
         elif precio_seleccionado == 2 and precio.precio_2 is not None:
-            precio_facturar = precio.precio_2
+            precio_bulto = precio.precio_2
         elif precio_seleccionado == 3 and precio.precio_3 is not None:
-            precio_facturar = precio.precio_3
+            precio_bulto = precio.precio_3
         else:
-            precio_facturar = precio.precio_1
+            precio_bulto = precio.precio_1
+
+        # Obtener el tipo de venta actual
+        tipo_venta = self.tipo_venta_combo.currentData()
+        producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
+        
+        # Calcular el precio de facturación según el tipo de venta
+        if tipo_venta == "unidad" and producto_seleccionado and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
+            # Calcular precio por unidad
+            cantidad_caja_float = float(producto_seleccionado.cantidad_caja)
+            precio_facturar = precio_bulto / cantidad_caja_float
+        else:
+            # Precio de bulto
+            precio_facturar = precio_bulto
 
         # Actualizar el precio de facturación en el input
         self.precio_input.set_value(precio_facturar)
 
-        # Calcular comisión: Precio 1 - Precio seleccionado
+        # Calcular comisión: Precio 1 - Precio seleccionado (siempre basado en precio de bulto)
         if precio_seleccionado in (2, 3):
-            comision = precio.precio_1 - precio_facturar
+            comision = precio.precio_1 - precio_bulto
             if comision > 0:
                 self.lbl_comision.setText(f"Comisión: ${comision:,.2f}")
                 self.lbl_comision.setVisible(True)
@@ -1373,6 +1420,66 @@ class FacturaFormDialog(QDialog):
         else:
             self.lbl_comision.setVisible(False)
 
+    def _on_tipo_venta_cambiado(self) -> None:
+        """Maneja el cambio entre venta por bulto y venta por unidad.
+        
+        Cuando se selecciona 'unidad', divide el precio seleccionado por la cantidad
+        de unidades que contiene la caja para obtener el precio unitario.
+        Cuando se selecciona 'bulto', restaura el precio original del bulto.
+        """
+        tipo_venta = self.tipo_venta_combo.currentData()
+        id_producto = self.producto_combo.currentData()
+
+        if id_producto is None:
+            return
+
+        producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
+        if producto_seleccionado is None:
+            return
+
+        # Actualizar etiqueta del tipo de precio
+        if tipo_venta == "unidad":
+            self.lbl_tipo_precio.setText("(por unidad)")
+        else:
+            self.lbl_tipo_precio.setText("(por bulto)")
+
+        if tipo_venta == "unidad":
+            if producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
+                # Calcular precio por unidad dividiendo el precio seleccionado por las unidades por caja
+                precio_info = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
+                if precio_info:
+                    # Obtener el precio actualmente seleccionado del combo
+                    precio_seleccionado = self.precio_seleccion_combo.currentData()
+                    if precio_seleccionado == 1:
+                        precio_bulto = precio_info.precio_1
+                    elif precio_seleccionado == 2 and precio_info.precio_2 is not None:
+                        precio_bulto = precio_info.precio_2
+                    elif precio_seleccionado == 3 and precio_info.precio_3 is not None:
+                        precio_bulto = precio_info.precio_3
+                    else:
+                        precio_bulto = precio_info.precio_1
+                    
+                    if precio_bulto > 0:
+                        # Convertir ambos valores al mismo tipo para la división
+                        cantidad_caja_float = float(producto_seleccionado.cantidad_caja)
+                        precio_por_unidad = precio_bulto / cantidad_caja_float
+                        self.precio_input.set_value(precio_por_unidad)
+            else:
+                # Si el producto no tiene cantidad_caja configurada, no se puede vender por unidad
+                MessageBox.warning(
+                    self, 
+                    "Producto sin configuración de caja",
+                    "Este producto no tiene configurada la cantidad de unidades por caja. Solo se puede vender por bulto."
+                )
+                # Volver a selección por bulto
+                self.tipo_venta_combo.blockSignals(True)
+                self.tipo_venta_combo.setCurrentIndex(0)  # "Bulto"
+                self.tipo_venta_combo.blockSignals(False)
+                self.lbl_tipo_precio.setText("(por bulto)")
+        elif tipo_venta == "bulto":
+            # Restaurar el precio original del bulto según la selección actual
+            self._on_precio_seleccion_cambiado()
+
     # ── Carrito ────────────────────────────────────────────────────────────
 
     def _agregar_item(self) -> None:
@@ -1380,8 +1487,8 @@ class FacturaFormDialog(QDialog):
         if id_producto is None:
             MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
             return
-        cantidad = float(self.cantidad_input.get_value())
-        precio_unitario = float(self.precio_input.get_value())
+        cantidad = float(self.cantidad_input.get_value() or 0)
+        precio_unitario = float(self.precio_input.get_value() or 0)
         if cantidad <= 0:
             MessageBox.warning(self, "Cantidad inválida", "La cantidad debe ser mayor a cero.")
             return
@@ -1398,21 +1505,40 @@ class FacturaFormDialog(QDialog):
         # validar todo con lock real, esto no lo reemplaza.
         producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
         if producto_seleccionado is not None:
-            cantidad_en_carrito = sum(it["cantidad"] for it in self.items if it["id_producto"] == id_producto)
+            # Obtener el tipo de venta actual
+            tipo_venta = self.tipo_venta_combo.currentData()
+            
+            # Calcular la cantidad en unidades reales según el tipo de venta
+            if tipo_venta == "bulto" and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
+                cantidad_unidades_reales = cantidad * float(producto_seleccionado.cantidad_caja)
+            else:
+                cantidad_unidades_reales = cantidad
+            
+            # Calcular el total de unidades ya en el carrito (considerando tipo de venta de cada item)
+            cantidad_en_carrito_unidades = 0.0
+            for it in self.items:
+                if it["id_producto"] == id_producto:
+                    tipo_venta_item = it.get("tipo_venta", "bulto")
+                    if tipo_venta_item == "bulto" and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
+                        cantidad_en_carrito_unidades += it["cantidad"] * float(producto_seleccionado.cantidad_caja)
+                    else:
+                        cantidad_en_carrito_unidades += it["cantidad"]
+            
             stock_disponible = float(producto_seleccionado.cantidad_unidad)
-            if cantidad_en_carrito + cantidad > stock_disponible:
+            if cantidad_en_carrito_unidades + cantidad_unidades_reales > stock_disponible:
                 MessageBox.warning(
                     self,
                     "Stock insuficiente",
-                    f"Stock disponible de '{producto_seleccionado.nombre_producto}': {stock_disponible:,.2f}."
-                    + (f" Ya tiene {cantidad_en_carrito:,.2f} en el carrito." if cantidad_en_carrito > 0 else ""),
+                    f"Stock disponible de '{producto_seleccionado.nombre_producto}': {stock_disponible:,.2f} unidades."
+                    + (f" Ya tiene {cantidad_en_carrito_unidades:,.2f} unidades en el carrito." if cantidad_en_carrito_unidades > 0 else "")
+                    + f" Intenta agregar {cantidad_unidades_reales:,.2f} unidades ({cantidad:,.2f} {tipo_venta})."
                 )
                 return
 
         nombre_producto = self.producto_combo.currentText()
         nota = self.nota_item_input.text().strip() or None
         precio_lista = self._precio_lista_actual
-        precio_unitario = float(self.precio_input.get_value())
+        precio_unitario = float(self.precio_input.get_value() or 0)
 
         # Calcular comisión si se seleccionó Precio 2 o 3
         precio_info = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
@@ -1425,10 +1551,13 @@ class FacturaFormDialog(QDialog):
             elif tipo_precio_seleccionado == 3 and precio_info.precio_3 is not None:
                 comision = precio_info.precio_1 - precio_info.precio_3
 
-        # Misma linea que una ya agregada (mismo producto, precio y nota): suma cantidad en
-        # vez de crear una fila duplicada. Si el precio o la nota difieren, se agrega como
-        # linea separada -- puede ser una venta legitima del mismo producto a dos precios
-        # distintos en la misma factura (ej. promo + regular).
+        # Obtener el tipo de venta actual
+        tipo_venta = self.tipo_venta_combo.currentData()
+        
+        # Misma linea que una ya agregada (mismo producto, precio, nota y tipo de venta): suma cantidad en
+        # vez de crear una fila duplicada. Si el precio, la nota o el tipo de venta difieren, se agrega como
+        # linea separada -- puede ser una venta legitima del mismo producto a dos precios/tipos distintos
+        # en la misma factura (ej. promo + regular, bulto + unidad).
         existente = next(
             (
                 it
@@ -1437,6 +1566,7 @@ class FacturaFormDialog(QDialog):
                 and abs(it["precio_unitario"] - precio_unitario) < 0.0001
                 and it["observaciones_item"] == nota
                 and it.get("tipo_precio_seleccionado") == tipo_precio_seleccionado
+                and it.get("tipo_venta") == tipo_venta
             ),
             None,
         )
@@ -1454,6 +1584,7 @@ class FacturaFormDialog(QDialog):
                     "precio_lista": precio_lista,
                     "tipo_precio_seleccionado": tipo_precio_seleccionado,
                     "comision": comision,
+                    "tipo_venta": tipo_venta,
                 }
             )
         self._refrescar_tabla_items()
@@ -1485,7 +1616,11 @@ class FacturaFormDialog(QDialog):
             if item["observaciones_item"]:
                 item_nombre.setToolTip(item["observaciones_item"])
             self.tabla_items.setItem(fila, 0, item_nombre)
-            item_cant = QTableWidgetItem(f"{item['cantidad']:,.2f}")
+            
+            # Mostrar cantidad con indicador de tipo de venta
+            tipo_venta = item.get("tipo_venta", "bulto")
+            tipo_venta_label = "u" if tipo_venta == "unidad" else "bulto"
+            item_cant = QTableWidgetItem(f"{item['cantidad']:,.2f} {tipo_venta_label}")
             item_cant.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_items.setItem(fila, 1, item_cant)
             item_precio = QTableWidgetItem(f"${item['precio_unitario']:,.2f}")
@@ -1516,7 +1651,7 @@ class FacturaFormDialog(QDialog):
         # cortado a la mitad tras sacarle el borde/fondo al boton (2026-09-09).
         self.tabla_items.resizeRowsToContents()
 
-        descuento = float(self.descuento_input.get_value())
+        descuento = float(self.descuento_input.get_value() or 0)
         subtotal_con_descuento = max(total - descuento, 0.0)
         monto_iva = self._calcular_iva(subtotal_con_descuento)
         if descuento > 0 or monto_iva > 0:
@@ -1541,7 +1676,7 @@ class FacturaFormDialog(QDialog):
         hay_precio_bajo_lista = any(
             it.get("precio_lista") is not None and it["precio_unitario"] < it["precio_lista"] for it in self.items
         )
-        return hay_precio_bajo_lista or self.descuento_input.get_value() > 0
+        return hay_precio_bajo_lista or (self.descuento_input.get_value() or 0) > 0
 
     def _validar_datos_basicos(self) -> bool:
         """Cliente/vendedor/carrito -- lo mismo que valida el paso "Siguiente" antes de
@@ -1771,7 +1906,7 @@ class FacturaFormDialog(QDialog):
             "motivo_descuento": self._motivo_descuento,
             "id_autorizador_descuento": self._id_autorizador_descuento,
             "dias_credito_personalizados": (
-                int(self.dias_credito_custom_input.get_value()) if es_credito and not usar_dias_configurados else None
+                int(self.dias_credito_custom_input.get_value() or 30) if es_credito and not usar_dias_configurados else None
             ),
             "motivo_dias_credito": self._motivo_dias_credito,
             "id_autorizador_dias_credito": self._id_autorizador_dias_credito,
