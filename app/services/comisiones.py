@@ -13,6 +13,7 @@ from app.db.models import (
     CuentaBancaria,
     FacturaDetalle,
     FacturaVenta,
+    Inventario,
     PagoComision,
     ProductoPrecio,
     Usuario,
@@ -61,10 +62,20 @@ class ComisionService:
             for precio in session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto)).all()
         }
 
+        # Obtener información de productos para saber cantidad_caja
+        productos = {
+            prod.id_producto: prod
+            for prod in session.query(Inventario).filter(Inventario.id_producto.in_(ids_producto)).all()
+        }
+
         comisiones = []
         for detalle in detalles:
             precio_lista = precios_lista.get(detalle.id_producto_factura)
             if precio_lista is None:
+                continue
+
+            producto = productos.get(detalle.id_producto_factura)
+            if producto is None:
                 continue
 
             # detalle recien se flusheo (no se refresco): precio_unitario/cantidad_producto
@@ -72,11 +83,53 @@ class ComisionService:
             # todavia -- misma coercion defensiva que usa el resto del codebase.
             cantidad = to_decimal(detalle.cantidad_producto)
             precio_unitario = to_decimal(detalle.precio_unitario)
-            monto_base = precio_lista * cantidad
-            monto_venta = precio_unitario * cantidad
+
+            # Determinar si la venta fue por unidad: si el producto tiene cantidad_caja configurada
+            # y el precio_unitario es cercano a precio_lista / cantidad_caja (o menor que precio_lista)
+            venta_por_unidad = False
+            if producto.cantidad_caja and producto.cantidad_caja > 0:
+                cantidad_caja = to_decimal(producto.cantidad_caja)
+                precio_esperado_unidad = precio_lista / cantidad_caja
+                # Si el precio_unitario es cercano al precio esperado por unidad (tolerancia del 10%)
+                # O si es menor que precio_lista (cualquier precio menor que el de bulto sugiere venta por unidad)
+                tolerancia = precio_esperado_unidad * Decimal("0.10")
+                if abs(precio_unitario - precio_esperado_unidad) <= tolerancia or precio_unitario < precio_lista:
+                    venta_por_unidad = True
+
+            # Ajustar precios base y venta según tipo de venta
+            if venta_por_unidad and producto.cantidad_caja and producto.cantidad_caja > 0:
+                cantidad_caja = to_decimal(producto.cantidad_caja)
+                precio_base_ajustado = precio_lista / cantidad_caja
+                precio_venta_ajustado = precio_unitario
+            else:
+                precio_base_ajustado = precio_lista
+                precio_venta_ajustado = precio_unitario
+
+            monto_base = precio_base_ajustado * cantidad
+            monto_venta = precio_venta_ajustado * cantidad
             monto_comision = max(Decimal("0.00"), monto_venta - monto_base)
 
+            # Logging para debug
+            logger.info(
+                "Comisión calculada: producto=%s venta_por_unidad=%s cantidad=%s "
+                "precio_unitario=%s precio_lista=%s cantidad_caja=%s "
+                "precio_base_ajustado=%s precio_venta_ajustado=%s "
+                "monto_base=%s monto_venta=%s monto_comision=%s",
+                detalle.id_producto_factura,
+                venta_por_unidad,
+                cantidad,
+                precio_unitario,
+                precio_lista,
+                producto.cantidad_caja if producto else None,
+                precio_base_ajustado,
+                precio_venta_ajustado,
+                monto_base,
+                monto_venta,
+                monto_comision,
+            )
+
             if monto_comision <= 0:
+                logger.info("Comisión omitida por monto <= 0 para producto %s", detalle.id_producto_factura)
                 continue
 
             # Contado: la factura se cobra completa al emitir (nunca hay cuentas_por_cobrar
