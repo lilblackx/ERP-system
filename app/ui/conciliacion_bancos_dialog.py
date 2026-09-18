@@ -577,11 +577,9 @@ class ConciliacionBancosDialog(QDialog):
                 elif mov.tipo_movimiento == "cargo":
                     saldo_inicial -= monto
 
-                # Calcular en bolívares
+                # Calcular en bolívares - usar el monto en BS directamente, no multiplicar por tasa
                 if mov.monto_bolivares:
                     monto_bs = float(mov.monto_bolivares)
-                elif mov.tasa_cambio and mov.tasa_cambio > 0:
-                    monto_bs = monto * float(mov.tasa_cambio)
                 else:
                     monto_bs = 0.0
 
@@ -613,11 +611,9 @@ class ConciliacionBancosDialog(QDialog):
                 elif mov.tipo_movimiento == "cargo":
                     total_salidas += monto
 
-                # Calcular en bolívares
+                # Calcular en bolívares - usar el monto en BS directamente, no multiplicar por tasa
                 if mov.monto_bolivares:
                     monto_bs = float(mov.monto_bolivares)
-                elif mov.tasa_cambio and mov.tasa_cambio > 0:
-                    monto_bs = monto * float(mov.tasa_cambio)
                 else:
                     monto_bs = 0.0
 
@@ -632,13 +628,8 @@ class ConciliacionBancosDialog(QDialog):
             else:
                 total_salidas += mov["monto"]
 
-            # Calcular en bolívares para movimientos manuales
+            # Calcular en bolívares para movimientos manuales - usar el monto en BS directamente
             monto_bs = mov.get("monto_bs", 0.0)
-            tasa_mov = mov.get("tasa", tasa_cambio)
-
-            # Si no se proporcionó monto_bs, calcularlo
-            if monto_bs == 0.0 and tasa_mov > 0:
-                monto_bs = mov["monto"] * tasa_mov
 
             if mov["tipo"] == "abono":
                 total_entradas_bs += monto_bs
@@ -647,7 +638,8 @@ class ConciliacionBancosDialog(QDialog):
 
         saldo_calculado_bs = saldo_inicial_bs + total_entradas_bs - total_salidas_bs
 
-        saldo_final_manual_bs = saldo_final_manual * tasa_cambio
+        # El saldo final manual ya está en BS, no multiplicar por tasa
+        saldo_final_manual_bs = saldo_final_manual
         diferencia_bs = saldo_calculado_bs - saldo_final_manual_bs
 
         if abs(diferencia_bs) > 0.01:
@@ -692,14 +684,11 @@ class ConciliacionBancosDialog(QDialog):
 
         try:
             for movimiento in self._movimientos_manuales:
-                # El monto en USD se calcula como monto_bs / tasa
-                monto = movimiento["monto"]
                 monto_bs = movimiento.get("monto_bs", 0.0)
                 tasa_mov = movimiento.get("tasa", tasa_cambio)
 
-                # Si no se proporcionó monto_bs, calcularlo
-                if monto_bs == 0.0 and tasa_mov is not None and tasa_mov > 0:
-                    monto_bs = monto * tasa_mov
+                # Si no se proporcionó monto_bs, dejarlo en 0.0
+                # No se debe calcular multiplicando por tasa, se debe usar el monto en BS directamente
 
                 BancoMovimientoService.crear(
                     self.session,
@@ -769,11 +758,9 @@ class ConciliacionBancosDialog(QDialog):
                 elif mov.tipo_movimiento == "cargo":
                     saldo_inicial -= monto
 
-                # Calcular en bolívares
+                # Calcular en bolívares - usar el monto en BS directamente, no multiplicar por tasa
                 if mov.monto_bolivares:
                     monto_bs = float(mov.monto_bolivares)
-                elif mov.tasa_cambio and mov.tasa_cambio > 0:
-                    monto_bs = monto * float(mov.tasa_cambio)
                 else:
                     monto_bs = 0.0
 
@@ -806,11 +793,9 @@ class ConciliacionBancosDialog(QDialog):
                 elif mov.tipo_movimiento == "cargo":
                     total_salidas += monto
 
-                # Calcular en bolívares
+                # Calcular en bolívares - usar el monto en BS directamente, no multiplicar por tasa
                 if mov.monto_bolivares:
                     monto_bs = float(mov.monto_bolivares)
-                elif mov.tasa_cambio and mov.tasa_cambio > 0:
-                    monto_bs = monto * float(mov.tasa_cambio)
                 else:
                     monto_bs = 0.0
 
@@ -826,13 +811,8 @@ class ConciliacionBancosDialog(QDialog):
             else:
                 total_salidas += mov["monto"]
 
-            # Calcular en bolívares para movimientos manuales
+            # Calcular en bolívares para movimientos manuales - usar el monto en BS directamente
             monto_bs = mov.get("monto_bs", 0.0)
-            tasa_mov = mov.get("tasa", tasa_cambio)
-
-            # Si no se proporcionó monto_bs, calcularlo
-            if monto_bs == 0.0 and tasa_mov > 0:
-                monto_bs = mov["monto"] * tasa_mov
 
             if mov["tipo"] == "abono":
                 total_entradas_bs += monto_bs

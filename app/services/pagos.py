@@ -214,6 +214,8 @@ class PagoService:
         referencia: str | None = None,
         fecha_pago: date | datetime | None = None,
         id_usuario: int | None = None,
+        monto_bolivares=None,
+        tasa_cambio=None,
     ) -> PagoProveedor:
         require_permiso(session, id_usuario, "pagos", "crear")
         if (id_cuenta_bancaria is None) == (id_caja is None):
@@ -271,6 +273,8 @@ class PagoService:
             id_tasa=id_tasa,
             metodo_pago=metodo_pago,
             monto=monto,
+            monto_bolivares=to_decimal(monto_bolivares) if monto_bolivares is not None else None,
+            tasa_cambio=to_decimal(tasa_cambio) if tasa_cambio is not None else None,
             referencia=referencia,
             fecha_pago=fecha_pago,
             creado_por=id_usuario,

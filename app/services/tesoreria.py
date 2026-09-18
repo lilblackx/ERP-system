@@ -323,6 +323,8 @@ class BancoService:
         referencia: str,
         id_usuario: int | None,
         fecha: datetime,
+        monto_bolivares: Decimal | None = None,
+        tasa_cambio: Decimal | None = None,
     ) -> BancoMovimiento:
         """Inserta el BancoMovimiento tipo 'cargo' del vuelto bancario (pago movil o
         transferencia) de una factura de contado -- SIN commit ni require_permiso propio: el
@@ -335,6 +337,8 @@ class BancoService:
             id_cuenta=id_cuenta,
             tipo_movimiento="cargo",
             monto_movimiento=monto,
+            monto_bolivares=monto_bolivares,
+            tasa_cambio=tasa_cambio,
             fecha_movimiento=fecha,
             referencia_movimiento=referencia,
             descripcion_movimiento=descripcion,
@@ -353,6 +357,8 @@ class BancoService:
         descripcion: str,
         id_usuario: int | None,
         fecha: datetime,
+        monto_bolivares: Decimal | None = None,
+        tasa_cambio: Decimal | None = None,
     ) -> BancoMovimiento:
         """Cuando una forma de pago bancaria tiende mas de lo que _aplicar_pago_cobro
         aplica a la cuenta por cobrar (capado a su saldo_pendiente -- ver VentaService.
@@ -366,6 +372,8 @@ class BancoService:
             id_cuenta=id_cuenta,
             tipo_movimiento="abono",
             monto_movimiento=monto,
+            monto_bolivares=monto_bolivares,
+            tasa_cambio=tasa_cambio,
             fecha_movimiento=fecha,
             descripcion_movimiento=descripcion,
             creado_por=id_usuario,

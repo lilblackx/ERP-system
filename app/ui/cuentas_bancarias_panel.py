@@ -2,7 +2,7 @@ import logging
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (
+from PySide6.QtWidgets import (  # type: ignore
     QAbstractItemView,
     QComboBox,
     QDialog,
@@ -88,19 +88,6 @@ def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_ba
     )
     cuentas = resultado["items"]
 
-    # Obtener tasa de cambio actual
-    tasa_bcv = 0.0
-    try:
-        from app.db.models import ControlDeTasa
-
-        tasa_registro = (
-            session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc()).first()
-        )
-        if tasa_registro and tasa_registro.tasa_dolar_bcv:
-            tasa_bcv = float(tasa_registro.tasa_dolar_bcv)
-    except Exception:
-        pass
-
     return [
         [
             cuenta.id_cuenta,
@@ -110,7 +97,7 @@ def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_ba
             cuenta.nombre_titular,
             cuenta.identificacion_titular,
             float(cuenta.saldo_total_banco or 0),
-            float(cuenta.saldo_total_banco or 0) * tasa_bcv if tasa_bcv > 0 else 0.0,
+            float(cuenta.saldo_total_banco_bs or 0),
             cuenta.estado_cuenta,
         ]
         for cuenta in cuentas
@@ -380,24 +367,6 @@ class CuentasBancariasPanel(QWidget):
 
     def _actualizar_tabla(self):
         """Actualiza la tabla con las cuentas cargadas."""
-        # Obtener tasa de cambio actual
-        session = self.session_factory()
-        tasa_bcv = 0.0
-        try:
-            from app.db.models import ControlDeTasa
-
-            tasa_registro = (
-                session.query(ControlDeTasa)
-                .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
-                .first()
-            )
-            if tasa_registro and tasa_registro.tasa_dolar_bcv:
-                tasa_bcv = float(tasa_registro.tasa_dolar_bcv)
-        except Exception:
-            pass
-        finally:
-            session.close()
-
         self.table.setRowCount(0)
         for row, cuenta in enumerate(self._cuentas):
             self.table.insertRow(row)
@@ -412,9 +381,8 @@ class CuentasBancariasPanel(QWidget):
             item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 6, item_saldo)
 
-            # Calcular monto en BS
-            saldo_usd = float(cuenta.saldo_total_banco or 0)
-            saldo_bs = saldo_usd * tasa_bcv if tasa_bcv > 0 else 0.0
+            # Usar el saldo en BS directamente de la base de datos, no multiplicar por tasa
+            saldo_bs = float(cuenta.saldo_total_banco_bs or 0)
             item_saldo_bs = QTableWidgetItem(f"{saldo_bs:,.2f}" if saldo_bs > 0 else "0.00")
             item_saldo_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 7, item_saldo_bs)
@@ -533,6 +501,7 @@ class CuentasBancariasPanel(QWidget):
             return
 
         cuenta_id = int(item.text())
+        cuenta = None
         session = self.session_factory()
         try:
             from app.db.models import CuentaBancaria
@@ -558,7 +527,8 @@ class CuentasBancariasPanel(QWidget):
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de cuentas bancarias.")
         except Exception:
             session.rollback()
-            logger.exception("Fallo al cambiar el estado de la cuenta bancaria %s", cuenta.id_cuenta)
+            cuenta_id_log = cuenta.id_cuenta if cuenta else cuenta_id
+            logger.exception("Fallo al cambiar el estado de la cuenta bancaria %s", cuenta_id_log)
             MessageBox.critical(self, "Error", "No se pudo cambiar el estado de la cuenta bancaria.")
         finally:
             session.close()

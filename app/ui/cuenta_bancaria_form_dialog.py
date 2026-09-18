@@ -232,16 +232,25 @@ class CuentaBancariaFormDialog(QDialog):
         grid.addWidget(lbl_tipo, 4, 0)
         grid.addWidget(self.tipo_combo, 5, 0)
 
-        # Saldo Inicial -- solo editable al CREAR la cuenta. En edicion se deshabilita
+        # Saldo Inicial USD -- solo editable al CREAR la cuenta. En edicion se deshabilita
         # (ver _precargar): cambiarlo a mano ahi rompe la trazabilidad, porque no genera
         # ningun BancoMovimiento que explique el ajuste -- BancoMovimientoService.crear()
         # es el unico camino que debe modificar saldo_total_banco despues de la creacion.
-        self.lbl_saldo = QLabel("Saldo Inicial")
+        self.lbl_saldo = QLabel("Saldo Inicial USD")
         self.lbl_saldo.setProperty("class", "FormLabel")
         self.saldo_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.saldo_input.setFixedHeight(36)
         grid.addWidget(self.lbl_saldo, 4, 1)
         grid.addWidget(self.saldo_input, 5, 1)
+
+        # Saldo Inicial BS -- solo editable al CREAR la cuenta. En edicion se deshabilita
+        # por la misma razón que el saldo USD.
+        self.lbl_saldo_bs = QLabel("Saldo Inicial BS")
+        self.lbl_saldo_bs.setProperty("class", "FormLabel")
+        self.saldo_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=False, decimals=2)
+        self.saldo_bs_input.setFixedHeight(36)
+        grid.addWidget(self.lbl_saldo_bs, 6, 1)
+        grid.addWidget(self.saldo_bs_input, 7, 1)
 
         # Nombre del Titular
         lbl_nom = QLabel(f"Nombre del Titular {ASTERISCO_REQUERIDO}")
@@ -249,8 +258,8 @@ class CuentaBancariaFormDialog(QDialog):
         self.nombre_input = QLineEdit()
         self.nombre_input.setPlaceholderText("Ej: Juan Pérez")
         self.nombre_input.setFixedHeight(36)
-        grid.addWidget(lbl_nom, 6, 0, 1, 2)
-        grid.addWidget(self.nombre_input, 7, 0, 1, 2)
+        grid.addWidget(lbl_nom, 8, 0, 1, 2)
+        grid.addWidget(self.nombre_input, 9, 0, 1, 2)
 
         # Identificación del Titular
         lbl_rif = QLabel(f"Identificación del Titular {ASTERISCO_REQUERIDO}")
@@ -259,8 +268,8 @@ class CuentaBancariaFormDialog(QDialog):
         self.identificacion_input.setPlaceholderText("Ej: V-12345678")
         self.identificacion_input.setMaxLength(20)
         self.identificacion_input.setFixedHeight(36)
-        grid.addWidget(lbl_rif, 8, 0, 1, 2)
-        grid.addWidget(self.identificacion_input, 9, 0, 1, 2)
+        grid.addWidget(lbl_rif, 10, 0, 1, 2)
+        grid.addWidget(self.identificacion_input, 11, 0, 1, 2)
 
         # Campos de auditoría (solo visibles en edición)
         self.auditoria_widget = QWidget()
@@ -327,7 +336,14 @@ class CuentaBancariaFormDialog(QDialog):
         self.saldo_input.set_value(cuenta.saldo_total_banco or 0)
         self.saldo_input.setEnabled(False)
         self.saldo_input.setToolTip("El saldo se actualiza registrando movimientos bancarios, no editando este campo.")
-        self.lbl_saldo.setText("Saldo Actual (solo lectura)")
+        self.lbl_saldo.setText("Saldo Actual USD (solo lectura)")
+
+        self.saldo_bs_input.set_value(cuenta.saldo_total_banco_bs or 0)
+        self.saldo_bs_input.setEnabled(False)
+        self.saldo_bs_input.setToolTip(
+            "El saldo en BS se actualiza registrando movimientos bancarios, no editando este campo."
+        )
+        self.lbl_saldo_bs.setText("Saldo Actual BS (solo lectura)")
 
         # Seleccionar banco
         idx_banco = self.banco_combo.findData(cuenta.id_banco)
@@ -386,4 +402,5 @@ class CuentaBancariaFormDialog(QDialog):
         # BancoMovimiento que lo explique.
         if self.cuenta is None:
             datos["saldo_total_banco"] = self.saldo_input.get_value()
+            datos["saldo_total_banco_bs"] = self.saldo_bs_input.get_value()
         return datos

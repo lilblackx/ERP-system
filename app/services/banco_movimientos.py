@@ -22,6 +22,8 @@ class BancoMovimientoService:
         id_pago_proveedor: int | None = None,
         id_pago_comision: int | None = None,
         id_usuario: int | None = None,
+        monto_bolivares: float | None = None,
+        tasa_cambio: float | None = None,
     ) -> BancoMovimiento:
         """Crea un movimiento bancario y actualiza el saldo de la cuenta."""
         require_permiso(session, id_usuario, "bancos", "crear")
@@ -40,6 +42,8 @@ class BancoMovimientoService:
             id_cuenta=id_cuenta,
             tipo_movimiento=tipo_movimiento,
             monto_movimiento=monto,
+            monto_bolivares=monto_bolivares,
+            tasa_cambio=tasa_cambio,
             fecha_movimiento=datetime.datetime.now(),
             referencia_movimiento=referencia,
             descripcion_movimiento=descripcion,
@@ -53,7 +57,7 @@ class BancoMovimientoService:
         session.commit()
         session.refresh(movimiento)
 
-        # El trigger trg_banco_movimientos_saldo actualiza saldo_total_banco automáticamente
+        # El trigger trg_banco_movimientos_saldo actualiza saldo_total_banco y saldo_total_banco_bs automáticamente
         session.refresh(cuenta)
 
         AuditoriaService.registrar_evento(
@@ -66,6 +70,8 @@ class BancoMovimientoService:
                 "id_cuenta": id_cuenta,
                 "tipo": tipo_movimiento,
                 "monto": float(monto),
+                "monto_bolivares": float(monto_bolivares) if monto_bolivares else None,
+                "tasa_cambio": float(tasa_cambio) if tasa_cambio else None,
             },
         )
         return movimiento

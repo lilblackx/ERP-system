@@ -279,6 +279,8 @@ class PagoComisionService:
                     creado_por=id_usuario,
                     fecha_creacion=ahora,
                     id_pago_comision=pago.id_pago_comision,
+                    monto_bolivares=None,  # Comisiones generalmente en USD
+                    tasa_cambio=None,
                 )
             )
         else:

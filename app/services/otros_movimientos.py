@@ -141,6 +141,8 @@ class OtrosMovimientosService:
                     descripcion_movimiento=f"Abono cuenta por cobrar (otros) #{id_cuenta}",
                     creado_por=id_usuario,
                     fecha_creacion=ahora,
+                    monto_bolivares=None,  # Otros movimientos generalmente en USD
+                    tasa_cambio=None,
                 )
             )
         else:
