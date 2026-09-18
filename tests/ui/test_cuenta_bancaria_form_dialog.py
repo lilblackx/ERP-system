@@ -63,6 +63,7 @@ def test_precargar_deshabilita_saldo_y_no_lo_incluye_en_get_data(qtbot):
     cuenta.nombre_titular = "Juan Perez"
     cuenta.identificacion_titular = "V-12345678"
     cuenta.saldo_total_banco = Decimal("1000.00")
+    cuenta.saldo_total_banco_bs = Decimal("5000.00")
     cuenta.id_banco = None
     cuenta.tipo_cuenta_banco = "CORRIENTE"
     cuenta.fecha_creacion = None
@@ -77,3 +78,56 @@ def test_precargar_deshabilita_saldo_y_no_lo_incluye_en_get_data(qtbot):
 
     datos = dialogo.get_data()
     assert "saldo_total_banco" not in datos
+
+
+def test_saldo_bs_input_arranca_en_cero_formateado(qtbot):
+    dialogo = CuentaBancariaFormDialog(_session_vacia())
+    qtbot.addWidget(dialogo)
+    assert dialogo.saldo_bs_input.text() == "0,00"
+    assert dialogo.saldo_bs_input.get_value() == Decimal("0")
+
+
+def test_saldo_bs_input_formatea_al_perder_foco(qtbot):
+    dialogo = CuentaBancariaFormDialog(_session_vacia())
+    qtbot.addWidget(dialogo)
+    _dar_foco(qtbot, dialogo.saldo_bs_input)
+    qtbot.keyClicks(dialogo.saldo_bs_input, "12345,6")
+    dialogo.saldo_bs_input.clearFocus()
+    assert dialogo.saldo_bs_input.get_value() == Decimal("12345.60")
+    assert dialogo.saldo_bs_input.text() == "12.345,60"
+
+
+def test_get_data_incluye_saldo_bs_tecleado_al_crear(qtbot):
+    dialogo = CuentaBancariaFormDialog(_session_vacia())
+    qtbot.addWidget(dialogo)
+    _dar_foco(qtbot, dialogo.saldo_bs_input)
+    qtbot.keyClicks(dialogo.saldo_bs_input, "999,99")
+    dialogo.saldo_bs_input.clearFocus()
+
+    datos = dialogo.get_data()
+
+    assert datos["saldo_total_banco_bs"] == Decimal("999.99")
+
+
+def test_precargar_deshabilita_saldo_bs_y_no_lo_incluye_en_get_data(qtbot):
+    session = _session_vacia()
+    cuenta = MagicMock()
+    cuenta.numero_cuenta = "0134-0001-123456789"
+    cuenta.nombre_titular = "Juan Perez"
+    cuenta.identificacion_titular = "V-12345678"
+    cuenta.saldo_total_banco = Decimal("1000.00")
+    cuenta.saldo_total_banco_bs = Decimal("5000.00")
+    cuenta.id_banco = None
+    cuenta.tipo_cuenta_banco = "CORRIENTE"
+    cuenta.fecha_creacion = None
+    cuenta.creador = None
+
+    dialogo = CuentaBancariaFormDialog(session, cuenta=cuenta)
+    qtbot.addWidget(dialogo)
+
+    assert dialogo.saldo_bs_input.get_value() == Decimal("5000.00")
+    assert dialogo.saldo_bs_input.text() == "5.000,00"
+    assert not dialogo.saldo_bs_input.isEnabled()
+
+    datos = dialogo.get_data()
+    assert "saldo_total_banco_bs" not in datos
