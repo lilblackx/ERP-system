@@ -222,6 +222,7 @@ class Categoria(Base):
 
 class Inventario(Base):
     __tablename__ = "inventario"
+    __table_args__ = {"implicit_returning": False}
 
     id_producto: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_categoria: Mapped[int] = mapped_column(BigInteger, ForeignKey("categorias.id_categoria"), nullable=False)
