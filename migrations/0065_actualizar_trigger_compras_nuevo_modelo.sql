@@ -2,6 +2,7 @@
 -- cantidad_caja_total = floor(cantidad_unidad / cantidad_caja) (calculado)
 -- cantidad_caja_unidad = cantidad_unidad % cantidad_caja (calculado - solo residuo)
 -- cantidad_unidad: stock total en unidades (valor base que se actualiza)
+-- stock_ya_contabilizado: si es True, NO actualizar stock (ya fue contabilizado en NR)
 
 -- Eliminar triggers existentes de compras
 IF OBJECT_ID('dbo.trg_compra_detalle_stock_ins', 'TR') IS NOT NULL
@@ -21,12 +22,15 @@ CREATE TRIGGER trg_compra_detalle_stock_ins ON dbo.compra_detalle
 AFTER INSERT AS
 BEGIN
 	SET NOCOUNT ON;
+	
+	-- Solo actualizar stock si stock_ya_contabilizado es False o NULL
 	UPDATE inv
 	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] + agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
 		SELECT [id_producto_compra], SUM([cantidad_producto]) AS [total_cant]
 		FROM inserted
+		WHERE [stock_ya_contabilizado] = 0 OR [stock_ya_contabilizado] IS NULL
 		GROUP BY [id_producto_compra]
 	) agg ON agg.[id_producto_compra] = inv.[id_producto];
 	
@@ -42,7 +46,7 @@ BEGIN
 			ELSE inv.[cantidad_unidad]
 		END
 	FROM dbo.inventario inv
-	WHERE inv.[id_producto] IN (SELECT DISTINCT [id_producto_compra] FROM inserted);
+	WHERE inv.[id_producto] IN (SELECT DISTINCT [id_producto_compra] FROM inserted WHERE [stock_ya_contabilizado] = 0 OR [stock_ya_contabilizado] IS NULL);
 END
 GO
 
@@ -51,12 +55,15 @@ CREATE TRIGGER trg_compra_detalle_stock_upd ON dbo.compra_detalle
 AFTER UPDATE AS
 BEGIN
 	SET NOCOUNT ON;
+	
+	-- Solo actualizar stock si stock_ya_contabilizado es False o NULL
 	UPDATE inv
 	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] - agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
 		SELECT [id_producto_compra], SUM([cantidad_producto]) AS [total_cant]
 		FROM deleted
+		WHERE [stock_ya_contabilizado] = 0 OR [stock_ya_contabilizado] IS NULL
 		GROUP BY [id_producto_compra]
 	) agg ON agg.[id_producto_compra] = inv.[id_producto];
 
@@ -66,6 +73,7 @@ BEGIN
 	JOIN (
 		SELECT [id_producto_compra], SUM([cantidad_producto]) AS [total_cant]
 		FROM inserted
+		WHERE [stock_ya_contabilizado] = 0 OR [stock_ya_contabilizado] IS NULL
 		GROUP BY [id_producto_compra]
 	) agg ON agg.[id_producto_compra] = inv.[id_producto];
 	
@@ -81,7 +89,11 @@ BEGIN
 			ELSE inv.[cantidad_unidad]
 		END
 	FROM dbo.inventario inv
-	WHERE inv.[id_producto] IN (SELECT DISTINCT [id_producto_compra] FROM inserted UNION SELECT DISTINCT [id_producto_compra] FROM deleted);
+	WHERE inv.[id_producto] IN (
+		SELECT DISTINCT [id_producto_compra] FROM deleted WHERE [stock_ya_contabilizado] = 0 OR [stock_ya_contabilizado] IS NULL
+		UNION
+		SELECT DISTINCT [id_producto_compra] FROM inserted WHERE [stock_ya_contabilizado] = 0 OR [stock_ya_contabilizado] IS NULL
+	);
 END
 GO
 
@@ -90,12 +102,15 @@ CREATE TRIGGER trg_compra_detalle_stock_del ON dbo.compra_detalle
 AFTER DELETE AS
 BEGIN
 	SET NOCOUNT ON;
+	
+	-- Solo actualizar stock si stock_ya_contabilizado es False o NULL
 	UPDATE inv
 	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] - agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
 		SELECT [id_producto_compra], SUM([cantidad_producto]) AS [total_cant]
 		FROM deleted
+		WHERE [stock_ya_contabilizado] = 0 OR [stock_ya_contabilizado] IS NULL
 		GROUP BY [id_producto_compra]
 	) agg ON agg.[id_producto_compra] = inv.[id_producto];
 	
@@ -111,6 +126,6 @@ BEGIN
 			ELSE inv.[cantidad_unidad]
 		END
 	FROM dbo.inventario inv
-	WHERE inv.[id_producto] IN (SELECT DISTINCT [id_producto_compra] FROM deleted);
+	WHERE inv.[id_producto] IN (SELECT DISTINCT [id_producto_compra] FROM deleted WHERE [stock_ya_contabilizado] = 0 OR [stock_ya_contabilizado] IS NULL);
 END
 GO
