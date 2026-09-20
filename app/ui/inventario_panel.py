@@ -71,7 +71,7 @@ COLS_VISIBLES = [
     "CATEGORÍA",
     "CANTIDAD",
     "CAJAS",
-    "UNIDADES SUELTAS",
+    "AGRANEL",
     "COSTO",
     "PRECIO 1",
     "PRECIO 2",
@@ -79,7 +79,7 @@ COLS_VISIBLES = [
     "ESTADO",
 ]
 COL_ID_INTERNO = 0  # oculto
-POR_PAGINA = 20
+POR_PAGINA = 25
 # Mismo horizonte que ProductoService.obtener_alertas_stock(dias_vencimiento=30) --
 # mantener sincronizado si ese default cambia.
 DIAS_VENCIMIENTO_ALERTA = 30
@@ -103,12 +103,21 @@ def _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usua
             p.nombre_producto,
             p.categoria.nombre if p.categoria else None,
             float(p.cantidad_unidad),
-            # Calcular cajas y unidades sueltas
-            (int(p.cantidad_unidad // p.cantidad_caja) if p.cantidad_caja and p.cantidad_caja > 0 else 0),
+            # Mostrar cantidad_caja_total (cajas completas) si existe, si no calcular
             (
-                int(p.cantidad_unidad % p.cantidad_caja)
-                if p.cantidad_caja and p.cantidad_caja > 0
-                else int(p.cantidad_unidad)
+                float(p.cantidad_caja_total)
+                if hasattr(p, "cantidad_caja_total") and p.cantidad_caja_total is not None
+                else (int(p.cantidad_unidad // p.cantidad_caja) if p.cantidad_caja and p.cantidad_caja > 0 else 0)
+            ),
+            # Mostrar cantidad_caja_unidad (residuo) si existe, si no calcular
+            (
+                float(p.cantidad_caja_unidad)
+                if hasattr(p, "cantidad_caja_unidad") and p.cantidad_caja_unidad is not None
+                else (
+                    int(p.cantidad_unidad % p.cantidad_caja)
+                    if p.cantidad_caja and p.cantidad_caja > 0
+                    else int(p.cantidad_unidad)
+                )
             ),
             float(p.costo_producto),
             precios.get(p.id_producto, {}).get("precio_1"),
@@ -183,7 +192,7 @@ class InventarioPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        lbl = QLabel("Catálogo de Productos")
+        lbl = QLabel("CATÁLOGO DE PRODUCTOS")
         lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")

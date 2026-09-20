@@ -189,6 +189,8 @@ CREATE TABLE dbo.inventario (
 	[nombre_producto] VARCHAR(200) NOT NULL,
 	[descripcion_producto] VARCHAR(MAX) NULL,
 	[cantidad_caja] DECIMAL(12,2) NOT NULL DEFAULT 0.000,
+	[cantidad_caja_unidad] DECIMAL(12,2) NOT NULL DEFAULT 0.000,
+	[cantidad_caja_total] DECIMAL(12,2) NOT NULL DEFAULT 0.000,
 	[cantidad_unidad] DECIMAL(12,2) NOT NULL DEFAULT 0.000,
 	[costo_producto] DECIMAL(18,2) NOT NULL DEFAULT 0.00,
 	[fecha_registro] DATETIME NOT NULL DEFAULT GETDATE(),
@@ -232,6 +234,7 @@ CREATE TABLE dbo.factura_detalle (
 	[cantidad_producto] DECIMAL(12,2) NOT NULL,
 	[observaciones_item] VARCHAR(255) NULL,
 	[precio_unitario] DECIMAL(18,2) NOT NULL,
+	[tipo_venta] VARCHAR(10) NULL CONSTRAINT CK_factura_detalle_tipo_venta CHECK ([tipo_venta] IN ('bulto','unidad')),
 	CONSTRAINT PK_factura_detalle PRIMARY KEY ([id_factura_detalle])
 );
 END
@@ -907,13 +910,34 @@ CREATE TRIGGER trg_factura_detalle_stock_ins ON dbo.factura_detalle
 AFTER INSERT AS
 BEGIN
 	SET NOCOUNT ON;
+	
+	-- Ventas por unidad: descuenta cantidad_producto de cantidad_caja_unidad
 	UPDATE inv
-	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] - agg.[total_cant]
+	SET inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] - agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
 		SELECT [id_producto_factura], SUM([cantidad_producto]) AS [total_cant]
 		FROM inserted
+		WHERE [tipo_venta] = 'unidad' OR [tipo_venta] IS NULL
 		GROUP BY [id_producto_factura]
+	) agg ON agg.[id_producto_factura] = inv.[id_producto];
+	
+	-- Ventas por bulto: descuenta cantidad_producto de cantidad_caja_total 
+	-- y cantidad_producto * cantidad_caja de cantidad_caja_unidad
+	UPDATE inv
+	SET 
+		inv.[cantidad_caja_total] = inv.[cantidad_caja_total] - agg.[total_bultos],
+		inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] - agg.[total_unidades]
+	FROM dbo.inventario inv
+	JOIN (
+		SELECT 
+			i.[id_producto_factura], 
+			SUM(i.[cantidad_producto]) AS [total_bultos],
+			SUM(i.[cantidad_producto] * COALESCE(inv.[cantidad_caja], 1)) AS [total_unidades]
+		FROM inserted i
+		JOIN dbo.inventario inv ON inv.[id_producto] = i.[id_producto_factura]
+		WHERE i.[tipo_venta] = 'bulto'
+		GROUP BY i.[id_producto_factura]
 	) agg ON agg.[id_producto_factura] = inv.[id_producto];
 END
 GO
@@ -922,24 +946,65 @@ CREATE TRIGGER trg_factura_detalle_stock_upd ON dbo.factura_detalle
 AFTER UPDATE AS
 BEGIN
 	SET NOCOUNT ON;
-	-- revierte lo que tenian las filas antes de modificarse
+	
+	-- Revertir valores anteriores (deleted)
+	-- Ventas por unidad: restaura cantidad_producto de cantidad_caja_unidad
 	UPDATE inv
-	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] + agg.[total_cant]
+	SET inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] + agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
-		SELECT [id_producto_factura], SUM([cantidad_producto]) AS [total_cant]
-		FROM deleted
-		GROUP BY [id_producto_factura]
+		SELECT d.[id_producto_factura], SUM(d.[cantidad_producto]) AS [total_cant]
+		FROM deleted d
+		WHERE d.[tipo_venta] = 'unidad' OR d.[tipo_venta] IS NULL
+		GROUP BY d.[id_producto_factura]
 	) agg ON agg.[id_producto_factura] = inv.[id_producto];
-
-	-- aplica lo que quedo tras la modificacion
+	
+	-- Ventas por bulto: restaura cantidad_producto de cantidad_caja_total 
+	-- y cantidad_producto * cantidad_caja de cantidad_caja_unidad
 	UPDATE inv
-	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] - agg.[total_cant]
+	SET 
+		inv.[cantidad_caja_total] = inv.[cantidad_caja_total] + agg.[total_bultos],
+		inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] + agg.[total_unidades]
 	FROM dbo.inventario inv
 	JOIN (
-		SELECT [id_producto_factura], SUM([cantidad_producto]) AS [total_cant]
-		FROM inserted
-		GROUP BY [id_producto_factura]
+		SELECT 
+			d.[id_producto_factura], 
+			SUM(d.[cantidad_producto]) AS [total_bultos],
+			SUM(d.[cantidad_producto] * COALESCE(inv.[cantidad_caja], 1)) AS [total_unidades]
+		FROM deleted d
+		JOIN dbo.inventario inv ON inv.[id_producto] = d.[id_producto_factura]
+		WHERE d.[tipo_venta] = 'bulto'
+		GROUP BY d.[id_producto_factura]
+	) agg ON agg.[id_producto_factura] = inv.[id_producto];
+	
+	-- Aplicar nuevos valores (inserted)
+	-- Ventas por unidad: descuenta cantidad_producto de cantidad_caja_unidad
+	UPDATE inv
+	SET inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] - agg.[total_cant]
+	FROM dbo.inventario inv
+	JOIN (
+		SELECT i.[id_producto_factura], SUM(i.[cantidad_producto]) AS [total_cant]
+		FROM inserted i
+		WHERE i.[tipo_venta] = 'unidad' OR i.[tipo_venta] IS NULL
+		GROUP BY i.[id_producto_factura]
+	) agg ON agg.[id_producto_factura] = inv.[id_producto];
+	
+	-- Ventas por bulto: descuenta cantidad_producto de cantidad_caja_total 
+	-- y cantidad_producto * cantidad_caja de cantidad_caja_unidad
+	UPDATE inv
+	SET 
+		inv.[cantidad_caja_total] = inv.[cantidad_caja_total] - agg.[total_bultos],
+		inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] - agg.[total_unidades]
+	FROM dbo.inventario inv
+	JOIN (
+		SELECT 
+			i.[id_producto_factura], 
+			SUM(i.[cantidad_producto]) AS [total_bultos],
+			SUM(i.[cantidad_producto] * COALESCE(inv.[cantidad_caja], 1)) AS [total_unidades]
+		FROM inserted i
+		JOIN dbo.inventario inv ON inv.[id_producto] = i.[id_producto_factura]
+		WHERE i.[tipo_venta] = 'bulto'
+		GROUP BY i.[id_producto_factura]
 	) agg ON agg.[id_producto_factura] = inv.[id_producto];
 END
 GO
@@ -948,13 +1013,34 @@ CREATE TRIGGER trg_factura_detalle_stock_del ON dbo.factura_detalle
 AFTER DELETE AS
 BEGIN
 	SET NOCOUNT ON;
+	
+	-- Ventas por unidad: restaura cantidad_producto de cantidad_caja_unidad
 	UPDATE inv
-	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] + agg.[total_cant]
+	SET inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] + agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
-		SELECT [id_producto_factura], SUM([cantidad_producto]) AS [total_cant]
-		FROM deleted
-		GROUP BY [id_producto_factura]
+		SELECT d.[id_producto_factura], SUM(d.[cantidad_producto]) AS [total_cant]
+		FROM deleted d
+		WHERE d.[tipo_venta] = 'unidad' OR d.[tipo_venta] IS NULL
+		GROUP BY d.[id_producto_factura]
+	) agg ON agg.[id_producto_factura] = inv.[id_producto];
+	
+	-- Ventas por bulto: restaura cantidad_producto de cantidad_caja_total 
+	-- y cantidad_producto * cantidad_caja de cantidad_caja_unidad
+	UPDATE inv
+	SET 
+		inv.[cantidad_caja_total] = inv.[cantidad_caja_total] + agg.[total_bultos],
+		inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] + agg.[total_unidades]
+	FROM dbo.inventario inv
+	JOIN (
+		SELECT 
+			d.[id_producto_factura], 
+			SUM(d.[cantidad_producto]) AS [total_bultos],
+			SUM(d.[cantidad_producto] * COALESCE(inv.[cantidad_caja], 1)) AS [total_unidades]
+		FROM deleted d
+		JOIN dbo.inventario inv ON inv.[id_producto] = d.[id_producto_factura]
+		WHERE d.[tipo_venta] = 'bulto'
+		GROUP BY d.[id_producto_factura]
 	) agg ON agg.[id_producto_factura] = inv.[id_producto];
 END
 GO
@@ -964,7 +1050,7 @@ AFTER INSERT AS
 BEGIN
 	SET NOCOUNT ON;
 	UPDATE inv
-	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] + agg.[total_cant]
+	SET inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] + agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
 		SELECT [id_producto_compra], SUM([cantidad_producto]) AS [total_cant]
@@ -979,7 +1065,7 @@ AFTER UPDATE AS
 BEGIN
 	SET NOCOUNT ON;
 	UPDATE inv
-	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] - agg.[total_cant]
+	SET inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] - agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
 		SELECT [id_producto_compra], SUM([cantidad_producto]) AS [total_cant]
@@ -988,7 +1074,7 @@ BEGIN
 	) agg ON agg.[id_producto_compra] = inv.[id_producto];
 
 	UPDATE inv
-	SET inv.[cantidad_unidad] = inv.[cantidad_unidad] + agg.[total_cant]
+	SET inv.[cantidad_caja_unidad] = inv.[cantidad_caja_unidad] + agg.[total_cant]
 	FROM dbo.inventario inv
 	JOIN (
 		SELECT [id_producto_compra], SUM([cantidad_producto]) AS [total_cant]
@@ -1010,6 +1096,27 @@ BEGIN
 		FROM deleted
 		GROUP BY [id_producto_compra]
 	) agg ON agg.[id_producto_compra] = inv.[id_producto];
+END
+GO
+
+
+-- Trigger para mantener cantidad_caja_total sincronizado
+CREATE TRIGGER trg_calcular_cajas_totales ON dbo.inventario
+AFTER INSERT, UPDATE AS
+BEGIN
+	SET NOCOUNT ON;
+	
+	-- Calcular cajas totales cuando se actualiza cantidad_caja_unidad o cantidad_caja
+	UPDATE inv
+	SET inv.[cantidad_caja_total] = CASE 
+		WHEN inv.[cantidad_caja] > 0 THEN FLOOR(inv.[cantidad_caja_unidad] / inv.[cantidad_caja])
+		ELSE 0
+	END
+	FROM dbo.inventario inv
+	JOIN inserted i ON inv.[id_producto] = i.[id_producto]
+	WHERE inv.[cantidad_caja_unidad] <> i.[cantidad_caja_unidad] 
+	   OR inv.[cantidad_caja] <> i.[cantidad_caja]
+	   OR inv.[cantidad_caja_total] IS NULL;
 END
 GO
 

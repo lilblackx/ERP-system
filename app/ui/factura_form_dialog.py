@@ -1289,12 +1289,19 @@ class FacturaFormDialog(QDialog):
         if not productos:
             self.producto_combo.addItem("Sin resultados")
         for producto in productos:
-            caja_info = (
-                f" | {producto.cantidad_caja:g} u/caja" if producto.cantidad_caja and producto.cantidad_caja > 0 else ""
-            )
-            etiqueta = (
-                f"{producto.cod_producto} - {producto.nombre_producto} (stock: {producto.cantidad_unidad:g}{caja_info})"
-            )
+            # Mostrar stock usando cantidad_unidad (compatibilidad con modelo antiguo)
+            total_unidades = producto.cantidad_unidad
+
+            # Si tiene los nuevos campos, mostrar información adicional
+            stock_info = f"{total_unidades:g} u."
+            if (
+                hasattr(producto, "cantidad_caja_total")
+                and producto.cantidad_caja_total
+                and producto.cantidad_caja_total > 0
+            ):
+                stock_info += f" | {producto.cantidad_caja_total:g} cajas"
+
+            etiqueta = f"{producto.cod_producto} - {producto.nombre_producto} (stock: {stock_info})"
             self.producto_combo.addItem(etiqueta, producto.id_producto)
         self.producto_combo.blockSignals(False)
         self.producto_combo.setEnabled(bool(productos))
@@ -1375,7 +1382,7 @@ class FacturaFormDialog(QDialog):
 
         Considera el tipo de venta actual (unidad o bulto) para calcular el precio
         correcto. Si está en modo unidad, divide el precio del bulto por la cantidad
-        de unidades por caja.
+        de unidades por caja (cantidad_caja).
         """
         id_producto = self.producto_combo.currentData()
         if id_producto is None:
@@ -1408,12 +1415,14 @@ class FacturaFormDialog(QDialog):
             and producto_seleccionado.cantidad_caja
             and producto_seleccionado.cantidad_caja > 0
         ):
-            # Calcular precio por unidad
+            # Calcular precio por unidad: precio del bulto / unidades por caja
             cantidad_caja_float = float(producto_seleccionado.cantidad_caja)
             precio_facturar = precio_bulto / cantidad_caja_float
+            self.lbl_tipo_precio.setText("(por unidad)")
         else:
-            # Precio de bulto
+            # Precio de bulto (sin división)
             precio_facturar = precio_bulto
+            self.lbl_tipo_precio.setText("(por bulto)")
 
         # Actualizar el precio de facturación en el input
         self.precio_input.set_value(precio_facturar)
@@ -1946,6 +1955,7 @@ class FacturaFormDialog(QDialog):
                     "cantidad": it["cantidad"],
                     "precio_unitario": it["precio_unitario"],
                     "observaciones": it["observaciones_item"],
+                    "tipo_venta": it.get("tipo_venta"),
                 }
                 for it in self.items
             ],

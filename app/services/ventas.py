@@ -290,17 +290,28 @@ class VentaService:
             require_permiso(session, id_autorizador_descuento, "descuentos", "crear")
 
         # --- Validar stock disponible por producto (agrupando items repetidos) ---
-        cantidades_por_producto: dict[int, Decimal] = {}
+        cantidades_por_producto: dict[int, dict] = {}  # {id_producto: {"bultos": X, "unidades": Y}}
         for item in items:
             id_producto = item["id_producto"]
             cantidad = Decimal(str(item["cantidad"]))
-            cantidades_por_producto[id_producto] = cantidades_por_producto.get(id_producto, Decimal("0")) + cantidad
+            tipo_venta = item.get("tipo_venta")
+
+            if id_producto not in cantidades_por_producto:
+                cantidades_por_producto[id_producto] = {"bultos": Decimal("0"), "unidades": Decimal("0")}
+
+            if tipo_venta == "bulto":
+                cantidades_por_producto[id_producto]["bultos"] += cantidad
+            else:
+                cantidades_por_producto[id_producto]["unidades"] += cantidad
 
         # sorted() por id_producto: dos facturas concurrentes que comparten productos
         # pero los cargaron en distinto orden en el carrito adquiririan los locks en
         # orden cruzado sin esto -> deadlock de SQL Server. Un orden total fijo (el
         # mismo para cualquier transaccion) elimina la posibilidad de cruce.
-        for id_producto, cantidad_requerida in sorted(cantidades_por_producto.items()):
+        for id_producto, cantidades in sorted(cantidades_por_producto.items()):
+            bultos_requeridos = cantidades["bultos"]
+            unidades_requeridas = cantidades["unidades"]
+
             # WITH (UPDLOCK, ROWLOCK): bloquea la fila hasta el commit de esta
             # transaccion para que una segunda factura concurrente sobre el mismo
             # producto espere en vez de leer el mismo stock stale (TOCTOU). session.get()
@@ -315,18 +326,36 @@ class VentaService:
                 raise ValueError(f"Producto {id_producto} no encontrado")
             if producto.estado_producto != "ACTIVO":
                 raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo")
-            if producto.cantidad_unidad < cantidad_requerida:
-                raise ValueError(
-                    f"Stock insuficiente para '{producto.nombre_producto}': "
-                    f"disponible {producto.cantidad_unidad}, solicitado {cantidad_requerida}"
-                )
+
+            # Usar cantidad_unidad como stock total
+            stock_total = producto.cantidad_unidad or Decimal("0")
+            unidades_por_caja = producto.cantidad_caja or Decimal("1")
+
+            # Validar stock para bultos
+            if bultos_requeridos > 0:
+                unidades_necesarias_bultos = bultos_requeridos * unidades_por_caja
+                if stock_total < unidades_necesarias_bultos:
+                    raise ValueError(
+                        f"Stock insuficiente para '{producto.nombre_producto}': "
+                        f"disponible {stock_total} unidades, "
+                        f"necesarias {unidades_necesarias_bultos} unidades para {bultos_requeridos} cajas"
+                    )
+
+            # Validar stock para unidades sueltas
+            if unidades_requeridas > 0:
+                if stock_total < unidades_requeridas:
+                    raise ValueError(
+                        f"Stock insuficiente en unidades para '{producto.nombre_producto}': "
+                        f"disponible {stock_total} unidades, solicitado {unidades_requeridas} unidades"
+                    )
+
             # Validar que la venta no deje stock por debajo de cantidad_minima
-            saldo_posterior = producto.cantidad_unidad - cantidad_requerida
+            total_unidades_requeridas = (bultos_requeridos * unidades_por_caja) + unidades_requeridas
+            saldo_posterior = stock_total - total_unidades_requeridas
             if saldo_posterior < (producto.cantidad_minima or 0):
                 raise ValueError(
-                    f"La venta de {cantidad_requerida} unidades de '{producto.nombre_producto}' "
-                    f"dejaría stock en {saldo_posterior}, por debajo del mínimo configurado "
-                    f"({producto.cantidad_minima})"
+                    f"La venta dejaría el stock de '{producto.nombre_producto}' en {saldo_posterior} unidades, "
+                    f"por debajo del mínimo configurado ({producto.cantidad_minima})"
                 )
 
         # --- IVA: snapshot de la configuracion vigente, no recalculado retroactivamente
@@ -540,6 +569,7 @@ class VentaService:
                 cantidad_producto=item["cantidad"],
                 observaciones_item=item.get("observaciones"),
                 precio_unitario=item["precio_unitario"],
+                tipo_venta=item.get("tipo_venta"),
             )
             session.add(detalle)
             detalles_creados.append(detalle)

@@ -228,8 +228,18 @@ class Inventario(Base):
     cod_producto: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     nombre_producto: Mapped[str] = mapped_column(String(200), nullable=False)
     descripcion_producto: Mapped[str | None] = mapped_column(String)
-    cantidad_caja: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.000")
-    cantidad_unidad: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.000")
+    cantidad_caja: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(12, 2), server_default="0.000"
+    )  # Unidades por caja (configuración)
+    cantidad_caja_unidad: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(12, 2), server_default="0.000"
+    )  # Unidades totales (stock)
+    cantidad_caja_total: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(12, 2), server_default="0.000"
+    )  # Cajas completas (calculado)
+    cantidad_unidad: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(12, 2), server_default="0.000"
+    )  # Mantenido por compatibilidad
     # Umbral de "stock bajo minimo" para el reporte del mismo nombre (migrations/0037).
     # 0.00 = sin minimo configurado para ese producto (no aparece en el reporte).
     cantidad_minima: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.00")
@@ -394,6 +404,7 @@ class FacturaDetalle(Base):
     cantidad_producto: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     observaciones_item: Mapped[str | None] = mapped_column(String(255))
     precio_unitario: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    tipo_venta: Mapped[str | None] = mapped_column(String(10))
 
     factura = relationship("FacturaVenta")
     producto = relationship("Inventario")
