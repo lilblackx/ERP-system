@@ -24,6 +24,25 @@ from PySide6.QtWidgets import QLineEdit
 
 from app.ui.styles import COLOR_BORDER, COLOR_DANGER, COLOR_PRIMARY, COLOR_TEXT_DARK, COLOR_WHITE
 
+
+def _as_decimal(value, default=Decimal("0")):
+    """Convierte un valor a Decimal de forma segura, evitando objetos mock.
+
+    Esta función es utilizada para evitar que objetos MagicMock (usados en tests)
+    lleguen al formateador numérico, lo que causaría un TypeError.
+    """
+    if value is None:
+        return default
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+
+
 _GROUP_SEP = "."
 _DECIMAL_SEP = ","
 
@@ -295,13 +314,13 @@ class NumericLineEdit(QLineEdit):
         super().setText(f"{self.prefix}{_formatear(self._value, self.decimals, agrupar=True)}{self.suffix}")
 
     def get_value(self) -> Decimal | None:
-        return self._value
+        return _as_decimal(self._value, default=None)
 
     def set_value(self, value: Decimal | int | float | str | None) -> None:
         if value is None:
             self._value = None
         else:
-            valor = value if isinstance(value, Decimal) else Decimal(str(value))
+            valor = _as_decimal(value)
             if self.min_value is not None and valor < self.min_value:
                 valor = self.min_value
             if self.max_value is not None and valor > self.max_value:

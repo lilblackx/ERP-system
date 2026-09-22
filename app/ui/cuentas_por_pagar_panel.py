@@ -43,7 +43,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
-from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
@@ -216,9 +216,10 @@ class PagoProveedorDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        texto_saldo = f"Saldo pendiente: ${float(self.cuenta.saldo_pendiente):,.2f}"
+        saldo_pendiente = _as_decimal(self.cuenta.saldo_pendiente)
+        texto_saldo = f"Saldo pendiente: ${float(saldo_pendiente):,.2f}"
         if self.tasa_bcv:
-            texto_saldo += f"  (Bs {float(self.cuenta.saldo_pendiente) * self.tasa_bcv:,.2f})"
+            texto_saldo += f"  (Bs {float(saldo_pendiente) * self.tasa_bcv:,.2f})"
         lbl_saldo = QLabel(texto_saldo)
         lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_saldo)
@@ -236,9 +237,9 @@ class PagoProveedorDialog(QDialog):
         lbl_monto = QLabel(f"Monto (USD) {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
         self.monto_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01"), max_value=self.cuenta.saldo_pendiente, prefix="$ "
+            NumericFieldType.AMOUNT, min_value=Decimal("0.01"), max_value=saldo_pendiente, prefix="$ "
         )
-        self.monto_input.set_value(self.cuenta.saldo_pendiente)
+        self.monto_input.set_value(saldo_pendiente)
         self.monto_input.setFixedHeight(32)
         self.monto_input.valueChanged.connect(self._on_monto_usd_cambiado)
         layout.addWidget(lbl_monto)
@@ -791,7 +792,8 @@ class CuentasPorPagarPanel(QWidget):
             self.tabla.setItem(
                 fila, 2, QTableWidgetItem(compra.proveedor.nombre_razon_social if compra and compra.proveedor else "")
             )
-            item_saldo = QTableWidgetItem(f"${float(cuenta.saldo_pendiente):,.2f}")
+            saldo_pendiente = _as_decimal(cuenta.saldo_pendiente)
+            item_saldo = QTableWidgetItem(f"${float(saldo_pendiente):,.2f}")
             item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_saldo)
 
@@ -815,7 +817,7 @@ class CuentasPorPagarPanel(QWidget):
             color = COLORES_ESTADO_CXP.get(cuenta.estado, COLOR_TEXT_MUTED)
             self.tabla.setCellWidget(fila, 7, EstadoBadge(cuenta.estado.capitalize(), color))
 
-            saldo_total += float(cuenta.saldo_pendiente)
+            saldo_total += float(saldo_pendiente)
 
         total = resultado["total"]
         self.total_paginas = max(1, -(-total // POR_PAGINA))

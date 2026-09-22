@@ -47,7 +47,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
-from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
@@ -226,9 +226,10 @@ class PagoCobroDialog(QDialog):
         lbl_factura.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_factura)
 
-        texto_saldo = f"Saldo pendiente: ${float(self.cuenta.saldo_pendiente):,.2f}"
+        saldo_pendiente = _as_decimal(self.cuenta.saldo_pendiente)
+        texto_saldo = f"Saldo pendiente: ${float(saldo_pendiente):,.2f}"
         if self.tasa_bcv:
-            texto_saldo += f"  (Bs {float(self.cuenta.saldo_pendiente) * self.tasa_bcv:,.2f})"
+            texto_saldo += f"  (Bs {float(saldo_pendiente) * self.tasa_bcv:,.2f})"
         lbl_saldo = QLabel(texto_saldo)
         lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_saldo)
@@ -246,7 +247,7 @@ class PagoCobroDialog(QDialog):
         lbl_monto = QLabel(f"Monto (USD) {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
         self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
-        self.monto_input.set_value(self.cuenta.saldo_pendiente)
+        self.monto_input.set_value(saldo_pendiente)
         self.monto_input.setFixedHeight(32)
         self.monto_input.valueChanged.connect(self._calcular_bolivares_desde_usd)
         layout.addWidget(lbl_monto)
@@ -679,7 +680,8 @@ class DetalleClienteDialog(QDialog):
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(cuenta.id_cuenta_por_cobrar)))
             self.tabla.setItem(fila, 1, QTableWidgetItem(factura.numero_factura if factura else ""))
 
-            item_saldo = QTableWidgetItem(f"${float(cuenta.saldo_pendiente):,.2f}")
+            saldo_pendiente = _as_decimal(cuenta.saldo_pendiente)
+            item_saldo = QTableWidgetItem(f"${float(saldo_pendiente):,.2f}")
             item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 2, item_saldo)
 
