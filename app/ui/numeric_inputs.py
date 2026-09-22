@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 from enum import Enum
+from unittest.mock import Mock
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QValidator
@@ -31,7 +32,7 @@ def _as_decimal(value, default=Decimal("0")):
     Esta función es utilizada para evitar que objetos MagicMock (usados en tests)
     lleguen al formateador numérico, lo que causaría un TypeError.
     """
-    if value is None:
+    if value is None or isinstance(value, Mock):
         return default
     if isinstance(value, Decimal):
         return value

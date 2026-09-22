@@ -363,19 +363,22 @@ class PagoProveedorDialog(QDialog):
         if tasa_registro:
             # Agregar tasa BCV
             if tasa_registro.tasa_dolar_bcv:
-                etiqueta_bcv = f"BCV: {tasa_registro.tasa_dolar_bcv:,.2f}"
-                self.tasa_combo.addItem(etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_registro.tasa_dolar_bcv)))
+                tasa_bcv = _as_decimal(tasa_registro.tasa_dolar_bcv)
+                etiqueta_bcv = f"BCV: {float(tasa_bcv):,.2f}"
+                self.tasa_combo.addItem(etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv)))
             # Agregar tasa paralelo
             if tasa_registro.tasa_dolar_paralelo:
-                etiqueta_paralelo = f"Paralelo: {tasa_registro.tasa_dolar_paralelo:,.2f}"
+                tasa_paralelo = _as_decimal(tasa_registro.tasa_dolar_paralelo)
+                etiqueta_paralelo = f"Paralelo: {float(tasa_paralelo):,.2f}"
                 self.tasa_combo.addItem(
                     etiqueta_paralelo,
-                    (tasa_registro.id_tasa, float(tasa_registro.tasa_dolar_paralelo)),
+                    (tasa_registro.id_tasa, float(tasa_paralelo)),
                 )
             # Agregar tasa COP
             if tasa_registro.tasa_cop:
-                etiqueta_cop = f"COP: {tasa_registro.tasa_cop:,.2f}"
-                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_registro.tasa_cop)))
+                tasa_cop = _as_decimal(tasa_registro.tasa_cop)
+                etiqueta_cop = f"COP: {float(tasa_cop):,.2f}"
+                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop)))
 
         self.tasa_combo.blockSignals(False)
 
@@ -722,9 +725,10 @@ class CuentasPorPagarPanel(QWidget):
             self.lbl_tasa.setVisible(False)
             return None
         fecha = tasa["fecha_tasa"].strftime("%d/%m/%Y")
-        self.lbl_tasa.setText(f"Tasa BCV: {tasa['tasa_bcv']:,.2f} Bs/USD ({fecha})")
+        tasa_bcv = _as_decimal(tasa["tasa_bcv"])
+        self.lbl_tasa.setText(f"Tasa BCV: {float(tasa_bcv):,.2f} Bs/USD ({fecha})")
         self.lbl_tasa.setVisible(True)
-        return float(tasa["tasa_bcv"])
+        return float(tasa_bcv)
 
     def cargar_cuentas(self) -> None:
         session = self.session_factory()
@@ -824,7 +828,7 @@ class CuentasPorPagarPanel(QWidget):
         self.pagina_actual = min(self.pagina_actual, self.total_paginas)
 
         self.lbl_total.setText(f"{total} cuenta{'s' if total != 1 else ''} por pagar")
-        self.lbl_saldo_total.setText(f"${saldo_total:,.2f}")
+        self.lbl_saldo_total.setText(f"${_as_decimal(saldo_total):,.2f}")
         self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
         self.btn_anterior.setEnabled(self.pagina_actual > 1)
         self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)

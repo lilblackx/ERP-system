@@ -59,7 +59,7 @@ from app.services.usuarios import UsuarioService
 from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.nota_recepcion_detalle_dialog import NotaRecepcionDetalleDialog
-from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
 from app.ui.styles import (
@@ -555,15 +555,17 @@ class OrdenCompraFormDialog(QDialog):
             total += subtotal
             self.tabla_items.setItem(fila, 0, QTableWidgetItem(item["nombre_producto"]))
 
-            item_cantidad = QTableWidgetItem(f"{item['cantidad']:,.2f}")
+            cantidad = _as_decimal(item["cantidad"])
+            item_cantidad = QTableWidgetItem(f"{float(cantidad):,.2f}")
             item_cantidad.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_items.setItem(fila, 1, item_cantidad)
 
-            item_precio = QTableWidgetItem(f"${item['precio']:,.2f}")
+            precio = _as_decimal(item["precio"])
+            item_precio = QTableWidgetItem(f"${float(precio):,.2f}")
             item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_items.setItem(fila, 2, item_precio)
 
-            item_subtotal = QTableWidgetItem(f"${subtotal:,.2f}")
+            item_subtotal = QTableWidgetItem(f"${float(subtotal):,.2f}")
             item_subtotal.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_items.setItem(fila, 3, item_subtotal)
             btn_quitar = QPushButton()
@@ -582,7 +584,7 @@ class OrdenCompraFormDialog(QDialog):
         # icono de papelera se veia cortado a la mitad tras sacarle el borde/fondo al
         # boton (2026-09-09) -- mismo patron aca.
         self.tabla_items.resizeRowsToContents()
-        self.lbl_total.setText(f"Total: ${total:,.2f}")
+        self.lbl_total.setText(f"Total: ${float(total):,.2f}")
 
     # ── Validacion / datos ────────────────────────────────────────────────
 
@@ -914,7 +916,8 @@ class NotaRecepcionFormDialog(QDialog):
             for fila, detalle in enumerate(self.detalles_pendientes):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
-                item_pendiente = QTableWidgetItem(f"{float(detalle.cantidad_pendiente):,.2f}")
+                cantidad_pendiente = _as_decimal(detalle.cantidad_pendiente)
+                item_pendiente = QTableWidgetItem(f"{float(cantidad_pendiente):,.2f}")
                 item_pendiente.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 1, item_pendiente)
 
@@ -1083,9 +1086,14 @@ class NotaDevolucionFormDialog(QDialog):
             for fila, (detalle, disponible) in enumerate(self.lineas_disponibles):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
-                item_disponible = QTableWidgetItem(f"{float(disponible):,.2f}")
+                disponible_decimal = _as_decimal(disponible)
+                item_disponible = QTableWidgetItem(f"{float(disponible_decimal):,.2f}")
                 item_disponible.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 1, item_disponible)
+                precio_unitario = _as_decimal(detalle.precio_unitario)
+                item_costo = QTableWidgetItem(f"${float(precio_unitario):,.2f}")
+                item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla.setItem(fila, 2, item_costo)
                 # NotaDevolucionDetalle.cantidad_devuelta es Numeric(18,4).
                 spin = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, max_value=disponible)
                 self.tabla.setCellWidget(fila, 2, spin)
@@ -1217,10 +1225,12 @@ class CompraDesdeOCFormDialog(QDialog):
             for fila, (detalle, disponible) in enumerate(self.lineas_disponibles):
                 nombre = detalle.producto.nombre_producto if detalle.producto else "—"
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
-                item_disponible = QTableWidgetItem(f"{float(disponible):,.2f}")
+                disponible_decimal = _as_decimal(disponible)
+                item_disponible = QTableWidgetItem(f"{float(disponible_decimal):,.2f}")
                 item_disponible.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 1, item_disponible)
-                item_costo = QTableWidgetItem(f"${float(detalle.precio_unitario):,.2f}")
+                precio_unitario = _as_decimal(detalle.precio_unitario)
+                item_costo = QTableWidgetItem(f"${float(precio_unitario):,.2f}")
                 item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 2, item_costo)
                 # Termina en CompraDetalle.cantidad_producto, que es Numeric(12,2) (no el
@@ -1297,7 +1307,8 @@ class CompraDesdeOCFormDialog(QDialog):
         )
 
     def _refrescar_total(self) -> None:
-        self.lbl_total.setText(f"Total: ${self._total_actual():,.2f}")
+        total_actual = self._total_actual()
+        self.lbl_total.setText(f"Total: ${float(total_actual):,.2f}")
 
     def _toggle_credito(self) -> None:
         es_credito = self.condicion_combo.currentData() == "credito"
@@ -1311,7 +1322,8 @@ class CompraDesdeOCFormDialog(QDialog):
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.pago = dialogo.get_data()
             metodo = _ETIQUETAS_METODO.get(self.pago["metodo_pago"], self.pago["metodo_pago"])
-            self.lbl_pago_resumen.setText(f"{metodo} · {self.pago['moneda']} {self.pago['monto_moneda_origen']:,.2f}")
+            monto_origen = _as_decimal(self.pago["monto_moneda_origen"])
+            self.lbl_pago_resumen.setText(f"{metodo} · {self.pago['moneda']} {float(monto_origen):,.2f}")
             self.lbl_pago_resumen.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
 
     def _validar_y_aceptar(self) -> None:
@@ -1580,15 +1592,18 @@ class ComprasView(QWidget):
                 self.tabla_oc.setItem(
                     fila, 3, QTableWidgetItem(oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else "")
                 )
-                item_solicitada = QTableWidgetItem(f"{float(oc.cantidad_solicitada):,.2f}")
+                cantidad_solicitada = _as_decimal(oc.cantidad_solicitada)
+                item_solicitada = QTableWidgetItem(f"{float(cantidad_solicitada):,.2f}")
                 item_solicitada.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla_oc.setItem(fila, 4, item_solicitada)
 
-                item_recibida = QTableWidgetItem(f"{float(oc.cantidad_recibida):,.2f}")
+                cantidad_recibida = _as_decimal(oc.cantidad_recibida)
+                item_recibida = QTableWidgetItem(f"{float(cantidad_recibida):,.2f}")
                 item_recibida.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla_oc.setItem(fila, 5, item_recibida)
 
-                item_total = QTableWidgetItem(f"${float(oc.total_oc):,.2f}")
+                total_oc = _as_decimal(oc.total_oc)
+                item_total = QTableWidgetItem(f"${float(total_oc):,.2f}")
                 item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla_oc.setItem(fila, 6, item_total)
                 color = COLORES_ESTADO_OC.get(oc.estado, COLOR_TEXT_MUTED)
@@ -1947,7 +1962,8 @@ class ComprasView(QWidget):
                 self.tabla_compra.setItem(
                     fila, 5, QTableWidgetItem("Contado" if c.condicion_pago == "contado" else "Crédito")
                 )
-                item_total = QTableWidgetItem(f"${float(c.total_compra):,.2f}")
+                total_compra = _as_decimal(c.total_compra)
+                item_total = QTableWidgetItem(f"${float(total_compra):,.2f}")
                 item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla_compra.setItem(fila, 6, item_total)
                 estado = c.estado_compra or "EMITIDA"
