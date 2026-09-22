@@ -464,6 +464,8 @@ class Compra(Base):
     usuario = relationship("Usuario", foreign_keys=[id_usuario_compra])
     tasa = relationship("ControlDeTasa")
     modificador = relationship("Usuario", foreign_keys=[modificado_por])
+    detalles = relationship("CompraDetalle")
+    oc = relationship("CompraOC", foreign_keys=[id_oc])
 
 
 class CompraDetalle(Base):
@@ -483,7 +485,7 @@ class CompraDetalle(Base):
     # DEFAULT False preserva el flujo viejo (compra directa) sin cambios.
     stock_ya_contabilizado: Mapped[bool] = mapped_column(Boolean, server_default="0")
 
-    compra = relationship("Compra")
+    compra = relationship("Compra", overlaps="detalles")
     producto = relationship("Inventario")
 
 

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
@@ -48,12 +49,16 @@ from sqlalchemy.orm import Session
 from app.db.models import CompraOC, NotaDevolucionDetalle, NotaRecepcion, Usuario
 from app.services.compra_oc import CompraOCService
 from app.services.compras import CompraService
+from app.services.empresa import EmpresaService
+from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import ProductoService
 from app.services.nota_recepcion import NotaRecepcionService
 from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
 from app.services.usuarios import UsuarioService
+from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.message_box import MessageBox
+from app.ui.nota_recepcion_detalle_dialog import NotaRecepcionDetalleDialog
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
@@ -89,7 +94,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_sombra,
 )
-from app.ui.toolbar_popups import BotonFiltros
+from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 
 logger = logging.getLogger(__name__)
 
@@ -1510,6 +1515,11 @@ class ComprasView(QWidget):
         toolbar, self.oc_buscar_input, self.oc_estado_combo = self._make_toolbar(
             estados, self._buscar_ocs_desde_inicio, self.nueva_oc, "Nueva ODC"
         )
+
+        # Agregar botón de exportación a la toolbar
+        btn_exportar_oc = BotonExportar(on_excel=self._exportar_ocs_excel, on_pdf=self._exportar_ocs_pdf)
+        toolbar.layout().addWidget(btn_exportar_oc)
+
         layout.addWidget(toolbar)
 
         self.tabla_oc = self._make_tabla(
@@ -1672,10 +1682,14 @@ class ComprasView(QWidget):
             self.nueva_recepcion,
             "Nueva Recepción",
         )
-        self.nr_buscar_input.setVisible(False)  # sin busqueda por texto, ver docstring del footer
+
+        # Agregar botón de exportación a la toolbar
+        btn_exportar_nr = BotonExportar(on_excel=self._exportar_nrs_excel, on_pdf=self._exportar_nrs_pdf)
+        toolbar.layout().addWidget(btn_exportar_nr)
+
         layout.addWidget(toolbar)
 
-        self.tabla_nr = self._make_tabla(["ID", "N° NR", "ODC", "Proveedor", "Fecha", "Estado"])
+        self.tabla_nr = self._make_tabla(["ID", "N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"])
         alinear_encabezados(
             self.tabla_nr,
             {
@@ -1683,17 +1697,23 @@ class ComprasView(QWidget):
                 2: Qt.AlignmentFlag.AlignLeft,
                 3: Qt.AlignmentFlag.AlignLeft,
                 4: Qt.AlignmentFlag.AlignLeft,
-                5: Qt.AlignmentFlag.AlignCenter,
+                5: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignCenter,
             },
         )
         layout.addWidget(self.tabla_nr, stretch=1)
+
+        btn_detalle_nr = QPushButton("Ver Detalle")
+        btn_detalle_nr.setIcon(qta.icon("fa5s.eye", color=COLOR_TEXT_DARK))
+        btn_detalle_nr.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_detalle_nr.clicked.connect(self.ver_detalle_nr)
 
         btn_rechazar = QPushButton("Rechazar (Devolución)")
         btn_rechazar.setIcon(qta.icon("fa5s.undo", color=COLOR_TEXT_DARK))
         btn_rechazar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_rechazar.clicked.connect(self.rechazar_nr_seleccionada)
         footer, self.lbl_pagina_nr, self.btn_nr_anterior, self.btn_nr_siguiente = self._make_footer(
-            lambda: self._pagina_anterior("nr"), lambda: self._pagina_siguiente("nr"), [btn_rechazar]
+            lambda: self._pagina_anterior("nr"), lambda: self._pagina_siguiente("nr"), [btn_detalle_nr, btn_rechazar]
         )
         layout.addWidget(footer)
         return page
@@ -1709,9 +1729,23 @@ class ComprasView(QWidget):
                 session, pagina=self.paginas["nr"], por_pagina=POR_PAGINA, id_usuario=self.usuario.id_usuario
             )
             nrs = resultado["items"]
+
+            # Filtro por estado
             estado_filtro = self.nr_estado_combo.currentData()
             if estado_filtro:
                 nrs = [n for n in nrs if n.estado == estado_filtro]
+
+            # Filtro por texto (búsqueda por número de NR, OC o proveedor)
+            texto_busqueda = self.nr_buscar_input.text().strip().lower()
+            if texto_busqueda:
+                nrs = [
+                    n
+                    for n in nrs
+                    if texto_busqueda in n.numero_nr.lower()
+                    or (n.oc and texto_busqueda in n.oc.numero_oc.lower())
+                    or (n.oc and n.oc.proveedor and texto_busqueda in n.oc.proveedor.nombre_razon_social.lower())
+                ]
+
             self.tabla_nr.setRowCount(len(nrs))
             for fila, nr in enumerate(nrs):
                 oc = nr.oc
@@ -1724,8 +1758,11 @@ class ComprasView(QWidget):
                 self.tabla_nr.setItem(
                     fila, 4, QTableWidgetItem(nr.fecha_recepcion.strftime("%d/%m/%Y") if nr.fecha_recepcion else "")
                 )
+                # Usuario que realizó la recepción
+                usuario = nr.usuario_recepcion if nr.usuario_recepcion else None
+                self.tabla_nr.setItem(fila, 5, QTableWidgetItem(usuario.nombre if usuario else ""))
                 color = COLORES_ESTADO_NR.get(nr.estado, COLOR_TEXT_MUTED)
-                self.tabla_nr.setCellWidget(fila, 5, EstadoBadge(nr.estado.capitalize(), color))
+                self.tabla_nr.setCellWidget(fila, 6, EstadoBadge(nr.estado.capitalize(), color))
             self._actualizar_paginacion(
                 "nr", resultado["total"], self.lbl_pagina_nr, self.btn_nr_anterior, self.btn_nr_siguiente
             )
@@ -1788,6 +1825,36 @@ class ComprasView(QWidget):
         finally:
             session.close()
 
+    def ver_detalle_nr(self) -> None:
+        """Muestra el detalle de la nota de recepción seleccionada."""
+        id_nr = self._fila_seleccionada_id(self.tabla_nr)
+        if id_nr is None:
+            return
+        session = self.session_factory()
+        try:
+            dialogo = NotaRecepcionDetalleDialog(session, id_nr, id_usuario=self.usuario.id_usuario, parent=self)
+            dialogo.exec()
+        except Exception:
+            logger.exception("Fallo al mostrar detalle de recepcion")
+            MessageBox.critical(self, "Error", "No se pudo mostrar el detalle de la recepción.")
+        finally:
+            session.close()
+
+    def ver_detalle_compra(self) -> None:
+        """Muestra el detalle de la factura de compra seleccionada."""
+        id_compra = self._fila_seleccionada_id(self.tabla_compra)
+        if id_compra is None:
+            return
+        session = self.session_factory()
+        try:
+            dialogo = CompraDetalleDialog(session, id_compra, id_usuario=self.usuario.id_usuario, parent=self)
+            dialogo.exec()
+        except Exception:
+            logger.exception("Fallo al mostrar detalle de compra")
+            MessageBox.critical(self, "Error", "No se pudo mostrar el detalle de la factura.")
+        finally:
+            session.close()
+
     # ── Pestana: Facturas ────────────────────────────────────────────────
 
     def _make_tab_compras(self) -> QWidget:
@@ -1802,7 +1869,11 @@ class ComprasView(QWidget):
             self.nueva_factura_desde_oc,
             "Nueva Factura",
         )
-        self.compra_buscar_input.setVisible(False)
+
+        # Agregar botón de exportación a la toolbar
+        btn_exportar_compra = BotonExportar(on_excel=self._exportar_compras_excel, on_pdf=self._exportar_compras_pdf)
+        toolbar.layout().addWidget(btn_exportar_compra)
+
         layout.addWidget(toolbar)
 
         self.tabla_compra = self._make_tabla(
@@ -1822,8 +1893,13 @@ class ComprasView(QWidget):
         )
         layout.addWidget(self.tabla_compra, stretch=1)
 
+        btn_detalle_compra = QPushButton("Ver Detalle")
+        btn_detalle_compra.setIcon(qta.icon("fa5s.eye", color=COLOR_TEXT_DARK))
+        btn_detalle_compra.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_detalle_compra.clicked.connect(self.ver_detalle_compra)
+
         footer, self.lbl_pagina_compra, self.btn_compra_anterior, self.btn_compra_siguiente = self._make_footer(
-            lambda: self._pagina_anterior("compra"), lambda: self._pagina_siguiente("compra"), []
+            lambda: self._pagina_anterior("compra"), lambda: self._pagina_siguiente("compra"), [btn_detalle_compra]
         )
         layout.addWidget(footer)
         return page
@@ -1844,6 +1920,18 @@ class ComprasView(QWidget):
                 id_usuario=self.usuario.id_usuario,
             )
             compras = resultado["items"]
+
+            # Filtro por texto (búsqueda por número de compra, OC o proveedor)
+            texto_busqueda = self.compra_buscar_input.text().strip().lower()
+            if texto_busqueda:
+                compras = [
+                    c
+                    for c in compras
+                    if texto_busqueda in c.numero_compra.lower()
+                    or (c.oc and texto_busqueda in c.oc.numero_oc.lower())
+                    or (c.proveedor and texto_busqueda in c.proveedor.nombre_razon_social.lower())
+                ]
+
             self.tabla_compra.setRowCount(len(compras))
             for fila, c in enumerate(compras):
                 self.tabla_compra.setItem(fila, 0, QTableWidgetItem(str(c.id_compra)))
@@ -1932,3 +2020,228 @@ class ComprasView(QWidget):
         if self.paginas[clave] < self.total_paginas[clave]:
             self.paginas[clave] += 1
             [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][["oc", "nr", "compra"].index(clave)]()
+
+    # ── Exportación ───────────────────────────────────────────────────────
+
+    def _exportar_ocs_excel(self) -> None:
+        """Exporta las órdenes de compra actuales a Excel."""
+        filas = self._obtener_filas_para_exportar(self.tabla_oc)
+        if not filas:
+            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
+            return
+
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Órdenes de Compra", "ordenes_compra.xlsx", "Excel (*.xlsx)"
+        )
+        if not ruta:
+            return
+
+        try:
+            config_empresa = self._obtener_config_empresa()
+            encabezados = ["N° ODC", "Proveedor", "Fecha", "Total Productos", "Cant. Rec.", "Total", "Estado"]
+            exportar_excel(ruta, encabezados, filas, titulo="Órdenes de Compra", config_empresa=config_empresa)
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar órdenes de compra a Excel")
+            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+
+    def _exportar_ocs_pdf(self) -> None:
+        """Exporta las órdenes de compra actuales a PDF."""
+        filas = self._obtener_filas_para_exportar(self.tabla_oc)
+        if not filas:
+            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
+            return
+
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Órdenes de Compra", "ordenes_compra.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        try:
+            config_empresa = self._obtener_config_empresa()
+            encabezados = ["N° ODC", "Proveedor", "Fecha", "Total Productos", "Cant. Rec.", "Total", "Estado"]
+            filtros = self._obtener_filtros_oc_para_exportar()
+            col_widths = [1.5, 2.5, 1.2, 1.5, 1.2, 1.5, 1.0]
+            exportar_pdf(
+                ruta,
+                "Órdenes de Compra",
+                encabezados,
+                filas,
+                filtros=filtros,
+                col_widths=col_widths,
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar órdenes de compra a PDF")
+            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
+
+    def _exportar_nrs_excel(self) -> None:
+        """Exporta las notas de recepción actuales a Excel."""
+        filas = self._obtener_filas_para_exportar(self.tabla_nr)
+        if not filas:
+            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
+            return
+
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Recepciones", "recepciones.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+
+        try:
+            config_empresa = self._obtener_config_empresa()
+            encabezados = ["N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"]
+            exportar_excel(ruta, encabezados, filas, titulo="Recepciones", config_empresa=config_empresa)
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar recepciones a Excel")
+            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+
+    def _exportar_nrs_pdf(self) -> None:
+        """Exporta las notas de recepción actuales a PDF."""
+        filas = self._obtener_filas_para_exportar(self.tabla_nr)
+        if not filas:
+            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
+            return
+
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Recepciones", "recepciones.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        try:
+            config_empresa = self._obtener_config_empresa()
+            encabezados = ["N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"]
+            filtros = self._obtener_filtros_nr_para_exportar()
+            col_widths = [1.5, 1.5, 2.5, 1.2, 1.5, 1.0]
+            exportar_pdf(
+                ruta,
+                "Recepciones",
+                encabezados,
+                filas,
+                filtros=filtros,
+                col_widths=col_widths,
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar recepciones a PDF")
+            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
+
+    def _exportar_compras_excel(self) -> None:
+        """Exporta las facturas de compra actuales a Excel."""
+        filas = self._obtener_filas_para_exportar(self.tabla_compra)
+        if not filas:
+            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
+            return
+
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Facturas", "facturas_compra.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+
+        try:
+            config_empresa = self._obtener_config_empresa()
+            encabezados = ["N° Compra", "ODC", "Proveedor", "Fecha", "Condición", "Total", "Estado"]
+            exportar_excel(ruta, encabezados, filas, titulo="Facturas de Compra", config_empresa=config_empresa)
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar facturas de compra a Excel")
+            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+
+    def _exportar_compras_pdf(self) -> None:
+        """Exporta las facturas de compra actuales a PDF."""
+        filas = self._obtener_filas_para_exportar(self.tabla_compra)
+        if not filas:
+            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
+            return
+
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Facturas", "facturas_compra.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        try:
+            config_empresa = self._obtener_config_empresa()
+            encabezados = ["N° Compra", "ODC", "Proveedor", "Fecha", "Condición", "Total", "Estado"]
+            filtros = self._obtener_filtros_compras_para_exportar()
+            col_widths = [1.5, 1.5, 2.5, 1.2, 1.2, 1.5, 1.0]
+            exportar_pdf(
+                ruta,
+                "Facturas de Compra",
+                encabezados,
+                filas,
+                filtros=filtros,
+                col_widths=col_widths,
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar facturas de compra a PDF")
+            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
+
+    def _obtener_filas_para_exportar(self, tabla: QTableWidget) -> list[list]:
+        """Obtiene las filas de la tabla actual para exportación."""
+        filas = []
+        for row in range(tabla.rowCount()):
+            fila = []
+            for col in range(1, tabla.columnCount()):  # Saltar columna ID (0)
+                item = tabla.item(row, col)
+                if item:
+                    fila.append(item.text())
+                else:
+                    # Para widgets como EstadoBadge
+                    widget = tabla.cellWidget(row, col)
+                    if widget:
+                        # EstadoBadge es un QWidget que contiene un QLabel
+                        # Buscamos el QLabel dentro del layout
+                        if hasattr(widget, "layout"):
+                            layout = widget.layout()
+                            if layout:
+                                for i in range(layout.count()):
+                                    layout_item = layout.itemAt(i)
+                                    if layout_item:
+                                        item_widget = layout_item.widget()
+                                        if isinstance(item_widget, QLabel):
+                                            fila.append(item_widget.text())
+                                            break
+                                else:
+                                    fila.append("")
+                            else:
+                                fila.append("")
+                        else:
+                            fila.append("")
+                    else:
+                        fila.append("")
+            filas.append(fila)
+        return filas
+
+    def _obtener_filtros_oc_para_exportar(self) -> dict[str, str]:
+        """Genera un diccionario con los filtros aplicados para las OC."""
+        filtros = {}
+        if self.oc_buscar_input.text().strip():
+            filtros["Búsqueda"] = self.oc_buscar_input.text().strip()
+        if self.oc_estado_combo.currentData():
+            filtros["Estado"] = self.oc_estado_combo.currentText()
+        return filtros
+
+    def _obtener_filtros_nr_para_exportar(self) -> dict[str, str]:
+        """Genera un diccionario con los filtros aplicados para las NR."""
+        filtros = {}
+        if self.nr_buscar_input.text().strip():
+            filtros["Búsqueda"] = self.nr_buscar_input.text().strip()
+        if self.nr_estado_combo.currentData():
+            filtros["Estado"] = self.nr_estado_combo.currentText()
+        return filtros
+
+    def _obtener_filtros_compras_para_exportar(self) -> dict[str, str]:
+        """Genera un diccionario con los filtros aplicados para las compras."""
+        filtros = {}
+        if self.compra_buscar_input.text().strip():
+            filtros["Búsqueda"] = self.compra_buscar_input.text().strip()
+        if self.compra_estado_combo.currentData():
+            filtros["Estado"] = self.compra_estado_combo.currentText()
+        return filtros
+
+    def _obtener_config_empresa(self):
+        """Obtiene la configuración de la empresa para la exportación."""
+        session = self.session_factory()
+        try:
+            return EmpresaService.obtener_datos_documento(session)
+        finally:
+            session.close()

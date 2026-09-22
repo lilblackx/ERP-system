@@ -1,4 +1,6 @@
+from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 
 from app.db.models import Proveedor
 from app.services.auditoria import AuditoriaService
@@ -36,10 +38,23 @@ class ProveedorService:
         query = session.query(Proveedor)
         if texto_busqueda:
             like = f"%{texto_busqueda}%"
+            # Buscar en: nombre, código, identificación (número), tipo legal (id_legal),
+            # y RIF completo (id_legal + "-" + identificacion_proveedor)
+            # Concatenación condicional: solo agregar "-" si ambos campos tienen valor
+            rif_completo = func.concat(
+                func.coalesce(Proveedor.id_legal, ""),
+                case((Proveedor.id_legal.isnot(None), "-"), else_=""),
+                func.coalesce(Proveedor.identificacion_proveedor, ""),
+            )
             query = query.filter(
-                Proveedor.nombre_razon_social.ilike(like)
-                | Proveedor.identificacion_proveedor.ilike(like)
-                | Proveedor.codigo_proveedor.ilike(like)
+                or_(
+                    Proveedor.nombre_razon_social.ilike(like),
+                    Proveedor.identificacion_proveedor.ilike(like),
+                    Proveedor.codigo_proveedor.ilike(like),
+                    Proveedor.id_legal.ilike(like),
+                    # Concatenación para búsqueda de RIF completo (ej. "J-12345678")
+                    rif_completo.ilike(like),
+                )
             )
         if estado_proveedor:
             query = query.filter(Proveedor.estado_proveedor == estado_proveedor)

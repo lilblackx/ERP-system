@@ -639,7 +639,7 @@ class DetalleClienteDialog(QDialog):
         root.addLayout(footer)
 
     def _crear_tabla_detalle(self) -> QTableWidget:
-        columnas = ["ID", "Factura", "Saldo Pendiente", "Saldo Pendiente (Bs)", "Días", "Fecha Factura", "Estado"]
+        columnas = ["ID", "Factura", "Saldo Pendiente", "Días", "Fecha Factura", "Estado"]
         tabla = QTableWidget(0, len(columnas))
         tabla.setHorizontalHeaderLabels(columnas)
         tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -663,9 +663,8 @@ class DetalleClienteDialog(QDialog):
                 1: Qt.AlignmentFlag.AlignLeft,
                 2: Qt.AlignmentFlag.AlignRight,
                 3: Qt.AlignmentFlag.AlignRight,
-                4: Qt.AlignmentFlag.AlignRight,
-                5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignCenter,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignCenter,
             },
         )
 
@@ -684,21 +683,16 @@ class DetalleClienteDialog(QDialog):
             item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 2, item_saldo)
 
-            texto_bs = f"Bs {float(cuenta.saldo_pendiente) * self.tasa_bcv:,.2f}" if self.tasa_bcv else "—"
-            item_saldo_bs = QTableWidgetItem(texto_bs)
-            item_saldo_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 3, item_saldo_bs)
-
             # Calcular días transcurridos desde la emisión de la factura
             dias_transcurridos = 0
             if factura and factura.fecha_emision:
                 dias_transcurridos = (hoy - factura.fecha_emision.date()).days
             item_dias = QTableWidgetItem(str(dias_transcurridos))
             item_dias.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 4, item_dias)
+            self.tabla.setItem(fila, 3, item_dias)
 
             vencimiento = cuenta.fecha_vencimiento.strftime("%d/%m/%Y") if cuenta.fecha_vencimiento else "Sin definir"
-            self.tabla.setItem(fila, 5, QTableWidgetItem(vencimiento))
+            self.tabla.setItem(fila, 4, QTableWidgetItem(vencimiento))
 
             # Calcular estado visual
             estado_visual = (
@@ -709,7 +703,7 @@ class DetalleClienteDialog(QDialog):
                 else cuenta.estado
             )
             color = COLORES_ESTADO_CXC.get(estado_visual, COLOR_TEXT_MUTED)
-            self.tabla.setCellWidget(fila, 6, EstadoBadge(estado_visual.capitalize(), color))
+            self.tabla.setCellWidget(fila, 5, EstadoBadge(estado_visual.capitalize(), color))
 
     def _on_double_click_cuenta(self) -> None:
         """Maneja el doble clic en una cuenta para abrir el diálogo de cobro."""
@@ -879,18 +873,15 @@ class CuentasPorCobrarPanel(QWidget):
         return w
 
     def _make_table(self) -> QWidget:
-        self.tabla = self._crear_tabla(
-            ["ID", "Cliente", "Saldo Pendiente", "Saldo Pendiente (Bs)", "Días", "Fecha Factura", "Estado"]
-        )
+        self.tabla = self._crear_tabla(["ID", "Cliente", "Saldo Pendiente", "Días", "Fecha Factura", "Estado"])
         alinear_encabezados(
             self.tabla,
             {
                 1: Qt.AlignmentFlag.AlignLeft,
                 2: Qt.AlignmentFlag.AlignRight,
                 3: Qt.AlignmentFlag.AlignRight,
-                4: Qt.AlignmentFlag.AlignRight,
-                5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignCenter,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignCenter,
             },
         )
         return self.tabla
@@ -1076,27 +1067,21 @@ class CuentasPorCobrarPanel(QWidget):
             item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 2, item_saldo)
 
-            # Equivalente en Bs, informativo
-            texto_bs = f"Bs {float(saldo_total_cliente) * self._tasa_bcv:,.2f}" if self._tasa_bcv else "—"
-            item_saldo_bs = QTableWidgetItem(texto_bs)
-            item_saldo_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 3, item_saldo_bs)
-
             # Días transcurridos desde la factura más vieja pendiente
             item_dias = QTableWidgetItem(str(dias_transcurridos))
             item_dias.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 4, item_dias)
+            self.tabla.setItem(fila, 3, item_dias)
 
             # Fecha de la factura más vieja pendiente
             fecha_factura = (
                 fecha_emision_mas_antigua.strftime("%d/%m/%Y") if fecha_emision_mas_antigua else "Sin definir"
             )
-            self.tabla.setItem(fila, 5, QTableWidgetItem(fecha_factura))
+            self.tabla.setItem(fila, 4, QTableWidgetItem(fecha_factura))
 
             # Determinar estado general del cliente basado en sus cuentas
             estado_general = self._determinar_estado_cliente(cuentas)
             color = COLORES_ESTADO_CXC.get(estado_general, COLOR_TEXT_MUTED)
-            self.tabla.setCellWidget(fila, 6, EstadoBadge(estado_general.capitalize(), color))
+            self.tabla.setCellWidget(fila, 5, EstadoBadge(estado_general.capitalize(), color))
 
             saldo_total += float(saldo_total_cliente)
 
@@ -1105,10 +1090,7 @@ class CuentasPorCobrarPanel(QWidget):
         self.pagina_actual = min(self.pagina_actual, self.total_paginas)
 
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''} con deuda")
-        if self._tasa_bcv:
-            self.lbl_saldo_total.setText(f"${saldo_total:,.2f}  (Bs {saldo_total * self._tasa_bcv:,.2f})")
-        else:
-            self.lbl_saldo_total.setText(f"${saldo_total:,.2f}")
+        self.lbl_saldo_total.setText(f"${saldo_total:,.2f}")
         self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
         self.btn_anterior.setEnabled(self.pagina_actual > 1)
         self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
@@ -1232,7 +1214,7 @@ class CuentasPorCobrarPanel(QWidget):
 
         try:
             config_empresa = self._obtener_config_empresa()
-            encabezados = ["Cliente", "Saldo Pendiente", "Saldo Pendiente (Bs)", "Días", "Fecha Factura", "Estado"]
+            encabezados = ["Cliente", "Saldo Pendiente", "Días", "Fecha Factura", "Estado"]
             exportar_excel(ruta, encabezados, filas, titulo="Cuentas por Cobrar", config_empresa=config_empresa)
             MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
         except Exception:
@@ -1252,9 +1234,9 @@ class CuentasPorCobrarPanel(QWidget):
 
         try:
             config_empresa = self._obtener_config_empresa()
-            encabezados = ["Cliente", "Saldo Pendiente", "Saldo Pendiente (Bs)", "Días", "Fecha Factura", "Estado"]
+            encabezados = ["Cliente", "Saldo Pendiente", "Días", "Fecha Factura", "Estado"]
             filtros = self._obtener_filtros_para_exportar()
-            col_widths = [2.5, 1.5, 1.5, 0.8, 1.2, 1.0]
+            col_widths = [2.5, 1.5, 0.8, 1.2, 1.0]
             exportar_pdf(
                 ruta,
                 "Cuentas por Cobrar",

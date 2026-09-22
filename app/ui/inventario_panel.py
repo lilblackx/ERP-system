@@ -362,7 +362,7 @@ class InventarioPanel(QWidget):
             self._timer_busqueda = QTimer()
             self._timer_busqueda.setSingleShot(True)
             self._timer_busqueda.timeout.connect(self._buscar_desde_inicio)
-        self._timer_busqueda.start(300)
+        self._timer_busqueda.start(400)
 
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
