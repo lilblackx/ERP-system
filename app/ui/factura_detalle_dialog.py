@@ -550,12 +550,16 @@ class FacturaDetalleDialog(QDialog):
                 MessageBox.warning(
                     self,
                     "Sin impresora configurada",
-                    "No hay una impresora predeterminada configurada. Ve a Configuración > Empresa para configurarla."
+                    "No hay una impresora predeterminada configurada. Ve a Configuración > Empresa para configurarla.",
                 )
                 return
 
             imprimir_factura(self.datos, config_empresa, config_empresa.impresora_predeterminada)
-            MessageBox.information(self, "Impresión enviada", f"Factura enviada a: {config_empresa.impresora_predeterminada}")
+            MessageBox.information(
+                self,
+                "Impresión enviada",
+                f"Factura enviada a: {config_empresa.impresora_predeterminada}",
+            )
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la configuración de empresa.")
         except ValueError as e:

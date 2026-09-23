@@ -616,6 +616,7 @@ class CajasPanel(QWidget):
             MessageBox.warning(self, "Sin permiso", str(exc))
         except Exception as exc:
             import traceback
+
             print(f"DEBUG: Exception al cerrar turno: {str(exc)}")
             print(traceback.format_exc())
             logger.exception("Fallo al cerrar el turno de la caja %s", id_caja)
@@ -692,6 +693,7 @@ class CajasPanel(QWidget):
                 session.close()
         except Exception as e:
             import traceback
+
             logger.exception("Fallo al abrir historial de movimientos para caja %s", id_caja)
             print(f"Error al abrir historial: {str(e)}")
             print(traceback.format_exc())

@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import ConfiguracionEmpresa, CuentaPorPagar, Usuario
-from app.services.compras import CompraService
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
@@ -623,7 +622,17 @@ class CuentasPorPagarPanel(QWidget):
 
     def _make_table(self) -> QWidget:
         self.tabla = self._crear_tabla(
-            ["ID", "Compra", "Proveedor", "Saldo Pendiente", "Fecha Factura", "Días", "Vencimiento", "Estado", "Acciones"]
+            [
+                "ID",
+                "Compra",
+                "Proveedor",
+                "Saldo Pendiente",
+                "Fecha Factura",
+                "Días",
+                "Vencimiento",
+                "Estado",
+                "Acciones",
+            ]
         )
         alinear_encabezados(
             self.tabla,
@@ -828,7 +837,9 @@ class CuentasPorPagarPanel(QWidget):
             btn_imprimir.setFixedHeight(28)
             btn_imprimir.setStyleSheet(BUTTON_SECONDARY_QSS)
             btn_imprimir.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_imprimir.clicked.connect(lambda checked, id_compra=compra.id_compra if compra else None: self._imprimir_factura_compra(id_compra))
+            btn_imprimir.clicked.connect(
+                lambda checked, id_compra=compra.id_compra if compra else None: self._imprimir_factura_compra(id_compra)
+            )
             widget_acciones = QWidget()
             layout_acciones = QHBoxLayout(widget_acciones)
             layout_acciones.setContentsMargins(5, 2, 5, 2)

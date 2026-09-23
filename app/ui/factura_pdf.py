@@ -207,7 +207,9 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
     watermark = ""
     if factura.estado_factura == "ANULADA":
-        watermark = f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** NOTA DE ENTREGA ANULADA ***</p>"
+        watermark = (
+            f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** NOTA DE ENTREGA ANULADA ***</p>"
+        )
 
     observaciones_html = ""
     if factura.observaciones_factura:
@@ -241,6 +243,19 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     email_cliente = (cliente.email if cliente else None) or "—"
     direccion_cliente = (cliente.direccion if cliente else None) or "—"
 
+    # Filas de información de factura
+    factura_info_rows = (
+        f"<tr><td {_INFO_LBL}>N° de Nota de Entrega:</td><td {_INFO_VAL}>{_esc(factura.numero_factura)}</td></tr>"
+        f"<tr><td {_INFO_LBL}>Fecha de Emisión:</td><td {_INFO_VAL}>{fecha}</td></tr>"
+        f"<tr><td {_INFO_LBL}>Hora de Emisión:</td><td {_INFO_VAL}>{hora}</td></tr>"
+        f"<tr><td {_INFO_LBL}>N° de Control:</td><td {_INFO_VAL}>{_esc(factura.numero_control)}</td></tr>"
+        f"<tr><td {_INFO_LBL}>Condición de Pago:</td><td {_INFO_VAL}>{condicion}</td></tr>"
+        f"{metodo_pago_row}"
+        f"{vencimiento_row}"
+        f"<tr><td {_INFO_LBL}>Moneda:</td><td {_INFO_VAL}>$ (USD)</td></tr>"
+        f"{vuelto_row}"
+    )
+
     return f"""
     <html><body style="font-family: Arial, sans-serif; color:{COLOR_TEXT_DARK}; font-size:10pt;">
         <table width="100%" style="border-collapse:collapse;"><tr>
@@ -254,15 +269,7 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
                 <table width="100%" style="border-collapse:collapse;border:1pt solid {_BORDER};">
                     <tr><td colspan="2" style="background-color:{_PRIMARY};color:#FFFFFF;text-align:center;
                         font-size:12pt;font-weight:bold;padding:5pt;">NOTA DE ENTREGA</td></tr>
-                    <tr><td {_INFO_LBL}>N° de Nota de Entrega:</td><td {_INFO_VAL}>{_esc(factura.numero_factura)}</td></tr>
-                    <tr><td {_INFO_LBL}>Fecha de Emisión:</td><td {_INFO_VAL}>{fecha}</td></tr>
-                    <tr><td {_INFO_LBL}>Hora de Emisión:</td><td {_INFO_VAL}>{hora}</td></tr>
-                    <tr><td {_INFO_LBL}>N° de Control:</td><td {_INFO_VAL}>{_esc(factura.numero_control)}</td></tr>
-                    <tr><td {_INFO_LBL}>Condición de Pago:</td><td {_INFO_VAL}>{condicion}</td></tr>
-                    {metodo_pago_row}
-                    {vencimiento_row}
-                    <tr><td {_INFO_LBL}>Moneda:</td><td {_INFO_VAL}>$ (USD)</td></tr>
-                    {vuelto_row}
+                    {factura_info_rows}
                 </table>
             </td>
         </tr></table>

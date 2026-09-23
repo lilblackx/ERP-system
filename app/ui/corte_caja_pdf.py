@@ -109,7 +109,7 @@ def _armar_html(
     # Fila de saldo neto
     saldo_neto_row = (
         f'<tr><td style="padding:8pt 6pt;text-align:right;font-weight:bold;border-top:2pt solid {_PRIMARY};">'
-        f'Saldo Neto:</td>'
+        f"Saldo Neto:</td>"
         f'<td style="padding:8pt 6pt 8pt 16pt;text-align:right;font-weight:bold;font-size:14pt;color:{_PRIMARY};'
         f'border-top:2pt solid {_PRIMARY};">{_money(saldo_neto)}</td></tr>'
     )
