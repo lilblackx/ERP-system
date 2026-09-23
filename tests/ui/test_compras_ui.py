@@ -268,6 +268,7 @@ def _crear_devolucion_dialogo(qtbot, monkeypatch, disponible=Decimal("50.1234"))
     detalle = SimpleNamespace(
         id_producto=1,
         cantidad_rechazada=disponible,
+        precio_unitario=Decimal("5.00"),
         producto=SimpleNamespace(nombre_producto="Producto Uno"),
     )
     monkeypatch.setattr(
