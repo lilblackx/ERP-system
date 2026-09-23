@@ -11,6 +11,7 @@ tesoreria.py, no el RBAC generico de 'cajas'/'editar') -- un cajero sin ese rol 
 listado (con 'cajas'/'ver') pero el boton de cierre le devuelve PermisoDenegadoError."""
 
 import logging
+from datetime import date, datetime
 from decimal import Decimal
 
 import qtawesome as qta
@@ -31,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.db.models import Caja, Usuario
+from app.db.models import Caja, CajaMovimiento, Usuario
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.ui.caja_cierre_dialog import CajaCierreDialog
@@ -41,8 +42,10 @@ from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
     COLOR_BORDER,
+    COLOR_CARD_BG,
     COLOR_CONTENT_BG,
     COLOR_DANGER,
+    COLOR_PRIMARY,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
@@ -72,6 +75,18 @@ QLineEdit, QComboBox {{
     font-size: 13px;
     color: {COLOR_TEXT_DARK};
     min-height: 20px;
+}}
+"""
+
+DIALOG_STYLE_HISTORIAL = f"""
+QDialog {{
+    background-color: {COLOR_CONTENT_BG};
+    font-family: '{FONT_FAMILY}', Arial, sans-serif;
+}}
+QWidget#SectionCard {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 10px;
 }}
 """
 
@@ -162,6 +177,209 @@ class MovimientoManualDialog(QDialog):
             "monto": self.monto_input.get_value(),
             "descripcion": self.descripcion_input.text().strip() or None,
         }
+
+
+class HistorialMovimientosDialog(QDialog):
+    """Dialogo para ver el historial de movimientos de una caja filtrado por fecha."""
+
+    def __init__(self, session_factory, id_caja: int, nombre_caja: str, usuario: Usuario, parent=None):
+        super().__init__(parent)
+        self.session_factory = session_factory
+        self.id_caja = id_caja
+        self.nombre_caja = nombre_caja
+        self.usuario = usuario
+
+        self.setWindowTitle(f"Historial de Movimientos - {nombre_caja}")
+        self.setMinimumWidth(700)
+        self.resize(700, 500)
+        self.setStyleSheet(DIALOG_STYLE_HISTORIAL)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        self._build_ui()
+        # Cargar historial directamente
+        self._cargar_historial()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        # Header con filtros de fecha
+        header = QHBoxLayout()
+        header.setSpacing(12)
+
+        header.addWidget(QLabel("Desde:"))
+        self.fecha_desde = QLineEdit()
+        self.fecha_desde.setPlaceholderText("DD/MM/YYYY")
+        self.fecha_desde.setFixedWidth(120)
+        header.addWidget(self.fecha_desde)
+
+        header.addWidget(QLabel("Hasta:"))
+        self.fecha_hasta = QLineEdit()
+        self.fecha_hasta.setPlaceholderText("DD/MM/YYYY")
+        self.fecha_hasta.setFixedWidth(120)
+        header.addWidget(self.fecha_hasta)
+
+        btn_filtrar = QPushButton("Filtrar")
+        btn_filtrar.setStyleSheet(BUTTON_PRIMARY_QSS)
+        btn_filtrar.clicked.connect(self._cargar_historial)
+        header.addWidget(btn_filtrar)
+
+        btn_hoy = QPushButton("Hoy")
+        btn_hoy.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_hoy.clicked.connect(self._filtrar_hoy)
+        header.addWidget(btn_hoy)
+
+        header.addStretch()
+        root.addLayout(header)
+
+        # Tabla de movimientos
+        self.tabla = QTableWidget(0, 5)
+        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Descripción", "Monto", "Origen"])
+        self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.setShowGrid(False)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.tabla)
+        alinear_encabezados(
+            self.tabla,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
+        root.addWidget(self.tabla, stretch=1)
+
+        # Footer con resumen
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 8, 0, 0)
+        footer.setSpacing(24)
+
+        self.lbl_total_entradas = QLabel("Total Entradas: $0.00")
+        self.lbl_total_entradas.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};")
+
+        self.lbl_total_salidas = QLabel("Total Salidas: $0.00")
+        self.lbl_total_salidas.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_DANGER};")
+
+        self.lbl_saldo = QLabel("Saldo Neto: $0.00")
+        self.lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_PRIMARY};")
+
+        footer.addWidget(self.lbl_total_entradas)
+        footer.addWidget(self.lbl_total_salidas)
+        footer.addStretch()
+        footer.addWidget(self.lbl_saldo)
+
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_cerrar.clicked.connect(self.accept)
+        footer.addWidget(btn_cerrar)
+
+        root.addLayout(footer)
+
+    def _filtrar_hoy(self) -> None:
+        hoy = date.today()
+        self.fecha_desde.setText(hoy.strftime("%d/%m/%Y"))
+        self.fecha_hasta.setText(hoy.strftime("%d/%m/%Y"))
+        self._cargar_historial()
+
+    def _cargar_historial(self) -> None:
+        try:
+            # Parsear fechas
+            fecha_desde = None
+            fecha_hasta = None
+
+            if self.fecha_desde.text().strip():
+                try:
+                    fecha_desde = datetime.strptime(self.fecha_desde.text().strip(), "%d/%m/%Y").date()
+                except ValueError:
+                    MessageBox.warning(self, "Fecha inválida", "El formato de 'Desde' debe ser DD/MM/YYYY")
+                    return
+
+            if self.fecha_hasta.text().strip():
+                try:
+                    fecha_hasta = datetime.strptime(self.fecha_hasta.text().strip(), "%d/%m/%Y").date()
+                except ValueError:
+                    MessageBox.warning(self, "Fecha inválida", "El formato de 'Hasta' debe ser DD/MM/YYYY")
+                    return
+
+            # Si no hay fechas, mostrar movimientos de hoy
+            if not fecha_desde and not fecha_hasta:
+                hoy = date.today()
+                fecha_desde = hoy
+                fecha_hasta = hoy
+                self.fecha_desde.setText(hoy.strftime("%d/%m/%Y"))
+                self.fecha_hasta.setText(hoy.strftime("%d/%m/%Y"))
+
+            session = self.session_factory()
+            try:
+                query = session.query(CajaMovimiento).filter(CajaMovimiento.id_caja == self.id_caja)
+
+                if fecha_desde:
+                    desde_dt = datetime.combine(fecha_desde, datetime.min.time())
+                    query = query.filter(CajaMovimiento.fecha_registro >= desde_dt)
+
+                if fecha_hasta:
+                    hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
+                    query = query.filter(CajaMovimiento.fecha_registro <= hasta_dt)
+
+                movimientos = query.order_by(CajaMovimiento.fecha_registro.desc()).all()
+
+                self.tabla.setRowCount(len(movimientos))
+                total_entradas = Decimal("0.00")
+                total_salidas = Decimal("0.00")
+
+                for fila, mov in enumerate(movimientos):
+                    fecha_str = mov.fecha_registro.strftime("%d/%m/%Y %H:%M")
+                    self.tabla.setItem(fila, 0, QTableWidgetItem(fecha_str))
+
+                    es_entrada = mov.tipo_movimiento == "entrada"
+                    tipo_item = QTableWidgetItem("Entrada" if es_entrada else "Salida")
+                    tipo_item.setForeground(Qt.GlobalColor.darkGreen if es_entrada else Qt.GlobalColor.red)
+                    self.tabla.setItem(fila, 1, tipo_item)
+
+                    self.tabla.setItem(fila, 2, QTableWidgetItem(mov.descripcion_movimiento or ""))
+
+                    monto = mov.monto_movimiento or Decimal("0.00")
+                    item_monto = QTableWidgetItem(f"$ {monto:,.2f}")
+                    item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    self.tabla.setItem(fila, 3, item_monto)
+
+                    # Determinar origen
+                    origen = "Manual"
+                    if mov.id_pago_cobro:
+                        origen = "Cobro"
+                    elif mov.id_pago_proveedor:
+                        origen = "Pago Proveedor"
+                    elif mov.id_pago_comision:
+                        origen = "Pago Comisión"
+                    self.tabla.setItem(fila, 4, QTableWidgetItem(origen))
+
+                    if es_entrada:
+                        total_entradas += monto
+                    else:
+                        total_salidas += monto
+
+                self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
+                self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
+                saldo_neto = total_entradas - total_salidas
+                self.lbl_saldo.setText(f"Saldo Neto: ${saldo_neto:,.2f}")
+
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.exception("Fallo al cargar historial de movimientos")
+            MessageBox.critical(self, "Error", f"No se pudo cargar el historial: {str(e)}")
 
 
 class CajasPanel(QWidget):
@@ -265,12 +483,18 @@ class CajasPanel(QWidget):
         self.btn_movimiento.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_movimiento.clicked.connect(self.registrar_movimiento_manual)
 
+        btn_historial = QPushButton("Ver Historial")
+        btn_historial.setIcon(qta.icon("fa5s.history", color=COLOR_TEXT_DARK))
+        btn_historial.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_historial.clicked.connect(self.ver_historial_movimientos)
+
         btn_cerrar = QPushButton("Cerrar Turno")
         btn_cerrar.setIcon(qta.icon("fa5s.lock", color="white"))
         btn_cerrar.setStyleSheet(BUTTON_PRIMARY_QSS)
         btn_cerrar.clicked.connect(self.cerrar_turno_seleccionado)
 
         h.addWidget(self.btn_movimiento)
+        h.addWidget(btn_historial)
         h.addWidget(btn_cerrar)
         return w
 
@@ -368,6 +592,7 @@ class CajasPanel(QWidget):
 
         session = self.session_factory()
         try:
+            print(f"DEBUG: Cerrando turno para caja id={id_caja}")
             caja = session.get(Caja, id_caja)
             if caja is None:
                 MessageBox.warning(self, "Error", "Caja no encontrada.")
@@ -378,17 +603,23 @@ class CajasPanel(QWidget):
                 )
                 return
 
+            print(f"DEBUG: Abriendo diálogo de cierre para caja {caja.nombre_caja}")
             dialogo = CajaCierreDialog(session, caja, self.usuario.id_usuario, parent=self)
+            print(f"DEBUG: Diálogo ejecutado, cerrada={dialogo.cerrada}")
             if dialogo.exec() and dialogo.cerrada:
                 MessageBox.information(
                     self, "Turno cerrado", f"El turno de '{caja.nombre_caja}' se cerró correctamente."
                 )
                 self.cargar_cajas()
         except PermisoDenegadoError as exc:
+            print(f"DEBUG: PermisoDenegadoError: {str(exc)}")
             MessageBox.warning(self, "Sin permiso", str(exc))
-        except Exception:
+        except Exception as exc:
+            import traceback
+            print(f"DEBUG: Exception al cerrar turno: {str(exc)}")
+            print(traceback.format_exc())
             logger.exception("Fallo al cerrar el turno de la caja %s", id_caja)
-            MessageBox.critical(self, "Error", "No se pudo cerrar el turno de caja.")
+            MessageBox.critical(self, "Error", f"No se pudo cerrar el turno de caja: {str(exc)}")
         finally:
             session.close()
 
@@ -437,3 +668,31 @@ class CajasPanel(QWidget):
         finally:
             session.close()
             self.btn_movimiento.setEnabled(True)
+
+    def ver_historial_movimientos(self) -> None:
+        id_caja = self._fila_seleccionada_id()
+        if id_caja is None:
+            return
+
+        try:
+            session = self.session_factory()
+            try:
+                caja = session.get(Caja, id_caja)
+                if caja is None:
+                    MessageBox.warning(self, "Error", "Caja no encontrada.")
+                    return
+
+                nombre_caja = caja.nombre_caja or f"Caja {id_caja}"
+                print(f"Abriendo historial para caja: {nombre_caja} (id: {id_caja})")
+                dialogo = HistorialMovimientosDialog(
+                    self.session_factory, id_caja, nombre_caja, self.usuario, parent=self
+                )
+                dialogo.exec()
+            finally:
+                session.close()
+        except Exception as e:
+            import traceback
+            logger.exception("Fallo al abrir historial de movimientos para caja %s", id_caja)
+            print(f"Error al abrir historial: {str(e)}")
+            print(traceback.format_exc())
+            MessageBox.critical(self, "Error", f"No se pudo abrir el historial de movimientos: {str(e)}")

@@ -9,6 +9,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -16,15 +17,20 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 from sqlalchemy.orm import Session
+from decimal import Decimal
 
 from app.db.models import Caja
+from app.services.empresa import EmpresaService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
+from app.ui.corte_caja_pdf import generar_pdf_corte_caja, imprimir_corte_caja
 from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericLineEdit, NumericFieldType
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -91,10 +97,11 @@ class CajaCierreDialog(QDialog):
         self.caja = caja
         self.id_usuario_actor = id_usuario_actor
         self.cerrada = False
+        self.saldo_calculado = Decimal("0.00")
 
         self.setWindowTitle("Cerrar Turno de Caja")
         self.setMinimumWidth(560)
-        self.resize(560, 520)
+        self.resize(560, 580)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -137,6 +144,14 @@ class CajaCierreDialog(QDialog):
         footer.setSpacing(10)
         footer.addStretch()
 
+        self.btn_exportar_pdf = QPushButton("Exportar PDF")
+        self.btn_exportar_pdf.setIcon(qta.icon("fa5s.file-pdf", color=COLOR_DANGER))
+        self.btn_exportar_pdf.setObjectName("BtnSecondary")
+        self.btn_exportar_pdf.setFixedHeight(34)
+        self.btn_exportar_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_exportar_pdf.setAutoDefault(False)
+        self.btn_exportar_pdf.clicked.connect(self.exportar_pdf)
+
         self.btn_cancelar = QPushButton("Cancelar")
         self.btn_cancelar.setIcon(qta.icon("fa5s.times", color="#475569"))
         self.btn_cancelar.setObjectName("BtnSecondary")
@@ -153,6 +168,7 @@ class CajaCierreDialog(QDialog):
         self.btn_cerrar.setAutoDefault(False)
         self.btn_cerrar.clicked.connect(self._confirmar_cierre)
 
+        footer.addWidget(self.btn_exportar_pdf)
         footer.addWidget(self.btn_cancelar)
         footer.addWidget(self.btn_cerrar)
         root.addLayout(footer)
@@ -161,20 +177,67 @@ class CajaCierreDialog(QDialog):
         card = QWidget()
         card.setObjectName("SectionCard")
         aplicar_sombra(card)
-        layout = QHBoxLayout(card)
+        layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(24)
+        layout.setSpacing(12)
+
+        # Primera fila: saldo calculado
+        fila_superior = QHBoxLayout()
+        fila_superior.setSpacing(24)
 
         self.lbl_apertura = self._make_stat("Saldo de apertura", "—")
         self.lbl_entradas = self._make_stat("Entradas", "—", COLOR_SUCCESS)
         self.lbl_salidas = self._make_stat("Salidas", "—", COLOR_DANGER)
         self.lbl_saldo_calculado = self._make_stat("Saldo calculado (a cerrar)", "—", COLOR_PRIMARY)
 
-        layout.addLayout(self.lbl_apertura[0])
-        layout.addLayout(self.lbl_entradas[0])
-        layout.addLayout(self.lbl_salidas[0])
-        layout.addStretch()
-        layout.addLayout(self.lbl_saldo_calculado[0])
+        fila_superior.addLayout(self.lbl_apertura[0])
+        fila_superior.addLayout(self.lbl_entradas[0])
+        fila_superior.addLayout(self.lbl_salidas[0])
+        fila_superior.addStretch()
+        fila_superior.addLayout(self.lbl_saldo_calculado[0])
+
+        # Segunda fila: campo para monto físico y diferencia
+        fila_inferior = QHBoxLayout()
+        fila_inferior.setSpacing(24)
+
+        lbl_monto_fisico = QLabel("Monto físico en caja:")
+        lbl_monto_fisico.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; font-weight: 600;")
+        self.monto_fisico_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0"), prefix="$ ")
+        self.monto_fisico_input.setFixedWidth(150)
+        self.monto_fisico_input.textChanged.connect(self._calcular_diferencia)
+
+        self.lbl_diferencia = QLabel("Diferencia: $0.00")
+        self.lbl_diferencia.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_TEXT_MUTED};")
+
+        fila_inferior.addWidget(lbl_monto_fisico)
+        fila_inferior.addWidget(self.monto_fisico_input)
+        fila_inferior.addStretch()
+        fila_inferior.addWidget(self.lbl_diferencia)
+
+        layout.addLayout(fila_superior)
+        layout.addLayout(fila_inferior)
+
+        # Tercera fila: descripción de la diferencia (solo visible cuando hay diferencia)
+        self.fila_descripcion_widget = QWidget()
+        fila_descripcion = QHBoxLayout(self.fila_descripcion_widget)
+        fila_descripcion.setSpacing(12)
+        fila_descripcion.setContentsMargins(0, 0, 0, 0)
+
+        lbl_descripcion = QLabel("Descripción de la diferencia:")
+        lbl_descripcion.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; font-weight: 600;")
+        self.descripcion_input = QTextEdit()
+        self.descripcion_input.setPlaceholderText("EXPLICA LA CAUSA DE LA DIFERENCIA")
+        self.descripcion_input.setMaximumHeight(60)
+        self.descripcion_input.setStyleSheet(
+            f"QTextEdit {{ background-color: {COLOR_WHITE}; border: 1px solid {COLOR_BORDER}; "
+            f"border-radius: 6px; padding: 5px; font-size: 12px; }}"
+        )
+
+        fila_descripcion.addWidget(lbl_descripcion)
+        fila_descripcion.addWidget(self.descripcion_input, stretch=1)
+        self.fila_descripcion_widget.setVisible(False)  # Oculto por defecto
+
+        layout.addWidget(self.fila_descripcion_widget)
         return card
 
     def _make_stat(self, titulo: str, valor_inicial: str, color: str = COLOR_TEXT_DARK):
@@ -222,7 +285,7 @@ class CajaCierreDialog(QDialog):
             movimientos = CajaService.listar_movimientos_turno(
                 self.session, self.caja.id_caja, id_usuario=self.id_usuario_actor
             )
-            saldo_calculado = CajaService.calcular_saldo_actual(self.session, self.caja.id_caja)
+            self.saldo_calculado = CajaService.calcular_saldo_actual(self.session, self.caja.id_caja)
         except (ValueError, PermisoDenegadoError) as exc:
             MessageBox.critical(self, "No se pudo cargar el arqueo", str(exc))
             self.reject()
@@ -234,7 +297,7 @@ class CajaCierreDialog(QDialog):
         self.lbl_apertura[1].setText(f"$ {self.caja.saldo_apertura or 0:,.2f}")
         self.lbl_entradas[1].setText(f"+$ {total_entradas:,.2f}")
         self.lbl_salidas[1].setText(f"-$ {total_salidas:,.2f}")
-        self.lbl_saldo_calculado[1].setText(f"$ {saldo_calculado:,.2f}")
+        self.lbl_saldo_calculado[1].setText(f"$ {self.saldo_calculado:,.2f}")
 
         self.tabla.setRowCount(len(movimientos))
         for fila, mov in enumerate(movimientos):
@@ -251,21 +314,152 @@ class CajaCierreDialog(QDialog):
         if not movimientos:
             self.btn_cerrar.setText("Confirmar Cierre de Turno (sin movimientos)")
 
+        # Calcular diferencia inicial
+        self._calcular_diferencia()
+
+    def _calcular_diferencia(self) -> None:
+        monto_fisico = self.monto_fisico_input.get_value() or Decimal("0.00")
+        diferencia = monto_fisico - self.saldo_calculado
+
+        if abs(diferencia) < Decimal("0.01"):
+            self.lbl_diferencia.setText("Diferencia: $0.00")
+            self.lbl_diferencia.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};")
+            self.fila_descripcion_widget.setVisible(False)
+        elif diferencia > 0:
+            self.lbl_diferencia.setText(f"Diferencia: +${diferencia:,.2f} (sobrante)")
+            self.lbl_diferencia.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};")
+            self.fila_descripcion_widget.setVisible(True)
+        else:
+            self.lbl_diferencia.setText(f"Diferencia: -${abs(diferencia):,.2f} (faltante)")
+            self.lbl_diferencia.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_DANGER};")
+            self.fila_descripcion_widget.setVisible(True)
+
+    def exportar_pdf(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar corte de caja", f"corte_caja_{self.caja.nombre_caja or self.caja.id_caja}.pdf", "PDF (*.pdf)"
+        )
+        if not ruta:
+            return
+
+        try:
+            config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario_actor)
+            
+            # Obtener movimientos del turno
+            movimientos = CajaService.listar_movimientos_turno(
+                self.session, self.caja.id_caja, id_usuario=self.id_usuario_actor
+            )
+            
+            # Calcular totales
+            total_entradas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "entrada")
+            total_salidas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "salida")
+            saldo_neto = total_entradas - total_salidas
+            
+            # Obtener observaciones si hay diferencia
+            observaciones = None
+            monto_fisico = self.monto_fisico_input.get_value() or Decimal("0.00")
+            diferencia = monto_fisico - self.saldo_calculado
+            if abs(diferencia) >= Decimal("0.01") and self.fila_descripcion_widget.isVisible():
+                observaciones = self.descripcion_input.toPlainText().strip() or None
+                if observaciones:
+                    tipo_dif = "sobrante" if diferencia > 0 else "faltante"
+                    observaciones = f"Diferencia de ${abs(diferencia):,.2f} ({tipo_dif}): {observaciones}"
+            
+            generar_pdf_corte_caja(
+                self.caja, movimientos, float(total_entradas), float(total_salidas), 
+                float(saldo_neto), observaciones, config_empresa, ruta
+            )
+            MessageBox.information(self, "Exportación completa", f"Corte de caja exportado a:\n{ruta}")
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la configuración de empresa.")
+        except Exception:
+            logger.exception("Fallo al exportar el corte de caja")
+            MessageBox.critical(self, "Error", "No se pudo exportar el corte de caja.")
+
     def _confirmar_cierre(self) -> None:
+        print("Iniciando confirmación de cierre...")
+        monto_fisico = self.monto_fisico_input.get_value() or Decimal("0.00")
+        diferencia = monto_fisico - self.saldo_calculado
+
+        mensaje_confirmacion = (
+            "Esta acción cierra el turno y fija el saldo de cierre mostrado arriba.\n"
+            "No se puede deshacer desde la aplicación. ¿Confirma el cierre?"
+        )
+
+        if abs(diferencia) >= Decimal("0.01"):
+            tipo_dif = "sobrante" if diferencia > 0 else "faltante"
+            mensaje_confirmacion += f"\n\nHay una diferencia de ${abs(diferencia):,.2f} ({tipo_dif})."
+
         respuesta = MessageBox.question(
             self,
             "Confirmar cierre de turno",
-            "Esta acción cierra el turno y fija el saldo de cierre mostrado arriba.\n"
-            "No se puede deshacer desde la aplicación. ¿Confirma el cierre?",
+            mensaje_confirmacion,
         )
         if respuesta != QMessageBox.StandardButton.Yes:
             return
 
         try:
-            CajaService.cerrar_caja(self.session, self.caja.id_caja, self.id_usuario_actor)
+            print(f"Llamando a cerrar_caja con id_caja={self.caja.id_caja}, id_usuario={self.id_usuario_actor}")
+            CajaService.cerrar_caja(
+                self.session, self.caja.id_caja, self.id_usuario_actor
+            )
         except (ValueError, PermisoDenegadoError) as exc:
+            print(f"Error específico al cerrar caja: {str(exc)}")
             MessageBox.warning(self, "No se pudo cerrar la caja", str(exc))
             return
+        except Exception as exc:
+            import traceback
+            logger.exception("Fallo al cerrar caja")
+            print(f"Error inesperado al cerrar caja: {str(exc)}")
+            print(traceback.format_exc())
+            MessageBox.warning(self, "No se pudo cerrar la caja", f"Error inesperado: {str(exc)}")
+            return
+
+        # Imprimir reporte automáticamente después de cerrar
+        try:
+            config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario_actor)
+            
+            # Obtener movimientos del turno
+            movimientos = CajaService.listar_movimientos_turno(
+                self.session, self.caja.id_caja, id_usuario=self.id_usuario_actor
+            )
+            
+            # Calcular totales
+            total_entradas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "entrada")
+            total_salidas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "salida")
+            saldo_neto = total_entradas - total_salidas
+            
+            # Obtener observaciones si hay diferencia
+            observaciones = None
+            if abs(diferencia) >= Decimal("0.01") and self.fila_descripcion_widget.isVisible():
+                observaciones = self.descripcion_input.toPlainText().strip() or None
+                if observaciones:
+                    tipo_dif = "sobrante" if diferencia > 0 else "faltante"
+                    observaciones = f"Diferencia de ${abs(diferencia):,.2f} ({tipo_dif}): {observaciones}"
+            
+            # Imprimir usando la impresora configurada
+            nombre_impresora = config_empresa.impresora_predeterminada if config_empresa else None
+            if nombre_impresora:
+                imprimir_corte_caja(
+                    self.caja, movimientos, float(total_entradas), float(total_salidas), 
+                    float(saldo_neto), observaciones, config_empresa, nombre_impresora
+                )
+            else:
+                # Si no hay impresora configurada, solo generar PDF
+                from datetime import datetime
+                nombre_archivo = f"corte_caja_{self.caja.nombre_caja or self.caja.id_caja}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                ruta = f"C:/Temp/{nombre_archivo}"  # Directorio temporal
+                generar_pdf_corte_caja(
+                    self.caja, movimientos, float(total_entradas), float(total_salidas), 
+                    float(saldo_neto), observaciones, config_empresa, ruta
+                )
+                MessageBox.information(self, "Reporte generado", f"Reporte de corte de caja guardado en:\n{ruta}")
+        except Exception as exc:
+            import traceback
+            logger.exception("Fallo al imprimir reporte de corte de caja")
+            print(f"Error al imprimir reporte: {str(exc)}")
+            print(traceback.format_exc())
+            # No fallar el cierre si falla la impresión
+            MessageBox.warning(self, "Advertencia", f"El turno se cerró correctamente, pero no se pudo imprimir el reporte: {str(exc)}")
 
         self.cerrada = True
         self.accept()

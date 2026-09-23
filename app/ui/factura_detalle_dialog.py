@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from app.services.empresa import EmpresaService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
-from app.ui.factura_pdf import generar_pdf_factura
+from app.ui.factura_pdf import generar_pdf_factura, imprimir_factura
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS
 from app.ui.styles import (
@@ -503,6 +503,14 @@ class FacturaDetalleDialog(QDialog):
         btn_exportar.setAutoDefault(False)
         btn_exportar.clicked.connect(self.exportar_pdf)
 
+        btn_imprimir = QPushButton("Imprimir")
+        btn_imprimir.setIcon(qta.icon("fa5s.print", color=COLOR_PRIMARY))
+        btn_imprimir.setObjectName("BtnSecondary")
+        btn_imprimir.setFixedHeight(36)
+        btn_imprimir.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_imprimir.setAutoDefault(False)
+        btn_imprimir.clicked.connect(self.imprimir)
+
         btn_cerrar = QPushButton("Cerrar")
         btn_cerrar.setIcon(qta.icon("fa5s.times", color="#475569"))
         btn_cerrar.setObjectName("BtnSecondary")
@@ -514,6 +522,7 @@ class FacturaDetalleDialog(QDialog):
         footer.addLayout(col_totales)
         footer.addStretch()
         footer.addWidget(btn_exportar)
+        footer.addWidget(btn_imprimir)
         footer.addWidget(btn_cerrar)
         return footer
 
@@ -533,3 +542,24 @@ class FacturaDetalleDialog(QDialog):
         except Exception:
             logger.exception("Fallo al exportar la factura %s a PDF", self.factura.numero_factura)
             MessageBox.critical(self, "Error", "No se pudo exportar la factura a PDF.")
+
+    def imprimir(self) -> None:
+        try:
+            config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario)
+            if not config_empresa or not config_empresa.impresora_predeterminada:
+                MessageBox.warning(
+                    self,
+                    "Sin impresora configurada",
+                    "No hay una impresora predeterminada configurada. Ve a Configuración > Empresa para configurarla."
+                )
+                return
+
+            imprimir_factura(self.datos, config_empresa, config_empresa.impresora_predeterminada)
+            MessageBox.information(self, "Impresión enviada", f"Factura enviada a: {config_empresa.impresora_predeterminada}")
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la configuración de empresa.")
+        except ValueError as e:
+            MessageBox.warning(self, "Impresora no disponible", str(e))
+        except Exception:
+            logger.exception("Fallo al imprimir la factura %s", self.factura.numero_factura)
+            MessageBox.critical(self, "Error", "No se pudo imprimir la factura.")

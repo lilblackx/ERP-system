@@ -127,20 +127,7 @@ def _bloque_bolivares_html(tasa, total_usd: float) -> str:
     _filas_totales (ver _bloque_totales_html) en vez de auto-alinearse con
     align="right" -- eso fue lo que causaba que el monto se viera corrido del margen
     derecho de la pagina."""
-    if tasa is None:
-        return ""
-    fecha_tasa = tasa.fecha_tasa.strftime("%d/%m/%Y")
-    total_bs = total_usd * float(tasa.tasa_dolar_bcv)
-    return f"""
-    <table width="100%" style="border-collapse:collapse;margin-top:6pt;border:1pt solid {_PRIMARY};">
-        <tr><td style="padding:4pt 8pt;color:{_MUTED};font-size:8.5pt;">
-            Tasa BCV: {float(tasa.tasa_dolar_bcv):,.2f} Bs/USD ({fecha_tasa})
-        </td></tr>
-        <tr><td style="padding:5pt 8pt;background-color:{_PRIMARY};color:#FFFFFF;font-weight:bold;text-align:right;">
-            Total Bs. {_money_bs(total_bs)}
-        </td></tr>
-    </table>
-    """
+    return ""
 
 
 def _bloque_totales_html(filas_totales: str, bloque_bs: str) -> str:
@@ -220,7 +207,7 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
     watermark = ""
     if factura.estado_factura == "ANULADA":
-        watermark = f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** FACTURA ANULADA ***</p>"
+        watermark = f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** NOTA DE ENTREGA ANULADA ***</p>"
 
     observaciones_html = ""
     if factura.observaciones_factura:
@@ -266,8 +253,8 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
             <td width="38%" style="vertical-align:top;">
                 <table width="100%" style="border-collapse:collapse;border:1pt solid {_BORDER};">
                     <tr><td colspan="2" style="background-color:{_PRIMARY};color:#FFFFFF;text-align:center;
-                        font-size:12pt;font-weight:bold;padding:5pt;">FACTURA</td></tr>
-                    <tr><td {_INFO_LBL}>N° de Factura:</td><td {_INFO_VAL}>{_esc(factura.numero_factura)}</td></tr>
+                        font-size:12pt;font-weight:bold;padding:5pt;">NOTA DE ENTREGA</td></tr>
+                    <tr><td {_INFO_LBL}>N° de Nota de Entrega:</td><td {_INFO_VAL}>{_esc(factura.numero_factura)}</td></tr>
                     <tr><td {_INFO_LBL}>Fecha de Emisión:</td><td {_INFO_VAL}>{fecha}</td></tr>
                     <tr><td {_INFO_LBL}>Hora de Emisión:</td><td {_INFO_VAL}>{hora}</td></tr>
                     <tr><td {_INFO_LBL}>N° de Control:</td><td {_INFO_VAL}>{_esc(factura.numero_control)}</td></tr>
@@ -327,7 +314,7 @@ def _documento(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> QTex
 
 def _configurar_pagina(impresora: QPrinter) -> None:
     impresora.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
-    impresora.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter)
+    impresora.setPageMargins(QMarginsF(2, 2, 2, 2), QPageLayout.Unit.Millimeter)
 
 
 def generar_pdf_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, ruta_destino: str) -> None:
