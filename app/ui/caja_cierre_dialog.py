@@ -4,6 +4,9 @@ CajaAperturaDialog (app/ui/caja_apertura_dialog.py) pero sin el paso de reautent
 CajasPanel ya exige estar logueado como ADMIN para llegar aqui (_require_admin en el
 servicio es la barrera real, esto es solo UX)."""
 
+import logging
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
@@ -22,7 +25,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from sqlalchemy.orm import Session
-from decimal import Decimal
 
 from app.db.models import Caja
 from app.services.empresa import EmpresaService
@@ -30,7 +32,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.ui.corte_caja_pdf import generar_pdf_corte_caja, imprimir_corte_caja
 from app.ui.message_box import MessageBox
-from app.ui.numeric_inputs import NumericLineEdit, NumericFieldType
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -48,6 +50,8 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_sombra,
 )
+
+logger = logging.getLogger(__name__)
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -336,24 +340,27 @@ class CajaCierreDialog(QDialog):
 
     def exportar_pdf(self) -> None:
         ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar corte de caja", f"corte_caja_{self.caja.nombre_caja or self.caja.id_caja}.pdf", "PDF (*.pdf)"
+            self,
+            "Exportar corte de caja",
+            f"corte_caja_{self.caja.nombre_caja or self.caja.id_caja}.pdf",
+            "PDF (*.pdf)",
         )
         if not ruta:
             return
 
         try:
             config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario_actor)
-            
+
             # Obtener movimientos del turno
             movimientos = CajaService.listar_movimientos_turno(
                 self.session, self.caja.id_caja, id_usuario=self.id_usuario_actor
             )
-            
+
             # Calcular totales
             total_entradas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "entrada")
             total_salidas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "salida")
             saldo_neto = total_entradas - total_salidas
-            
+
             # Obtener observaciones si hay diferencia
             observaciones = None
             monto_fisico = self.monto_fisico_input.get_value() or Decimal("0.00")
@@ -363,10 +370,16 @@ class CajaCierreDialog(QDialog):
                 if observaciones:
                     tipo_dif = "sobrante" if diferencia > 0 else "faltante"
                     observaciones = f"Diferencia de ${abs(diferencia):,.2f} ({tipo_dif}): {observaciones}"
-            
+
             generar_pdf_corte_caja(
-                self.caja, movimientos, float(total_entradas), float(total_salidas), 
-                float(saldo_neto), observaciones, config_empresa, ruta
+                self.caja,
+                movimientos,
+                float(total_entradas),
+                float(total_salidas),
+                float(saldo_neto),
+                observaciones,
+                config_empresa,
+                ruta,
             )
             MessageBox.information(self, "Exportación completa", f"Corte de caja exportado a:\n{ruta}")
         except PermisoDenegadoError:
@@ -399,15 +412,14 @@ class CajaCierreDialog(QDialog):
 
         try:
             print(f"Llamando a cerrar_caja con id_caja={self.caja.id_caja}, id_usuario={self.id_usuario_actor}")
-            CajaService.cerrar_caja(
-                self.session, self.caja.id_caja, self.id_usuario_actor
-            )
+            CajaService.cerrar_caja(self.session, self.caja.id_caja, self.id_usuario_actor)
         except (ValueError, PermisoDenegadoError) as exc:
             print(f"Error específico al cerrar caja: {str(exc)}")
             MessageBox.warning(self, "No se pudo cerrar la caja", str(exc))
             return
         except Exception as exc:
             import traceback
+
             logger.exception("Fallo al cerrar caja")
             print(f"Error inesperado al cerrar caja: {str(exc)}")
             print(traceback.format_exc())
@@ -417,17 +429,17 @@ class CajaCierreDialog(QDialog):
         # Imprimir reporte automáticamente después de cerrar
         try:
             config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario_actor)
-            
+
             # Obtener movimientos del turno
             movimientos = CajaService.listar_movimientos_turno(
                 self.session, self.caja.id_caja, id_usuario=self.id_usuario_actor
             )
-            
+
             # Calcular totales
             total_entradas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "entrada")
             total_salidas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "salida")
             saldo_neto = total_entradas - total_salidas
-            
+
             # Obtener observaciones si hay diferencia
             observaciones = None
             if abs(diferencia) >= Decimal("0.01") and self.fila_descripcion_widget.isVisible():
@@ -435,31 +447,52 @@ class CajaCierreDialog(QDialog):
                 if observaciones:
                     tipo_dif = "sobrante" if diferencia > 0 else "faltante"
                     observaciones = f"Diferencia de ${abs(diferencia):,.2f} ({tipo_dif}): {observaciones}"
-            
+
             # Imprimir usando la impresora configurada
             nombre_impresora = config_empresa.impresora_predeterminada if config_empresa else None
             if nombre_impresora:
                 imprimir_corte_caja(
-                    self.caja, movimientos, float(total_entradas), float(total_salidas), 
-                    float(saldo_neto), observaciones, config_empresa, nombre_impresora
+                    self.caja,
+                    movimientos,
+                    float(total_entradas),
+                    float(total_salidas),
+                    float(saldo_neto),
+                    observaciones,
+                    config_empresa,
+                    nombre_impresora,
                 )
             else:
                 # Si no hay impresora configurada, solo generar PDF
                 from datetime import datetime
-                nombre_archivo = f"corte_caja_{self.caja.nombre_caja or self.caja.id_caja}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+
+                nombre_archivo = (
+                    f"corte_caja_{self.caja.nombre_caja or self.caja.id_caja}_"
+                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                )
                 ruta = f"C:/Temp/{nombre_archivo}"  # Directorio temporal
                 generar_pdf_corte_caja(
-                    self.caja, movimientos, float(total_entradas), float(total_salidas), 
-                    float(saldo_neto), observaciones, config_empresa, ruta
+                    self.caja,
+                    movimientos,
+                    float(total_entradas),
+                    float(total_salidas),
+                    float(saldo_neto),
+                    observaciones,
+                    config_empresa,
+                    ruta,
                 )
                 MessageBox.information(self, "Reporte generado", f"Reporte de corte de caja guardado en:\n{ruta}")
         except Exception as exc:
             import traceback
+
             logger.exception("Fallo al imprimir reporte de corte de caja")
             print(f"Error al imprimir reporte: {str(exc)}")
             print(traceback.format_exc())
             # No fallar el cierre si falla la impresión
-            MessageBox.warning(self, "Advertencia", f"El turno se cerró correctamente, pero no se pudo imprimir el reporte: {str(exc)}")
+            MessageBox.warning(
+                self,
+                "Advertencia",
+                f"El turno se cerró correctamente, pero no se pudo imprimir el reporte: {str(exc)}",
+            )
 
         self.cerrada = True
         self.accept()
