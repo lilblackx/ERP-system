@@ -5,12 +5,12 @@
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'cuentas_por_cobrar_bcv')
 BEGIN
     CREATE TABLE dbo.cuentas_por_cobrar_bcv (
-        id_cuenta_por_cobrar INT IDENTITY(1,1) PRIMARY KEY,
-        id_factura INT NOT NULL,
+        id_cuenta_por_cobrar BIGINT IDENTITY(1,1) PRIMARY KEY,
+        id_factura BIGINT NOT NULL,
         saldo_pendiente DECIMAL(18, 2) NOT NULL DEFAULT 0.00,
         fecha_vencimiento DATE NULL,
         estado VARCHAR(50) NOT NULL,
-        creado_por INT NOT NULL,
+        creado_por BIGINT NOT NULL,
         fecha_creacion DATETIME NOT NULL DEFAULT GETDATE(),
         saldo_favor DECIMAL(18, 2) NULL,
         porcentaje DECIMAL(5, 2) NULL,
