@@ -143,7 +143,7 @@ BEGIN
 		[fecha_pago],
 		[referencia],
 		'Cobro a cliente: ' + COALESCE(cl.nombre_razon_social, 'Desconocido'),
-		[creado_por],
+		n.[creado_por],
 		GETDATE(),
 		[id_pago_cobro]
 	FROM @nuevos n
@@ -161,7 +161,7 @@ BEGIN
 		[monto],
 		[fecha_pago],
 		[id_pago_cobro],
-		[creado_por]
+		n.[creado_por]
 	FROM @nuevos n
 	JOIN dbo.cuentas_por_cobrar cxc ON cxc.[id_cuenta_por_cobrar] = n.[id_cuenta_por_cobrar]
 	JOIN dbo.factura_venta fv ON fv.[id_factura] = cxc.[id_factura]

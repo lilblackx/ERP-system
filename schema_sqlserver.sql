@@ -1310,7 +1310,7 @@ BEGIN
 		[fecha_pago],
 		[referencia],
 		'Cobro a cliente: ' + COALESCE(cl.nombre_razon_social, 'Desconocido'),
-		[creado_por],
+		n.[creado_por],
 		GETDATE(),
 		[id_pago_cobro]
 	FROM @nuevos n
@@ -1328,7 +1328,7 @@ BEGIN
 		[monto],
 		[fecha_pago],
 		[id_pago_cobro],
-		[creado_por]
+		n.[creado_por]
 	FROM @nuevos n
 	JOIN dbo.cuentas_por_cobrar cxc ON cxc.[id_cuenta_por_cobrar] = n.[id_cuenta_por_cobrar]
 	JOIN dbo.factura_venta fv ON fv.[id_factura] = cxc.[id_factura]
@@ -1396,12 +1396,12 @@ BEGIN
 	JOIN @nuevos n ON n.[id_cuenta_por_pagar] = c.[id_cuenta];
 
 	INSERT INTO dbo.banco_movimientos ([id_cuenta], [tipo_movimiento], [monto_movimiento], [fecha_movimiento], [referencia_movimiento], [descripcion_movimiento], [creado_por], [fecha_creacion], [id_pago_proveedor])
-	SELECT [id_cuenta_bancaria], 'cargo', [monto], [fecha_pago], [referencia], 'Pago a proveedor', [creado_por], GETDATE(), [id_pago_proveedor]
-	FROM @nuevos WHERE [id_cuenta_bancaria] IS NOT NULL;
+	SELECT [id_cuenta_bancaria], 'cargo', [monto], [fecha_pago], [referencia], 'Pago a proveedor', n.[creado_por], GETDATE(), [id_pago_proveedor]
+	FROM @nuevos n WHERE [id_cuenta_bancaria] IS NOT NULL;
 
 	INSERT INTO dbo.caja_movimientos ([id_caja], [tipo_movimiento], [descripcion_movimiento], [monto_movimiento], [fecha_registro], [id_pago_proveedor], [creado_por])
-	SELECT [id_caja], 'salida', 'Pago a proveedor', [monto], [fecha_pago], [id_pago_proveedor], [creado_por]
-	FROM @nuevos WHERE [id_caja] IS NOT NULL;
+	SELECT [id_caja], 'salida', 'Pago a proveedor', [monto], [fecha_pago], [id_pago_proveedor], n.[creado_por]
+	FROM @nuevos n WHERE [id_caja] IS NOT NULL;
 
 	-- Ver el comentario equivalente en trg_pagos_cobros_io.
 	SELECT [id_pago_proveedor] FROM @nuevos;
