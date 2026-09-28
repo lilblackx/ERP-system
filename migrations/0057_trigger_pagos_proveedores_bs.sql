@@ -61,12 +61,12 @@ BEGIN
 	JOIN @nuevos n ON n.[id_cuenta_por_pagar] = c.[id_cuenta];
 
 	INSERT INTO dbo.banco_movimientos ([id_cuenta], [tipo_movimiento], [monto_movimiento], [monto_bolivares], [tasa_cambio], [id_tasa], [fecha_movimiento], [referencia_movimiento], [descripcion_movimiento], [creado_por], [fecha_creacion], [id_pago_proveedor])
-	SELECT [id_cuenta_bancaria], 'cargo', [monto], [monto_bolivares], [tasa_cambio], [id_tasa], [fecha_pago], [referencia], 'Pago a proveedor', [creado_por], GETDATE(), [id_pago_proveedor]
-	FROM @nuevos WHERE [id_cuenta_bancaria] IS NOT NULL;
+	SELECT n.[id_cuenta_bancaria], 'cargo', n.[monto], n.[monto_bolivares], n.[tasa_cambio], n.[id_tasa], n.[fecha_pago], n.[referencia], 'Pago a proveedor', n.[creado_por], GETDATE(), n.[id_pago_proveedor]
+	FROM @nuevos n WHERE n.[id_cuenta_bancaria] IS NOT NULL;
 
 	INSERT INTO dbo.caja_movimientos ([id_caja], [tipo_movimiento], [descripcion_movimiento], [monto_movimiento], [fecha_registro], [id_pago_proveedor], [creado_por])
-	SELECT [id_caja], 'salida', 'Pago a proveedor', [monto], [fecha_pago], [id_pago_proveedor], [creado_por]
-	FROM @nuevos WHERE [id_caja] IS NOT NULL;
+	SELECT n.[id_caja], 'salida', 'Pago a proveedor', n.[monto], n.[fecha_pago], n.[id_pago_proveedor], n.[creado_por]
+	FROM @nuevos n WHERE n.[id_caja] IS NOT NULL;
 
 	SELECT [id_pago_proveedor] FROM @nuevos;
 END

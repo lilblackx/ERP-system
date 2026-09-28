@@ -134,39 +134,39 @@ BEGIN
 	-- Insertar movimientos de banco con nombre del cliente
 	INSERT INTO dbo.banco_movimientos ([id_cuenta], [tipo_movimiento], [monto_movimiento], [monto_bolivares], [tasa_cambio], [id_tasa], [fecha_movimiento], [referencia_movimiento], [descripcion_movimiento], [creado_por], [fecha_creacion], [id_pago_cobro])
 	SELECT
-		[id_cuenta_bancaria],
+		n.[id_cuenta_bancaria],
 		'abono',
-		[monto],
-		[monto_bolivares],
-		[tasa_cambio],
-		[id_tasa],
-		[fecha_pago],
-		[referencia],
+		n.[monto],
+		n.[monto_bolivares],
+		n.[tasa_cambio],
+		n.[id_tasa],
+		n.[fecha_pago],
+		n.[referencia],
 		'Cobro a cliente: ' + COALESCE(cl.nombre_razon_social, 'Desconocido'),
 		n.[creado_por],
 		GETDATE(),
-		[id_pago_cobro]
+		n.[id_pago_cobro]
 	FROM @nuevos n
 	JOIN dbo.cuentas_por_cobrar cxc ON cxc.[id_cuenta_por_cobrar] = n.[id_cuenta_por_cobrar]
 	JOIN dbo.factura_venta fv ON fv.[id_factura] = cxc.[id_factura]
 	JOIN dbo.clientes cl ON cl.[id_cliente] = fv.[id_cliente_factura]
-	WHERE [id_cuenta_bancaria] IS NOT NULL;
+	WHERE n.[id_cuenta_bancaria] IS NOT NULL;
 
 	-- Insertar movimientos de caja con nombre del cliente
 	INSERT INTO dbo.caja_movimientos ([id_caja], [tipo_movimiento], [descripcion_movimiento], [monto_movimiento], [fecha_registro], [id_pago_cobro], [creado_por])
 	SELECT
-		[id_caja],
+		n.[id_caja],
 		'entrada',
 		'Cobro a cliente: ' + COALESCE(cl.nombre_razon_social, 'Desconocido'),
-		[monto],
-		[fecha_pago],
-		[id_pago_cobro],
+		n.[monto],
+		n.[fecha_pago],
+		n.[id_pago_cobro],
 		n.[creado_por]
 	FROM @nuevos n
 	JOIN dbo.cuentas_por_cobrar cxc ON cxc.[id_cuenta_por_cobrar] = n.[id_cuenta_por_cobrar]
 	JOIN dbo.factura_venta fv ON fv.[id_factura] = cxc.[id_factura]
 	JOIN dbo.clientes cl ON cl.[id_cliente] = fv.[id_cliente_factura]
-	WHERE [id_caja] IS NOT NULL;
+	WHERE n.[id_caja] IS NOT NULL;
 
 	-- Ver el comentario equivalente en trg_pagos_cobros_io original (schema_sqlserver.sql)
 	-- sobre por que este SELECT final es necesario para que SQLAlchemy pueda leer el id
