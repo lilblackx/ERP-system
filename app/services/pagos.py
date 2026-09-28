@@ -13,6 +13,7 @@ from app.db.models import (
     CuentaPorCobrar,
     CuentaPorPagar,
     FacturaVenta,
+    NotaCreditoCliente,
     PagoCobro,
     PagoProveedor,
 )
@@ -435,6 +436,324 @@ class PagoService:
         return {"items": cuentas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
 
     @staticmethod
+    def aplicar_abono_general_cliente(
+        session: Session,
+        id_cliente: int,
+        monto_abono: Decimal,
+        tasa_cambio: Decimal,
+        metodo_pago: str,
+        id_cuenta_bancaria: int | None = None,
+        id_caja: int | None = None,
+        id_tasa: int | None = None,
+        referencia: str | None = None,
+        id_usuario: int | None = None,
+    ) -> dict:
+        """Aplica un abono general a un cliente usando el método FIFO (First In, First Out).
+
+        Distribuye el monto del abono entre las facturas pendientes del cliente,
+        ordenadas por fecha de emisión (más antiguas primero), usando la tasa de cambio
+        proporcionada para calcular equivalentes en bolívares.
+
+        Args:
+            session: Sesión de base de datos
+            id_cliente: ID del cliente
+            monto_abono: Monto total del abono en USD
+            tasa_cambio: Tasa de cambio USD a Bs
+            metodo_pago: Método de pago (efectivo, transferencia, etc.)
+            id_cuenta_bancaria: ID de cuenta bancaria (opcional)
+            id_caja: ID de caja (opcional)
+            id_tasa: ID del registro de tasa (opcional)
+            referencia: Referencia del pago (opcional)
+            id_usuario: ID del usuario que realiza la operación
+
+        Returns:
+            dict con información del proceso:
+            - facturas_actualizadas: lista de facturas afectadas
+            - monto_total_aplicado: monto total aplicado
+            - saldo_restante: saldo no aplicado (si hay sobreabono)
+            - es_sobreabono: True si el abono excedió todas las deudas
+
+        Raises:
+            ValueError: Si hay errores de validación
+        """
+        require_permiso(session, id_usuario, "pagos", "crear")
+
+        # Validaciones básicas
+        monto_abono = to_decimal(monto_abono)
+        if monto_abono <= 0:
+            raise ValueError("El monto del abono debe ser mayor a cero")
+
+        tasa_cambio = to_decimal(tasa_cambio)
+        if tasa_cambio <= 0:
+            raise ValueError("La tasa de cambio debe ser mayor a cero")
+
+        if (id_cuenta_bancaria is None) == (id_caja is None):
+            raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
+
+        # Validar origen del pago
+        if id_cuenta_bancaria is not None:
+            cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
+            if cuenta_bancaria is None:
+                raise ValueError("Cuenta bancaria no encontrada")
+            if cuenta_bancaria.estado_cuenta != "ACTIVO":
+                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' está inactiva")
+
+        if id_caja is not None:
+            caja = session.get(Caja, id_caja)
+            if caja is None:
+                raise ValueError("Caja no encontrada")
+            if caja.fecha_apertura is None or caja.fecha_cierre is not None:
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+
+        # Obtener todas las cuentas por cobrar pendientes del cliente
+        # Ordenadas por fecha de emisión de la factura (FIFO)
+        try:
+            cuentas_pendientes = (
+                session.query(CuentaPorCobrar)
+                .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+                .filter(
+                    FacturaVenta.id_cliente_factura == id_cliente,
+                    FacturaVenta.condicion_pago == "credito",
+                    CuentaPorCobrar.estado.in_(("pendiente", "parcial")),
+                    CuentaPorCobrar.saldo_pendiente > 0,
+                )
+                .order_by(FacturaVenta.fecha_emision.asc())
+                .all()
+            )
+            logger.info(f"Cuentas pendientes encontradas para cliente {id_cliente}: {len(cuentas_pendientes)}")
+        except Exception as e:
+            logger.error(f"Error al obtener cuentas pendientes: {e}")
+            raise ValueError(f"Error al obtener cuentas pendientes: {str(e)}")
+
+        # Calcular total de deuda (si hay facturas pendientes)
+        if cuentas_pendientes:
+            try:
+                total_deuda = sum(cuenta.saldo_pendiente for cuenta in cuentas_pendientes)
+                logger.info(f"Total deuda calculada: {total_deuda}")
+            except Exception as e:
+                logger.error(f"Error al calcular total deuda: {e}")
+                raise ValueError(f"Error al calcular total deuda: {str(e)}")
+        else:
+            total_deuda = Decimal("0.00")
+            logger.info(f"Cliente {id_cliente} no tiene facturas pendientes, todo el abono quedará como saldo a favor")
+
+        # Verificar si es sobreabono o pago sin facturas
+        es_sobreabono = monto_abono > total_deuda
+        monto_a_aplicar = min(monto_abono, total_deuda)
+        saldo_restante = monto_abono - monto_a_aplicar
+
+        # Iniciar transacción
+        try:
+            facturas_actualizadas = []
+            monto_restante = monto_a_aplicar
+
+            # Determinar si es pago en efectivo (no incluye tasa en descripción)
+            es_efectivo = metodo_pago == "efectivo"
+
+            # Si no hay facturas pendientes, registrar directamente como saldo a favor
+            if not cuentas_pendientes:
+                logger.info(f"Registrando abono sin facturas pendientes para cliente {id_cliente}: ${monto_abono}")
+
+                # Registrar movimiento de caja/banco
+                fecha = datetime.now()
+                cliente = session.get(Cliente, id_cliente)
+                nombre_cliente = cliente.nombre_razon_social if cliente else "Desconocido"
+                descripcion = f"Abono anticipado - {nombre_cliente}"
+                if referencia:
+                    descripcion += f" (Ref: {referencia})"
+                monto_abono_bs = monto_abono * tasa_cambio
+
+                if id_caja is not None:
+                    from app.services.tesoreria import CajaService
+                    CajaService._registrar_ingreso_excedente(
+                        session,
+                        id_caja=id_caja,
+                        monto=monto_abono,
+                        descripcion=descripcion,
+                        id_usuario=id_usuario,
+                        fecha=fecha,
+                    )
+                else:
+                    from app.services.tesoreria import BancoService
+                    BancoService._registrar_ingreso_excedente(
+                        session,
+                        id_cuenta=id_cuenta_bancaria,
+                        monto=monto_abono,
+                        descripcion=descripcion,
+                        id_usuario=id_usuario,
+                        fecha=fecha,
+                        monto_bolivares=monto_abono_bs,
+                        tasa_cambio=tasa_cambio,
+                    )
+            else:
+                # Aplicar pagos usando FIFO
+                for cuenta in cuentas_pendientes:
+                    if monto_restante <= 0:
+                        break
+
+                    # Calcular monto a aplicar a esta factura
+                    saldo_pendiente = cuenta.saldo_pendiente
+                    monto_aplicar = min(monto_restante, saldo_pendiente)
+
+                    # Calcular equivalentes en Bs
+                    monto_aplicado_bs = monto_aplicar * tasa_cambio
+
+                    # Generar descripción de auditoría (sin tasa para efectivo)
+                    if es_efectivo:
+                        descripcion_auditoria = (
+                            f"Abono general efectivo: ${float(monto_aplicar):.2f} / "
+                            f"Restante: ${float(monto_restante - monto_aplicar):.2f}"
+                        )
+                    else:
+                        descripcion_auditoria = (
+                            f"Abono general: ${float(monto_aplicar):.2f} ({float(monto_aplicado_bs):.2f} Bs) / "
+                            f"Tasa: {float(tasa_cambio):.2f} / "
+                            f"Restante: ${float(monto_restante - monto_aplicar):.2f}"
+                        )
+
+                    # Crear registro de pago
+                    pago = PagoCobro(
+                        id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
+                        id_cuenta_bancaria=id_cuenta_bancaria,
+                        id_caja=id_caja,
+                        id_tasa=id_tasa,
+                        metodo_pago=metodo_pago,
+                        moneda="USD",
+                        monto=monto_aplicar,
+                        monto_bolivares=monto_aplicado_bs,
+                        tasa_cambio=tasa_cambio,
+                        referencia=referencia,
+                        fecha_pago=datetime.now(),
+                        creado_por=id_usuario,
+                    )
+                    session.add(pago)
+                    session.flush()  # Flush para obtener el ID del pago
+
+                    # Actualizar saldo de la cuenta por cobrar
+                    cuenta.saldo_pendiente -= monto_aplicar
+
+                    # Actualizar estado según el saldo restante
+                    if cuenta.saldo_pendiente <= 0:
+                        cuenta.estado = "pagada"
+                        cuenta.saldo_pendiente = Decimal("0.00")
+                    else:
+                        cuenta.estado = "parcial"
+
+                    # Actualizar observaciones de la factura si existe (truncando si es necesario)
+                    if cuenta.factura:
+                        observaciones_actuales = cuenta.factura.observaciones_factura or ""
+                        separador = " | " if observaciones_actuales else ""
+                        nueva_observacion = f"{observaciones_actuales}{separador}{descripcion_auditoria}"
+
+                        # Truncar a 255 caracteres si es necesario
+                        if len(nueva_observacion) > 255:
+                            nueva_observacion = nueva_observacion[:252] + "..."
+                        cuenta.factura.observaciones_factura = nueva_observacion
+
+                    facturas_actualizadas.append({
+                        "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
+                        "id_factura": cuenta.id_factura,
+                        "numero_factura": cuenta.factura.numero_factura if cuenta.factura else "N/A",
+                        "monto_aplicado": monto_aplicar,
+                        "monto_aplicado_bs": monto_aplicado_bs,
+                        "saldo_restante_factura": cuenta.saldo_pendiente,
+                        "estado_resultante": cuenta.estado,
+                        "descripcion_auditoria": descripcion_auditoria,
+                    })
+
+                    # Actualizar monto restante
+                    monto_restante -= monto_aplicar
+
+            # Si hay sobreabono o no hay facturas pendientes, crear nota de crédito como saldo a favor del cliente
+            nota_credito_id = None
+            if (es_sobreabono or not cuentas_pendientes) and saldo_restante > 0:
+                try:
+                    cliente = session.get(Cliente, id_cliente)
+                    if cliente:
+                        # Crear nota de crédito por el excedente o por pago sin facturas
+                        if cuentas_pendientes:
+                            motivo = f"Sobreabono por pago en exceso - {metodo_pago}"
+                        else:
+                            motivo = f"Abono anticipado sin facturas pendientes - {metodo_pago}"
+                        nota_credito = NotaCreditoCliente(
+                            numero_nota_credito=f"ABONO-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                            id_cliente=id_cliente,
+                            id_factura_origen=None,  # No asociada a una factura específica
+                            monto=saldo_restante,
+                            saldo_disponible=saldo_restante,
+                            motivo=motivo,
+                            estado="disponible",
+                            creado_por=id_usuario,
+                            fecha_creacion=datetime.now(),
+                        )
+                        session.add(nota_credito)
+                        session.flush()
+                        nota_credito_id = nota_credito.id_nota_credito
+
+                        logger.info(
+                            "Nota de crédito creada por sobreabono: cliente=%s monto=%s metodo=%s nota_id=%s",
+                            id_cliente,
+                            saldo_restante,
+                            metodo_pago,
+                            nota_credito_id,
+                        )
+                except Exception as e:
+                    logger.warning("No se pudo crear nota de crédito por sobreabono: %s", e)
+                    # No fallar toda la transacción si falla la nota de crédito
+
+            # Commit de la transacción
+            session.commit()
+
+            # Registrar evento de auditoría general
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="ABONO_GENERAL_CLIENTE",
+                modulo="TESORERIA",
+                detalle={
+                    "id_cliente": id_cliente,
+                    "monto_abono": str(monto_abono),
+                    "tasa_cambio": str(tasa_cambio),
+                    "monto_total_aplicado": str(monto_a_aplicar),
+                    "saldo_restante": str(saldo_restante),
+                    "es_sobreabono": es_sobreabono,
+                    "facturas_actualizadas": len(facturas_actualizadas),
+                    "nota_credito_id": nota_credito_id,
+                },
+            )
+
+            logger.info(
+                "Abono general aplicado: cliente=%s monto_abono=%s tasa_cambio=%s "
+                "monto_aplicado=%s facturas_actualizadas=%s es_sobreabono=%s nota_credito=%s",
+                id_cliente,
+                monto_abono,
+                tasa_cambio,
+                monto_a_aplicar,
+                len(facturas_actualizadas),
+                es_sobreabono,
+                nota_credito_id,
+            )
+
+            return {
+                "facturas_actualizadas": facturas_actualizadas,
+                "monto_total_aplicado": monto_a_aplicar,
+                "saldo_restante": saldo_restante,
+                "es_sobreabono": es_sobreabono,
+                "tasa_cambio_utilizada": tasa_cambio,
+                "nota_credito_id": nota_credito_id,
+            }
+
+        except Exception as e:
+            session.rollback()
+            if _es_deadlock(e):
+                raise
+            if _es_lock_timeout(e):
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a las cuentas. Intente de nuevo."
+                ) from e
+            raise ValueError(f"Error al aplicar abono general: {str(e)}") from e
+
+    @staticmethod
     def listar_cuentas_por_cobrar_por_cliente(
         session: Session,
         id_cliente: int | None = None,
@@ -445,7 +764,8 @@ class PagoService:
         id_usuario: int | None = None,
     ) -> dict:
         """Lista cuentas por cobrar agrupadas por cliente con el saldo total pendiente.
-        Retorna una fila por cliente con la suma de todos los saldos pendientes de sus facturas."""
+        Retorna una fila por cliente con la suma de todos los saldos pendientes de sus facturas.
+        También incluye clientes que solo tienen saldo a favor (notas de crédito disponibles)."""
         require_permiso(session, id_usuario, "pagos", "ver")
         hoy = date.today()
 
@@ -485,9 +805,19 @@ class PagoService:
                 id_cliente_key = cliente.id_cliente
 
                 if id_cliente_key not in clientes_deuda:
+                    # Manejo seguro del campo saldo_favor (puede no existir si no se ejecutó la migración)
+                    saldo_favor = Decimal("0.00")
+                    try:
+                        saldo_favor = getattr(cuenta, 'saldo_favor', Decimal("0.00"))
+                        if saldo_favor is None:
+                            saldo_favor = Decimal("0.00")
+                    except Exception:
+                        saldo_favor = Decimal("0.00")
+                    
                     clientes_deuda[id_cliente_key] = {
                         "cliente": cliente,
                         "saldo_total": Decimal("0.00"),
+                        "saldo_favor": saldo_favor,
                         "cuentas": [],
                         "fecha_vencimiento_mas_antigua": None,
                         "fecha_emision_mas_antigua_pendiente": None,
@@ -495,6 +825,21 @@ class PagoService:
 
                 clientes_deuda[id_cliente_key]["saldo_total"] += cuenta.saldo_pendiente
                 clientes_deuda[id_cliente_key]["cuentas"].append(cuenta)
+                
+                # Actualizar saldo_favor con el valor más alto encontrado (por si hay inconsistencias)
+                try:
+                    cuenta_saldo_favor = getattr(cuenta, 'saldo_favor', Decimal("0.00"))
+                    if cuenta_saldo_favor is None:
+                        cuenta_saldo_favor = Decimal("0.00")
+                    
+                    saldo_favor_actual = clientes_deuda[id_cliente_key]["saldo_favor"]
+                    if saldo_favor_actual is None:
+                        saldo_favor_actual = Decimal("0.00")
+                    
+                    if cuenta_saldo_favor and cuenta_saldo_favor > saldo_favor_actual:
+                        clientes_deuda[id_cliente_key]["saldo_favor"] = cuenta_saldo_favor
+                except Exception:
+                    pass
 
                 # Calcular fecha de vencimiento más antigua
                 if cuenta.fecha_vencimiento:

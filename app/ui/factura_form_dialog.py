@@ -300,6 +300,7 @@ class FacturaFormDialog(QDialog):
         self._tasa_vigente: dict | None = None
         self._iva_activo: bool = False
         self._iva_porcentaje: Decimal = Decimal("0")
+        self._precios_originales: dict = {}
 
         self.setWindowTitle("Nueva Factura")
         self.resize(920, 740)
@@ -535,6 +536,22 @@ class FacturaFormDialog(QDialog):
         grid.addWidget(lbl_condicion, 3, 0)
         grid.addWidget(self.condicion_combo, 4, 0)
 
+        # Porcentaje BCV (opcional)
+        lbl_porcentaje_bcv = QLabel("Porcentaje BCV")
+        lbl_porcentaje_bcv.setProperty("class", "FormLabel")
+        self.chk_porcentaje_bcv = QCheckBox("Aplicar porcentaje BCV")
+        self.chk_porcentaje_bcv.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 13px;")
+        self.chk_porcentaje_bcv.toggled.connect(self._toggle_porcentaje_bcv)
+        self.porcentaje_bcv_input = NumericLineEdit(
+            NumericFieldType.PERCENTAGE, min_value=Decimal("0"), max_value=Decimal("100")
+        )
+        self.porcentaje_bcv_input.setFixedHeight(32)
+        self.porcentaje_bcv_input.hide()
+        self.porcentaje_bcv_input.valueChanged.connect(self._on_porcentaje_bcv_cambiado)
+        grid.addWidget(lbl_porcentaje_bcv, 3, 1)
+        grid.addWidget(self.chk_porcentaje_bcv, 4, 1)
+        grid.addWidget(self.porcentaje_bcv_input, 4, 2)
+
         # Fecha de vencimiento (solo credito)
         lbl_vencimiento = QLabel("Fecha de Vencimiento")
         lbl_vencimiento.setProperty("class", "FormLabel")
@@ -545,8 +562,8 @@ class FacturaFormDialog(QDialog):
         self.vencimiento_input.setDate(QDate.currentDate().addDays(30))
         self.vencimiento_input.setFixedHeight(32)
         self.vencimiento_input.setEnabled(False)
-        grid.addWidget(lbl_vencimiento, 3, 1)
-        grid.addWidget(self.vencimiento_input, 4, 1)
+        grid.addWidget(lbl_vencimiento, 5, 0)
+        grid.addWidget(self.vencimiento_input, 6, 0)
 
         # Observaciones
         lbl_obs = QLabel("Observaciones")
@@ -555,8 +572,8 @@ class FacturaFormDialog(QDialog):
         self.observaciones_input.setPlaceholderText("Opcional")
         self.observaciones_input.setMaxLength(255)
         self.observaciones_input.setFixedHeight(32)
-        grid.addWidget(lbl_obs, 3, 2)
-        grid.addWidget(self.observaciones_input, 4, 2)
+        grid.addWidget(lbl_obs, 5, 1)
+        grid.addWidget(self.observaciones_input, 6, 1)
 
         # Dias de credito (solo credito): por defecto usa los configurados en el cliente
         # (self.chk_dias_configurados marcado); desmarcarlo revela un spinbox para dar
@@ -1264,12 +1281,95 @@ class FacturaFormDialog(QDialog):
             self._referencia_vuelto = None
             self.metodo_vuelto_combo.setCurrentIndex(0)
         self.tabs.setTabEnabled(self._idx_tab_pagos, not es_credito)
-        if es_credito and self.tabs.currentIndex() == self._idx_tab_pagos:
-            self.tabs.setCurrentIndex(0)  # dispara _on_tab_cambiada, que ya actualiza el boton
+
+    def _toggle_porcentaje_bcv(self) -> None:
+        """Muestra/oculta el campo de porcentaje BCV según el checkbox."""
+        if self.chk_porcentaje_bcv.isChecked():
+            self.porcentaje_bcv_input.show()
+            self.porcentaje_bcv_input.setFocus()
         else:
-            self._actualizar_boton_footer()
-        self._refrescar_tabla_pagos()  # tambien deja btn_emitir en el estado correcto
-        self._on_cliente_cambiado()  # tambien recalcula vencimiento_input y la alerta
+            self.porcentaje_bcv_input.hide()
+            self.porcentaje_bcv_input.set_value(None)
+
+        # Actualizar el combo de precios del producto actual
+        id_producto = self.producto_combo.currentData()
+        if id_producto is not None:
+            self._on_producto_cambiado()
+
+        # Recalcular el total de la factura cuando cambia el porcentaje
+        self._actualizar_boton_footer()
+        self._refrescar_tabla_items()
+
+    def _on_porcentaje_bcv_cambiado(self) -> None:
+        """Actualiza los precios en el carrito y en el combo de selección cuando cambia el porcentaje BCV."""
+        # Actualizar los precios en el combo de selección de precio
+        id_producto = self.producto_combo.currentData()
+        if id_producto is not None:
+            precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
+            if precio:
+                # Actualizar los precios originales
+                self._precios_originales = {
+                    1: precio.precio_1,
+                    2: precio.precio_2,
+                    3: precio.precio_3
+                }
+
+                # Actualizar el combo con los nuevos precios con porcentaje
+                self.precio_seleccion_combo.blockSignals(True)
+                self.precio_seleccion_combo.clear()
+
+                porcentaje_bcv = self.porcentaje_bcv_input.get_value()
+                if porcentaje_bcv is not None and porcentaje_bcv > 0:
+                    precio_1_mostrar = precio.precio_1 * (1 + float(porcentaje_bcv) / 100)
+                    self.precio_seleccion_combo.addItem(f"Precio 1: ${precio_1_mostrar:,.2f}", 1)
+
+                    if precio.precio_2 is not None:
+                        precio_2_mostrar = precio.precio_2 * (1 + float(porcentaje_bcv) / 100)
+                        self.precio_seleccion_combo.addItem(f"Precio 2: ${precio_2_mostrar:,.2f}", 2)
+
+                    if precio.precio_3 is not None:
+                        precio_3_mostrar = precio.precio_3 * (1 + float(porcentaje_bcv) / 100)
+                        self.precio_seleccion_combo.addItem(f"Precio 3: ${precio_3_mostrar:,.2f}", 3)
+                else:
+                    self.precio_seleccion_combo.addItem(f"Precio 1: ${precio.precio_1:,.2f}", 1)
+
+                    if precio.precio_2 is not None:
+                        self.precio_seleccion_combo.addItem(f"Precio 2: ${precio.precio_2:,.2f}", 2)
+
+                    if precio.precio_3 is not None:
+                        self.precio_seleccion_combo.addItem(f"Precio 3: ${precio.precio_3:,.2f}", 3)
+
+                # Restaurar la selección anterior
+                if self.precio_seleccion_combo.count() > 0:
+                    self.precio_seleccion_combo.setCurrentIndex(0)
+
+                self.precio_seleccion_combo.blockSignals(False)
+
+                # Recalcular el precio actual basado en la selección
+                self._on_precio_seleccion_cambiado()
+
+        # Actualizar los precios de los items en el carrito
+        if not self.items:
+            return
+
+        porcentaje_bcv = self.porcentaje_bcv_input.get_value()
+        if porcentaje_bcv is None or porcentaje_bcv <= 0:
+            # Si no hay porcentaje, restaurar los precios base originales
+            for item in self.items:
+                precio_base = item.get("precio_base", item["precio_unitario"])
+                item["precio_unitario"] = precio_base
+        else:
+            # Actualizar los precios de los items en el carrito según el porcentaje
+            for item in self.items:
+                # Obtener el precio base original (sin porcentaje)
+                precio_base = item.get("precio_base", item["precio_unitario"])
+
+                # Aplicar el porcentaje
+                nuevo_precio = precio_base * (1 + float(porcentaje_bcv) / 100)
+                item["precio_unitario"] = nuevo_precio
+
+        self._refrescar_tabla_items()
+        self._actualizar_boton_footer()
 
     # ── Producto: busqueda server-side con debounce ─────────────────────────
 
@@ -1339,19 +1439,47 @@ class FacturaFormDialog(QDialog):
         precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         self._precio_lista_actual = float(precio.precio_venta) if precio else None
 
+        # Guardar los precios originales sin porcentaje BCV
+        if precio:
+            self._precios_originales = {
+                1: precio.precio_1,
+                2: precio.precio_2,
+                3: precio.precio_3
+            }
+        else:
+            self._precios_originales = {}
+
         # Poblar el combo de selección de precio
         self.precio_seleccion_combo.blockSignals(True)
         self.precio_seleccion_combo.clear()
 
         if precio:
             self.precio_seleccion_combo.setEnabled(True)
-            self.precio_seleccion_combo.addItem(f"Precio 1: ${precio.precio_1:,.2f}", 1)
 
-            if precio.precio_2 is not None:
-                self.precio_seleccion_combo.addItem(f"Precio 2: ${precio.precio_2:,.2f}", 2)
+            # Aplicar porcentaje BCV a los precios si está activo
+            porcentaje_bcv = None
+            if self.chk_porcentaje_bcv.isChecked():
+                porcentaje_bcv = self.porcentaje_bcv_input.get_value()
 
-            if precio.precio_3 is not None:
-                self.precio_seleccion_combo.addItem(f"Precio 3: ${precio.precio_3:,.2f}", 3)
+            if porcentaje_bcv is not None and porcentaje_bcv > 0:
+                precio_1_mostrar = precio.precio_1 * (1 + float(porcentaje_bcv) / 100)
+                self.precio_seleccion_combo.addItem(f"Precio 1: ${precio_1_mostrar:,.2f}", 1)
+
+                if precio.precio_2 is not None:
+                    precio_2_mostrar = precio.precio_2 * (1 + float(porcentaje_bcv) / 100)
+                    self.precio_seleccion_combo.addItem(f"Precio 2: ${precio_2_mostrar:,.2f}", 2)
+
+                if precio.precio_3 is not None:
+                    precio_3_mostrar = precio.precio_3 * (1 + float(porcentaje_bcv) / 100)
+                    self.precio_seleccion_combo.addItem(f"Precio 3: ${precio_3_mostrar:,.2f}", 3)
+            else:
+                self.precio_seleccion_combo.addItem(f"Precio 1: ${precio.precio_1:,.2f}", 1)
+
+                if precio.precio_2 is not None:
+                    self.precio_seleccion_combo.addItem(f"Precio 2: ${precio.precio_2:,.2f}", 2)
+
+                if precio.precio_3 is not None:
+                    self.precio_seleccion_combo.addItem(f"Precio 3: ${precio.precio_3:,.2f}", 3)
 
             # Por defecto seleccionar Precio 1
             self.precio_seleccion_combo.setCurrentIndex(0)
@@ -1395,14 +1523,16 @@ class FacturaFormDialog(QDialog):
             return
 
         precio_seleccionado = self.precio_seleccion_combo.currentData()
+
+        # Usar los precios originales (sin porcentaje BCV) para el cálculo
         if precio_seleccionado == 1:
-            precio_bulto = precio.precio_1
-        elif precio_seleccionado == 2 and precio.precio_2 is not None:
-            precio_bulto = precio.precio_2
-        elif precio_seleccionado == 3 and precio.precio_3 is not None:
-            precio_bulto = precio.precio_3
+            precio_bulto = self._precios_originales.get(1, precio.precio_1)
+        elif precio_seleccionado == 2 and self._precios_originales.get(2) is not None:
+            precio_bulto = self._precios_originales.get(2)
+        elif precio_seleccionado == 3 and self._precios_originales.get(3) is not None:
+            precio_bulto = self._precios_originales.get(3)
         else:
-            precio_bulto = precio.precio_1
+            precio_bulto = self._precios_originales.get(1, precio.precio_1)
 
         # Obtener el tipo de venta actual
         tipo_venta = self.tipo_venta_combo.currentData()
@@ -1423,6 +1553,12 @@ class FacturaFormDialog(QDialog):
             # Precio de bulto (sin división)
             precio_facturar = precio_bulto
             self.lbl_tipo_precio.setText("(por bulto)")
+
+        # Aplicar porcentaje BCV al precio de facturación si está activo
+        if self.chk_porcentaje_bcv.isChecked():
+            porcentaje_bcv = self.porcentaje_bcv_input.get_value()
+            if porcentaje_bcv is not None and porcentaje_bcv > 0:
+                precio_facturar = precio_facturar * (1 + float(porcentaje_bcv) / 100)
 
         # Actualizar el precio de facturación en el input
         self.precio_input.set_value(precio_facturar)
@@ -1571,6 +1707,17 @@ class FacturaFormDialog(QDialog):
         precio_lista = self._precio_lista_actual
         precio_unitario = float(self.precio_input.get_value() or 0)
 
+        # Calcular el precio base original (sin porcentaje BCV)
+        # Si hay porcentaje BCV activo, dividir para obtener el precio base
+        if self.chk_porcentaje_bcv.isChecked():
+            porcentaje_bcv = self.porcentaje_bcv_input.get_value()
+            if porcentaje_bcv is not None and porcentaje_bcv > 0:
+                precio_base = precio_unitario / (1 + float(porcentaje_bcv) / 100)
+            else:
+                precio_base = precio_unitario
+        else:
+            precio_base = precio_unitario
+
         # Calcular comisión si se seleccionó Precio 2 o 3
         precio_info = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         tipo_precio_seleccionado = self.precio_seleccion_combo.currentData()
@@ -1611,6 +1758,7 @@ class FacturaFormDialog(QDialog):
                     "nombre_producto": nombre_producto,
                     "cantidad": cantidad,
                     "precio_unitario": precio_unitario,
+                    "precio_base": precio_base,
                     "observaciones_item": nota,
                     "precio_lista": precio_lista,
                     "tipo_precio_seleccionado": tipo_precio_seleccionado,
@@ -1924,6 +2072,10 @@ class FacturaFormDialog(QDialog):
         hay_vuelto = monto_vuelto > 0.005
         metodo_vuelto = self.metodo_vuelto_combo.currentData() if hay_vuelto else None
         origen_vuelto = self.origen_vuelto_combo.currentData() if hay_vuelto else None
+        
+        # Porcentaje BCV
+        porcentaje_bcv = self.porcentaje_bcv_input.get_value() if self.chk_porcentaje_bcv.isChecked() else None
+        
         return {
             "id_cliente": self.cliente_combo.currentData(),
             "id_vendedor": self.vendedor_combo.currentData(),
@@ -1949,11 +2101,13 @@ class FacturaFormDialog(QDialog):
             "referencia_vuelto": self._referencia_vuelto if hay_vuelto else None,
             "id_autorizador_vuelto": self._id_autorizador_vuelto if hay_vuelto else None,
             "pagos": self.pagos if not es_credito else [],
+            "porcentaje_bcv": porcentaje_bcv,
             "items": [
                 {
                     "id_producto": it["id_producto"],
                     "cantidad": it["cantidad"],
                     "precio_unitario": it["precio_unitario"],
+                    "precio_base": it.get("precio_base", it["precio_unitario"]),
                     "observaciones": it["observaciones_item"],
                     "tipo_venta": it.get("tipo_venta"),
                 }

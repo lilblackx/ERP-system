@@ -38,6 +38,7 @@ from app.ui.comisiones_panel import ComisionesPanel
 from app.ui.compras import ComprasView
 from app.ui.config_empresa_panel import ConfigEmpresaPanel
 from app.ui.cuentas_bancarias_panel import CuentasBancariasPanel
+from app.ui.cuentas_por_cobrar_bcv_panel import CuentasPorCobrarBCVPanel
 from app.ui.cuentas_por_cobrar_panel import CuentasPorCobrarPanel
 from app.ui.cuentas_por_pagar_panel import CuentasPorPagarPanel
 from app.ui.dashboard_panel import DashboardPanel
@@ -69,6 +70,7 @@ MODULOS_CONFIG = {
     "bancos": ("Bancos", BancosPanel),
     "cuentas_bancarias": ("Cuentas Bancarias", CuentasBancariasPanel),
     "cuentas_por_cobrar": ("Cuentas por Cobrar", CuentasPorCobrarPanel),
+    "cuentas_por_cobrar_bcv": ("Cuentas por Cobrar BCV", CuentasPorCobrarBCVPanel),
     "cuentas_por_pagar": ("Cuentas por Pagar", CuentasPorPagarPanel),
     "cajas": ("Cajas", CajasPanel),
     "vendedores": ("Vendedores", VendedoresPanel),
@@ -105,6 +107,8 @@ MODULO_PERMISO: dict[str, tuple[str, str]] = {
     # CuentasPorCobrarPanel usa 'pagos'/'ver' porque PagoService.listar_cuentas_por_cobrar
     # exige ese mismo permiso -- simetrico a cuentas_por_pagar mas abajo.
     "cuentas_por_cobrar": ("pagos", "ver"),
+    # CuentasPorCobrarBCVPanel usa 'pagos'/'ver' por simetria con cuentas_por_cobrar
+    "cuentas_por_cobrar_bcv": ("pagos", "ver"),
     # CuentasPorPagarPanel -- usa 'pagos'/'ver' porque PagoService.listar_cuentas_por_pagar
     # exige ese mismo permiso.
     "cuentas_por_pagar": ("pagos", "ver"),

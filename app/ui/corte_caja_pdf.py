@@ -97,7 +97,6 @@ def _armar_html(
         f"<tr><td {_INFO_LBL}>Cajero:</td><td {_INFO_VAL}>{_esc(cajero)}</td></tr>"
         f"<tr><td {_INFO_LBL}>Fecha Apertura:</td><td {_INFO_VAL}>{fecha_apertura}</td></tr>"
         f"<tr><td {_INFO_LBL}>Fecha Cierre:</td><td {_INFO_VAL}>{fecha_cierre}</td></tr>"
-        f"<tr><td {_INFO_LBL}>Hora de Cierre:</td><td {_INFO_VAL}>{hora_cierre}</td></tr>"
     )
 
     # Filas de totales

@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import ConfiguracionEmpresa, CuentaPorPagar, Usuario
+from app.services.compra_oc import CompraOCService
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
@@ -45,6 +46,8 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
+from app.ui.compra_detalle_dialog import CompraDetalleDialog
+from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -832,18 +835,25 @@ class CuentasPorPagarPanel(QWidget):
             color = COLORES_ESTADO_CXP.get(cuenta.estado, COLOR_TEXT_MUTED)
             self.tabla.setCellWidget(fila, 7, EstadoBadge(cuenta.estado.capitalize(), color))
 
-            # Botón de imprimir factura
-            btn_imprimir = QPushButton("Imprimir")
-            btn_imprimir.setFixedHeight(28)
-            btn_imprimir.setStyleSheet(BUTTON_SECONDARY_QSS)
-            btn_imprimir.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_imprimir.clicked.connect(
-                lambda checked, id_compra=compra.id_compra if compra else None: self._imprimir_factura_compra(id_compra)
+            # Botón de acción: Exportar ODC
+            id_oc = compra.oc.id_oc if compra and compra.oc else None
+
+            btn_odc = QPushButton()
+            btn_odc.setIcon(qta.icon("fa5s.print", color=COLOR_TEXT_DARK))
+            btn_odc.setFixedHeight(28)
+            btn_odc.setFixedWidth(28)
+            btn_odc.setStyleSheet(BUTTON_SECONDARY_QSS)
+            btn_odc.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_odc.setEnabled(id_oc is not None)  # Deshabilitar si no hay ODC asociada
+            btn_odc.setToolTip("Exportar ODC a PDF")
+            btn_odc.clicked.connect(
+                lambda checked, id_oc=id_oc: self._exportar_odc_pdf(id_oc)
             )
+
             widget_acciones = QWidget()
             layout_acciones = QHBoxLayout(widget_acciones)
             layout_acciones.setContentsMargins(5, 2, 5, 2)
-            layout_acciones.addWidget(btn_imprimir)
+            layout_acciones.addWidget(btn_odc)
             layout_acciones.addStretch()
             self.tabla.setCellWidget(fila, 8, widget_acciones)
 
@@ -890,6 +900,101 @@ class CuentasPorPagarPanel(QWidget):
         finally:
             session.close()
 
+    def _imprimir_factura_compra(self, id_compra: int | None) -> None:
+        """Muestra el detalle de la factura de compra en un diálogo."""
+        if id_compra is None:
+            MessageBox.warning(self, "Sin compra", "No hay una compra asociada a esta cuenta por pagar.")
+            return
+        session = self.session_factory()
+        try:
+            dialogo = CompraDetalleDialog(session, id_compra, id_usuario=self.usuario.id_usuario, parent=self)
+            dialogo.exec()
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver detalles de compras.")
+        except Exception:
+            logger.exception("Fallo al abrir detalle de compra")
+            MessageBox.critical(self, "Error", "No se pudo abrir el detalle de la compra.")
+        finally:
+            session.close()
+
+    def _exportar_odc_pdf(self, id_oc: int | None) -> None:
+        """Exporta la orden de compra a PDF."""
+        if id_oc is None:
+            MessageBox.warning(self, "Sin ODC", "No hay una orden de compra asociada a esta cuenta por pagar.")
+            return
+
+        session = self.session_factory()
+        try:
+            datos_oc = CompraOCService.obtener_oc(session, id_oc, id_usuario=self.usuario.id_usuario)
+            oc = datos_oc["oc"]
+            detalles = datos_oc["detalles"]
+
+            # Generar nombre de archivo
+            nombre_archivo = f"ODC_{oc.numero_oc}.pdf"
+            ruta, _ = QFileDialog.getSaveFileName(self, "Exportar ODC a PDF", nombre_archivo, "PDF (*.pdf)")
+            if not ruta:
+                return
+
+            # Preparar datos para exportación
+            config_empresa = EmpresaService.obtener_datos_documento(session)
+            encabezados = ["Producto", "Cantidad Solicitada", "Cantidad Pendiente", "Precio Unitario", "Total"]
+            filas = []
+            total_oc = 0.0
+
+            for detalle in detalles:
+                producto = detalle.producto.nombre_producto if detalle.producto else "Producto eliminado"
+                cantidad_solicitada = float(detalle.cantidad_solicitada)
+                cantidad_pendiente = float(detalle.cantidad_pendiente)
+                precio = float(detalle.precio_unitario)
+                total = cantidad_solicitada * precio
+                total_oc += total
+
+                filas.append([
+                    producto,
+                    f"{cantidad_solicitada:,.2f}",
+                    f"{cantidad_pendiente:,.2f}",
+                    f"${precio:,.2f}",
+                    f"${total:,.2f}"
+                ])
+
+            # Filtros con información de la ODC
+            proveedor = oc.proveedor.nombre_razon_social if oc.proveedor else ""
+            filtros = {
+                "N° ODC": oc.numero_oc,
+                "Proveedor": proveedor,
+                "Fecha": oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else "",
+                "Estado": oc.estado
+            }
+
+            # Fila de totales
+            total_row = ["", "", "", f"${total_oc:,.2f}"]
+            total_label = "TOTAL:"
+
+            col_widths = [2.5, 1.5, 1.5, 1.5, 1.5]
+            exportar_pdf(
+                ruta,
+                f"Orden de Compra {oc.numero_oc}",
+                encabezados,
+                filas,
+                filtros=filtros,
+                col_widths=col_widths,
+                config_empresa=config_empresa,
+                total_row=total_row,
+                total_label=total_label,
+            )
+
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver detalles de órdenes de compra.")
+        except ValueError as e:
+            MessageBox.warning(self, "Error", str(e))
+        except Exception:
+            logger.exception("Fallo al exportar ODC a PDF")
+            MessageBox.critical(self, "Error", "No se pudo exportar la orden de compra a PDF.")
+        finally:
+            session.close()
+
     # ── Exportación ───────────────────────────────────────────────────────
 
     def _exportar_excel(self) -> None:
@@ -906,7 +1011,30 @@ class CuentasPorPagarPanel(QWidget):
         try:
             config_empresa = self._obtener_config_empresa()
             encabezados = ["Compra", "Proveedor", "Saldo Pendiente", "Fecha Factura", "Días", "Vencimiento", "Estado"]
-            exportar_excel(ruta, encabezados, filas, titulo="Cuentas por Pagar", config_empresa=config_empresa)
+
+            # Calcular total del saldo pendiente
+            total_saldo = 0.0
+            for fila in filas:
+                # La columna de saldo pendiente es el índice 2
+                saldo_str = fila[2].replace("$", "").replace(",", "").strip()
+                try:
+                    total_saldo += float(saldo_str)
+                except (ValueError, IndexError):
+                    continue
+
+            # Crear fila de totales
+            total_row = ["", "", f"${total_saldo:,.2f}", "", "", "", ""]
+            total_label = "TOTAL:"
+
+            exportar_excel(
+                ruta,
+                encabezados,
+                filas,
+                titulo="Cuentas por Pagar",
+                config_empresa=config_empresa,
+                total_row=total_row,
+                total_label=total_label,
+            )
             MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
         except Exception:
             logger.exception("Fallo al exportar a Excel")
@@ -928,6 +1056,21 @@ class CuentasPorPagarPanel(QWidget):
             encabezados = ["Compra", "Proveedor", "Saldo Pendiente", "Fecha Factura", "Días", "Vencimiento", "Estado"]
             filtros = self._obtener_filtros_para_exportar()
             col_widths = [1.5, 2.5, 1.5, 1.2, 0.8, 1.2, 1.0]
+
+            # Calcular total del saldo pendiente
+            total_saldo = 0.0
+            for fila in filas:
+                # La columna de saldo pendiente es el índice 2
+                saldo_str = fila[2].replace("$", "").replace(",", "").strip()
+                try:
+                    total_saldo += float(saldo_str)
+                except (ValueError, IndexError):
+                    continue
+
+            # Crear fila de totales
+            total_row = ["", "", f"${total_saldo:,.2f}", "", "", "", ""]
+            total_label = "TOTAL:"
+
             exportar_pdf(
                 ruta,
                 "Cuentas por Pagar",
@@ -936,6 +1079,8 @@ class CuentasPorPagarPanel(QWidget):
                 filtros=filtros,
                 col_widths=col_widths,
                 config_empresa=config_empresa,
+                total_row=total_row,
+                total_label=total_label,
             )
             MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
         except Exception:

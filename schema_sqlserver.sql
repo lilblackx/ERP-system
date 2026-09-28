@@ -1298,13 +1298,42 @@ BEGIN
 	FROM dbo.cuentas_por_cobrar c
 	JOIN @nuevos n ON n.[id_cuenta_por_cobrar] = c.[id_cuenta_por_cobrar];
 
+	-- Insertar movimientos de banco con nombre del cliente
 	INSERT INTO dbo.banco_movimientos ([id_cuenta], [tipo_movimiento], [monto_movimiento], [monto_bolivares], [tasa_cambio], [id_tasa], [fecha_movimiento], [referencia_movimiento], [descripcion_movimiento], [creado_por], [fecha_creacion], [id_pago_cobro])
-	SELECT [id_cuenta_bancaria], 'abono', [monto], [monto_bolivares], [tasa_cambio], [id_tasa], [fecha_pago], [referencia], 'Cobro a cliente', [creado_por], GETDATE(), [id_pago_cobro]
-	FROM @nuevos WHERE [id_cuenta_bancaria] IS NOT NULL;
+	SELECT
+		[id_cuenta_bancaria],
+		'abono',
+		[monto],
+		[monto_bolivares],
+		[tasa_cambio],
+		[id_tasa],
+		[fecha_pago],
+		[referencia],
+		'Cobro a cliente: ' + COALESCE(cl.nombre_razon_social, 'Desconocido'),
+		[creado_por],
+		GETDATE(),
+		[id_pago_cobro]
+	FROM @nuevos n
+	JOIN dbo.cuentas_por_cobrar cxc ON cxc.[id_cuenta_por_cobrar] = n.[id_cuenta_por_cobrar]
+	JOIN dbo.factura_venta fv ON fv.[id_factura] = cxc.[id_factura]
+	JOIN dbo.clientes cl ON cl.[id_cliente] = fv.[id_cliente_factura]
+	WHERE [id_cuenta_bancaria] IS NOT NULL;
 
+	-- Insertar movimientos de caja con nombre del cliente
 	INSERT INTO dbo.caja_movimientos ([id_caja], [tipo_movimiento], [descripcion_movimiento], [monto_movimiento], [fecha_registro], [id_pago_cobro], [creado_por])
-	SELECT [id_caja], 'entrada', 'Cobro a cliente', [monto], [fecha_pago], [id_pago_cobro], [creado_por]
-	FROM @nuevos WHERE [id_caja] IS NOT NULL;
+	SELECT
+		[id_caja],
+		'entrada',
+		'Cobro a cliente: ' + COALESCE(cl.nombre_razon_social, 'Desconocido'),
+		[monto],
+		[fecha_pago],
+		[id_pago_cobro],
+		[creado_por]
+	FROM @nuevos n
+	JOIN dbo.cuentas_por_cobrar cxc ON cxc.[id_cuenta_por_cobrar] = n.[id_cuenta_por_cobrar]
+	JOIN dbo.factura_venta fv ON fv.[id_factura] = cxc.[id_factura]
+	JOIN dbo.clientes cl ON cl.[id_cliente] = fv.[id_cliente_factura]
+	WHERE [id_caja] IS NOT NULL;
 
 	-- Un INSTEAD OF INSERT reemplaza el INSERT del caller: SCOPE_IDENTITY() no ve el
 	-- id generado aqui adentro (es un scope distinto) y @@IDENTITY devolveria el de

@@ -658,10 +658,37 @@ class CuentaPorCobrar(Base):
     id_cuenta_por_cobrar: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
     saldo_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    saldo_favor: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
     fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
     estado: Mapped[str] = mapped_column(String(10), server_default="pendiente")
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    factura = relationship("FacturaVenta")
+    creador = relationship("Usuario")
+
+
+class CuentaPorCobrarBCV(Base):
+    """Cuentas por cobrar con precios incrementados por porcentaje BCV.
+
+    Se generan automáticamente cuando se factura con un porcentaje de incremento BCV.
+    Los precios de los productos (precio_1, precio_2, precio_3) se incrementan por
+    el porcentaje especificado y se almacenan en esta cuenta separada del cliente.
+    """
+    __tablename__ = "cuentas_por_cobrar_bcv"
+    __table_args__ = {"implicit_returning": False}
+
+    id_cuenta_por_cobrar: Mapped[int] = mapped_column("id_cuenta_por_cobrar", BigInteger, primary_key=True, autoincrement=True)
+    id_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
+    saldo_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False, server_default="0.00")
+    fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
+    estado: Mapped[str] = mapped_column(String(50), nullable=False)
+    creado_por: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"), nullable=False)
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    saldo_favor: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
+    porcentaje: Mapped[decimal.Decimal | None] = mapped_column(Numeric(5, 2))
+    dias_credito: Mapped[int | None] = mapped_column(Integer)
+    fecha_emision: Mapped[datetime.date | None] = mapped_column(Date)
 
     factura = relationship("FacturaVenta")
     creador = relationship("Usuario")
@@ -753,11 +780,14 @@ class NotaCreditoCliente(Base):
     -- reportable al SENIAT cuando se solicite."""
 
     __tablename__ = "notas_credito_clientes"
+    __table_args__ = {"implicit_returning": False}
 
     id_nota_credito: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     numero_nota_credito: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     id_cliente: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id_cliente"), nullable=False)
-    id_factura_origen: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
+    id_factura_origen: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("factura_venta.id_factura"), nullable=True
+    )
     monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     saldo_disponible: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     motivo: Mapped[str | None] = mapped_column(String(255))
@@ -775,6 +805,7 @@ class NotaCreditoProveedor(Base):
     empresa cuando se anula una compra que ya tenia pagos aplicados al proveedor."""
 
     __tablename__ = "notas_credito_proveedores"
+    __table_args__ = {"implicit_returning": False}
 
     id_nota_credito: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_proveedor: Mapped[int] = mapped_column(BigInteger, ForeignKey("proveedores.id_proveedor"), nullable=False)

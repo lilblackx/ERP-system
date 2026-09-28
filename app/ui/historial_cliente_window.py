@@ -4,7 +4,7 @@ encabezado con icono + titulo/subtitulo) -- antes tenia su propio fondo azul sol
 no combinaba con el resto de dialogos de la app."""
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import qtawesome as qta
@@ -28,6 +28,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.historial_cliente import (
     obtener_historial_cliente,
     obtener_saldo_total_pendiente,
+    obtener_saldo_total_positivo,
 )
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
@@ -112,9 +113,9 @@ QPushButton#BtnSecondary:hover {{
 # Columnas de la tabla de historial
 COLS_HISTORIAL = [
     "Tipo",
-    "N° Factura",
+    "N° Factura/Nota",
     "Fecha",
-    "Estado Factura",
+    "Estado",
     "Condición Pago",
     "Método Pago",
     "Días Crédito",
@@ -136,7 +137,7 @@ def _filas_historial_para_exportar(session, id_cliente: int) -> list[list]:
                 fecha_emision = datetime.strptime(item["fecha"], "%Y-%m-%d %H:%M").date()
                 fecha_actual = date.today()
                 dias_credito = item["dias_credito"] or 0
-                fecha_vencimiento = fecha_emision + date(days=dias_credito)
+                fecha_vencimiento = fecha_emision + timedelta(days=dias_credito)
                 dias_vencidos_calc = (fecha_actual - fecha_vencimiento).days
                 if dias_vencidos_calc > 0:
                     dias_vencidos = str(dias_vencidos_calc)
@@ -144,17 +145,25 @@ def _filas_historial_para_exportar(session, id_cliente: int) -> list[list]:
                     dias_vencidos = "0"
             except Exception:
                 dias_vencidos = "0"
-        elif item["tipo_transaccion"] == "pago":
+        elif item["tipo_transaccion"] in ("pago", "nota_credito", "devolucion_nota_credito"):
             dias_vencidos = "—"
+
+        # Determinar estado para mostrar
+        if item["tipo_transaccion"] == "factura":
+            estado = item["estado_factura"]
+        elif item["tipo_transaccion"] in ("nota_credito", "devolucion_nota_credito"):
+            estado = item["estado_factura"]
+        else:
+            estado = "—"
 
         fila = [
             item["id_cuenta"] or "N/A",
             item["numero_factura"],
             item["fecha"],
-            item["estado_factura"],
-            item["condicion_pago"],
-            _etiqueta_metodo_pago(item["metodo_pago"]),
-            str(item["dias_credito"] or 0),
+            estado,
+            item["condicion_pago"] if item["tipo_transaccion"] == "factura" else "—",
+            _etiqueta_metodo_pago(item["metodo_pago"]) if item["tipo_transaccion"] in ("factura", "pago") else "—",
+            str(item["dias_credito"] or 0) if item["tipo_transaccion"] == "factura" else "—",
             dias_vencidos,
             item["observaciones"] or "",
             str(item["monto"]),
@@ -275,6 +284,11 @@ class HistorialClienteWindow(QDialog):
         self.lbl_saldo_pendiente = QLabel("Cargando saldo...")
         self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 15px; font-weight: bold;")
 
+        # Saldo positivo (notas de crédito disponibles)
+        self.lbl_saldo_positivo = QLabel()
+        self.lbl_saldo_positivo.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 14px; font-weight: 600;")
+        self.lbl_saldo_positivo.hide()
+
         # Notas de credito disponibles -- solo visible si el cliente tiene alguna (ver
         # cargar_historial). Antes no habia ningun indicio en la app de que un cliente
         # tuviera saldo a favor sin consumir.
@@ -285,6 +299,7 @@ class HistorialClienteWindow(QDialog):
         h.addWidget(lbl_icono)
         h.addWidget(self.lbl_saldo_pendiente)
         h.addSpacing(16)
+        h.addWidget(self.lbl_saldo_positivo)
         h.addWidget(self.lbl_notas_credito)
         h.addStretch()
         return card
@@ -429,6 +444,14 @@ class HistorialClienteWindow(QDialog):
             else:
                 self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 16px; font-weight: bold;")
 
+            # Cargar saldo total positivo (notas de crédito disponibles)
+            saldo_positivo = obtener_saldo_total_positivo(session, self.id_cliente)
+            if saldo_positivo > 0:
+                self.lbl_saldo_positivo.setText(f"SALDO A FAVOR : $ {float(saldo_positivo):,.2f}")
+                self.lbl_saldo_positivo.show()
+            else:
+                self.lbl_saldo_positivo.hide()
+
             self._actualizar_notas_credito(session, historial)
 
         except Exception:
@@ -507,17 +530,30 @@ class HistorialClienteWindow(QDialog):
         self.tabla.setRowCount(len(historial))
 
         for fila, item in enumerate(historial):
-            # Tipo de transacción (Factura o Pago)
+            # Tipo de transacción (Factura, Pago, Nota Crédito o Devolución)
             tipo = item["tipo_transaccion"]
-            item_tipo = QTableWidgetItem("Factura" if tipo == "factura" else "Abono")
-            item_tipo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            if tipo == "pago":
-                item_tipo.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS))
+            if tipo == "factura":
+                tipo_label = "Factura"
+                color = QColor(COLOR_DANGER)
+            elif tipo == "pago":
+                tipo_label = "Abono"
+                color = QColor(COLOR_SUCCESS)
+            elif tipo == "nota_credito":
+                tipo_label = "Nota Crédito"
+                color = QColor(COLOR_PRIMARY)
+            elif tipo == "devolucion_nota_credito":
+                tipo_label = "Devolución NC"
+                color = QColor("#FF9800")  # Naranja para devoluciones
             else:
-                item_tipo.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER))
+                tipo_label = tipo
+                color = QColor(COLOR_TEXT_DARK)
+
+            item_tipo = QTableWidgetItem(tipo_label)
+            item_tipo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            item_tipo.setData(Qt.ItemDataRole.ForegroundRole, color)
             self.tabla.setItem(fila, 0, item_tipo)
 
-            # N° Factura
+            # N° Factura/Nota
             item_factura = QTableWidgetItem(item["numero_factura"])
             item_factura.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 1, item_factura)
@@ -527,24 +563,41 @@ class HistorialClienteWindow(QDialog):
             item_fecha.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 2, item_fecha)
 
-            # Estado Factura
-            item_estado = QTableWidgetItem(item["estado_factura"] or "")
+            # Estado
+            if tipo == "factura":
+                estado = item["estado_factura"] or ""
+            elif tipo in ("nota_credito", "devolucion_nota_credito"):
+                estado = item["estado_factura"] or ""
+            else:
+                estado = ""
+            item_estado = QTableWidgetItem(estado)
             item_estado.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_estado)
 
-            # Condición Pago
-            item_condicion = QTableWidgetItem(item["condicion_pago"] or "")
+            # Condición Pago (solo para facturas)
+            if tipo == "factura":
+                item_condicion = QTableWidgetItem(item["condicion_pago"] or "")
+            else:
+                item_condicion = QTableWidgetItem("—")
             item_condicion.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 4, item_condicion)
 
-            # Método Pago
-            metodo_pago = _etiqueta_metodo_pago(item["metodo_pago"])
+            # Método Pago (solo para facturas y pagos)
+            if tipo in ("factura", "pago"):
+                metodo_pago = _etiqueta_metodo_pago(item["metodo_pago"])
+            elif tipo in ("nota_credito", "devolucion_nota_credito"):
+                metodo_pago = "—"
+            else:
+                metodo_pago = "—"
             item_metodo = QTableWidgetItem(metodo_pago)
             item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 5, item_metodo)
 
-            # Días Crédito
-            dias = str(item["dias_credito"]) if item["dias_credito"] is not None else ""
+            # Días Crédito (solo para facturas)
+            if tipo == "factura":
+                dias = str(item["dias_credito"]) if item["dias_credito"] is not None else ""
+            else:
+                dias = "—"
             item_dias = QTableWidgetItem(dias)
             item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_dias)
@@ -556,7 +609,7 @@ class HistorialClienteWindow(QDialog):
                     fecha_emision = datetime.strptime(item["fecha"], "%Y-%m-%d %H:%M").date()
                     fecha_actual = date.today()
                     dias_credito = item["dias_credito"] or 0
-                    fecha_vencimiento = fecha_emision + date(days=dias_credito)
+                    fecha_vencimiento = fecha_emision + timedelta(days=dias_credito)
                     dias_vencidos_calc = (fecha_actual - fecha_vencimiento).days
                     # Mostrar días vencidos si es positivo, si es negativo mostrar 0 (no vencido)
                     if dias_vencidos_calc > 0:
@@ -566,7 +619,7 @@ class HistorialClienteWindow(QDialog):
                 except Exception as e:
                     logger.exception("Error calculando días vencidos: %s", e)
                     dias_vencidos = "0"
-            elif tipo == "pago":
+            elif tipo in ("pago", "nota_credito", "devolucion_nota_credito"):
                 dias_vencidos = "—"
             else:
                 dias_vencidos = "0"

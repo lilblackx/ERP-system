@@ -538,6 +538,351 @@ def test_listar_pagos_proveedor_sin_usuario_autorizado_falla(db_session):
         PagoService.listar_pagos_proveedor(db_session, cxp.id_cuenta)
 
 
+# --- aplicar_abono_general_cliente (FIFO con tasa de cambio) ------------------
+
+
+def _crear_facturas_cliente_cxc(session, cliente, admin, montos_facturas):
+    """Crea múltiples facturas para un cliente con montos específicos."""
+    vendedor = crear_vendedor(session)
+    facturas = []
+    for i, monto in enumerate(montos_facturas):
+        producto = crear_producto(session, cantidad_unidad=100)
+        crear_precio_producto(session, producto, str(monto))
+
+        factura = VentaService.emitir_factura(
+            session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": str(monto)}],
+        )
+        facturas.append(factura)
+
+    return facturas
+
+
+def test_aplicar_abono_general_fifo_distribuye_correctamente(db_session):
+    """Verifica que el abono general se distribuye usando FIFO (facturas más antiguas primero)."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+
+    # Crear 3 facturas con montos diferentes y fechas diferentes
+    facturas = _crear_facturas_cliente_cxc(
+        db_session, cliente, admin, [Decimal("100.00"), Decimal("200.00"), Decimal("300.00")]
+    )
+
+    # Esperar un momento para asegurar diferencias en fechas de emisión
+    import time
+    time.sleep(0.1)
+
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    # Aplicar abono general de $250 con tasa de cambio 900
+    resultado = PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("250.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    # Verificar resultado general
+    assert resultado["monto_total_aplicado"] == Decimal("250.00")
+    assert resultado["saldo_restante"] == Decimal("0.00")
+    assert resultado["es_sobreabono"] is False
+    assert len(resultado["facturas_actualizadas"]) == 2  # Debe afectar 2 facturas
+
+    # Verificar distribución FIFO:
+    # - Primera factura ($100): pagada completamente
+    # - Segunda factura ($200): recibe $150 restantes, queda $50 pendiente
+    # - Tercera factura ($300): no recibe nada
+
+    from app.db.models import CuentaPorCobrar
+
+    cuentas = (
+        db_session.query(CuentaPorCobrar)
+        .filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas]))
+        .order_by(CuentaPorCobrar.id_cuenta_por_cobrar)
+        .all()
+    )
+
+    assert cuentas[0].saldo_pendiente == Decimal("0.00")  # Primera factura pagada
+    assert cuentas[0].estado == "pagada"
+    assert cuentas[1].saldo_pendiente == Decimal("50.00")  # Segunda factura parcial
+    assert cuentas[1].estado == "parcial"
+    assert cuentas[2].saldo_pendiente == Decimal("300.00")  # Tercera factura sin cambios
+    assert cuentas[2].estado == "pendiente"
+
+
+def test_aplicar_abono_general_con_tasa_cambio_calcula_bolivares_correctamente(db_session):
+    """Verifica que la conversión USD a Bs se realice correctamente."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    tasa_cambio = Decimal("950.50")
+    resultado = PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("50.00"),
+        tasa_cambio=tasa_cambio,
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    # Verificar cálculo de bolívares: $50.00 * 950.50 = 47,525.00 Bs
+    assert len(resultado["facturas_actualizadas"]) == 1
+    factura_actualizada = resultado["facturas_actualizadas"][0]
+
+    assert factura_actualizada["monto_aplicado"] == Decimal("50.00")
+    assert factura_actualizada["monto_aplicado_bs"] == Decimal("47525.00")  # 50 * 950.50
+
+    # Verificar que el pago registrado tenga los valores correctos
+    pagos = db_session.query(PagoCobro).all()
+    assert len(pagos) == 1
+    assert pagos[0].monto_bolivares == Decimal("47525.00")
+    assert pagos[0].tasa_cambio == tasa_cambio
+
+
+def test_aplicar_abono_general_sobreabono_maneja_exceso_correctamente(db_session):
+    """Verifica que el sobreabono se maneje correctamente registrando el exceso."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00"), Decimal("50.00")])
+
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    # Abono de $200 cuando la deuda total es $150 (sobreabono de $50)
+    resultado = PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("200.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    # Verificar resultado
+    assert resultado["monto_total_aplicado"] == Decimal("150.00")  # Solo se aplicó la deuda total
+    assert resultado["saldo_restante"] == Decimal("50.00")  # Exceso no aplicado
+    assert resultado["es_sobreabono"] is True
+    assert len(resultado["facturas_actualizadas"]) == 2  # Ambas facturas pagadas
+
+    # Verificar que todas las facturas estén pagadas
+    from app.db.models import CuentaPorCobrar
+
+    cuentas = (
+        db_session.query(CuentaPorCobrar)
+        .filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas]))
+        .all()
+    )
+
+    for cuenta in cuentas:
+        assert cuenta.saldo_pendiente == Decimal("0.00")
+        assert cuenta.estado == "pagada"
+
+
+def test_aplicar_abono_general_descripcion_auditoria_formato_correcto(db_session):
+    """Verifica que la descripción de auditoría tenga el formato correcto."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00"), Decimal("200.00")])
+
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    resultado = PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("150.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    # Verificar formato de descripción de auditoría
+    assert len(resultado["facturas_actualizadas"]) == 2
+
+    # Primera factura: recibe $100 completos
+    desc1 = resultado["facturas_actualizadas"][0]["descripcion_auditoria"]
+    assert "Abono general aplicado: $100.00" in desc1
+    assert "90000.00 Bs" in desc1  # 100 * 900
+    assert "Tasa: 900.00" in desc1
+    assert "$ Restante por asignar a otras facturas: $50.00" in desc1
+    assert "45000.00 Bs" in desc1  # 50 * 900
+
+    # Verificar que la descripción se agregó a las observaciones de la factura
+    from app.db.models import FacturaVenta
+
+    factura1 = db_session.get(FacturaVenta, facturas[0].id_factura)
+    assert desc1 in factura1.observaciones_factura
+
+
+def test_aplicar_abono_general_validaciones_basicas(db_session):
+    """Verifica las validaciones básicas del abono general."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    # Test monto <= 0
+    with pytest.raises(ValueError, match="mayor a cero"):
+        PagoService.aplicar_abono_general_cliente(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_abono=Decimal("0.00"),
+            tasa_cambio=Decimal("900.00"),
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+    # Test tasa_cambio <= 0
+    with pytest.raises(ValueError, match="mayor a cero"):
+        PagoService.aplicar_abono_general_cliente(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_abono=Decimal("100.00"),
+            tasa_cambio=Decimal("0.00"),
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+    # Test sin origen de pago
+    with pytest.raises(ValueError, match="exactamente un origen"):
+        PagoService.aplicar_abono_general_cliente(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_abono=Decimal("100.00"),
+            tasa_cambio=Decimal("900.00"),
+            metodo_pago="efectivo",
+            id_usuario=admin.id_usuario,
+        )
+
+    # Test cliente sin facturas pendientes
+    with pytest.raises(ValueError, match="no tiene facturas pendientes"):
+        PagoService.aplicar_abono_general_cliente(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_abono=Decimal("100.00"),
+            tasa_cambio=Decimal("900.00"),
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_aplicar_abono_general_transaccion_atomica(db_session):
+    """Verifica que la operación sea atómica (todo o nada)."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00"), Decimal("200.00")])
+
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    # Contar pagos antes
+    pagos_antes = db_session.query(PagoCobro).count()
+
+    # Intentar aplicar abono con origen inválido (debe fallar y no dejar registros parciales)
+    try:
+        PagoService.aplicar_abono_general_cliente(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_abono=Decimal("150.00"),
+            tasa_cambio=Decimal("900.00"),
+            metodo_pago="efectivo",
+            id_caja=999999,  # Caja inexistente
+            id_usuario=admin.id_usuario,
+        )
+        assert False, "Debería haber fallado"
+    except ValueError:
+        pass
+
+    # Verificar que no se crearon pagos parciales
+    pagos_despues = db_session.query(PagoCobro).count()
+    assert pagos_antes == pagos_despues
+
+    # Verificar que las cuentas por cobrar no fueron modificadas
+    from app.db.models import CuentaPorCobrar
+
+    cuentas = (
+        db_session.query(CuentaPorCobrar)
+        .filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas]))
+        .all()
+    )
+
+    assert cuentas[0].saldo_pendiente == Decimal("100.00")
+    assert cuentas[1].saldo_pendiente == Decimal("200.00")
+
+
+def test_aplicar_abono_general_por_banco(db_session):
+    """Verifica que el abono general funcione con origen bancario."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("1000.00"))
+
+    resultado = PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("50.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="transferencia",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    # Verificar que se actualizó el saldo bancario
+    db_session.refresh(cuenta)
+    assert cuenta.saldo_total_banco == Decimal("1050.00")
+
+    # Verificar resultado del abono
+    assert resultado["monto_total_aplicado"] == Decimal("50.00")
+    assert len(resultado["facturas_actualizadas"]) == 1
+
+
+def test_aplicar_abono_general_permisos(db_session):
+    """Verifica que se requieran permisos adecuados."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    # Intentar sin usuario (sin permisos)
+    with pytest.raises(PermisoDenegadoError):
+        PagoService.aplicar_abono_general_cliente(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_abono=Decimal("50.00"),
+            tasa_cambio=Decimal("900.00"),
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+        )
+
+
 # --- el trigger sigue siendo una red de seguridad a nivel BD ------------------
 
 

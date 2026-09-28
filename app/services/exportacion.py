@@ -58,6 +58,8 @@ def exportar_excel(
     filas: Iterable[Sequence[Any]],
     titulo: str | None = None,
     config_empresa: ConfiguracionEmpresa | None = None,
+    total_row: Sequence[Any] | None = None,
+    total_label: str | None = None,
 ) -> None:
     """Escribe una unica hoja (encabezados + filas) a un archivo .xlsx en `ruta`.
 
@@ -67,7 +69,10 @@ def exportar_excel(
     `config_empresa` se antepone la razon social/RIF/direccion/telefono de la empresa
     (sin logo -- Excel no lo necesita) y, si hay `titulo`, el nombre del reporte centrado
     una fila en blanco despues de esos datos -- pedido del usuario 2026-09-01 para que
-    todo reporte exportado (Excel o PDF) traiga la info de la empresa."""
+    todo reporte exportado (Excel o PDF) traiga la info de la empresa.
+
+    `total_row` y `total_label` son opcionales para agregar una fila de totales al final
+    de la tabla."""
     libro = Workbook()
     hoja = libro.active
     ancho_tabla = max(len(encabezados), 1)
@@ -111,6 +116,24 @@ def exportar_excel(
     for fila in filas:
         for col_idx, valor in enumerate(fila, start=1):
             hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
+        fila_actual += 1
+        cantidad_filas += 1
+
+    # Agregar fila de totales si se proporciona
+    if total_row is not None:
+        if total_label:
+            # Reemplazar la primera celda con la etiqueta de total
+            total_row_con_label = list(total_row)
+            total_row_con_label[0] = total_label
+            total_row = total_row_con_label
+
+        for col_idx, valor in enumerate(total_row, start=1):
+            celda = hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
+            # Aplicar formato negrita a la fila de totales
+            celda.font = Font(bold=True)
+            # Si es la columna de saldo (índice 2 en cuentas por pagar), aplicar color
+            if col_idx == 3:  # Columna de Saldo Pendiente
+                celda.font = Font(bold=True, color="0D47A1")
         fila_actual += 1
         cantidad_filas += 1
 
@@ -187,6 +210,8 @@ def exportar_pdf(
     filtros: dict[str, Any] | None = None,
     col_widths: Sequence[float] | None = None,
     config_empresa: ConfiguracionEmpresa | None = None,
+    total_row: Sequence[Any] | None = None,
+    total_label: str | None = None,
 ) -> None:
     """Exporta datos a un archivo PDF con formato de tabla.
 
@@ -201,6 +226,8 @@ def exportar_pdf(
         config_empresa: datos de la empresa (razón social, RIF, dirección, teléfono,
             logo) a imprimir arriba del título -- opcional para no romper a los callers
             existentes que no lo pasan (catálogos de clientes/bancos/inventario/etc.).
+        total_row: Fila de totales a agregar al final de la tabla (opcional).
+        total_label: Etiqueta para la fila de totales (opcional, ej: "TOTAL:").
     """
     margen_horizontal = 30
     doc = SimpleDocTemplate(
@@ -268,6 +295,16 @@ def exportar_pdf(
     for fila in filas:
         data.append(list(fila))
 
+    # Agregar fila de totales si se proporciona
+    if total_row is not None:
+        if total_label:
+            # Reemplazar la primera celda con la etiqueta de total
+            total_row_con_label = list(total_row)
+            total_row_con_label[0] = total_label
+            data.append(total_row_con_label)
+        else:
+            data.append(list(total_row))
+
     # Estilo de la tabla
     table_style = TableStyle(
         [
@@ -290,7 +327,12 @@ def exportar_pdf(
 
     # Alternar colores de filas
     for i in range(1, len(data)):
-        if i % 2 == 0:
+        if total_row is not None and i == len(data) - 1:
+            # Fila de totales - fondo azul oscuro, texto blanco
+            table_style.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#0D47A1"))
+            table_style.add("TEXTCOLOR", (0, i), (-1, i), colors.white)
+            table_style.add("FONTNAME", (0, i), (-1, i), "Helvetica-Bold")
+        elif i % 2 == 0:
             table_style.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F8FAFC"))
         else:
             table_style.add("BACKGROUND", (0, i), (-1, i), colors.white)

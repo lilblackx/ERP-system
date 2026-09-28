@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Caja,
+    Cliente,
     CuentaBancaria,
     CuentaPorCobrar,
     FacturaVenta,
@@ -286,7 +287,10 @@ class NotaCreditoService:
             raise ValueError(f"El monto {monto} excede el saldo disponible {nota.saldo_disponible} de la nota")
 
         fecha = datetime.now()
-        descripcion = f"Devolucion nota de credito {nota.numero_nota_credito}"
+        # Obtener nombre del cliente para la descripción
+        cliente = session.get(Cliente, nota.id_cliente)
+        nombre_cliente = cliente.nombre_razon_social if cliente else "Desconocido"
+        descripcion = f"Devolucion nota de credito {nota.numero_nota_credito} - {nombre_cliente}"
 
         if metodo_devolucion == "efectivo":
             if id_caja is None:

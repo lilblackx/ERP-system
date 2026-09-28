@@ -14,6 +14,7 @@ from app.db.models import (
     ControlDeTasa,
     CuentaBancaria,
     CuentaPorCobrar,
+    CuentaPorCobrarBCV,
     FacturaDetalle,
     FacturaVenta,
     Inventario,
@@ -156,6 +157,7 @@ class VentaService:
         id_cuenta_bancaria_vuelto: int | None = None,
         referencia_vuelto: str | None = None,
         id_autorizador_vuelto: int | None = None,
+        porcentaje_bcv: Decimal | int | str | None = None,
     ) -> FacturaVenta:
         require_permiso(session, id_usuario, "ventas", "crear")
         aplicar_lock_timeout(session)
@@ -381,6 +383,7 @@ class VentaService:
             if iva_activo
             else Decimal("0.00")
         )
+        
         # Lo que efectivamente se le suma a la cuenta por cobrar (subtotal - descuento +
         # IVA) -- se usa tanto para el limite de credito (solo credito) como para validar
         # que la suma de formas de pago cubra la factura (solo contado, ver mas abajo).
@@ -402,7 +405,23 @@ class VentaService:
                 .where(Cliente.id_cliente == id_cliente)
                 .with_hint(Cliente, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
             ).scalar_one()
-            deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
+            
+            # Si hay porcentaje BCV, la deuda actual debe incluir también las cuentas BCV
+            if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
+                # Calcular deuda actual incluyendo cuentas BCV
+                deuda_bcv = (
+                    session.query(func.coalesce(func.sum(CuentaPorCobrarBCV.saldo_pendiente), 0))
+                    .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+                    .filter(
+                        FacturaVenta.id_cliente_factura == id_cliente,
+                        CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial", "vencida")),
+                    )
+                    .scalar()
+                )
+                deuda_actual = _deuda_pendiente_cliente(session, id_cliente) + Decimal(str(deuda_bcv))
+            else:
+                deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
+            
             limite_credito = cliente.limite_credito if cliente.limite_credito is not None else Decimal("0.00")
             if deuda_actual + total_a_cobrar > limite_credito:
                 raise ValueError(
@@ -590,9 +609,88 @@ class VentaService:
         # por cobrar tanto para credito como para contado, asi que el ajuste aplica a
         # ambas condiciones (antes era solo credito).
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
-        ajuste_cxc = monto_iva - monto_descuento
-        if cxc is not None and ajuste_cxc != 0:
-            cxc.saldo_pendiente += ajuste_cxc
+        
+        # Si hay porcentaje BCV, la cuenta por cobrar original debe tener saldo 0
+        # (solo la cuenta BCV maneja el monto total)
+        if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
+            # La cuenta por cobrar original debe tener saldo 0
+            if cxc is not None:
+                cxc.saldo_pendiente = Decimal("0.00")
+                cxc.estado = "pagada"
+        else:
+            # Sin porcentaje BCV, comportamiento normal
+            ajuste_cxc = monto_iva - monto_descuento
+            if cxc is not None and ajuste_cxc != 0:
+                cxc.saldo_pendiente += ajuste_cxc
+
+        # --- Cuenta por Cobrar BCV: si se especificó un porcentaje BCV, crear cuenta separada
+        # con el monto total de la factura (con porcentaje aplicado). La cuenta por cobrar
+        # original tiene saldo 0, solo la cuenta BCV maneja el monto total.
+        if porcentaje_bcv is not None:
+            porcentaje_bcv = Decimal(str(porcentaje_bcv))
+            if porcentaje_bcv > 0:
+                # Debug: imprimir valores para verificar el cálculo
+                logger.info(f"BCV - Porcentaje: {porcentaje_bcv}%")
+                logger.info(f"BCV - Total a cobrar (con porcentaje): {total_a_cobrar}")
+
+                # Crear cuenta por cobrar BCV con el monto total de la factura (con porcentaje)
+                estado_bcv = "pendiente" if condicion_pago == "credito" else "pagada"
+                logger.info(f"BCV - Creando cuenta con estado: {estado_bcv}, condición pago: {condicion_pago}")
+                cxc_bcv = CuentaPorCobrarBCV(
+                    id_factura=factura.id_factura,
+                    saldo_pendiente=total_a_cobrar,
+                    fecha_vencimiento=fecha_vencimiento,
+                    estado=estado_bcv,
+                    creado_por=id_usuario,
+                    fecha_creacion=datetime.now(),
+                    porcentaje=porcentaje_bcv,
+                    dias_credito=dias_credito_aplicados if condicion_pago == "credito" else None,
+                    fecha_emision=factura.fecha_emision.date() if factura.fecha_emision else date.today(),
+                )
+                session.add(cxc_bcv)
+                session.flush()  # Asegurar que se inserte la cuenta BCV antes de continuar
+                logger.info(f"BCV - Cuenta creada exitosamente: ID={cxc_bcv.id_cuenta_por_cobrar}, estado={cxc_bcv.estado}, saldo={cxc_bcv.saldo_pendiente}")
+
+                # Si es contado, liquidar inmediatamente la cuenta BCV con los pagos
+                if condicion_pago == "contado" and pagos:
+                    total_pagos = sum(pagos_usd)
+                    if total_pagos > 0 and total_a_cobrar > 0:
+                        # Aplicar pagos directamente a la cuenta BCV (que tiene el monto total)
+                        saldo_restante_bcv = cxc_bcv.saldo_pendiente
+                        for pago_linea, monto_usd in zip(pagos, pagos_usd, strict=True):
+                            monto_a_aplicar_bcv = Decimal("0.00")
+                            if saldo_restante_bcv > 0:
+                                monto_a_aplicar_bcv = min(monto_usd, saldo_restante_bcv)
+                                cxc_bcv.saldo_pendiente -= monto_a_aplicar_bcv
+                                saldo_restante_bcv -= monto_a_aplicar_bcv
+                                if cxc_bcv.saldo_pendiente <= 0:
+                                    cxc_bcv.saldo_pendiente = Decimal("0.00")
+                                    cxc_bcv.estado = "pagada"
+                            
+                            # Registrar excedente (cambio) si lo hay
+                            excedente_linea = (monto_usd - monto_a_aplicar_bcv).quantize(Decimal("0.01"))
+                            if excedente_linea > 0:
+                                descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
+                                id_caja_linea = pago_linea.get("id_caja")
+                                id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
+                                if id_caja_linea is not None:
+                                    CajaService._registrar_ingreso_excedente(
+                                        session,
+                                        id_caja=id_caja_linea,
+                                        monto=excedente_linea,
+                                        descripcion=descripcion_excedente,
+                                        id_usuario=id_usuario,
+                                        fecha=factura.fecha_emision,
+                                    )
+                                elif id_cuenta_linea is not None:
+                                    BancoService._registrar_ingreso_excedente(
+                                        session,
+                                        id_cuenta=id_cuenta_linea,
+                                        monto=excedente_linea,
+                                        descripcion=descripcion_excedente,
+                                        id_usuario=id_usuario,
+                                        fecha=factura.fecha_emision,
+                                    )
 
         # --- Contado: liquidar la cuenta por cobrar recien abierta con las formas de pago
         # ya validadas arriba, en la MISMA transaccion (se aplica con _aplicar_pago_cobro,
@@ -606,26 +704,60 @@ class VentaService:
         # que si entro fisicamente mas alla de lo que necesitaba la factura quedaria sin
         # asiento, y el egreso del vuelto (mas abajo, unico y contra el origen elegido por
         # el cajero) lo restaria una segunda vez.
-        if condicion_pago == "contado" and cxc is not None:
-            for pago_linea, monto_usd in zip(pagos, pagos_usd, strict=True):
-                monto_a_aplicar = min(monto_usd, cxc.saldo_pendiente)
-                if monto_a_aplicar > 0:
-                    PagoService._aplicar_pago_cobro(
-                        session,
-                        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
-                        monto=monto_a_aplicar,
-                        metodo_pago=pago_linea["metodo_pago"],
-                        moneda=pago_linea["moneda"],
-                        monto_moneda_origen=pago_linea["monto_moneda_origen"],
-                        monto_bolivares=pago_linea.get("monto_bolivares"),
-                        tasa_cambio=pago_linea.get("tasa_cambio"),
-                        id_cuenta_bancaria=pago_linea.get("id_cuenta_bancaria"),
-                        id_caja=pago_linea.get("id_caja"),
-                        id_tasa=id_tasa,
-                        referencia=pago_linea.get("referencia"),
-                        fecha_pago=factura.fecha_emision,
-                        id_usuario=id_usuario,
-                    )
+        #
+        # Si hay porcentaje BCV, los pagos se aplican a la cuenta BCV (que tiene el monto total)
+        # y la cuenta original tiene saldo 0.
+        if condicion_pago == "contado":
+            if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
+                # Con porcentaje BCV, los pagos ya se aplicaron a la cuenta BCV arriba
+                # La cuenta original tiene saldo 0, no recibe pagos
+                # Los excedentes ya se manejan en el bloque de pagos BCV arriba
+                pass
+            elif cxc is not None:
+                # Sin porcentaje BCV, comportamiento normal: aplicar pagos a cuenta original
+                for pago_linea, monto_usd in zip(pagos, pagos_usd, strict=True):
+                    monto_a_aplicar = min(monto_usd, cxc.saldo_pendiente)
+                    if monto_a_aplicar > 0:
+                        PagoService._aplicar_pago_cobro(
+                            session,
+                            id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+                            monto=monto_a_aplicar,
+                            metodo_pago=pago_linea["metodo_pago"],
+                            moneda=pago_linea["moneda"],
+                            monto_moneda_origen=pago_linea["monto_moneda_origen"],
+                            monto_bolivares=pago_linea.get("monto_bolivares"),
+                            tasa_cambio=pago_linea.get("tasa_cambio"),
+                            id_cuenta_bancaria=pago_linea.get("id_cuenta_bancaria"),
+                            id_caja=pago_linea.get("id_caja"),
+                            id_tasa=id_tasa,
+                            referencia=pago_linea.get("referencia"),
+                            fecha_pago=factura.fecha_emision,
+                            id_usuario=id_usuario,
+                        )
+
+                excedente_linea = (monto_usd - monto_a_aplicar).quantize(Decimal("0.01"))
+                if excedente_linea > 0:
+                    descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
+                    id_caja_linea = pago_linea.get("id_caja")
+                    id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
+                    if id_caja_linea is not None:
+                        CajaService._registrar_ingreso_excedente(
+                            session,
+                            id_caja=id_caja_linea,
+                            monto=excedente_linea,
+                            descripcion=descripcion_excedente,
+                            id_usuario=id_usuario,
+                            fecha=factura.fecha_emision,
+                        )
+                    elif id_cuenta_linea is not None:
+                        BancoService._registrar_ingreso_excedente(
+                            session,
+                            id_cuenta=id_cuenta_linea,
+                            monto=excedente_linea,
+                            descripcion=descripcion_excedente,
+                            id_usuario=id_usuario,
+                            fecha=factura.fecha_emision,
+                        )
 
                 excedente_linea = (monto_usd - monto_a_aplicar).quantize(Decimal("0.01"))
                 if excedente_linea > 0:
@@ -652,7 +784,8 @@ class VentaService:
                         )
 
         if monto_vuelto > 0:
-            descripcion_vuelto = f"Vuelto factura {factura.numero_factura}"
+            nombre_cliente = factura.cliente.nombre_razon_social if factura.cliente else "Desconocido"
+            descripcion_vuelto = f"Vuelto factura {factura.numero_factura} - {nombre_cliente}"
             fecha_vuelto: datetime = factura.fecha_emision
             if metodo_vuelto == "efectivo":
                 # id_caja_vuelto/caja_vuelto ya se validaron como no-None mas arriba (unico
