@@ -649,7 +649,10 @@ class VentaService:
                 )
                 session.add(cxc_bcv)
                 session.flush()  # Asegurar que se inserte la cuenta BCV antes de continuar
-                logger.info(f"BCV - Cuenta creada exitosamente: ID={cxc_bcv.id_cuenta_por_cobrar}, estado={cxc_bcv.estado}, saldo={cxc_bcv.saldo_pendiente}")
+                logger.info(
+                    f"BCV - Cuenta creada exitosamente: ID={cxc_bcv.id_cuenta_por_cobrar}, "
+                    f"estado={cxc_bcv.estado}, saldo={cxc_bcv.saldo_pendiente}"
+                )
 
                 # Si es contado, liquidar inmediatamente la cuenta BCV con los pagos
                 if condicion_pago == "contado" and pagos:
@@ -670,7 +673,10 @@ class VentaService:
                             # Registrar excedente (cambio) si lo hay
                             excedente_linea = (monto_usd - monto_a_aplicar_bcv).quantize(Decimal("0.01"))
                             if excedente_linea > 0:
-                                descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
+                                descripcion_excedente = (
+                                    f"Excedente de pago factura {factura.numero_factura} "
+                                    f"(vuelto pendiente)"
+                                )
                                 id_caja_linea = pago_linea.get("id_caja")
                                 id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
                                 if id_caja_linea is not None:

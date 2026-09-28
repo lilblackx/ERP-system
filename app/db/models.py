@@ -678,7 +678,9 @@ class CuentaPorCobrarBCV(Base):
     __tablename__ = "cuentas_por_cobrar_bcv"
     __table_args__ = {"implicit_returning": False}
 
-    id_cuenta_por_cobrar: Mapped[int] = mapped_column("id_cuenta_por_cobrar", BigInteger, primary_key=True, autoincrement=True)
+    id_cuenta_por_cobrar: Mapped[int] = mapped_column(
+        "id_cuenta_por_cobrar", BigInteger, primary_key=True, autoincrement=True
+    )
     id_factura: Mapped[int] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"), nullable=False)
     saldo_pendiente: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False, server_default="0.00")
     fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)

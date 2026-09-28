@@ -545,7 +545,7 @@ def _crear_facturas_cliente_cxc(session, cliente, admin, montos_facturas):
     """Crea múltiples facturas para un cliente con montos específicos."""
     vendedor = crear_vendedor(session)
     facturas = []
-    for i, monto in enumerate(montos_facturas):
+    for _i, monto in enumerate(montos_facturas):
         producto = crear_producto(session, cantidad_unidad=100)
         crear_precio_producto(session, producto, str(monto))
 
@@ -623,7 +623,7 @@ def test_aplicar_abono_general_con_tasa_cambio_calcula_bolivares_correctamente(d
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
 
-    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+    _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
 
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
@@ -812,7 +812,7 @@ def test_aplicar_abono_general_transaccion_atomica(db_session):
             id_caja=999999,  # Caja inexistente
             id_usuario=admin.id_usuario,
         )
-        assert False, "Debería haber fallado"
+        raise AssertionError("Debería haber fallado")
     except ValueError:
         pass
 
@@ -838,7 +838,7 @@ def test_aplicar_abono_general_por_banco(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
 
-    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+    _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
 
     cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("1000.00"))
 
@@ -866,7 +866,7 @@ def test_aplicar_abono_general_permisos(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
 
-    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+    _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
 
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)

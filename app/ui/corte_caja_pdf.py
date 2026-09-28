@@ -73,7 +73,6 @@ def _armar_html(
     fecha_cierre = (
         caja.fecha_cierre.strftime("%d/%m/%Y %H:%M") if caja.fecha_cierre else fecha_corte.strftime("%d/%m/%Y %H:%M")
     )
-    hora_cierre = caja.fecha_cierre.strftime("%H:%M") if caja.fecha_cierre else fecha_corte.strftime("%H:%M")
 
     # Filas de movimientos
     filas_movimientos = "".join(_fila_movimiento(mov) for mov in movimientos)

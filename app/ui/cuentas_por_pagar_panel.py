@@ -43,11 +43,10 @@ from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
+from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
-from app.ui.compra_detalle_dialog import CompraDetalleDialog
-from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
