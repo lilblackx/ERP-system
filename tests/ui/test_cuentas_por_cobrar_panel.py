@@ -48,7 +48,7 @@ def _crear_sesion() -> MagicMock:
 
 def _crear_cuenta(saldo=Decimal("1250.75")) -> SimpleNamespace:
     factura = SimpleNamespace(numero_factura="F-001", cliente=SimpleNamespace(nombre_razon_social="Cliente Uno"))
-    return SimpleNamespace(id_cuenta_por_cobrar=1, factura=factura, saldo_pendiente=saldo)
+    return SimpleNamespace(id_cuenta_por_cobrar=1, factura=factura, saldo_pendiente=saldo, saldo_favor=Decimal("0.00"))
 
 
 def test_monto_input_arranca_en_saldo_pendiente(qtbot):

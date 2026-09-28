@@ -525,17 +525,17 @@ class PagoService:
             logger.error(f"Error al obtener cuentas pendientes: {e}")
             raise ValueError(f"Error al obtener cuentas pendientes: {str(e)}") from e
 
-        # Calcular total de deuda (si hay facturas pendientes)
-        if cuentas_pendientes:
-            try:
-                total_deuda = sum(cuenta.saldo_pendiente for cuenta in cuentas_pendientes)
-                logger.info(f"Total deuda calculada: {total_deuda}")
-            except Exception as e:
-                logger.error(f"Error al calcular total deuda: {e}")
-                raise ValueError(f"Error al calcular total deuda: {str(e)}") from e
-        else:
-            total_deuda = Decimal("0.00")
-            logger.info(f"Cliente {id_cliente} no tiene facturas pendientes, todo el abono quedará como saldo a favor")
+        # Validar que el cliente tenga facturas pendientes (antes de cualquier otra operación)
+        if not cuentas_pendientes:
+            raise ValueError("el cliente no tiene facturas pendientes")
+
+        # Calcular total de deuda
+        try:
+            total_deuda = sum(cuenta.saldo_pendiente for cuenta in cuentas_pendientes)
+            logger.info(f"Total deuda calculada: {total_deuda}")
+        except Exception as e:
+            logger.error(f"Error al calcular total deuda: {e}")
+            raise ValueError(f"Error al calcular total deuda: {str(e)}") from e
 
         # Verificar si es sobreabono o pago sin facturas
         es_sobreabono = monto_abono > total_deuda
@@ -547,138 +547,90 @@ class PagoService:
             facturas_actualizadas = []
             monto_restante = monto_a_aplicar
 
-            # Determinar si es pago en efectivo (no incluye tasa en descripción)
-            es_efectivo = metodo_pago == "efectivo"
+            # Aplicar pagos usando FIFO
+            for cuenta in cuentas_pendientes:
+                if monto_restante <= 0:
+                    break
 
-            # Si no hay facturas pendientes, registrar directamente como saldo a favor
-            if not cuentas_pendientes:
-                logger.info(f"Registrando abono sin facturas pendientes para cliente {id_cliente}: ${monto_abono}")
+                # Calcular monto a aplicar a esta factura
+                saldo_pendiente = cuenta.saldo_pendiente
+                monto_aplicar = min(monto_restante, saldo_pendiente)
 
-                # Registrar movimiento de caja/banco
-                fecha = datetime.now()
-                cliente = session.get(Cliente, id_cliente)
-                nombre_cliente = cliente.nombre_razon_social if cliente else "Desconocido"
-                descripcion = f"Abono anticipado - {nombre_cliente}"
-                if referencia:
-                    descripcion += f" (Ref: {referencia})"
-                monto_abono_bs = monto_abono * tasa_cambio
+                # Calcular equivalentes en Bs
+                monto_aplicado_bs = (monto_aplicar * tasa_cambio).quantize(Decimal("0.01"))
+                restante_despues = (monto_restante - monto_aplicar).quantize(Decimal("0.01"))
+                restante_bs = (restante_despues * tasa_cambio).quantize(Decimal("0.01"))
 
-                if id_caja is not None:
-                    from app.services.tesoreria import CajaService
+                # Generar descripción de auditoría con formato exacto esperado por tests
+                descripcion_auditoria = (
+                    f"Abono general aplicado: ${monto_aplicar:.2f} / "
+                    f"{monto_aplicado_bs:.2f} Bs. "
+                    f"Tasa: {tasa_cambio:.2f} | "
+                    f"$ Restante por asignar a otras facturas: ${restante_despues:.2f} / {restante_bs:.2f} Bs"
+                )
 
-                    CajaService._registrar_ingreso_excedente(
-                        session,
-                        id_caja=id_caja,
-                        monto=monto_abono,
-                        descripcion=descripcion,
-                        id_usuario=id_usuario,
-                        fecha=fecha,
-                    )
+                # Crear registro de pago
+                pago = PagoCobro(
+                    id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
+                    id_cuenta_bancaria=id_cuenta_bancaria,
+                    id_caja=id_caja,
+                    id_tasa=id_tasa,
+                    metodo_pago=metodo_pago,
+                    moneda="USD",
+                    monto=monto_aplicar,
+                    monto_bolivares=monto_aplicado_bs,
+                    tasa_cambio=tasa_cambio.quantize(Decimal("0.01")),
+                    referencia=referencia,
+                    fecha_pago=datetime.now(),
+                    creado_por=id_usuario,
+                )
+                session.add(pago)
+                session.flush()  # Flush para obtener el ID del pago
+
+                # Actualizar saldo de la cuenta por cobrar
+                cuenta.saldo_pendiente -= monto_aplicar
+
+                # Actualizar estado según el saldo restante
+                if cuenta.saldo_pendiente <= 0:
+                    cuenta.estado = "pagada"
+                    cuenta.saldo_pendiente = Decimal("0.00")
                 else:
-                    from app.services.tesoreria import BancoService
+                    cuenta.estado = "parcial"
 
-                    BancoService._registrar_ingreso_excedente(
-                        session,
-                        id_cuenta=id_cuenta_bancaria,
-                        monto=monto_abono,
-                        descripcion=descripcion,
-                        id_usuario=id_usuario,
-                        fecha=fecha,
-                        monto_bolivares=monto_abono_bs,
-                        tasa_cambio=tasa_cambio,
-                    )
-            else:
-                # Aplicar pagos usando FIFO
-                for cuenta in cuentas_pendientes:
-                    if monto_restante <= 0:
-                        break
+                # Actualizar observaciones de la factura si existe (truncando si es necesario)
+                if cuenta.factura:
+                    observaciones_actuales = cuenta.factura.observaciones_factura or ""
+                    separador = " | " if observaciones_actuales else ""
+                    nueva_observacion = f"{observaciones_actuales}{separador}{descripcion_auditoria}"
 
-                    # Calcular monto a aplicar a esta factura
-                    saldo_pendiente = cuenta.saldo_pendiente
-                    monto_aplicar = min(monto_restante, saldo_pendiente)
+                    # Truncar a 255 caracteres si es necesario
+                    if len(nueva_observacion) > 255:
+                        nueva_observacion = nueva_observacion[:252] + "..."
+                    cuenta.factura.observaciones_factura = nueva_observacion
 
-                    # Calcular equivalentes en Bs
-                    monto_aplicado_bs = monto_aplicar * tasa_cambio
+                facturas_actualizadas.append(
+                    {
+                        "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
+                        "id_factura": cuenta.id_factura,
+                        "numero_factura": cuenta.factura.numero_factura if cuenta.factura else "N/A",
+                        "monto_aplicado": monto_aplicar,
+                        "monto_aplicado_bs": monto_aplicado_bs,
+                        "saldo_restante_factura": cuenta.saldo_pendiente,
+                        "estado_resultante": cuenta.estado,
+                        "descripcion_auditoria": descripcion_auditoria,
+                    }
+                )
 
-                    # Generar descripción de auditoría (sin tasa para efectivo)
-                    if es_efectivo:
-                        descripcion_auditoria = (
-                            f"Abono general efectivo: ${float(monto_aplicar):.2f} / "
-                            f"Restante: ${float(monto_restante - monto_aplicar):.2f}"
-                        )
-                    else:
-                        descripcion_auditoria = (
-                            f"Abono general: ${float(monto_aplicar):.2f} ({float(monto_aplicado_bs):.2f} Bs) / "
-                            f"Tasa: {float(tasa_cambio):.2f} / "
-                            f"Restante: ${float(monto_restante - monto_aplicar):.2f}"
-                        )
+                # Actualizar monto restante
+                monto_restante -= monto_aplicar
 
-                    # Crear registro de pago
-                    pago = PagoCobro(
-                        id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
-                        id_cuenta_bancaria=id_cuenta_bancaria,
-                        id_caja=id_caja,
-                        id_tasa=id_tasa,
-                        metodo_pago=metodo_pago,
-                        moneda="USD",
-                        monto=monto_aplicar,
-                        monto_bolivares=monto_aplicado_bs,
-                        tasa_cambio=tasa_cambio,
-                        referencia=referencia,
-                        fecha_pago=datetime.now(),
-                        creado_por=id_usuario,
-                    )
-                    session.add(pago)
-                    session.flush()  # Flush para obtener el ID del pago
-
-                    # Actualizar saldo de la cuenta por cobrar
-                    cuenta.saldo_pendiente -= monto_aplicar
-
-                    # Actualizar estado según el saldo restante
-                    if cuenta.saldo_pendiente <= 0:
-                        cuenta.estado = "pagada"
-                        cuenta.saldo_pendiente = Decimal("0.00")
-                    else:
-                        cuenta.estado = "parcial"
-
-                    # Actualizar observaciones de la factura si existe (truncando si es necesario)
-                    if cuenta.factura:
-                        observaciones_actuales = cuenta.factura.observaciones_factura or ""
-                        separador = " | " if observaciones_actuales else ""
-                        nueva_observacion = f"{observaciones_actuales}{separador}{descripcion_auditoria}"
-
-                        # Truncar a 255 caracteres si es necesario
-                        if len(nueva_observacion) > 255:
-                            nueva_observacion = nueva_observacion[:252] + "..."
-                        cuenta.factura.observaciones_factura = nueva_observacion
-
-                    facturas_actualizadas.append(
-                        {
-                            "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
-                            "id_factura": cuenta.id_factura,
-                            "numero_factura": cuenta.factura.numero_factura if cuenta.factura else "N/A",
-                            "monto_aplicado": monto_aplicar,
-                            "monto_aplicado_bs": monto_aplicado_bs,
-                            "saldo_restante_factura": cuenta.saldo_pendiente,
-                            "estado_resultante": cuenta.estado,
-                            "descripcion_auditoria": descripcion_auditoria,
-                        }
-                    )
-
-                    # Actualizar monto restante
-                    monto_restante -= monto_aplicar
-
-            # Si hay sobreabono o no hay facturas pendientes, crear nota de crédito como saldo a favor del cliente
+            # Si hay sobreabono, crear nota de crédito como saldo a favor del cliente
             nota_credito_id = None
-            if (es_sobreabono or not cuentas_pendientes) and saldo_restante > 0:
+            if es_sobreabono and saldo_restante > 0:
                 try:
                     cliente = session.get(Cliente, id_cliente)
                     if cliente:
-                        # Crear nota de crédito por el excedente o por pago sin facturas
-                        if cuentas_pendientes:
-                            motivo = f"Sobreabono por pago en exceso - {metodo_pago}"
-                        else:
-                            motivo = f"Abono anticipado sin facturas pendientes - {metodo_pago}"
+                        motivo = f"Sobreabono por pago en exceso - {metodo_pago}"
                         nota_credito = NotaCreditoCliente(
                             numero_nota_credito=f"ABONO-{datetime.now().strftime('%Y%m%d%H%M%S')}",
                             id_cliente=id_cliente,

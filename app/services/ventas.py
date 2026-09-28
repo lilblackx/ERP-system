@@ -764,30 +764,6 @@ class VentaService:
                             fecha=factura.fecha_emision,
                         )
 
-                excedente_linea = (monto_usd - monto_a_aplicar).quantize(Decimal("0.01"))
-                if excedente_linea > 0:
-                    descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
-                    id_caja_linea = pago_linea.get("id_caja")
-                    id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
-                    if id_caja_linea is not None:
-                        CajaService._registrar_ingreso_excedente(
-                            session,
-                            id_caja=id_caja_linea,
-                            monto=excedente_linea,
-                            descripcion=descripcion_excedente,
-                            id_usuario=id_usuario,
-                            fecha=factura.fecha_emision,
-                        )
-                    elif id_cuenta_linea is not None:
-                        BancoService._registrar_ingreso_excedente(
-                            session,
-                            id_cuenta=id_cuenta_linea,
-                            monto=excedente_linea,
-                            descripcion=descripcion_excedente,
-                            id_usuario=id_usuario,
-                            fecha=factura.fecha_emision,
-                        )
-
         if monto_vuelto > 0:
             nombre_cliente = factura.cliente.nombre_razon_social if factura.cliente else "Desconocido"
             descripcion_vuelto = f"Vuelto factura {factura.numero_factura} - {nombre_cliente}"
