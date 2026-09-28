@@ -574,6 +574,7 @@ def test_aplicar_abono_general_fifo_distribuye_correctamente(db_session):
 
     # Esperar un momento para asegurar diferencias en fechas de emisión
     import time
+
     time.sleep(0.1)
 
     caja = crear_caja(db_session)
@@ -684,9 +685,7 @@ def test_aplicar_abono_general_sobreabono_maneja_exceso_correctamente(db_session
     from app.db.models import CuentaPorCobrar
 
     cuentas = (
-        db_session.query(CuentaPorCobrar)
-        .filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas]))
-        .all()
+        db_session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas])).all()
     )
 
     for cuenta in cuentas:
@@ -824,9 +823,7 @@ def test_aplicar_abono_general_transaccion_atomica(db_session):
     from app.db.models import CuentaPorCobrar
 
     cuentas = (
-        db_session.query(CuentaPorCobrar)
-        .filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas]))
-        .all()
+        db_session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas])).all()
     )
 
     assert cuentas[0].saldo_pendiente == Decimal("100.00")

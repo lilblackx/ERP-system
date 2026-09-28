@@ -845,9 +845,7 @@ class CuentasPorPagarPanel(QWidget):
             btn_odc.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_odc.setEnabled(id_oc is not None)  # Deshabilitar si no hay ODC asociada
             btn_odc.setToolTip("Exportar ODC a PDF")
-            btn_odc.clicked.connect(
-                lambda checked, id_oc=id_oc: self._exportar_odc_pdf(id_oc)
-            )
+            btn_odc.clicked.connect(lambda checked, id_oc=id_oc: self._exportar_odc_pdf(id_oc))
 
             widget_acciones = QWidget()
             layout_acciones = QHBoxLayout(widget_acciones)
@@ -948,13 +946,15 @@ class CuentasPorPagarPanel(QWidget):
                 total = cantidad_solicitada * precio
                 total_oc += total
 
-                filas.append([
-                    producto,
-                    f"{cantidad_solicitada:,.2f}",
-                    f"{cantidad_pendiente:,.2f}",
-                    f"${precio:,.2f}",
-                    f"${total:,.2f}"
-                ])
+                filas.append(
+                    [
+                        producto,
+                        f"{cantidad_solicitada:,.2f}",
+                        f"{cantidad_pendiente:,.2f}",
+                        f"${precio:,.2f}",
+                        f"${total:,.2f}",
+                    ]
+                )
 
             # Filtros con información de la ODC
             proveedor = oc.proveedor.nombre_razon_social if oc.proveedor else ""
@@ -962,7 +962,7 @@ class CuentasPorPagarPanel(QWidget):
                 "N° ODC": oc.numero_oc,
                 "Proveedor": proveedor,
                 "Fecha": oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else "",
-                "Estado": oc.estado
+                "Estado": oc.estado,
             }
 
             # Fila de totales

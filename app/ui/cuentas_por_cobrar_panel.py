@@ -632,6 +632,7 @@ class AbonoGeneralDialog(QDialog):
         # Calcular deuda total del cliente
         try:
             from app.services.pagos import PagoService
+
             resultado = PagoService.listar_cuentas_por_cobrar(
                 self.session,
                 id_cliente=self.cliente.id_cliente if self.cliente else None,
@@ -658,13 +659,13 @@ class AbonoGeneralDialog(QDialog):
                     .first()
                 )
                 if primera_cuenta:
-                    saldo_favor = getattr(primera_cuenta, 'saldo_favor', Decimal("0.00"))
+                    saldo_favor = getattr(primera_cuenta, "saldo_favor", Decimal("0.00"))
                     if saldo_favor is None:
                         saldo_favor = Decimal("0.00")
             except Exception as e:
                 logger.warning(f"Error al obtener saldo a favor: {e}")
                 saldo_favor = Decimal("0.00")
-        
+
         if saldo_favor > 0:
             lbl_saldo_favor = QLabel(f"Saldo a favor: ${float(saldo_favor):,.2f}")
             lbl_saldo_favor.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
@@ -1023,18 +1024,18 @@ class AbonoGeneralDialog(QDialog):
             f"Facturas actualizadas: {len(resultado['facturas_actualizadas'])}",
         ]
 
-        if resultado['es_sobreabono']:
+        if resultado["es_sobreabono"]:
             lines.append(f"Saldo a favor del cliente: ${float(resultado['saldo_restante']):,.2f}")
-            if resultado.get('saldo_favor_id'):
+            if resultado.get("saldo_favor_id"):
                 lines.append(f"ID saldo a favor: {resultado['saldo_favor_id']}")
 
         lines.append("\nFacturas afectadas:")
-        for factura in resultado['facturas_actualizadas']:
+        for factura in resultado["facturas_actualizadas"]:
             try:
-                monto_aplicado = factura.get('monto_aplicado', Decimal("0.00"))
-                monto_aplicado_bs = factura.get('monto_aplicado_bs', Decimal("0.00"))
-                numero_factura = factura.get('numero_factura', 'N/A')
-                estado_resultante = factura.get('estado_resultante', 'desconocido')
+                monto_aplicado = factura.get("monto_aplicado", Decimal("0.00"))
+                monto_aplicado_bs = factura.get("monto_aplicado_bs", Decimal("0.00"))
+                numero_factura = factura.get("numero_factura", "N/A")
+                estado_resultante = factura.get("estado_resultante", "desconocido")
 
                 # Mostrar Bs solo si el monto en Bs es significativo (no para efectivo)
                 if monto_aplicado_bs and monto_aplicado_bs > 0:
@@ -1043,9 +1044,7 @@ class AbonoGeneralDialog(QDialog):
                         f"({float(monto_aplicado_bs):,.2f} Bs) - Estado: {estado_resultante}"
                     )
                 else:
-                    lines.append(
-                        f"• {numero_factura}: ${float(monto_aplicado):,.2f} - Estado: {estado_resultante}"
-                    )
+                    lines.append(f"• {numero_factura}: ${float(monto_aplicado):,.2f} - Estado: {estado_resultante}")
             except (KeyError, TypeError, AttributeError) as e:
                 logger.warning(f"Error al procesar factura en resumen: {e}")
                 lines.append("• Factura con datos incompletos")
@@ -1212,12 +1211,12 @@ class DetalleClienteDialog(QDialog):
                     .first()
                 )
                 if primera_cuenta:
-                    saldo_favor = getattr(primera_cuenta, 'saldo_favor', Decimal("0.00"))
+                    saldo_favor = getattr(primera_cuenta, "saldo_favor", Decimal("0.00"))
                     if saldo_favor is None:
                         saldo_favor = Decimal("0.00")
             except Exception:
                 saldo_favor = Decimal("0.00")
-        
+
         if saldo_favor > 0:
             self.lbl_saldo_favor.setText(f"Saldo a favor: ${float(saldo_favor):,.2f}")
         else:
@@ -1276,11 +1275,7 @@ class DetalleClienteDialog(QDialog):
         """Abre el diálogo de abono general para el cliente."""
         try:
             dialogo = AbonoGeneralDialog(
-                self.session,
-                self.cliente,
-                self.id_usuario,
-                tasa_bcv=self.tasa_bcv,
-                parent=self
+                self.session, self.cliente, self.id_usuario, tasa_bcv=self.tasa_bcv, parent=self
             )
             if dialogo.exec() and dialogo.abono_aplicado is not None:
                 self.se_realizo_cobro = True

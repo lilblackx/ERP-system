@@ -1308,11 +1308,7 @@ class FacturaFormDialog(QDialog):
             precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
             if precio:
                 # Actualizar los precios originales
-                self._precios_originales = {
-                    1: precio.precio_1,
-                    2: precio.precio_2,
-                    3: precio.precio_3
-                }
+                self._precios_originales = {1: precio.precio_1, 2: precio.precio_2, 3: precio.precio_3}
 
                 # Actualizar el combo con los nuevos precios con porcentaje
                 self.precio_seleccion_combo.blockSignals(True)
@@ -1441,11 +1437,7 @@ class FacturaFormDialog(QDialog):
 
         # Guardar los precios originales sin porcentaje BCV
         if precio:
-            self._precios_originales = {
-                1: precio.precio_1,
-                2: precio.precio_2,
-                3: precio.precio_3
-            }
+            self._precios_originales = {1: precio.precio_1, 2: precio.precio_2, 3: precio.precio_3}
         else:
             self._precios_originales = {}
 
@@ -2072,10 +2064,10 @@ class FacturaFormDialog(QDialog):
         hay_vuelto = monto_vuelto > 0.005
         metodo_vuelto = self.metodo_vuelto_combo.currentData() if hay_vuelto else None
         origen_vuelto = self.origen_vuelto_combo.currentData() if hay_vuelto else None
-        
+
         # Porcentaje BCV
         porcentaje_bcv = self.porcentaje_bcv_input.get_value() if self.chk_porcentaje_bcv.isChecked() else None
-        
+
         return {
             "id_cliente": self.cliente_combo.currentData(),
             "id_vendedor": self.vendedor_combo.currentData(),

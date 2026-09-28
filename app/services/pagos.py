@@ -565,6 +565,7 @@ class PagoService:
 
                 if id_caja is not None:
                     from app.services.tesoreria import CajaService
+
                     CajaService._registrar_ingreso_excedente(
                         session,
                         id_caja=id_caja,
@@ -575,6 +576,7 @@ class PagoService:
                     )
                 else:
                     from app.services.tesoreria import BancoService
+
                     BancoService._registrar_ingreso_excedente(
                         session,
                         id_cuenta=id_cuenta_bancaria,
@@ -650,16 +652,18 @@ class PagoService:
                             nueva_observacion = nueva_observacion[:252] + "..."
                         cuenta.factura.observaciones_factura = nueva_observacion
 
-                    facturas_actualizadas.append({
-                        "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
-                        "id_factura": cuenta.id_factura,
-                        "numero_factura": cuenta.factura.numero_factura if cuenta.factura else "N/A",
-                        "monto_aplicado": monto_aplicar,
-                        "monto_aplicado_bs": monto_aplicado_bs,
-                        "saldo_restante_factura": cuenta.saldo_pendiente,
-                        "estado_resultante": cuenta.estado,
-                        "descripcion_auditoria": descripcion_auditoria,
-                    })
+                    facturas_actualizadas.append(
+                        {
+                            "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
+                            "id_factura": cuenta.id_factura,
+                            "numero_factura": cuenta.factura.numero_factura if cuenta.factura else "N/A",
+                            "monto_aplicado": monto_aplicar,
+                            "monto_aplicado_bs": monto_aplicado_bs,
+                            "saldo_restante_factura": cuenta.saldo_pendiente,
+                            "estado_resultante": cuenta.estado,
+                            "descripcion_auditoria": descripcion_auditoria,
+                        }
+                    )
 
                     # Actualizar monto restante
                     monto_restante -= monto_aplicar
@@ -808,12 +812,12 @@ class PagoService:
                     # Manejo seguro del campo saldo_favor (puede no existir si no se ejecutó la migración)
                     saldo_favor = Decimal("0.00")
                     try:
-                        saldo_favor = getattr(cuenta, 'saldo_favor', Decimal("0.00"))
+                        saldo_favor = getattr(cuenta, "saldo_favor", Decimal("0.00"))
                         if saldo_favor is None:
                             saldo_favor = Decimal("0.00")
                     except Exception:
                         saldo_favor = Decimal("0.00")
-                    
+
                     clientes_deuda[id_cliente_key] = {
                         "cliente": cliente,
                         "saldo_total": Decimal("0.00"),
@@ -825,17 +829,17 @@ class PagoService:
 
                 clientes_deuda[id_cliente_key]["saldo_total"] += cuenta.saldo_pendiente
                 clientes_deuda[id_cliente_key]["cuentas"].append(cuenta)
-                
+
                 # Actualizar saldo_favor con el valor más alto encontrado (por si hay inconsistencias)
                 try:
-                    cuenta_saldo_favor = getattr(cuenta, 'saldo_favor', Decimal("0.00"))
+                    cuenta_saldo_favor = getattr(cuenta, "saldo_favor", Decimal("0.00"))
                     if cuenta_saldo_favor is None:
                         cuenta_saldo_favor = Decimal("0.00")
-                    
+
                     saldo_favor_actual = clientes_deuda[id_cliente_key]["saldo_favor"]
                     if saldo_favor_actual is None:
                         saldo_favor_actual = Decimal("0.00")
-                    
+
                     if cuenta_saldo_favor and cuenta_saldo_favor > saldo_favor_actual:
                         clientes_deuda[id_cliente_key]["saldo_favor"] = cuenta_saldo_favor
                 except Exception:

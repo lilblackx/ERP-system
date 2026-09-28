@@ -383,7 +383,7 @@ class VentaService:
             if iva_activo
             else Decimal("0.00")
         )
-        
+
         # Lo que efectivamente se le suma a la cuenta por cobrar (subtotal - descuento +
         # IVA) -- se usa tanto para el limite de credito (solo credito) como para validar
         # que la suma de formas de pago cubra la factura (solo contado, ver mas abajo).
@@ -405,7 +405,7 @@ class VentaService:
                 .where(Cliente.id_cliente == id_cliente)
                 .with_hint(Cliente, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
             ).scalar_one()
-            
+
             # Si hay porcentaje BCV, la deuda actual debe incluir también las cuentas BCV
             if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
                 # Calcular deuda actual incluyendo cuentas BCV
@@ -421,7 +421,7 @@ class VentaService:
                 deuda_actual = _deuda_pendiente_cliente(session, id_cliente) + Decimal(str(deuda_bcv))
             else:
                 deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
-            
+
             limite_credito = cliente.limite_credito if cliente.limite_credito is not None else Decimal("0.00")
             if deuda_actual + total_a_cobrar > limite_credito:
                 raise ValueError(
@@ -609,7 +609,7 @@ class VentaService:
         # por cobrar tanto para credito como para contado, asi que el ajuste aplica a
         # ambas condiciones (antes era solo credito).
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
-        
+
         # Si hay porcentaje BCV, la cuenta por cobrar original debe tener saldo 0
         # (solo la cuenta BCV maneja el monto total)
         if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
@@ -669,13 +669,12 @@ class VentaService:
                                 if cxc_bcv.saldo_pendiente <= 0:
                                     cxc_bcv.saldo_pendiente = Decimal("0.00")
                                     cxc_bcv.estado = "pagada"
-                            
+
                             # Registrar excedente (cambio) si lo hay
                             excedente_linea = (monto_usd - monto_a_aplicar_bcv).quantize(Decimal("0.01"))
                             if excedente_linea > 0:
                                 descripcion_excedente = (
-                                    f"Excedente de pago factura {factura.numero_factura} "
-                                    f"(vuelto pendiente)"
+                                    f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
                                 )
                                 id_caja_linea = pago_linea.get("id_caja")
                                 id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")

@@ -675,6 +675,7 @@ class CuentaPorCobrarBCV(Base):
     Los precios de los productos (precio_1, precio_2, precio_3) se incrementan por
     el porcentaje especificado y se almacenan en esta cuenta separada del cliente.
     """
+
     __tablename__ = "cuentas_por_cobrar_bcv"
     __table_args__ = {"implicit_returning": False}
 

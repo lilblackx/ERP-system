@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 class PagoBCVService:
     """Servicio para gestionar pagos de cuentas por cobrar BCV.
-    
+
     Similar a PagoService pero operando sobre cuentas_por_cobrar_bcv
     en lugar de cuentas_por_cobrar regulares.
     """
@@ -87,17 +87,17 @@ class PagoBCVService:
         # Por ahora, vamos a asumir que usamos la misma tabla pagos_cobros
         # con un indicador de que es BCV, o creamos una tabla separada
         # Para simplificar, vamos a registrar el pago y actualizar la cuenta
-        
+
         # Actualizar saldo pendiente
         cuenta.saldo_pendiente = cuenta.saldo_pendiente - monto
-        
+
         # Determinar nuevo estado
         if cuenta.saldo_pendiente <= 0:
             cuenta.estado = "pagada"
             cuenta.saldo_pendiente = Decimal("0.00")
         elif cuenta.saldo_pendiente < (cuenta.factura.total_venta if cuenta.factura else Decimal("0.00")):
             cuenta.estado = "parcial"
-        
+
         session.add(cuenta)
         try:
             session.flush()
@@ -214,11 +214,9 @@ class PagoBCVService:
 
         total = query.count()
         logger.info(f"BCV - Listar cuentas: estado filtro={estado}, busqueda={busqueda}, total encontrado={total}")
-        
+
         cuentas = (
-            query.options(
-                joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente)
-            )
+            query.options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
             .order_by(CuentaPorCobrarBCV.fecha_vencimiento.desc())
             .offset((pagina - 1) * por_pagina)
             .limit(por_pagina)
@@ -302,16 +300,12 @@ class PagoBCVService:
 
         total = query.count()
         logger.info(
-            f"BCV - Listar cuentas agrupadas: estado filtro={estado}, "
-            f"busqueda={busqueda}, total clientes={total}"
+            f"BCV - Listar cuentas agrupadas: estado filtro={estado}, busqueda={busqueda}, total clientes={total}"
         )
 
         # Ejecutar query con paginación
         resultados = (
-            query.order_by(Cliente.nombre_razon_social)
-            .offset((pagina - 1) * por_pagina)
-            .limit(por_pagina)
-            .all()
+            query.order_by(Cliente.nombre_razon_social).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
         )
 
         # Construir lista de objetos agrupados
@@ -324,29 +318,25 @@ class PagoBCVService:
                 estado_visual = "vencida"
 
             # Crear objeto simple con los datos agrupados
-            saldo_pendiente = (
-                Decimal(str(row.saldo_pendiente_total))
-                if row.saldo_pendiente_total
-                else Decimal("0.00")
-            )
-            saldo_favor = (
-                Decimal(str(row.saldo_favor_total))
-                if row.saldo_favor_total
-                else Decimal("0.00")
-            )
+            saldo_pendiente = Decimal(str(row.saldo_pendiente_total)) if row.saldo_pendiente_total else Decimal("0.00")
+            saldo_favor = Decimal(str(row.saldo_favor_total)) if row.saldo_favor_total else Decimal("0.00")
 
-            item = type('obj', (object,), {
-                'id_cliente': row.id_cliente,
-                'nombre_cliente': row.nombre_razon_social,
-                'saldo_pendiente': saldo_pendiente,
-                'saldo_favor': saldo_favor,
-                'cantidad_cuentas': row.cantidad_cuentas,
-                'fecha_vencimiento': fecha_venc_min,
-                'fecha_emision': row.fecha_emision_min,
-                'dias_credito': row.dias_credito_min,
-                'estado': estado_visual,
-                'estado_visual': estado_visual,
-            })()
+            item = type(
+                "obj",
+                (object,),
+                {
+                    "id_cliente": row.id_cliente,
+                    "nombre_cliente": row.nombre_razon_social,
+                    "saldo_pendiente": saldo_pendiente,
+                    "saldo_favor": saldo_favor,
+                    "cantidad_cuentas": row.cantidad_cuentas,
+                    "fecha_vencimiento": fecha_venc_min,
+                    "fecha_emision": row.fecha_emision_min,
+                    "dias_credito": row.dias_credito_min,
+                    "estado": estado_visual,
+                    "estado_visual": estado_visual,
+                },
+            )()
             items.append(item)
 
         logger.info(f"BCV - Clientes agrupados recuperados: {len(items)}")

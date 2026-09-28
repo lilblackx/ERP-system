@@ -570,8 +570,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
         self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
         self.btn_exportar = BotonExportar(
-            on_excel=self._exportar_excel_cuentas_bcv,
-            on_pdf=self._exportar_pdf_cuentas_bcv
+            on_excel=self._exportar_excel_cuentas_bcv, on_pdf=self._exportar_pdf_cuentas_bcv
         )
 
         h.addWidget(self.buscar_input)
@@ -586,12 +585,12 @@ class CuentasPorCobrarBCVPanel(QWidget):
         alinear_encabezados(
             self.tabla,
             {
-                1: Qt.AlignmentFlag.AlignLeft,      # CLIENTE
-                2: Qt.AlignmentFlag.AlignRight,     # SALDO PENDIENTE
-                3: Qt.AlignmentFlag.AlignRight,     # SALDO A FAVOR
-                4: Qt.AlignmentFlag.AlignCenter,    # DÍAS
-                5: Qt.AlignmentFlag.AlignCenter,    # FECHA FACTURA
-                6: Qt.AlignmentFlag.AlignCenter,    # ESTADO
+                1: Qt.AlignmentFlag.AlignLeft,  # CLIENTE
+                2: Qt.AlignmentFlag.AlignRight,  # SALDO PENDIENTE
+                3: Qt.AlignmentFlag.AlignRight,  # SALDO A FAVOR
+                4: Qt.AlignmentFlag.AlignCenter,  # DÍAS
+                5: Qt.AlignmentFlag.AlignCenter,  # FECHA FACTURA
+                6: Qt.AlignmentFlag.AlignCenter,  # ESTADO
             },
         )
         return self.tabla
@@ -664,7 +663,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
                     session.query(
                         Cliente.id_cliente,
                         func.sum(CuentaPorCobrarBCV.saldo_pendiente).label("saldo_cliente"),
-                        func.sum(CuentaPorCobrarBCV.saldo_favor).label("saldo_favor_cliente")
+                        func.sum(CuentaPorCobrarBCV.saldo_favor).label("saldo_favor_cliente"),
                     )
                     .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
                     .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
@@ -674,13 +673,9 @@ class CuentasPorCobrarBCVPanel(QWidget):
                     .subquery()
                 )
 
-                total_pendiente = session.query(
-                    func.coalesce(func.sum(subquery.c.saldo_cliente), 0)
-                ).scalar()
+                total_pendiente = session.query(func.coalesce(func.sum(subquery.c.saldo_cliente), 0)).scalar()
 
-                total_favor = session.query(
-                    func.coalesce(func.sum(subquery.c.saldo_favor_cliente), 0)
-                ).scalar()
+                total_favor = session.query(func.coalesce(func.sum(subquery.c.saldo_favor_cliente), 0)).scalar()
 
                 total_clientes = session.query(func.count(subquery.c.id_cliente)).scalar()
 
@@ -830,11 +825,9 @@ class CuentasPorCobrarBCVPanel(QWidget):
                     .filter(
                         FacturaVenta.id_cliente_factura == item.id_cliente,
                         CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")),
-                        CuentaPorCobrarBCV.saldo_pendiente > 0
+                        CuentaPorCobrarBCV.saldo_pendiente > 0,
                     )
-                    .options(
-                        joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente)
-                    )
+                    .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
                     .order_by(CuentaPorCobrarBCV.fecha_vencimiento.desc())
                     .all()
                 )
@@ -866,9 +859,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
         fila_actual = self.tabla.currentRow()
         if fila_actual < 0 or fila_actual >= len(self._cuentas_cargadas):
             MessageBox.warning(
-                self,
-                "Selección requerida",
-                "Seleccione un cliente para ver sus cuentas por cobrar BCV."
+                self, "Selección requerida", "Seleccione un cliente para ver sus cuentas por cobrar BCV."
             )
             return
 
@@ -903,18 +894,10 @@ class CuentasPorCobrarBCVPanel(QWidget):
                     filas.append(fila)
 
                 ruta, _ = QFileDialog.getSaveFileName(
-                    self,
-                    "Exportar cuentas por cobrar BCV",
-                    "cuentas_por_cobrar_bcv.xlsx",
-                    "Excel (*.xlsx)"
+                    self, "Exportar cuentas por cobrar BCV", "cuentas_por_cobrar_bcv.xlsx", "Excel (*.xlsx)"
                 )
                 if ruta:
-                    exportar_excel(
-                        ruta,
-                        encabezados,
-                        filas,
-                        titulo="Cuentas por Cobrar BCV (Agrupadas por Cliente)"
-                    )
+                    exportar_excel(ruta, encabezados, filas, titulo="Cuentas por Cobrar BCV (Agrupadas por Cliente)")
             finally:
                 session.close()
         except Exception as e:
@@ -949,18 +932,10 @@ class CuentasPorCobrarBCVPanel(QWidget):
                     filas.append(fila)
 
                 ruta, _ = QFileDialog.getSaveFileName(
-                    self,
-                    "Exportar cuentas por cobrar BCV",
-                    "cuentas_por_cobrar_bcv.pdf",
-                    "PDF (*.pdf)"
+                    self, "Exportar cuentas por cobrar BCV", "cuentas_por_cobrar_bcv.pdf", "PDF (*.pdf)"
                 )
                 if ruta:
-                    exportar_pdf(
-                        ruta,
-                        "Cuentas por Cobrar BCV (Agrupadas por Cliente)",
-                        encabezados,
-                        filas
-                    )
+                    exportar_pdf(ruta, "Cuentas por Cobrar BCV (Agrupadas por Cliente)", encabezados, filas)
             finally:
                 session.close()
         except Exception as e:
