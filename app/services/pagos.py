@@ -523,7 +523,7 @@ class PagoService:
             logger.info(f"Cuentas pendientes encontradas para cliente {id_cliente}: {len(cuentas_pendientes)}")
         except Exception as e:
             logger.error(f"Error al obtener cuentas pendientes: {e}")
-            raise ValueError(f"Error al obtener cuentas pendientes: {str(e)}")
+            raise ValueError(f"Error al obtener cuentas pendientes: {str(e)}") from e
 
         # Calcular total de deuda (si hay facturas pendientes)
         if cuentas_pendientes:
@@ -532,7 +532,7 @@ class PagoService:
                 logger.info(f"Total deuda calculada: {total_deuda}")
             except Exception as e:
                 logger.error(f"Error al calcular total deuda: {e}")
-                raise ValueError(f"Error al calcular total deuda: {str(e)}")
+                raise ValueError(f"Error al calcular total deuda: {str(e)}") from e
         else:
             total_deuda = Decimal("0.00")
             logger.info(f"Cliente {id_cliente} no tiene facturas pendientes, todo el abono quedará como saldo a favor")

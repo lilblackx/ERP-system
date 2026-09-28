@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import ConfiguracionEmpresa, CuentaPorCobrar, FacturaVenta, NotaCreditoCliente, Usuario
+from app.db.models import ConfiguracionEmpresa, CuentaPorCobrar, FacturaVenta, Usuario
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
@@ -1412,7 +1412,8 @@ class CuentasPorCobrarPanel(QWidget):
         return w
 
     def _make_table(self) -> QWidget:
-        self.tabla = self._crear_tabla(["ID", "Cliente", "Saldo Pendiente", "Saldo a Favor", "Días", "Fecha Factura", "Estado"])
+        headers = ["ID", "Cliente", "Saldo Pendiente", "Saldo a Favor", "Días", "Fecha Factura", "Estado"]
+        self.tabla = self._crear_tabla(headers)
         alinear_encabezados(
             self.tabla,
             {
@@ -1586,8 +1587,9 @@ class CuentasPorCobrarPanel(QWidget):
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas por cobrar.")
         except Exception as e:
-            logger.exception(f"Fallo al cargar el listado de cuentas por cobrar: {e}")
-            MessageBox.critical(self, "Error de conexión", f"No se pudo cargar el listado de cuentas por cobrar: {str(e)}")
+            logger.exception("Fallo al cargar el listado de cuentas por cobrar: %s", e)
+            msg = f"No se pudo cargar el listado de cuentas por cobrar: {e}"
+            MessageBox.critical(self, "Error de conexión", msg)
         finally:
             session.close()
 
