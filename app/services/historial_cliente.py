@@ -6,6 +6,7 @@ from typing import Literal, TypedDict
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    ControlDeTasa,
     CuentaBancaria,
     CuentaPorCobrar,
     FacturaVenta,
@@ -73,6 +74,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             joinedload(PagoCobro.cuenta_bancaria).joinedload(CuentaBancaria.banco),
             joinedload(PagoCobro.caja),
             joinedload(PagoCobro.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura),
+            joinedload(PagoCobro.tasa),
         )
         .order_by(PagoCobro.fecha_pago.desc())
         .all()
@@ -144,36 +146,14 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                 # Construir observaciones con bolivares, tasa y banco
                 observaciones = ""
 
-                # Agregar bolivares y tasa si es transferencia
-                if pago.metodo_pago == "transferencia" and pago.monto_moneda_origen and pago.tasa:
-                    # Determinar qué tasa se usó comparando con los campos del registro
-                    tasa_usada = None
-                    tipo_tasa = ""
+                # Usar campos directos monto_bolivares y tasa_cambio
+                monto_bs = pago.monto_bolivares or pago.monto_moneda_origen
+                tasa = pago.tasa_cambio
 
-                    if pago.tasa.tasa_dolar_bcv and pago.monto / pago.monto_moneda_origen == float(
-                        pago.tasa.tasa_dolar_bcv
-                    ):
-                        tasa_usada = pago.tasa.tasa_dolar_bcv
-                        tipo_tasa = "BCV"
-                    elif pago.tasa.tasa_dolar_paralelo and pago.monto / pago.monto_moneda_origen == float(
-                        pago.tasa.tasa_dolar_paralelo
-                    ):
-                        tasa_usada = pago.tasa.tasa_dolar_paralelo
-                        tipo_tasa = "Paralelo"
-                    elif pago.tasa.tasa_cop and pago.monto / pago.monto_moneda_origen == float(pago.tasa.tasa_cop):
-                        tasa_usada = pago.tasa.tasa_cop
-                        tipo_tasa = "COP"
-
-                    if tasa_usada:
-                        observaciones = f"Bs({pago.monto_moneda_origen:,.2f}) - {tipo_tasa}: {tasa_usada:,.2f}"
-                    else:
-                        # Fallback: mostrar BCV si no se puede determinar
-                        if pago.tasa.tasa_dolar_bcv:
-                            observaciones = (
-                                f"Bs({pago.monto_moneda_origen:,.2f}) - BCV: {pago.tasa.tasa_dolar_bcv:,.2f}"
-                            )
-                        else:
-                            observaciones = f"Bs({pago.monto_moneda_origen:,.2f})"
+                if monto_bs and tasa:
+                    observaciones = f"Bs. {monto_bs:,.2f} - {tasa:,.2f}"
+                elif monto_bs:
+                    observaciones = f"Bs. {monto_bs:,.2f}"
 
                 # Agregar banco si existe
                 if pago.cuenta_bancaria:
@@ -181,9 +161,9 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     nombre_banco = banco.nombre_banco if banco else ""
                     if nombre_banco:
                         if observaciones:
-                            observaciones += f" - ({nombre_banco})"
+                            observaciones += f" - {nombre_banco}"
                         else:
-                            observaciones = f"({nombre_banco})"
+                            observaciones = nombre_banco
 
                 item_pago: HistorialItem = {
                     "tipo_transaccion": "pago",

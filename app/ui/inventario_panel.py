@@ -166,6 +166,7 @@ class InventarioPanel(QWidget):
         self.usuario = usuario
         self.pagina_actual = 1
         self.total_paginas = 1
+        self.es_vendedor = usuario.id_vendedor_usuario is not None
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self._cargar_categorias_filtro)
@@ -283,8 +284,10 @@ class InventarioPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_nuevo)
-        h.addWidget(self.btn_auditoria)
+        # Solo mostrar botones de creación y auditoría si no es vendedor
+        if not self.es_vendedor:
+            h.addWidget(self.btn_nuevo)
+            h.addWidget(self.btn_auditoria)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -346,22 +349,23 @@ class InventarioPanel(QWidget):
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.clicked.connect(self._pagina_siguiente)
 
-        btn_editar = QPushButton("Editar seleccionado")
-        btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
-        btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_editar.clicked.connect(self.editar_producto)
-
-        btn_estado = QPushButton("Cambiar estado")
-        btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
-        btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_estado.clicked.connect(self.cambiar_estado_producto_seleccionado)
-
         h.addWidget(self.lbl_pagina)
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
-        h.addWidget(btn_editar)
-        h.addWidget(btn_estado)
+        # Solo mostrar botones de edición y cambio de estado si no es vendedor
+        if not self.es_vendedor:
+            btn_editar = QPushButton("Editar seleccionado")
+            btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
+            btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
+            btn_editar.clicked.connect(self.editar_producto)
+            h.addWidget(btn_editar)
+
+            btn_estado = QPushButton("Cambiar estado")
+            btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
+            btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
+            btn_estado.clicked.connect(self.cambiar_estado_producto_seleccionado)
+            h.addWidget(btn_estado)
         return w
 
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────

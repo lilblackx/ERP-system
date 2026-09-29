@@ -118,8 +118,7 @@ COLS_HISTORIAL = [
     "Estado",
     "Condición Pago",
     "Método Pago",
-    "Días Crédito",
-    "Días Vencidos",
+    "Días",
     "Observaciones",
     "Monto",
     "Saldo Corrido",
@@ -130,27 +129,22 @@ def _filas_historial_para_exportar(session, id_cliente: int) -> list[list]:
     historial = obtener_historial_cliente(session, id_cliente)
     filas = []
     for item in historial:
-        # Calcular días vencidos para todas las facturas
-        dias_vencidos = "0"
+        # Calcular días transcurridos desde la fecha de emisión
+        dias_transcurridos = "—"
         if item["tipo_transaccion"] == "factura" and item["fecha"]:
             try:
                 fecha_emision = datetime.strptime(item["fecha"], "%Y-%m-%d %H:%M").date()
                 fecha_actual = date.today()
-                dias_credito = item["dias_credito"] or 0
-                fecha_vencimiento = fecha_emision + timedelta(days=dias_credito)
-                dias_vencidos_calc = (fecha_actual - fecha_vencimiento).days
-                if dias_vencidos_calc > 0:
-                    dias_vencidos = str(dias_vencidos_calc)
-                else:
-                    dias_vencidos = "0"
+                dias_calc = (fecha_actual - fecha_emision).days
+                dias_transcurridos = str(dias_calc)
             except Exception:
-                dias_vencidos = "0"
+                dias_transcurridos = "—"
         elif item["tipo_transaccion"] in (
             "pago",
             "nota_credito",
             "devolucion_nota_credito",
         ):
-            dias_vencidos = "—"
+            dias_transcurridos = "—"
 
         # Determinar estado para mostrar
         if item["tipo_transaccion"] == "factura":
@@ -167,8 +161,7 @@ def _filas_historial_para_exportar(session, id_cliente: int) -> list[list]:
             estado,
             item["condicion_pago"] if item["tipo_transaccion"] == "factura" else "—",
             (_etiqueta_metodo_pago(item["metodo_pago"]) if item["tipo_transaccion"] in ("factura", "pago") else "—"),
-            (str(item["dias_credito"] or 0) if item["tipo_transaccion"] == "factura" else "—"),
-            dias_vencidos,
+            dias_transcurridos,
             item["observaciones"] or "",
             str(item["monto"]),
             str(item["saldo_corrido"]),
@@ -334,10 +327,9 @@ class HistorialClienteWindow(QDialog):
                 4: Qt.AlignmentFlag.AlignCenter,
                 5: Qt.AlignmentFlag.AlignCenter,
                 6: Qt.AlignmentFlag.AlignCenter,
-                7: Qt.AlignmentFlag.AlignCenter,
-                8: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignLeft,
+                8: Qt.AlignmentFlag.AlignRight,
                 9: Qt.AlignmentFlag.AlignRight,
-                10: Qt.AlignmentFlag.AlignRight,
             },
         )
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -622,48 +614,28 @@ class HistorialClienteWindow(QDialog):
             item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 5, item_metodo)
 
-            # Días Crédito (solo para facturas)
-            if tipo == "factura":
-                dias = str(item["dias_credito"]) if item["dias_credito"] is not None else ""
-            else:
-                dias = "—"
-            item_dias = QTableWidgetItem(dias)
-            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 6, item_dias)
-
-            # Días Vencidos (calculado para todas las facturas)
-            dias_vencidos = ""
+            # Días transcurridos desde la fecha de emisión
+            dias_transcurridos = "—"
             if tipo == "factura" and item["fecha"]:
                 try:
                     fecha_emision = datetime.strptime(item["fecha"], "%Y-%m-%d %H:%M").date()
                     fecha_actual = date.today()
-                    dias_credito = item["dias_credito"] or 0
-                    fecha_vencimiento = fecha_emision + timedelta(days=dias_credito)
-                    dias_vencidos_calc = (fecha_actual - fecha_vencimiento).days
-                    # Mostrar días vencidos si es positivo, si es negativo mostrar 0 (no vencido)
-                    if dias_vencidos_calc > 0:
-                        dias_vencidos = str(dias_vencidos_calc)
-                    else:
-                        dias_vencidos = "0"
+                    dias_calc = (fecha_actual - fecha_emision).days
+                    dias_transcurridos = str(dias_calc)
                 except Exception as e:
-                    logger.exception("Error calculando días vencidos: %s", e)
-                    dias_vencidos = "0"
+                    logger.exception("Error calculando días transcurridos: %s", e)
+                    dias_transcurridos = "—"
             elif tipo in ("pago", "nota_credito", "devolucion_nota_credito"):
-                dias_vencidos = "—"
-            else:
-                dias_vencidos = "0"
+                dias_transcurridos = "—"
 
-            item_dias_vencidos = QTableWidgetItem(dias_vencidos)
-            item_dias_vencidos.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            # Color rojo si está vencido
-            if dias_vencidos and dias_vencidos != "0" and dias_vencidos != "—":
-                item_dias_vencidos.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER))
-            self.tabla.setItem(fila, 7, item_dias_vencidos)
+            item_dias = QTableWidgetItem(dias_transcurridos)
+            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 6, item_dias)
 
             # Observaciones
             item_observaciones = QTableWidgetItem(item["observaciones"] or "")
             item_observaciones.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 8, item_observaciones)
+            self.tabla.setItem(fila, 7, item_observaciones)
 
             # Monto (positivo para facturas, negativo para pagos)
             monto = f"${float(item['monto']):,.2f}"
@@ -676,7 +648,7 @@ class HistorialClienteWindow(QDialog):
             font = item_monto.font()
             font.setBold(True)
             item_monto.setFont(font)
-            self.tabla.setItem(fila, 9, item_monto)
+            self.tabla.setItem(fila, 8, item_monto)
 
             # Saldo Corrido
             saldo_corrido = f"${float(item['saldo_corrido']):,.2f}"
@@ -689,7 +661,7 @@ class HistorialClienteWindow(QDialog):
             font_corrido = item_corrido.font()
             font_corrido.setBold(True)
             item_corrido.setFont(font_corrido)
-            self.tabla.setItem(fila, 10, item_corrido)
+            self.tabla.setItem(fila, 9, item_corrido)
 
     def exportar_excel(self) -> None:
         session = self.session_factory()

@@ -211,7 +211,9 @@ class ComisionService:
         return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
 
     @staticmethod
-    def listar_mis_comisiones(session: Session, id_usuario: int | None) -> list[ComisionFactura]:
+    def listar_mis_comisiones(
+        session: Session, id_usuario: int | None, solo_con_porcentaje_bcv: bool = False
+    ) -> list[ComisionFactura]:
         """Retorna las comisiones del vendedor logueado. Requiere permiso reportes_comisiones:ver
         (distinto de comisiones:ver, que es para gestion/pago). El usuario debe tener un vendedor
         vinculado (Usuario.id_vendedor_usuario) -- esto es verdad para usuarios con rol VENDEDOR.
@@ -220,7 +222,8 @@ class ComisionService:
         usuario = session.get(Usuario, id_usuario) if id_usuario is not None else None
         if usuario is None or usuario.id_vendedor_usuario is None:
             raise ValueError("Este usuario no tiene un vendedor vinculado")
-        return (
+
+        query = (
             session.query(ComisionFactura)
             .options(
                 joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente),
@@ -230,9 +233,19 @@ class ComisionService:
                 ComisionFactura.id_vendedor == usuario.id_vendedor_usuario,
                 ComisionFactura.monto_comision > 0,
             )
-            .order_by(ComisionFactura.fecha_calculo.desc())
-            .all()
         )
+
+        if solo_con_porcentaje_bcv:
+            # Filtrar solo facturas que tienen cuenta BCV con porcentaje > 0
+            from sqlalchemy import exists
+
+            subquery = exists().where(
+                CuentaPorCobrarBCV.id_factura == FacturaDetalle.id_factura,
+                CuentaPorCobrarBCV.porcentaje > 0,
+            )
+            query = query.join(ComisionFactura.detalle).filter(subquery)
+
+        return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
 
 
 class PagoComisionService:

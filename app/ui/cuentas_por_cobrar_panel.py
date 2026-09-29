@@ -1178,7 +1178,7 @@ class DetalleClienteDialog(QDialog):
         aplicar_sombra(tabla)
         tabla.setColumnHidden(0, True)
         tabla.verticalHeader().setDefaultSectionSize(40)
-        tabla.doubleClicked.connect(self._on_double_click_cuenta)
+        tabla.doubleClicked.connect(self._on_double_click_factura_detalle)
 
         alinear_encabezados(
             tabla,
@@ -1268,11 +1268,45 @@ class DetalleClienteDialog(QDialog):
         id_cuenta = int(item.text())
         self._cobrar_cuenta(id_cuenta)
 
+    def _on_double_click_factura_detalle(self) -> None:
+        """Maneja el doble clic en una factura para mostrar el detalle de la factura."""
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return
+
+        row = filas[0].row()
+        item = self.tabla.item(row, 0)
+        if item is None:
+            return
+
+        id_cuenta = int(item.text())
+        cuenta = self.session.get(CuentaPorCobrar, id_cuenta)
+        if cuenta and cuenta.factura:
+            from app.services.ventas import VentaService
+            from app.ui.factura_detalle_dialog import FacturaDetalleDialog
+
+            try:
+                # Usar la sesión existente para obtener los datos
+                datos = VentaService.obtener_factura(self.session, cuenta.factura.id_factura, self.id_usuario)
+                dialogo = FacturaDetalleDialog(
+                    datos,
+                    self.session,
+                    self.id_usuario,
+                    parent=self,
+                )
+                dialogo.exec()
+            except PermisoDenegadoError:
+                MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+            except Exception as e:
+                logger.exception("Error al mostrar detalle de factura")
+                MessageBox.warning(self, "Error", f"No se pudo mostrar el detalle de la factura: {str(e)}")
+
     def _cobrar_cuenta(self, id_cuenta: int) -> None:
         """Abre el diálogo de cobro para una cuenta específica."""
         try:
             cuenta = self.session.get(CuentaPorCobrar, id_cuenta)
             if cuenta is None:
+                MessageBox.warning(self, "Cuenta no encontrada", "La cuenta por cobrar no existe.")
                 return
             if cuenta.estado == "pagada":
                 MessageBox.information(self, "Ya pagada", "Esta cuenta por cobrar ya está saldada.")
@@ -1292,9 +1326,12 @@ class DetalleClienteDialog(QDialog):
                 self._recargar_cuentas()
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar cobros.")
-        except Exception:
+        except ValueError as e:
+            logger.exception("Error de validación al registrar cobro")
+            MessageBox.warning(self, "Error", str(e))
+        except Exception as e:
             logger.exception("Fallo al registrar cobro de cliente")
-            MessageBox.critical(self, "Error", "No se pudo registrar el cobro.")
+            MessageBox.critical(self, "Error", f"No se pudo registrar el cobro: {str(e)}")
 
     def _recargar_cuentas(self) -> None:
         """Recarga las cuentas del cliente después de un cobro."""

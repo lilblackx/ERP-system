@@ -155,9 +155,8 @@ class ClienteFormDialog(QDialog):
         self.cliente = cliente
         self.id_usuario = id_usuario
         self.setWindowTitle("Editar Cliente" if cliente else "Nuevo Cliente")
-        # Un poco mas ancho/alto que antes (860x740) -- pedido del usuario 2026-09-03:
-        # mas area de mapa hace mas facil marcar la ubicacion con precision.
-        self.setFixedSize(920, 800)
+        # Ajustado para que los botones sean visibles en pantallas estándar
+        self.setFixedSize(920, 900)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -229,23 +228,10 @@ class ClienteFormDialog(QDialog):
         grid1.setColumnStretch(0, 1)
         grid1.setColumnStretch(1, 1)
 
-        # Código
-        lbl_cod = QLabel(f"Código {ASTERISCO_REQUERIDO}")
-        lbl_cod.setProperty("class", "FormLabel")
-        self.codigo_input = QLineEdit()
-        self.codigo_input.setPlaceholderText("Ej: CLI-001")
-        self.codigo_input.setMaxLength(20)
-        self.codigo_input.setFixedHeight(32)
-        grid1.addWidget(lbl_cod, 0, 0, 1, 2)
-        grid1.addWidget(self.codigo_input, 1, 0, 1, 2)
-
-        # ID Fiscal -- fila propia a ancho completo (no compartida con Código): a media
-        # columna, el combo de tipo (V/J/G/E/P) mas el placeholder largo del numero
-        # ("Ej: 30489713 / 12345678-0") no entraban y el campo quedaba visualmente
-        # cortado. Reportado por el usuario 2026-09-09.
+        # ID Fiscal -- fila propia a ancho completo
         lbl_id = QLabel(f"ID Fiscal / Identificación {ASTERISCO_REQUERIDO}")
         lbl_id.setProperty("class", "FormLabel")
-        grid1.addWidget(lbl_id, 2, 0, 1, 2)
+        grid1.addWidget(lbl_id, 0, 0, 1, 2)
 
         id_hbox = QHBoxLayout()
         id_hbox.setSpacing(4)
@@ -266,7 +252,7 @@ class ClienteFormDialog(QDialog):
 
         id_hbox.addWidget(self.tipo_id_combo)
         id_hbox.addWidget(self.identificacion_input)
-        grid1.addLayout(id_hbox, 3, 0, 1, 2)
+        grid1.addLayout(id_hbox, 1, 0, 1, 2)
 
         # Razón Social
         lbl_nom = QLabel(f"Razón Social o Nombre Completo {ASTERISCO_REQUERIDO}")
@@ -275,8 +261,8 @@ class ClienteFormDialog(QDialog):
         self.nombre_input.setPlaceholderText("Ej: Distribuidora Central, C.A.")
         self.nombre_input.setMaxLength(200)
         self.nombre_input.setFixedHeight(32)
-        grid1.addWidget(lbl_nom, 4, 0, 1, 2)
-        grid1.addWidget(self.nombre_input, 5, 0, 1, 2)
+        grid1.addWidget(lbl_nom, 2, 0, 1, 2)
+        grid1.addWidget(self.nombre_input, 3, 0, 1, 2)
 
         # Vendedor Asignado
         lbl_vend = QLabel("Vendedor Asignado")
@@ -289,8 +275,8 @@ class ClienteFormDialog(QDialog):
         ):
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
 
-        grid1.addWidget(lbl_vend, 6, 0)
-        grid1.addWidget(self.vendedor_combo, 7, 0)
+        grid1.addWidget(lbl_vend, 4, 0)
+        grid1.addWidget(self.vendedor_combo, 5, 0)
 
         # Categoría
         lbl_cat = QLabel("Categoría de Cliente")
@@ -301,8 +287,8 @@ class ClienteFormDialog(QDialog):
         for categoria in self.session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):
             self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
 
-        grid1.addWidget(lbl_cat, 6, 1)
-        grid1.addWidget(self.categoria_combo, 7, 1)
+        grid1.addWidget(lbl_cat, 4, 1)
+        grid1.addWidget(self.categoria_combo, 5, 1)
 
         col1_layout.addLayout(grid1)
         col1_layout.addStretch()
@@ -512,8 +498,6 @@ class ClienteFormDialog(QDialog):
             return None, None
 
     def _precargar(self, cliente: Cliente):
-        self.codigo_input.setText(cliente.codigo_cliente or "")
-
         # id_legal contiene solo la letra (V, J, G, E, P)
         # identificacion_cliente contiene solo el número
         prefix = (cliente.id_legal or "").strip().upper() or "V"
@@ -545,10 +529,6 @@ class ClienteFormDialog(QDialog):
             self._sugerir_vendedor_por_ubicacion(lat, lng)
 
     def _validar_y_aceptar(self):
-        if not self.codigo_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "El código del cliente es obligatorio.")
-            self.codigo_input.setFocus()
-            return
         if not self.identificacion_input.text().strip():
             MessageBox.warning(
                 self,

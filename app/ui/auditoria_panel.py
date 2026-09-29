@@ -13,6 +13,7 @@ eventos hoy) en vez de hardcodear la lista aca.
 import json
 import logging
 from datetime import datetime, time
+from typing import cast
 
 import qtawesome as qta
 from PySide6.QtCore import QDate, Qt, QTimer
@@ -120,6 +121,7 @@ ETIQUETAS_DETALLE: dict[str, str] = {
     "metodo_pago": "Método de pago",
     "moneda": "Moneda",
     "monto": "Monto",
+    "monto_abono": "Monto abono",
     "monto_descuento": "Monto del descuento",
     "monto_iva": "Monto del IVA",
     "monto_total": "Monto total",
@@ -188,11 +190,23 @@ def _formatear_detalle(detalle_crudo: str | None) -> list[str]:
         return [detalle_crudo]
     if not isinstance(datos, dict):
         return [str(datos)]
-    return [
-        f"{_etiqueta_campo(clave)}: {_formatear_valor_detalle(valor)}"
-        for clave, valor in datos.items()
-        if valor is not None
-    ]
+
+    # Campos que deben mostrar el valor en bolívares con "Bs"
+    campos_en_bs = {
+        "monto_abono",
+        "monto_total_aplicado",
+        "saldo_restante",
+    }
+
+    lineas = []
+    for clave, valor in datos.items():
+        if valor is None:
+            continue
+        valor_formateado = _formatear_valor_detalle(valor)
+        if clave in campos_en_bs:
+            valor_formateado = f"{valor_formateado} Bs"
+        lineas.append(f"{_etiqueta_campo(clave)}: {valor_formateado}")
+    return lineas
 
 
 # QDateEdit no hereda GLOBAL_QSS de forma confiable cuando se usa suelto en un toolbar
@@ -623,7 +637,7 @@ class AuditoriaPanel(QWidget):
         if not filas:
             MessageBox.information(self, "Selección requerida", "Selecciona un evento de la lista.")
             return
-        evento = self._eventos_pagina[filas[0].row()]
+        evento = cast(Auditoria, self._eventos_pagina[filas[0].row()])
         fecha_texto = evento.fecha_evento.strftime("%d/%m/%Y %H:%M:%S") if evento.fecha_evento else "—"
         usuario_texto = evento.usuario.nombre_usuario if evento.usuario else "Sistema"
         lineas_detalle = _formatear_detalle(evento.detalle)

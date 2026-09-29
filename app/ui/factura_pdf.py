@@ -184,7 +184,10 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     metodo_pago_row = ""
     if factura.condicion_pago == "contado":
         metodo_pago = datos.get("metodo_pago")
-        etiqueta_metodo_pago = _ETIQUETAS_METODO_PAGO.get(metodo_pago, metodo_pago or "—")
+        if metodo_pago:
+            etiqueta_metodo_pago = _ETIQUETAS_METODO_PAGO.get(metodo_pago, metodo_pago)
+        else:
+            etiqueta_metodo_pago = "—"
         metodo_pago_row = (
             f"<tr><td {_INFO_LBL}>Método de Pago:</td><td {_INFO_VAL}>{_esc(etiqueta_metodo_pago)}</td></tr>"
         )
@@ -254,7 +257,6 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
         f"<tr><td {_INFO_LBL}>N° de Nota de Entrega:</td><td {_INFO_VAL}>{_esc(factura.numero_factura)}</td></tr>"
         f"<tr><td {_INFO_LBL}>Fecha de Emisión:</td><td {_INFO_VAL}>{fecha}</td></tr>"
         f"<tr><td {_INFO_LBL}>Hora de Emisión:</td><td {_INFO_VAL}>{hora}</td></tr>"
-        f"<tr><td {_INFO_LBL}>N° de Control:</td><td {_INFO_VAL}>{_esc(factura.numero_control)}</td></tr>"
         f"<tr><td {_INFO_LBL}>Condición de Pago:</td><td {_INFO_VAL}>{condicion}</td></tr>"
         f"{metodo_pago_row}"
         f"{vencimiento_row}"
@@ -284,7 +286,7 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
         <table width="100%" style="border-collapse:collapse;margin-top:10pt;"><tr>
             <td style="background-color:{_PRIMARY};color:#FFFFFF;padding:5pt 8pt;font-size:10pt;font-weight:bold;">
-                CLIENTE N° {_esc(codigo_cliente)}
+                CLIENTE
             </td>
         </tr></table>
         <table width="100%" style="border-collapse:collapse;border:1pt solid {_BORDER};border-top:none;"><tr>
@@ -327,7 +329,7 @@ def _documento(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> QTex
 
 def _configurar_pagina(impresora: QPrinter) -> None:
     impresora.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
-    impresora.setPageMargins(QMarginsF(2, 2, 2, 2), QPageLayout.Unit.Millimeter)
+    impresora.setPageMargins(QMarginsF(-2, -2, -2, -2), QPageLayout.Unit.Millimeter)
 
 
 def generar_pdf_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, ruta_destino: str) -> None:

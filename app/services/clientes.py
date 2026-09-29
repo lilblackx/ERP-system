@@ -15,8 +15,6 @@ def _escapar_like(texto: str) -> str:
 
 
 def _validar_requeridos(datos: dict) -> None:
-    if not datos.get("codigo_cliente"):
-        raise ValueError("codigo_cliente es requerido")
     if not datos.get("id_legal"):
         raise ValueError("id_legal (tipo de identificación) es requerido")
     if not datos.get("identificacion_cliente"):
@@ -117,9 +115,16 @@ def list_clientes(
 def create_cliente(session: Session, **datos) -> Cliente:
     require_permiso(session, datos.get("creado_por"), "clientes", "crear")
     _validar_requeridos(datos)
-    _validar_unico(session, "codigo_cliente", datos["codigo_cliente"])
     _validar_unico(session, "identificacion_cliente", datos["identificacion_cliente"])
     _validar_rango_coordenadas(datos.get("latitud"), datos.get("longitud"))
+
+    # Generar código automáticamente si no se proporciona
+    if not datos.get("codigo_cliente"):
+        # Buscar el ID más alto para generar el siguiente código
+        max_id = session.query(Cliente.id_cliente).order_by(Cliente.id_cliente.desc()).first()
+        siguiente_id = (max_id[0] + 1) if max_id else 1
+        datos["codigo_cliente"] = f"CLI-{siguiente_id:06d}"
+
     cliente = Cliente(**datos)
     session.add(cliente)
     session.commit()

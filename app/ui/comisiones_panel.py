@@ -530,7 +530,12 @@ class ComisionesPanel(QWidget):
 
         session = session_factory()
         try:
-            self.modo_gestion = UsuarioService.verificar_permiso(session, usuario.id_usuario, "comisiones", "ver")
+            # Si el usuario es vendedor (tiene id_vendedor_usuario), siempre usar modo "Mis Comisiones"
+            # para que solo vea sus propias comisiones, independientemente de otros permisos
+            if usuario.id_vendedor_usuario is not None:
+                self.modo_gestion = False
+            else:
+                self.modo_gestion = UsuarioService.verificar_permiso(session, usuario.id_usuario, "comisiones", "ver")
         except Exception:
             self.modo_gestion = False
         finally:
@@ -736,7 +741,12 @@ class ComisionesPanel(QWidget):
 
     def _cargar_comisiones_propias(self, session: Session) -> None:
         try:
-            comisiones = ComisionService.listar_mis_comisiones(session, self.usuario.id_usuario)
+            self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+            comisiones = ComisionService.listar_mis_comisiones(
+                session,
+                self.usuario.id_usuario,
+                solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+            )
             self.comisiones_cargadas = comisiones
             self._aplicar_filtro_estado()
         except ValueError:
@@ -766,16 +776,24 @@ class ComisionesPanel(QWidget):
 
     def _aplicar_filtro_estado(self) -> None:
         # Si el checkbox de porcentaje BCV cambió, recargar desde BD
-        if self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv and self.id_vendedor_actual is not None:
+        if self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv:
             self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
             session = self.session_factory()
             try:
-                comisiones = ComisionService.listar_comisiones_vendedor(
-                    session,
-                    self.id_vendedor_actual,
-                    id_usuario=self.usuario.id_usuario,
-                    solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
-                )
+                if self.modo_gestion and self.id_vendedor_actual is not None:
+                    comisiones = ComisionService.listar_comisiones_vendedor(
+                        session,
+                        self.id_vendedor_actual,
+                        id_usuario=self.usuario.id_usuario,
+                        solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                    )
+                else:
+                    # Modo "Mis Comisiones" - recargar con filtro de porcentaje BCV
+                    comisiones = ComisionService.listar_mis_comisiones(
+                        session,
+                        self.usuario.id_usuario,
+                        solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                    )
                 self.comisiones_cargadas = comisiones
             except Exception:
                 logger.exception("Fallo al recargar comisiones con filtro porcentaje BCV")
