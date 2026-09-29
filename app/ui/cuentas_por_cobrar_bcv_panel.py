@@ -1121,7 +1121,8 @@ class AbonoGeneralBCVDialog(QDialog):
                 MessageBox.information(
                     self,
                     "Abono aplicado",
-                    f"Abono general BCV aplicado exitosamente.\nMonto aplicado: ${float(self.abono_aplicado['monto_total_aplicado']):,.2f}",
+                    "Abono general BCV aplicado exitosamente.\n"
+                    f"Monto aplicado: ${float(self.abono_aplicado['monto_total_aplicado']):,.2f}",
                 )
                 self.accept()
             finally:
