@@ -20,15 +20,11 @@ from tests.factories import (
 )
 
 
-def _factura_directa(
-    session, cliente, fecha_emision, total, estado="EMITIDA", numero=None, vendedor=None
-):
+def _factura_directa(session, cliente, fecha_emision, total, estado="EMITIDA", numero=None, vendedor=None):
     vendedor = vendedor or crear_vendedor(session)
     factura = FacturaVenta(
         numero_factura=numero or f"FV-DIRECT-{fecha_emision.timestamp()}",
-        numero_control=(
-            f"C-{numero}" if numero else f"C-{fecha_emision.timestamp():.0f}"
-        ),
+        numero_control=(f"C-{numero}" if numero else f"C-{fecha_emision.timestamp():.0f}"),
         id_cliente_factura=cliente.id_cliente,
         id_vendedor=vendedor.id_vendedor,
         fecha_emision=fecha_emision,
@@ -44,9 +40,7 @@ def _factura_directa(
 
 def test_panel_general_devuelve_todas_las_secciones(db_session):
     admin = crear_usuario_admin(db_session)
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert set(resultado.keys()) == {
         "ventas_hoy",
@@ -71,12 +65,8 @@ def test_ventas_hoy_excluye_anuladas_y_calcula_porcentaje(db_session):
     ahora = datetime.now()
     ayer = ahora - timedelta(days=1)
 
-    _factura_directa(
-        db_session, cliente, ayer, total=Decimal("50.00"), numero="FV-AYER-1"
-    )
-    _factura_directa(
-        db_session, cliente, ahora, total=Decimal("100.00"), numero="FV-HOY-1"
-    )
+    _factura_directa(db_session, cliente, ayer, total=Decimal("50.00"), numero="FV-AYER-1")
+    _factura_directa(db_session, cliente, ahora, total=Decimal("100.00"), numero="FV-HOY-1")
     _factura_directa(
         db_session,
         cliente,
@@ -86,9 +76,7 @@ def test_ventas_hoy_excluye_anuladas_y_calcula_porcentaje(db_session):
         numero="FV-HOY-ANULADA",
     )
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["ventas_hoy"]["total"] == Decimal("100.00")
     assert resultado["ventas_hoy"]["porcentaje_vs_ayer"] == 100.0
@@ -96,9 +84,7 @@ def test_ventas_hoy_excluye_anuladas_y_calcula_porcentaje(db_session):
 
 def test_ventas_hoy_sin_ventas_previas(db_session):
     admin = crear_usuario_admin(db_session)
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
     assert resultado["ventas_hoy"]["total"] == 0
     assert resultado["ventas_hoy"]["porcentaje_vs_ayer"] == 0.0
 
@@ -126,9 +112,7 @@ def test_por_cobrar_suma_saldos_abiertos_y_cuenta_vencidas(db_session):
         fecha_vencimiento=date.today() - timedelta(days=5),
     )
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["por_cobrar"]["saldo_total"] == Decimal("80.00")
     assert resultado["por_cobrar"]["facturas_vencidas"] == 1
@@ -155,9 +139,7 @@ def test_por_pagar_suma_saldos_abiertos_y_cuenta_vencidas(db_session):
         fecha_vencimiento=date.today() - timedelta(days=3),
     )
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["por_pagar"]["saldo_total"] == Decimal("60.00")
     assert resultado["por_pagar"]["compras_vencidas"] == 1
@@ -168,9 +150,7 @@ def test_productos_alerta_cuenta_bajo_stock(db_session):
     crear_producto(db_session, cantidad_unidad=3, cantidad_minima=Decimal("10.00"))
     crear_producto(db_session, cantidad_unidad=500, cantidad_minima=Decimal("10.00"))
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["productos_alerta"] == 1
 
@@ -182,13 +162,9 @@ def test_productos_alerta_ignora_productos_sin_minimo_configurado(db_session):
     ProductoService.obtener_alertas_stock, ver test_inventario.py)."""
     admin = crear_usuario_admin(db_session)
     crear_producto(db_session, cantidad_unidad=37, cantidad_minima=Decimal("5.00"))
-    crear_producto(
-        db_session, cantidad_unidad=1
-    )  # cantidad_minima queda en 0 (default)
+    crear_producto(db_session, cantidad_unidad=1)  # cantidad_minima queda en 0 (default)
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["productos_alerta"] == 0
 
@@ -209,9 +185,7 @@ def test_productos_alerta_cuenta_proximos_a_vencer(db_session):
         fecha_vencimiento=date.today() + timedelta(days=90),
     )
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["productos_alerta"] == 1
     assert len(resultado["inventario_alerta"]) == 1
@@ -231,9 +205,7 @@ def test_productos_alerta_excluye_inactivos(db_session):
         estado_producto="INACTIVO",
     )
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["productos_alerta"] == 0
 
@@ -242,13 +214,9 @@ def test_grafico_semanal_tiene_siete_dias_incluyendo_hoy(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session)
     hoy = datetime.now()
-    _factura_directa(
-        db_session, cliente, hoy, total=Decimal("25.00"), numero="FV-GRAFICO-HOY"
-    )
+    _factura_directa(db_session, cliente, hoy, total=Decimal("25.00"), numero="FV-GRAFICO-HOY")
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
     grafico = resultado["grafico_semanal"]
 
     assert len(grafico) == 7
@@ -267,12 +235,8 @@ def test_cajas_activas_solo_incluye_abiertas_hoy(db_session):
     )
 
     caja_cerrada = crear_caja(db_session, nombre_caja="Cerrada")
-    CajaService.abrir_caja(
-        db_session, caja_cerrada.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
-    CajaService.cerrar_caja(
-        db_session, caja_cerrada.id_caja, id_usuario_cierre=admin.id_usuario
-    )
+    CajaService.abrir_caja(db_session, caja_cerrada.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.cerrar_caja(db_session, caja_cerrada.id_caja, id_usuario_cierre=admin.id_usuario)
 
     caja_abierta_ayer = Caja(
         nombre_caja="Abierta ayer",
@@ -284,9 +248,7 @@ def test_cajas_activas_solo_incluye_abiertas_hoy(db_session):
     db_session.add(caja_abierta_ayer)
     db_session.commit()
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     nombres_activos = [c["nombre_caja"] for c in resultado["cajas_activas"]]
     assert nombres_activos == ["Abierta hoy"]
@@ -305,9 +267,7 @@ def test_facturas_recientes_limita_a_cinco_y_ordena_desc(db_session):
             numero=f"FV-REC-{i}",
         )
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
     recientes = resultado["facturas_recientes"]
 
     assert len(recientes) == 5
@@ -328,9 +288,7 @@ def test_inventario_alerta_incluye_categoria(db_session):
     )
     crear_producto(db_session, cantidad_unidad=999, cantidad_minima=Decimal("10.00"))
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
     alertas = resultado["inventario_alerta"]
 
     assert len(alertas) == 1
@@ -349,8 +307,6 @@ def test_inventario_alerta_excluye_inactivos(db_session):
         estado_producto="INACTIVO",
     )
 
-    resultado = DashboardService.get_panel_general_data(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = DashboardService.get_panel_general_data(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["inventario_alerta"] == []

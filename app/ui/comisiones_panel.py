@@ -91,16 +91,12 @@ ESTADOS_FILTRO = [
 LIMITE_CATALOGO = 50
 
 
-def _tarea_exportar_excel(
-    session, ruta: str, encabezados: list[str], filas: list[list], config_empresa
-) -> str:
+def _tarea_exportar_excel(session, ruta: str, encabezados: list[str], filas: list[list], config_empresa) -> str:
     """Corre en un QThread (ver QueryWorker) para no bloquear la ventana mientras
     openpyxl genera el archivo -- `session` no se usa (config_empresa ya se resolvio
     de forma sincrona antes de lanzar el worker), pero es parte del contrato de
     QueryWorker.run()."""
-    exportar_excel(
-        ruta, encabezados, filas, titulo="Comisiones", config_empresa=config_empresa
-    )
+    exportar_excel(ruta, encabezados, filas, titulo="Comisiones", config_empresa=config_empresa)
     return ruta
 
 
@@ -223,9 +219,7 @@ class PagarComisionesDialog(QDialog):
         self.setWindowTitle("Pagar Comisiones")
         self.setFixedSize(420, 380)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
         self._cargar_origenes()
         self._toggle_origen()
@@ -236,9 +230,7 @@ class PagarComisionesDialog(QDialog):
         root.setSpacing(12)
 
         lbl_titulo = QLabel(f"Pagar comisiones a {self.nombre_vendedor}")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         root.addWidget(lbl_titulo)
 
         card = QWidget()
@@ -249,9 +241,7 @@ class PagarComisionesDialog(QDialog):
         layout.setSpacing(8)
 
         lbl_monto = QLabel(f"Total pendiente: ${float(self.monto_pendiente):,.2f}")
-        lbl_monto.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};"
-        )
+        lbl_monto.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_monto)
 
         lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
@@ -303,18 +293,12 @@ class PagarComisionesDialog(QDialog):
             cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cajas = []
-        self._cajas_abiertas = [
-            c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None
-        ]
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
         try:
-            cuentas = BancoService.listar_cuentas(
-                self.session, id_usuario=self.id_usuario
-            )
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cuentas = []
-        self._cuentas_activas = [
-            c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"
-        ]
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
 
     def _toggle_origen(self) -> None:
         metodo = self.metodo_combo.currentData()
@@ -339,9 +323,7 @@ class PagarComisionesDialog(QDialog):
             else:
                 self.origen_combo.setEnabled(True)
                 for cuenta in self._cuentas_activas:
-                    nombre_banco = (
-                        cuenta.banco.nombre_banco if cuenta.banco else "Banco"
-                    )
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
                         ("banco", cuenta.id_cuenta),
@@ -384,9 +366,7 @@ class PagarComisionesDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para pagar comisiones."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para pagar comisiones.")
             return
         except Exception:
             self.session.rollback()
@@ -418,11 +398,7 @@ def _agrupar_comisiones_por_factura(comisiones: list[ComisionFactura]) -> list[d
                 factura = comision.detalle.factura
                 clave = factura.id_factura
                 factura_num = factura.numero_factura or ""
-                cliente_nombre = (
-                    factura.cliente.nombre_razon_social
-                    if factura.cliente
-                    else "Consumidor final"
-                )
+                cliente_nombre = factura.cliente.nombre_razon_social if factura.cliente else "Consumidor final"
         except Exception:
             pass
 
@@ -463,9 +439,7 @@ class DetalleComisionFacturaDialog(QDialog):
         self.setWindowTitle(f"Detalle de comisión - Factura {grupo['numero_factura']}")
         self.setFixedSize(560, 420)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -473,18 +447,10 @@ class DetalleComisionFacturaDialog(QDialog):
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
-        fecha_str = (
-            self.grupo["fecha_calculo"].strftime("%d/%m/%Y")
-            if self.grupo["fecha_calculo"]
-            else ""
-        )
+        fecha_str = self.grupo["fecha_calculo"].strftime("%d/%m/%Y") if self.grupo["fecha_calculo"] else ""
         estado = (self.grupo["estado_pago"] or "pendiente").capitalize()
-        lbl_titulo = QLabel(
-            f"Factura {self.grupo['numero_factura']} · {self.grupo['cliente_nombre']}"
-        )
-        lbl_titulo.setStyleSheet(
-            f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo = QLabel(f"Factura {self.grupo['numero_factura']} · {self.grupo['cliente_nombre']}")
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         root.addWidget(lbl_titulo)
 
         lbl_sub = QLabel(f"Fecha: {fecha_str}  ·  Estado: {estado}")
@@ -492,9 +458,7 @@ class DetalleComisionFacturaDialog(QDialog):
         root.addWidget(lbl_sub)
 
         tabla = QTableWidget(len(self.grupo["lineas"]), 5)
-        tabla.setHorizontalHeaderLabels(
-            ["Producto", "Cantidad", "Monto Base", "Monto Venta", "Comisión"]
-        )
+        tabla.setHorizontalHeaderLabels(["Producto", "Cantidad", "Monto Base", "Monto Venta", "Comisión"])
         tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         tabla.setAlternatingRowColors(True)
@@ -523,43 +487,25 @@ class DetalleComisionFacturaDialog(QDialog):
             cantidad = linea.detalle.cantidad_producto if linea.detalle else None
             tabla.setItem(fila, 0, QTableWidgetItem(nombre_producto))
 
-            item_cantidad = QTableWidgetItem(
-                f"{float(cantidad):,.2f}" if cantidad is not None else ""
-            )
-            item_cantidad.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_cantidad = QTableWidgetItem(f"{float(cantidad):,.2f}" if cantidad is not None else "")
+            item_cantidad.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 1, item_cantidad)
 
-            item_base = QTableWidgetItem(
-                f"${float(linea.monto_base_comision or 0):,.2f}"
-            )
-            item_base.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_base = QTableWidgetItem(f"${float(linea.monto_base_comision or 0):,.2f}")
+            item_base.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 2, item_base)
 
-            item_venta = QTableWidgetItem(
-                f"${float(linea.monto_venta_comision or 0):,.2f}"
-            )
-            item_venta.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_venta = QTableWidgetItem(f"${float(linea.monto_venta_comision or 0):,.2f}")
+            item_venta.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 3, item_venta)
 
             item_comision = QTableWidgetItem(f"${float(linea.monto_comision):,.2f}")
-            item_comision.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_comision.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 4, item_comision)
         root.addWidget(tabla, stretch=1)
 
-        lbl_total = QLabel(
-            f"Total comisión: ${float(self.grupo['monto_comision']):,.2f}"
-        )
-        lbl_total.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_total = QLabel(f"Total comisión: ${float(self.grupo['monto_comision']):,.2f}")
+        lbl_total.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         root.addWidget(lbl_total)
 
         btn_cerrar = QPushButton("Cerrar")
@@ -584,9 +530,7 @@ class ComisionesPanel(QWidget):
 
         session = session_factory()
         try:
-            self.modo_gestion = UsuarioService.verificar_permiso(
-                session, usuario.id_usuario, "comisiones", "ver"
-            )
+            self.modo_gestion = UsuarioService.verificar_permiso(session, usuario.id_usuario, "comisiones", "ver")
         except Exception:
             self.modo_gestion = False
         finally:
@@ -630,9 +574,7 @@ class ComisionesPanel(QWidget):
 
         titulo = "Comisiones" if self.modo_gestion else "Mis Comisiones"
         lbl = QLabel(titulo)
-        lbl.setStyleSheet(
-            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -670,16 +612,12 @@ class ComisionesPanel(QWidget):
         self.estado_combo.currentIndexChanged.connect(self._aplicar_filtro_estado)
 
         self.chk_porcentaje_bcv = QCheckBox("Solo con porcentaje BCV")
-        self.chk_porcentaje_bcv.setStyleSheet(
-            f"color: {COLOR_TEXT_DARK}; font-weight: 600;"
-        )
+        self.chk_porcentaje_bcv.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.chk_porcentaje_bcv.stateChanged.connect(self._aplicar_filtro_estado)
 
         self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
-        self.btn_exportar = BotonExportar(
-            on_excel=self.exportar_excel, on_pdf=self.exportar_pdf
-        )
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel, on_pdf=self.exportar_pdf)
 
         h.addStretch()
         h.addWidget(self.chk_porcentaje_bcv)
@@ -728,24 +666,12 @@ class ComisionesPanel(QWidget):
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.doubleClicked.connect(self.ver_detalle_factura)
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            8, QHeaderView.ResizeMode.Fixed
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            9, QHeaderView.ResizeMode.Fixed
-        )
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(8, 120)
         self.tabla.setColumnWidth(9, 48)
         self.tabla.setStyleSheet(TABLE_QSS)
@@ -777,16 +703,12 @@ class ComisionesPanel(QWidget):
             else:
                 self._cargar_comisiones_propias(session)
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para consultar comisiones."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar comisiones.")
         except ValueError as exc:
             MessageBox.warning(self, "Error", str(exc))
         except Exception:
             logger.exception("Fallo al cargar comisiones")
-            MessageBox.critical(
-                self, "Error de conexión", "No se pudo cargar las comisiones."
-            )
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar las comisiones.")
         finally:
             session.close()
 
@@ -814,9 +736,7 @@ class ComisionesPanel(QWidget):
 
     def _cargar_comisiones_propias(self, session: Session) -> None:
         try:
-            comisiones = ComisionService.listar_mis_comisiones(
-                session, self.usuario.id_usuario
-            )
+            comisiones = ComisionService.listar_mis_comisiones(session, self.usuario.id_usuario)
             self.comisiones_cargadas = comisiones
             self._aplicar_filtro_estado()
         except ValueError:
@@ -846,10 +766,7 @@ class ComisionesPanel(QWidget):
 
     def _aplicar_filtro_estado(self) -> None:
         # Si el checkbox de porcentaje BCV cambió, recargar desde BD
-        if (
-            self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv
-            and self.id_vendedor_actual is not None
-        ):
+        if self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv and self.id_vendedor_actual is not None:
             self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
             session = self.session_factory()
             try:
@@ -861,17 +778,13 @@ class ComisionesPanel(QWidget):
                 )
                 self.comisiones_cargadas = comisiones
             except Exception:
-                logger.exception(
-                    "Fallo al recargar comisiones con filtro porcentaje BCV"
-                )
+                logger.exception("Fallo al recargar comisiones con filtro porcentaje BCV")
             finally:
                 session.close()
 
         estado_filtro = self.estado_combo.currentData()
         if estado_filtro:
-            filtradas = [
-                c for c in self.comisiones_cargadas if c.estado_pago == estado_filtro
-            ]
+            filtradas = [c for c in self.comisiones_cargadas if c.estado_pago == estado_filtro]
         else:
             filtradas = self.comisiones_cargadas
         self._poblar_tabla(filtradas)
@@ -884,39 +797,25 @@ class ComisionesPanel(QWidget):
         total_liberada = Decimal("0.00")
 
         for fila, grupo in enumerate(grupos):
-            self.tabla.setItem(
-                fila, 0, QTableWidgetItem(str(grupo["id_factura"] or ""))
-            )
+            self.tabla.setItem(fila, 0, QTableWidgetItem(str(grupo["id_factura"] or "")))
             self.tabla.setItem(fila, 1, QTableWidgetItem(grupo["numero_factura"]))
             self.tabla.setItem(fila, 2, QTableWidgetItem(grupo["cliente_nombre"]))
-            fecha_str = (
-                grupo["fecha_calculo"].strftime("%d/%m/%Y")
-                if grupo["fecha_calculo"]
-                else ""
-            )
+            fecha_str = grupo["fecha_calculo"].strftime("%d/%m/%Y") if grupo["fecha_calculo"] else ""
             self.tabla.setItem(fila, 3, QTableWidgetItem(fecha_str))
             item_lineas = QTableWidgetItem(str(grupo["cantidad_lineas"]))
-            item_lineas.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_lineas.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 4, item_lineas)
 
             item_base = QTableWidgetItem(f"${float(grupo['monto_base']):,.2f}")
-            item_base.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_base.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 5, item_base)
 
             item_venta = QTableWidgetItem(f"${float(grupo['monto_venta']):,.2f}")
-            item_venta.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_venta.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_venta)
 
             item_comision = QTableWidgetItem(f"${float(grupo['monto_comision']):,.2f}")
-            item_comision.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_comision.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_comision)
 
             estado = grupo["estado_pago"] or "pendiente"
@@ -942,26 +841,18 @@ class ComisionesPanel(QWidget):
             f"Por cobrar: ${float(total_pendiente):,.2f}  ·  Liberada: ${float(total_liberada):,.2f}"
         )
         if self.modo_gestion:
-            self.btn_pagar.setEnabled(
-                self.id_vendedor_actual is not None and total_liberada > 0
-            )
+            self.btn_pagar.setEnabled(self.id_vendedor_actual is not None and total_liberada > 0)
 
     def _ver_detalle_comision(self, grupo: dict) -> None:
         DetalleComisionFacturaDialog(grupo, parent=self).exec()
 
     def pagar_comisiones(self) -> None:
         if self.id_vendedor_actual is None:
-            MessageBox.information(
-                self, "Selección requerida", "Selecciona un vendedor."
-            )
+            MessageBox.information(self, "Selección requerida", "Selecciona un vendedor.")
             return
 
         total_liberada = sum(
-            (
-                c.monto_comision
-                for c in self.comisiones_cargadas
-                if c.estado_pago == "liberada"
-            ),
+            (c.monto_comision for c in self.comisiones_cargadas if c.estado_pago == "liberada"),
             Decimal("0.00"),
         )
         if total_liberada <= 0:
@@ -986,9 +877,7 @@ class ComisionesPanel(QWidget):
             )
             if dialogo.exec() and dialogo.pago_creado is not None:
                 self._on_vendedor_cambiado()
-                MessageBox.information(
-                    self, "Pago registrado", "El pago se registró con éxito."
-                )
+                MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
         except Exception:
             logger.exception("Fallo al abrir dialogo de pago")
         finally:
@@ -1010,11 +899,7 @@ class ComisionesPanel(QWidget):
             [
                 grupo["numero_factura"],
                 grupo["cliente_nombre"],
-                (
-                    grupo["fecha_calculo"].strftime("%d/%m/%Y")
-                    if grupo["fecha_calculo"]
-                    else ""
-                ),
+                (grupo["fecha_calculo"].strftime("%d/%m/%Y") if grupo["fecha_calculo"] else ""),
                 grupo["cantidad_lineas"],
                 float(grupo["monto_base"]),
                 float(grupo["monto_venta"]),
@@ -1027,11 +912,7 @@ class ComisionesPanel(QWidget):
 
     def _filtros_para_exportar(self) -> dict:
         filtros = {
-            "Vendedor": (
-                self.vendedor_combo.currentText()
-                if self.modo_gestion
-                else self.usuario.nombre_usuario
-            ),
+            "Vendedor": (self.vendedor_combo.currentText() if self.modo_gestion else self.usuario.nombre_usuario),
             "Estado": self.estado_combo.currentText(),
             "Por cobrar": f"${float(self.total_pendiente):,.2f}",
             "Liberada": f"${float(self.total_liberada):,.2f}",
@@ -1045,14 +926,9 @@ class ComisionesPanel(QWidget):
         # Mismo guard que reportes_panel.py/facturacion_panel.py: reasignar
         # self._worker_export a un QThread nuevo mientras el viejo sigue corriendo lo
         # destruye a mitad de ejecucion.
-        if (
-            getattr(self, "_worker_export", None) is not None
-            and self._worker_export.isRunning()
-        ):
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
-        ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar comisiones", "comisiones.xlsx", "Excel (*.xlsx)"
-        )
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar comisiones", "comisiones.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
@@ -1081,14 +957,9 @@ class ComisionesPanel(QWidget):
         self._worker_export.start()
 
     def exportar_pdf(self) -> None:
-        if (
-            getattr(self, "_worker_export", None) is not None
-            and self._worker_export.isRunning()
-        ):
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
-        ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar comisiones", "comisiones.pdf", "PDF (*.pdf)"
-        )
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar comisiones", "comisiones.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
@@ -1131,9 +1002,7 @@ class ComisionesPanel(QWidget):
         """Obtiene el ID de la factura de la fila (agrupada por factura) seleccionada."""
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(
-                self, "Selección requerida", "Selecciona una factura de la lista."
-            )
+            MessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
             return None
 
         fila = filas[0].row()
@@ -1153,12 +1022,8 @@ class ComisionesPanel(QWidget):
 
         session = self.session_factory()
         try:
-            datos = VentaService.obtener_factura(
-                session, id_factura, id_usuario=self.usuario.id_usuario
-            )
-            dialogo = FacturaDetalleDialog(
-                datos, session, self.usuario.id_usuario, parent=self
-            )
+            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.usuario.id_usuario)
+            dialogo = FacturaDetalleDialog(datos, session, self.usuario.id_usuario, parent=self)
             dialogo.exec()
         except ValueError as exc:
             MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
@@ -1170,9 +1035,7 @@ class ComisionesPanel(QWidget):
             )
         except Exception:
             logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
-            MessageBox.critical(
-                self, "Error", "No se pudo cargar el detalle de la factura."
-            )
+            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
             session.close()
             self._abriendo_dialogo = False

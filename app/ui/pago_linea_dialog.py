@@ -176,9 +176,7 @@ class PagoLineaDialog(QDialog):
         self.setMinimumHeight(500)
         self.resize(420, 500)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
         self._cargar_origenes()
@@ -204,9 +202,7 @@ class PagoLineaDialog(QDialog):
         header = QHBoxLayout()
         header.setSpacing(12)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.money-bill-wave", color=COLOR_PRIMARY).pixmap(QSize(20, 20))
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.money-bill-wave", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -214,9 +210,7 @@ class PagoLineaDialog(QDialog):
         icon_lbl.setFixedSize(34, 34)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_titulo = QLabel("Agregar Forma de Pago")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         header.addWidget(icon_lbl)
         header.addWidget(lbl_titulo)
         header.addStretch()
@@ -255,9 +249,7 @@ class PagoLineaDialog(QDialog):
         col_monto = QVBoxLayout()
         lbl_monto = QLabel(f"Monto {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01")
-        )
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)
         # Con el monto ya precargado (ver __init__/monto_sugerido) y seleccionado, Enter
         # aca confirma de una -- para el caso comun (efectivo, monto sugerido correcto)
@@ -285,9 +277,7 @@ class PagoLineaDialog(QDialog):
         col_bolivares = QVBoxLayout()
         lbl_bolivares = QLabel("Monto (Bs)")
         lbl_bolivares.setProperty("class", "FormLabel")
-        self.bolivares_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, max_value=Decimal("999999999999")
-        )
+        self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
         col_bolivares.addWidget(lbl_bolivares)
@@ -335,9 +325,7 @@ class PagoLineaDialog(QDialog):
         lbl_ref = QLabel("Referencia")
         lbl_ref.setProperty("class", "FormLabel")
         self.referencia_input = QLineEdit()
-        self.referencia_input.setPlaceholderText(
-            "Opcional (confirmación, últimos dígitos, etc.)"
-        )
+        self.referencia_input.setPlaceholderText("Opcional (confirmación, últimos dígitos, etc.)")
         self.referencia_input.setFixedHeight(32)
         self.referencia_input.setMaxLength(100)  # columna referencia VARCHAR(100)
         card_layout.addWidget(lbl_ref)
@@ -377,19 +365,13 @@ class PagoLineaDialog(QDialog):
             cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cajas = []
-        self._cajas_abiertas = [
-            c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None
-        ]
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
 
         try:
-            cuentas = BancoService.listar_cuentas(
-                self.session, id_usuario=self.id_usuario
-            )
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cuentas = []
-        self._cuentas_activas = [
-            c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"
-        ]
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
 
     def _on_metodo_cambiado(self) -> None:
         metodo = self.metodo_combo.currentData()
@@ -432,9 +414,7 @@ class PagoLineaDialog(QDialog):
             else:
                 self.origen_combo.setEnabled(True)
                 for cuenta in self._cuentas_activas:
-                    nombre_banco = (
-                        cuenta.banco.nombre_banco if cuenta.banco else "Banco"
-                    )
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     etiqueta = f"{nombre_banco} - {_enmascarar(cuenta.numero_cuenta)}"
                     self.origen_combo.addItem(etiqueta, ("banco", cuenta.id_cuenta))
         self.origen_combo.blockSignals(False)
@@ -469,9 +449,7 @@ class PagoLineaDialog(QDialog):
                 )
             # Agregar tasa paralelo
             if tasa_registro.tasa_dolar_paralelo:
-                etiqueta_paralelo = (
-                    f"Paralelo: {tasa_registro.tasa_dolar_paralelo:,.2f}"
-                )
+                etiqueta_paralelo = f"Paralelo: {tasa_registro.tasa_dolar_paralelo:,.2f}"
                 self.tasa_combo.addItem(
                     etiqueta_paralelo,
                     (tasa_registro.id_tasa, float(tasa_registro.tasa_dolar_paralelo)),
@@ -479,9 +457,7 @@ class PagoLineaDialog(QDialog):
             # Agregar tasa COP
             if tasa_registro.tasa_cop:
                 etiqueta_cop = f"COP: {tasa_registro.tasa_cop:,.2f}"
-                self.tasa_combo.addItem(
-                    etiqueta_cop, (tasa_registro.id_tasa, float(tasa_registro.tasa_cop))
-                )
+                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_registro.tasa_cop)))
 
         self.tasa_combo.blockSignals(False)
 
@@ -526,9 +502,7 @@ class PagoLineaDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if self.monto_input.get_value() <= 0:
-            MessageBox.warning(
-                self, "Monto requerido", "Ingrese un monto mayor a cero."
-            )
+            MessageBox.warning(self, "Monto requerido", "Ingrese un monto mayor a cero.")
             return
         origen = self.origen_combo.currentData()
         if origen is None:

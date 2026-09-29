@@ -159,9 +159,7 @@ class ClienteFormDialog(QDialog):
         # mas area de mapa hace mas facil marcar la ubicacion con precision.
         self.setFixedSize(920, 800)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
@@ -181,9 +179,7 @@ class ClienteFormDialog(QDialog):
 
         icon_lbl = QLabel()
         fa_icon_name = "fa5s.user-edit" if self.cliente else "fa5s.user-plus"
-        icon_lbl.setPixmap(
-            qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22))
-        )
+        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -197,13 +193,9 @@ class ClienteFormDialog(QDialog):
 
         titulo_text = "Editar Cliente" if self.cliente else "Nuevo Cliente"
         lbl_titulo = QLabel(titulo_text)
-        lbl_titulo.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
-        lbl_subtitulo = QLabel(
-            "Complete los datos requeridos para registrar la ficha comercial del cliente."
-        )
+        lbl_subtitulo = QLabel("Complete los datos requeridos para registrar la ficha comercial del cliente.")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
 
         titles_layout.addWidget(lbl_titulo)
@@ -269,9 +261,7 @@ class ClienteFormDialog(QDialog):
         self.identificacion_input.setMaxLength(20)
         self.identificacion_input.setFixedHeight(32)
         # Validador para RIF/Cédula: 1-8 dígitos opcionalmente seguidos de guión y un dígito
-        id_validator = QRegularExpressionValidator(
-            QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$")
-        )
+        id_validator = QRegularExpressionValidator(QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$"))
         self.identificacion_input.setValidator(id_validator)
 
         id_hbox.addWidget(self.tipo_id_combo)
@@ -295,9 +285,7 @@ class ClienteFormDialog(QDialog):
         self.vendedor_combo.setFixedHeight(32)
         self.vendedor_combo.addItem("Sin asignar")
         for vendedor in (
-            self.session.query(Vendedor)
-            .filter(Vendedor.estado_vendedor == "ACTIVO")
-            .order_by(Vendedor.nombre_vendedor)
+            self.session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor)
         ):
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
 
@@ -310,12 +298,8 @@ class ClienteFormDialog(QDialog):
         self.categoria_combo = QComboBox()
         self.categoria_combo.setFixedHeight(32)
         self.categoria_combo.addItem("Sin asignar")
-        for categoria in self.session.query(CategoriaCliente).order_by(
-            CategoriaCliente.nombre
-        ):
-            self.categoria_combo.addItem(
-                categoria.nombre, categoria.id_categoria_cliente
-            )
+        for categoria in self.session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):
+            self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
 
         grid1.addWidget(lbl_cat, 6, 1)
         grid1.addWidget(self.categoria_combo, 7, 1)
@@ -369,9 +353,7 @@ class ClienteFormDialog(QDialog):
         lbl_dir = QLabel("Dirección Fiscal / Entrega")
         lbl_dir.setProperty("class", "FormLabel")
         self.direccion_input = QLineEdit()
-        self.direccion_input.setPlaceholderText(
-            "Ej: Av. Principal, Edificio Central, Piso 2"
-        )
+        self.direccion_input.setPlaceholderText("Ej: Av. Principal, Edificio Central, Piso 2")
         self.direccion_input.setMaxLength(255)
         self.direccion_input.setFixedHeight(32)
         grid2.addWidget(lbl_dir, 2, 0, 1, 2)
@@ -380,9 +362,7 @@ class ClienteFormDialog(QDialog):
         # Límite de Crédito
         lbl_limite = QLabel("Límite de Crédito ($)")
         lbl_limite.setProperty("class", "FormLabel")
-        self.limite_credito_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, prefix="$ "
-        )
+        self.limite_credito_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.limite_credito_input.setFixedHeight(32)
         grid2.addWidget(lbl_limite, 4, 0)
         grid2.addWidget(self.limite_credito_input, 5, 0)
@@ -390,13 +370,9 @@ class ClienteFormDialog(QDialog):
         # Días de Crédito
         lbl_dias = QLabel("Días de Crédito")
         lbl_dias.setProperty("class", "FormLabel")
-        self.dias_credito_input = NumericLineEdit(
-            NumericFieldType.COUNT, max_value=Decimal(365), suffix=" días"
-        )
+        self.dias_credito_input = NumericLineEdit(NumericFieldType.COUNT, max_value=Decimal(365), suffix=" días")
         self.dias_credito_input.setFixedHeight(32)
-        self.dias_credito_input.setToolTip(
-            "0 = cliente de contado, no podrá facturarse a crédito"
-        )
+        self.dias_credito_input.setToolTip("0 = cliente de contado, no podrá facturarse a crédito")
         grid2.addWidget(lbl_dias, 4, 1)
         grid2.addWidget(self.dias_credito_input, 5, 1)
 
@@ -458,9 +434,7 @@ class ClienteFormDialog(QDialog):
         contenido = QHBoxLayout()
         contenido.setSpacing(14)
 
-        self.mapa = MapaWidget(
-            editable=True, centrar_en_dispositivo=self.cliente is None
-        )
+        self.mapa = MapaWidget(editable=True, centrar_en_dispositivo=self.cliente is None)
         self.mapa.setMinimumSize(440, 300)
         self.mapa.coordenadas_cambiadas.connect(self._on_mapa_click)
         contenido.addWidget(self.mapa, 1)
@@ -482,9 +456,7 @@ class ClienteFormDialog(QDialog):
         self.longitud_input.setFixedHeight(32)
         self.longitud_input.editingFinished.connect(self._on_coordenadas_editadas)
 
-        lbl_ayuda = QLabel(
-            "Busca un lugar por nombre, hace click en el mapa o ingresa las coordenadas manualmente."
-        )
+        lbl_ayuda = QLabel("Busca un lugar por nombre, hace click en el mapa o ingresa las coordenadas manualmente.")
         lbl_ayuda.setWordWrap(True)
         lbl_ayuda.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
 
@@ -497,17 +469,11 @@ class ClienteFormDialog(QDialog):
         sugerencia_layout.setContentsMargins(0, 0, 0, 0)
         sugerencia_layout.setSpacing(4)
         icon_sugerencia = QLabel()
-        icon_sugerencia.setPixmap(
-            qta.icon("fa5s.map-marker-alt", color=COLOR_PRIMARY).pixmap(QSize(12, 12))
-        )
+        icon_sugerencia.setPixmap(qta.icon("fa5s.map-marker-alt", color=COLOR_PRIMARY).pixmap(QSize(12, 12)))
         self.lbl_sugerencia_ruta_texto = QLabel()
         self.lbl_sugerencia_ruta_texto.setWordWrap(True)
-        self.lbl_sugerencia_ruta_texto.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_PRIMARY}; font-weight: 600;"
-        )
-        sugerencia_layout.addWidget(
-            icon_sugerencia, alignment=Qt.AlignmentFlag.AlignTop
-        )
+        self.lbl_sugerencia_ruta_texto.setStyleSheet(f"font-size: 11px; color: {COLOR_PRIMARY}; font-weight: 600;")
+        sugerencia_layout.addWidget(icon_sugerencia, alignment=Qt.AlignmentFlag.AlignTop)
         sugerencia_layout.addWidget(self.lbl_sugerencia_ruta_texto, stretch=1)
         self.lbl_sugerencia_ruta.setVisible(False)
 
@@ -580,9 +546,7 @@ class ClienteFormDialog(QDialog):
 
     def _validar_y_aceptar(self):
         if not self.codigo_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "El código del cliente es obligatorio."
-            )
+            MessageBox.warning(self, "Dato requerido", "El código del cliente es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
@@ -620,14 +584,10 @@ class ClienteFormDialog(QDialog):
             )
             return
         if not (-90 <= lat <= 90):
-            MessageBox.warning(
-                self, "Dato inválido", "La latitud debe estar entre -90 y 90."
-            )
+            MessageBox.warning(self, "Dato inválido", "La latitud debe estar entre -90 y 90.")
             return
         if not (-180 <= lng <= 180):
-            MessageBox.warning(
-                self, "Dato inválido", "La longitud debe estar entre -180 y 180."
-            )
+            MessageBox.warning(self, "Dato inválido", "La longitud debe estar entre -180 y 180.")
             return
 
         self.accept()
@@ -643,9 +603,7 @@ class ClienteFormDialog(QDialog):
         error), se oculta el texto y se sigue completando el formulario en silencio en
         vez de interrumpir al usuario con un dialogo de error."""
         try:
-            ruta = RutaService.sugerir_ruta_por_ubicacion(
-                self.session, lat, lng, id_usuario=self.id_usuario
-            )
+            ruta = RutaService.sugerir_ruta_por_ubicacion(self.session, lat, lng, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             logger.warning(
                 "Sin permiso para sugerir ruta por ubicacion (usuario=%s)",
@@ -663,9 +621,7 @@ class ClienteFormDialog(QDialog):
 
         vendedores_zona = (
             self.session.query(Vendedor)
-            .filter(
-                Vendedor.id_ruta == ruta.id_ruta, Vendedor.estado_vendedor == "ACTIVO"
-            )
+            .filter(Vendedor.id_ruta == ruta.id_ruta, Vendedor.estado_vendedor == "ACTIVO")
             .order_by(Vendedor.nombre_vendedor)
             .all()
         )

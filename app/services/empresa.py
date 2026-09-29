@@ -11,15 +11,9 @@ _SENTINEL = object()
 
 class EmpresaService:
     @staticmethod
-    def obtener_configuracion(
-        session: Session, id_usuario: int | None = None
-    ) -> ConfiguracionEmpresa | None:
+    def obtener_configuracion(session: Session, id_usuario: int | None = None) -> ConfiguracionEmpresa | None:
         require_permiso(session, id_usuario, "empresa", "ver")
-        return (
-            session.query(ConfiguracionEmpresa)
-            .order_by(ConfiguracionEmpresa.id_config)
-            .first()
-        )
+        return session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
 
     @staticmethod
     def obtener_iva_vigente(session: Session) -> tuple[bool, Decimal]:
@@ -32,11 +26,7 @@ class EmpresaService:
         numero es lo que causaba que el total mostrado en factura_form_dialog.py quedara
         mal para cualquier rol sin 'empresa'/'ver' (hallazgo #1 de la auditoria de
         facturacion)."""
-        config = (
-            session.query(ConfiguracionEmpresa)
-            .order_by(ConfiguracionEmpresa.id_config)
-            .first()
-        )
+        config = session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
         if config is None or not config.iva_activo:
             return False, Decimal("0")
         return True, config.iva_porcentaje or Decimal("0")
@@ -51,11 +41,7 @@ class EmpresaService:
         la pantalla de configuracion, no la impresion de esos mismos datos en un
         documento). Exigirlo aca acoplaria el permiso 'reportes'/'ver' con 'empresa'/'ver'
         sin necesidad."""
-        return (
-            session.query(ConfiguracionEmpresa)
-            .order_by(ConfiguracionEmpresa.id_config)
-            .first()
-        )
+        return session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
 
     @staticmethod
     def guardar_configuracion(
@@ -85,11 +71,7 @@ class EmpresaService:
         if iva_porcentaje < 0 or iva_porcentaje > 100:
             raise ValueError("iva_porcentaje debe estar entre 0 y 100")
 
-        config = (
-            session.query(ConfiguracionEmpresa)
-            .order_by(ConfiguracionEmpresa.id_config)
-            .first()
-        )
+        config = session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
 
         if config is None:
             config = ConfiguracionEmpresa()

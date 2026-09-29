@@ -65,9 +65,7 @@ class TopBar(QWidget):
 
         layout.addWidget(self._make_breadcrumb())
 
-        spacer = QSpacerItem(
-            1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-        )
+        spacer = QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout.addSpacerItem(spacer)
 
         self.buscar_input = QLineEdit()
@@ -98,14 +96,10 @@ class TopBar(QWidget):
         h.setSpacing(6)
 
         lbl_raiz = QLabel("Módulos")
-        lbl_raiz.setStyleSheet(
-            f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;"
-        )
+        lbl_raiz.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
 
         lbl_sep = QLabel("›")
-        lbl_sep.setStyleSheet(
-            f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;"
-        )
+        lbl_sep.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
 
         self.lbl_titulo = QLabel("Panel General")
         self.lbl_titulo.setObjectName("TopBarTitle")

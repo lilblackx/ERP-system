@@ -33,9 +33,7 @@ def _escribir_y_perder_foco(qtbot, campo, texto):
 
 def _session_sin_cuentas() -> MagicMock:
     session = MagicMock()
-    session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = (
-        []
-    )
+    session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = []
     return session
 
 

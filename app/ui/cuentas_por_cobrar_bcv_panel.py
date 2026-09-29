@@ -183,9 +183,7 @@ class PagoCobroBCVDialog(QDialog):
         self.setWindowTitle("Registrar Cobro BCV")
         self.setFixedSize(420, 550)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
         self._cargar_origenes()
         self._cargar_tasas()
@@ -198,12 +196,8 @@ class PagoCobroBCVDialog(QDialog):
         root.setSpacing(12)
 
         cliente = self.cuenta.factura.cliente if self.cuenta.factura else None
-        lbl_titulo = QLabel(
-            f"Cobrar BCV a {cliente.nombre_razon_social if cliente else 'cliente'}"
-        )
-        lbl_titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo = QLabel(f"Cobrar BCV a {cliente.nombre_razon_social if cliente else 'cliente'}")
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         root.addWidget(lbl_titulo)
 
         card = QWidget()
@@ -213,15 +207,9 @@ class PagoCobroBCVDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        numero_factura = (
-            self.cuenta.factura.numero_factura if self.cuenta.factura else ""
-        )
-        porcentaje = (
-            f"{float(self.cuenta.porcentaje):.2f}%" if self.cuenta.porcentaje else "N/A"
-        )
-        total_factura = (
-            self.cuenta.factura.total_venta if self.cuenta.factura else Decimal("0.00")
-        )
+        numero_factura = self.cuenta.factura.numero_factura if self.cuenta.factura else ""
+        porcentaje = f"{float(self.cuenta.porcentaje):.2f}%" if self.cuenta.porcentaje else "N/A"
+        total_factura = self.cuenta.factura.total_venta if self.cuenta.factura else Decimal("0.00")
         total_text = f"Factura: {numero_factura} | Porcentaje BCV: {porcentaje} | Total: ${float(total_factura):,.2f}"
         lbl_factura = QLabel(total_text)
         lbl_factura.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
@@ -230,17 +218,11 @@ class PagoCobroBCVDialog(QDialog):
         saldo_pendiente = _as_decimal(self.cuenta.saldo_pendiente)
         texto_saldo = f"Saldo pendiente BCV: ${float(saldo_pendiente):,.2f}"
         if self.tasa_bcv:
-            tasa_decimal = (
-                Decimal(str(self.tasa_bcv))
-                if not isinstance(self.tasa_bcv, Decimal)
-                else self.tasa_bcv
-            )
+            tasa_decimal = Decimal(str(self.tasa_bcv)) if not isinstance(self.tasa_bcv, Decimal) else self.tasa_bcv
             monto_bs = saldo_pendiente * tasa_decimal
             texto_saldo += f"  (Bs {float(monto_bs):,.2f})"
         lbl_saldo = QLabel(texto_saldo)
-        lbl_saldo.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};"
-        )
+        lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_saldo)
 
         lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
@@ -255,9 +237,7 @@ class PagoCobroBCVDialog(QDialog):
 
         lbl_monto = QLabel(f"Monto (USD) {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ "
-        )
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         self.monto_input.set_value(saldo_pendiente)
         self.monto_input.setFixedHeight(32)
         self.monto_input.valueChanged.connect(self._calcular_bolivares_desde_usd)
@@ -277,9 +257,7 @@ class PagoCobroBCVDialog(QDialog):
         col_bolivares = QVBoxLayout()
         lbl_bolivares = QLabel("Monto (Bs)")
         lbl_bolivares.setProperty("class", "FormLabel")
-        self.bolivares_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, max_value=Decimal("999999999999")
-        )
+        self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
         col_bolivares.addWidget(lbl_bolivares)
@@ -358,22 +336,16 @@ class PagoCobroBCVDialog(QDialog):
                 session.close()
         except PermisoDenegadoError:
             cajas = []
-        self._cajas_abiertas = [
-            c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None
-        ]
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
         try:
             session = self.session_factory()
             try:
-                cuentas = BancoService.listar_cuentas(
-                    session, id_usuario=self.id_usuario
-                )
+                cuentas = BancoService.listar_cuentas(session, id_usuario=self.id_usuario)
             finally:
                 session.close()
         except PermisoDenegadoError:
             cuentas = []
-        self._cuentas_activas = [
-            c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"
-        ]
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
 
     def _cargar_tasas(self) -> None:
         """Carga las tasas actuales (BCV, paralelo y COP) en el combo."""
@@ -385,9 +357,7 @@ class PagoCobroBCVDialog(QDialog):
                 # Obtener la tasa más reciente
                 tasa_registro = (
                     session.query(ControlDeTasa)
-                    .order_by(
-                        ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc()
-                    )
+                    .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
                     .first()
                 )
             finally:
@@ -404,9 +374,7 @@ class PagoCobroBCVDialog(QDialog):
             if tasa_registro.tasa_dolar_bcv:
                 tasa_bcv = _as_decimal(tasa_registro.tasa_dolar_bcv)
                 etiqueta_bcv = f"BCV: {float(tasa_bcv):,.2f}"
-                self.tasa_combo.addItem(
-                    etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv))
-                )
+                self.tasa_combo.addItem(etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv)))
             # Agregar tasa paralelo
             if tasa_registro.tasa_dolar_paralelo:
                 tasa_paralelo = _as_decimal(tasa_registro.tasa_dolar_paralelo)
@@ -419,9 +387,7 @@ class PagoCobroBCVDialog(QDialog):
             if tasa_registro.tasa_cop:
                 tasa_cop = _as_decimal(tasa_registro.tasa_cop)
                 etiqueta_cop = f"COP: {float(tasa_cop):,.2f}"
-                self.tasa_combo.addItem(
-                    etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop))
-                )
+                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop)))
 
         self.tasa_combo.blockSignals(False)
 
@@ -456,9 +422,7 @@ class PagoCobroBCVDialog(QDialog):
             else:
                 self.origen_combo.setEnabled(True)
                 for cuenta in self._cuentas_activas:
-                    nombre_banco = (
-                        cuenta.banco.nombre_banco if cuenta.banco else "Banco"
-                    )
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
                         ("banco", cuenta.id_cuenta),
@@ -544,16 +508,12 @@ class PagoCobroBCVDialog(QDialog):
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
         if origen is None:
-            MessageBox.warning(
-                self, "Campo requerido", "Seleccione el origen del pago."
-            )
+            MessageBox.warning(self, "Campo requerido", "Seleccione el origen del pago.")
             return
 
         monto = self.monto_input.get_value()
         if monto is None or monto <= 0:
-            MessageBox.warning(
-                self, "Monto inválido", "El monto debe ser mayor a cero."
-            )
+            MessageBox.warning(self, "Monto inválido", "El monto debe ser mayor a cero.")
             return
 
         tipo_origen, id_origen = origen
@@ -617,9 +577,7 @@ class PagoCobroBCVDialog(QDialog):
                     )
                 )
                 self.pago_creado = True
-                MessageBox.information(
-                    self, "Éxito", "Cobro BCV registrado correctamente."
-                )
+                MessageBox.information(self, "Éxito", "Cobro BCV registrado correctamente.")
                 self.accept()
             finally:
                 session.close()
@@ -627,9 +585,7 @@ class PagoCobroBCVDialog(QDialog):
             MessageBox.warning(self, "Error", str(e))
         except Exception as e:
             logger.exception("Error al registrar cobro BCV")
-            MessageBox.critical(
-                self, "Error", f"No se pudo registrar el cobro: {str(e)}"
-            )
+            MessageBox.critical(self, "Error", f"No se pudo registrar el cobro: {str(e)}")
 
 
 class SeleccionarCuentaBCVDialog(QDialog):
@@ -644,9 +600,7 @@ class SeleccionarCuentaBCVDialog(QDialog):
         self.setWindowTitle("Seleccionar Cuenta BCV")
         self.setFixedSize(700, 500)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -655,9 +609,7 @@ class SeleccionarCuentaBCVDialog(QDialog):
         root.setSpacing(12)
 
         lbl_titulo = QLabel("Seleccione una cuenta para cobrar")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         root.addWidget(lbl_titulo)
 
         # Tabla de cuentas
@@ -677,9 +629,7 @@ class SeleccionarCuentaBCVDialog(QDialog):
         self.tabla.setAlternatingRowColors(True)
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.setStyleSheet(TABLE_QSS)
         self.tabla.verticalHeader().setDefaultSectionSize(40)
 
@@ -690,56 +640,34 @@ class SeleccionarCuentaBCVDialog(QDialog):
             factura = cuenta.factura
 
             # Factura
-            self.tabla.setItem(
-                fila, 0, QTableWidgetItem(factura.numero_factura if factura else "N/A")
-            )
+            self.tabla.setItem(fila, 0, QTableWidgetItem(factura.numero_factura if factura else "N/A"))
 
             # Porcentaje BCV
-            porcentaje_text = (
-                f"{float(cuenta.porcentaje):.2f}%" if cuenta.porcentaje else "N/A"
-            )
+            porcentaje_text = f"{float(cuenta.porcentaje):.2f}%" if cuenta.porcentaje else "N/A"
             self.tabla.setItem(fila, 1, QTableWidgetItem(porcentaje_text))
 
             # Saldo Pendiente
             saldo = _as_decimal(cuenta.saldo_pendiente)
             saldo_text = f"${float(saldo):,.2f}"
             if self.tasa_bcv:
-                tasa_bcv = (
-                    float(self.tasa_bcv)
-                    if not isinstance(self.tasa_bcv, float)
-                    else self.tasa_bcv
-                )
+                tasa_bcv = float(self.tasa_bcv) if not isinstance(self.tasa_bcv, float) else self.tasa_bcv
                 saldo_text = f"${float(saldo):,.2f} / Bs {float(saldo * Decimal(str(tasa_bcv))):,.2f}"
             self.tabla.setItem(fila, 2, QTableWidgetItem(saldo_text))
 
             # Saldo a Favor
-            saldo_favor = (
-                _as_decimal(cuenta.saldo_favor)
-                if cuenta.saldo_favor
-                else Decimal("0.00")
-            )
+            saldo_favor = _as_decimal(cuenta.saldo_favor) if cuenta.saldo_favor else Decimal("0.00")
             saldo_favor_text = f"${float(saldo_favor):,.2f}"
             if self.tasa_bcv:
-                tasa_bcv = (
-                    float(self.tasa_bcv)
-                    if not isinstance(self.tasa_bcv, float)
-                    else self.tasa_bcv
-                )
+                tasa_bcv = float(self.tasa_bcv) if not isinstance(self.tasa_bcv, float) else self.tasa_bcv
                 saldo_favor_text = f"${float(saldo_favor):,.2f} / Bs {float(saldo_favor * Decimal(str(tasa_bcv))):,.2f}"
             self.tabla.setItem(fila, 3, QTableWidgetItem(saldo_favor_text))
 
             # Días de crédito
-            dias_text = (
-                str(cuenta.dias_credito) if cuenta.dias_credito is not None else "N/A"
-            )
+            dias_text = str(cuenta.dias_credito) if cuenta.dias_credito is not None else "N/A"
             self.tabla.setItem(fila, 4, QTableWidgetItem(dias_text))
 
             # Fecha de Emisión
-            fecha_emision_text = (
-                cuenta.fecha_emision.strftime("%d/%m/%Y")
-                if cuenta.fecha_emision
-                else "N/A"
-            )
+            fecha_emision_text = cuenta.fecha_emision.strftime("%d/%m/%Y") if cuenta.fecha_emision else "N/A"
             self.tabla.setItem(fila, 5, QTableWidgetItem(fecha_emision_text))
 
         root.addWidget(self.tabla, stretch=1)
@@ -763,9 +691,7 @@ class SeleccionarCuentaBCVDialog(QDialog):
     def _seleccionar(self) -> None:
         fila_actual = self.tabla.currentRow()
         if fila_actual < 0 or fila_actual >= len(self.cuentas):
-            MessageBox.warning(
-                self, "Selección requerida", "Seleccione una cuenta de la lista."
-            )
+            MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta de la lista.")
             return
 
         self.cuenta_seleccionada = self.cuentas[fila_actual]
@@ -796,9 +722,7 @@ class AbonoGeneralBCVDialog(QDialog):
         self.setWindowTitle("Abono General BCV")
         self.setFixedSize(450, 500)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
         self._cargar_origenes()
         self._cargar_tasas()
@@ -810,12 +734,8 @@ class AbonoGeneralBCVDialog(QDialog):
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
-        lbl_titulo = QLabel(
-            f"Abono General BCV - {self.cliente.nombre_razon_social if self.cliente else 'Cliente'}"
-        )
-        lbl_titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo = QLabel(f"Abono General BCV - {self.cliente.nombre_razon_social if self.cliente else 'Cliente'}")
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         root.addWidget(lbl_titulo)
 
         card = QWidget()
@@ -834,9 +754,7 @@ class AbonoGeneralBCVDialog(QDialog):
                     id_cliente=self.cliente.id_cliente if self.cliente else None,
                     id_usuario=self.id_usuario,
                 )
-                deuda_total = sum(
-                    cuenta.saldo_pendiente for cuenta in resultado["items"]
-                )
+                deuda_total = sum(cuenta.saldo_pendiente for cuenta in resultado["items"])
             finally:
                 session.close()
         except Exception:
@@ -844,17 +762,11 @@ class AbonoGeneralBCVDialog(QDialog):
 
         lbl_deuda = QLabel(f"Deuda total BCV: ${float(deuda_total):,.2f}")
         if self.tasa_bcv:
-            tasa_bcv = (
-                float(self.tasa_bcv)
-                if not isinstance(self.tasa_bcv, float)
-                else self.tasa_bcv
-            )
+            tasa_bcv = float(self.tasa_bcv) if not isinstance(self.tasa_bcv, float) else self.tasa_bcv
             lbl_deuda.setText(
                 f"Deuda total BCV: ${float(deuda_total):,.2f} (Bs {float(deuda_total * Decimal(str(tasa_bcv))):,.2f})"
             )
-        lbl_deuda.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};"
-        )
+        lbl_deuda.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_deuda)
 
         # Calcular saldo a favor del cliente (desde la primera cuenta BCV del cliente)
@@ -871,17 +783,11 @@ class AbonoGeneralBCVDialog(QDialog):
                             FacturaVenta,
                             FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura,
                         )
-                        .filter(
-                            FacturaVenta.id_cliente_factura == self.cliente.id_cliente
-                        )
+                        .filter(FacturaVenta.id_cliente_factura == self.cliente.id_cliente)
                         .first()
                     )
                     if primera_cuenta:
-                        saldo_favor = (
-                            primera_cuenta.saldo_favor
-                            if primera_cuenta.saldo_favor
-                            else Decimal("0.00")
-                        )
+                        saldo_favor = primera_cuenta.saldo_favor if primera_cuenta.saldo_favor else Decimal("0.00")
                         if saldo_favor is None:
                             saldo_favor = Decimal("0.00")
                 finally:
@@ -892,17 +798,11 @@ class AbonoGeneralBCVDialog(QDialog):
 
         if saldo_favor > 0:
             lbl_saldo_favor = QLabel(f"Saldo a favor: ${float(saldo_favor):,.2f}")
-            lbl_saldo_favor.setStyleSheet(
-                f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};"
-            )
+            lbl_saldo_favor.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
             layout.addWidget(lbl_saldo_favor)
 
-        lbl_info = QLabel(
-            "El abono se aplicará automáticamente a las facturas más antiguas (FIFO)"
-        )
-        lbl_info.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-style: italic;"
-        )
+        lbl_info = QLabel("El abono se aplicará automáticamente a las facturas más antiguas (FIFO)")
+        lbl_info.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-style: italic;")
         layout.addWidget(lbl_info)
 
         lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
@@ -917,9 +817,7 @@ class AbonoGeneralBCVDialog(QDialog):
 
         lbl_monto = QLabel(f"Monto del Abono (USD) {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ "
-        )
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         self.monto_input.set_value(deuda_total)  # Sugerir deuda total
         self.monto_input.setFixedHeight(32)
         self.monto_input.valueChanged.connect(self._calcular_bolivares_desde_usd)
@@ -939,9 +837,7 @@ class AbonoGeneralBCVDialog(QDialog):
         col_bolivares = QVBoxLayout()
         lbl_bolivares = QLabel("Monto (Bs)")
         lbl_bolivares.setProperty("class", "FormLabel")
-        self.bolivares_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, max_value=Decimal("999999999999")
-        )
+        self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
         col_bolivares.addWidget(lbl_bolivares)
@@ -1020,22 +916,16 @@ class AbonoGeneralBCVDialog(QDialog):
                 session.close()
         except PermisoDenegadoError:
             cajas = []
-        self._cajas_abiertas = [
-            c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None
-        ]
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
         try:
             session = self.session_factory()
             try:
-                cuentas = BancoService.listar_cuentas(
-                    session, id_usuario=self.id_usuario
-                )
+                cuentas = BancoService.listar_cuentas(session, id_usuario=self.id_usuario)
             finally:
                 session.close()
         except PermisoDenegadoError:
             cuentas = []
-        self._cuentas_activas = [
-            c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"
-        ]
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
 
     def _cargar_tasas(self) -> None:
         """Carga las tasas actuales (BCV, paralelo y COP) en el combo."""
@@ -1046,9 +936,7 @@ class AbonoGeneralBCVDialog(QDialog):
 
                 tasa_registro = (
                     session.query(ControlDeTasa)
-                    .order_by(
-                        ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc()
-                    )
+                    .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
                     .first()
                 )
             finally:
@@ -1064,9 +952,7 @@ class AbonoGeneralBCVDialog(QDialog):
             if tasa_registro.tasa_dolar_bcv:
                 tasa_bcv = _as_decimal(tasa_registro.tasa_dolar_bcv)
                 etiqueta_bcv = f"BCV: {float(tasa_bcv):,.2f}"
-                self.tasa_combo.addItem(
-                    etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv))
-                )
+                self.tasa_combo.addItem(etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv)))
             if tasa_registro.tasa_dolar_paralelo:
                 tasa_paralelo = _as_decimal(tasa_registro.tasa_dolar_paralelo)
                 etiqueta_paralelo = f"Paralelo: {float(tasa_paralelo):,.2f}"
@@ -1077,9 +963,7 @@ class AbonoGeneralBCVDialog(QDialog):
             if tasa_registro.tasa_cop:
                 tasa_cop = _as_decimal(tasa_registro.tasa_cop)
                 etiqueta_cop = f"COP: {float(tasa_cop):,.2f}"
-                self.tasa_combo.addItem(
-                    etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop))
-                )
+                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop)))
 
         self.tasa_combo.blockSignals(False)
 
@@ -1113,9 +997,7 @@ class AbonoGeneralBCVDialog(QDialog):
             else:
                 self.origen_combo.setEnabled(True)
                 for cuenta in self._cuentas_activas:
-                    nombre_banco = (
-                        cuenta.banco.nombre_banco if cuenta.banco else "Banco"
-                    )
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
                         ("banco", cuenta.id_cuenta),
@@ -1211,9 +1093,7 @@ class AbonoGeneralBCVDialog(QDialog):
             # Obtener monto del abono primero
             monto_abono = self.monto_input.get_value()
             if not monto_abono or monto_abono <= 0:
-                MessageBox.warning(
-                    self, "Monto requerido", "El monto del abono debe ser mayor a cero."
-                )
+                MessageBox.warning(self, "Monto requerido", "El monto del abono debe ser mayor a cero.")
                 return
 
             # Obtener tasa de cambio según el método de pago
@@ -1255,9 +1135,7 @@ class AbonoGeneralBCVDialog(QDialog):
                         monto_abono=monto_abono,
                         tasa_cambio=tasa_cambio,
                         metodo_pago=metodo,
-                        id_cuenta_bancaria=(
-                            id_origen if tipo_origen == "banco" else None
-                        ),
+                        id_cuenta_bancaria=(id_origen if tipo_origen == "banco" else None),
                         id_caja=id_origen if tipo_origen == "caja" else None,
                         id_tasa=id_tasa,
                         referencia=self.referencia_input.text().strip() or None,
@@ -1277,9 +1155,7 @@ class AbonoGeneralBCVDialog(QDialog):
             MessageBox.warning(self, "No se pudo aplicar el abono", str(exc))
             return
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para aplicar abonos."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar abonos.")
             return
         except Exception as e:
             logger.exception(f"Fallo al aplicar abono general BCV: {e}")
@@ -1309,14 +1185,10 @@ class DetalleCuentasBCVDialog(QDialog):
         self.id_usuario = id_usuario
         self.se_realizo_cobro = False
 
-        self.setWindowTitle(
-            f"Detalle de Cuentas BCV - {cliente.nombre_razon_social if cliente else 'Cliente'}"
-        )
+        self.setWindowTitle(f"Detalle de Cuentas BCV - {cliente.nombre_razon_social if cliente else 'Cliente'}")
         self.setFixedSize(900, 600)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
         self._poblar_tabla_detalle()
 
@@ -1332,30 +1204,22 @@ class DetalleCuentasBCVDialog(QDialog):
         header_layout.setContentsMargins(0, 0, 0, 0)
 
         lbl_titulo = QLabel("Facturas Pendientes BCV")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         header_layout.addWidget(lbl_titulo)
         header_layout.addStretch()
 
-        lbl_cliente = QLabel(
-            self.cliente.nombre_razon_social if self.cliente else "Cliente"
-        )
+        lbl_cliente = QLabel(self.cliente.nombre_razon_social if self.cliente else "Cliente")
         lbl_cliente.setStyleSheet(f"font-size: 14px; color: {COLOR_TEXT_MEDIUM};")
         header_layout.addWidget(lbl_cliente)
 
         # Saldo a favor del cliente
         self.lbl_saldo_favor = QLabel("")
-        self.lbl_saldo_favor.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};"
-        )
+        self.lbl_saldo_favor.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
         header_layout.addWidget(self.lbl_saldo_favor)
 
         # Monto total a cobrar
         self.lbl_monto_total = QLabel("")
-        self.lbl_monto_total.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};"
-        )
+        self.lbl_monto_total.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};")
         header_layout.addWidget(self.lbl_monto_total)
 
         root.addWidget(header)
@@ -1369,9 +1233,7 @@ class DetalleCuentasBCVDialog(QDialog):
         footer.addStretch()
 
         btn_abono_general = QPushButton("Abono General BCV")
-        btn_abono_general.setIcon(
-            qta.icon("fa5s.money-bill-wave", color=COLOR_TEXT_DARK)
-        )
+        btn_abono_general.setIcon(qta.icon("fa5s.money-bill-wave", color=COLOR_TEXT_DARK))
         btn_abono_general.setObjectName("BtnPrimary")
         btn_abono_general.setFixedHeight(34)
         btn_abono_general.setAutoDefault(False)
@@ -1408,27 +1270,13 @@ class DetalleCuentasBCVDialog(QDialog):
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # Ajustar columnas para que los datos sean visibles
-        tabla.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )  # ID (oculto)
-        tabla.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )  # Factura
-        tabla.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.ResizeToContents
-        )  # Porcentaje BCV
-        tabla.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.ResizeToContents
-        )  # Saldo Pendiente
-        tabla.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.ResizeToContents
-        )  # Días
-        tabla.horizontalHeader().setSectionResizeMode(
-            5, QHeaderView.ResizeMode.ResizeToContents
-        )  # Fecha Factura
-        tabla.horizontalHeader().setSectionResizeMode(
-            6, QHeaderView.ResizeMode.ResizeToContents
-        )  # Estado
+        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID (oculto)
+        tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Factura
+        tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Porcentaje BCV
+        tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Saldo Pendiente
+        tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Días
+        tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Fecha Factura
+        tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Estado
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
         tabla.setColumnHidden(0, True)
@@ -1460,29 +1308,19 @@ class DetalleCuentasBCVDialog(QDialog):
         monto_total = Decimal("0.00")
         for fila, cuenta in enumerate(self.cuentas):
             factura = cuenta.factura
-            self.tabla.setItem(
-                fila, 0, QTableWidgetItem(str(cuenta.id_cuenta_por_cobrar))
-            )
-            self.tabla.setItem(
-                fila, 1, QTableWidgetItem(factura.numero_factura if factura else "")
-            )
+            self.tabla.setItem(fila, 0, QTableWidgetItem(str(cuenta.id_cuenta_por_cobrar)))
+            self.tabla.setItem(fila, 1, QTableWidgetItem(factura.numero_factura if factura else ""))
 
             # Porcentaje BCV
-            porcentaje_text = (
-                f"{float(cuenta.porcentaje):.2f}%" if cuenta.porcentaje else "N/A"
-            )
+            porcentaje_text = f"{float(cuenta.porcentaje):.2f}%" if cuenta.porcentaje else "N/A"
             item_porcentaje = QTableWidgetItem(porcentaje_text)
-            item_porcentaje.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_porcentaje.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 2, item_porcentaje)
 
             saldo_pendiente = _as_decimal(cuenta.saldo_pendiente)
             monto_total += saldo_pendiente
             item_saldo = QTableWidgetItem(f"${float(saldo_pendiente):,.2f}")
-            item_saldo.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_saldo)
 
             # Calcular días transcurridos desde la emisión de la factura
@@ -1490,16 +1328,10 @@ class DetalleCuentasBCVDialog(QDialog):
             if cuenta.fecha_emision:
                 dias_transcurridos = (hoy - cuenta.fecha_emision).days
             item_dias = QTableWidgetItem(str(dias_transcurridos))
-            item_dias.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 4, item_dias)
 
-            fecha_emision = (
-                cuenta.fecha_emision.strftime("%d/%m/%Y")
-                if cuenta.fecha_emision
-                else "Sin definir"
-            )
+            fecha_emision = cuenta.fecha_emision.strftime("%d/%m/%Y") if cuenta.fecha_emision else "Sin definir"
             self.tabla.setItem(fila, 5, QTableWidgetItem(fecha_emision))
 
             # Calcular estado visual
@@ -1518,24 +1350,15 @@ class DetalleCuentasBCVDialog(QDialog):
             self.tabla.setCellWidget(fila, 6, estado_widget)
 
         # Calcular y mostrar saldo a favor
-        saldo_favor_total = sum(
-            _as_decimal(c.saldo_favor) if c.saldo_favor else Decimal("0.00")
-            for c in self.cuentas
-        )
+        saldo_favor_total = sum(_as_decimal(c.saldo_favor) if c.saldo_favor else Decimal("0.00") for c in self.cuentas)
         if saldo_favor_total > 0:
-            self.lbl_saldo_favor.setText(
-                f"Saldo a favor: ${float(saldo_favor_total):,.2f}"
-            )
+            self.lbl_saldo_favor.setText(f"Saldo a favor: ${float(saldo_favor_total):,.2f}")
         else:
             self.lbl_saldo_favor.setText("")
 
         # Mostrar monto total a cobrar
         if self.tasa_bcv:
-            tasa_bcv = (
-                float(self.tasa_bcv)
-                if not isinstance(self.tasa_bcv, float)
-                else self.tasa_bcv
-            )
+            tasa_bcv = float(self.tasa_bcv) if not isinstance(self.tasa_bcv, float) else self.tasa_bcv
             self.lbl_monto_total.setText(
                 f"Total a cobrar: ${float(monto_total):,.2f} (Bs {float(monto_total * Decimal(str(tasa_bcv))):,.2f})"
             )
@@ -1565,27 +1388,19 @@ class DetalleCuentasBCVDialog(QDialog):
                 if cuenta is None:
                     return
                 if cuenta.estado == "pagada":
-                    MessageBox.information(
-                        self, "Ya pagada", "Esta cuenta por cobrar BCV ya está saldada."
-                    )
+                    MessageBox.information(self, "Ya pagada", "Esta cuenta por cobrar BCV ya está saldada.")
                     return
 
-                dialogo = PagoCobroBCVDialog(
-                    self.session_factory, self.id_usuario, cuenta, self.tasa_bcv, self
-                )
+                dialogo = PagoCobroBCVDialog(self.session_factory, self.id_usuario, cuenta, self.tasa_bcv, self)
                 if dialogo.exec() and dialogo.pago_creado is not None:
                     self.se_realizo_cobro = True
-                    MessageBox.information(
-                        self, "Cobro registrado", "El cobro BCV se registró con éxito."
-                    )
+                    MessageBox.information(self, "Cobro registrado", "El cobro BCV se registró con éxito.")
                     # Recargar la tabla de detalle
                     self._recargar_cuentas()
             finally:
                 session.close()
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para aplicar cobros."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar cobros.")
         except Exception:
             logger.exception("Fallo al registrar cobro BCV de cliente")
             MessageBox.critical(self, "Error", "No se pudo registrar el cobro.")
@@ -1619,20 +1434,14 @@ class DetalleCuentasBCVDialog(QDialog):
             )
             if dialogo.exec() and dialogo.abono_aplicado is not None:
                 self.se_realizo_cobro = True
-                MessageBox.information(
-                    self, "Abono aplicado", "El abono general BCV se aplicó con éxito."
-                )
+                MessageBox.information(self, "Abono aplicado", "El abono general BCV se aplicó con éxito.")
                 # Recargar la tabla de detalle
                 self._recargar_cuentas()
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para aplicar abonos."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar abonos.")
         except Exception:
             logger.exception("Fallo al aplicar abono general BCV")
-            MessageBox.critical(
-                self, "Error", "No se pudo aplicar el abono general BCV."
-            )
+            MessageBox.critical(self, "Error", "No se pudo aplicar el abono general BCV.")
 
 
 class CuentasPorCobrarBCVPanel(QWidget):
@@ -1680,9 +1489,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Cuentas por Cobrar BCV")
-        lbl.setStyleSheet(
-            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -1788,27 +1595,13 @@ class CuentasPorCobrarBCVPanel(QWidget):
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # Ajustar columnas para que los datos sean visibles
-        tabla.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )  # ID Cliente (oculto)
-        tabla.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )  # CLIENTE
-        tabla.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.ResizeToContents
-        )  # SALDO PENDIENTE
-        tabla.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.ResizeToContents
-        )  # SALDO A FAVOR
-        tabla.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.ResizeToContents
-        )  # DÍAS
-        tabla.horizontalHeader().setSectionResizeMode(
-            5, QHeaderView.ResizeMode.ResizeToContents
-        )  # FECHA FACTURA
-        tabla.horizontalHeader().setSectionResizeMode(
-            6, QHeaderView.ResizeMode.ResizeToContents
-        )  # ESTADO
+        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID Cliente (oculto)
+        tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # CLIENTE
+        tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # SALDO PENDIENTE
+        tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # SALDO A FAVOR
+        tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # DÍAS
+        tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # FECHA FACTURA
+        tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # ESTADO
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
         tabla.setColumnHidden(0, True)
@@ -1827,9 +1620,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         self.lbl_paginacion = QLabel("Página 1 de 1")
-        self.lbl_paginacion.setStyleSheet(
-            f"color: {COLOR_TEXT_MUTED}; font-size: 13px;"
-        )
+        self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
         h.addWidget(self.lbl_paginacion)
         h.addStretch()
 
@@ -1846,16 +1637,10 @@ class CuentasPorCobrarBCVPanel(QWidget):
         try:
             session = self.session_factory()
             try:
-                tasa = TasaService.obtener_tasa_actual(
-                    session, id_usuario=self.id_usuario
-                )
+                tasa = TasaService.obtener_tasa_actual(session, id_usuario=self.id_usuario)
                 if tasa:
-                    self._tasa_bcv = (
-                        float(tasa.get("tasa_bcv")) if tasa.get("tasa_bcv") else None
-                    )
-                    self.lbl_tasa.setText(
-                        f"Tasa BCV: {float(self._tasa_bcv):,.2f} Bs/USD"
-                    )
+                    self._tasa_bcv = float(tasa.get("tasa_bcv")) if tasa.get("tasa_bcv") else None
+                    self.lbl_tasa.setText(f"Tasa BCV: {float(self._tasa_bcv):,.2f} Bs/USD")
                     self.lbl_tasa.setVisible(True)
             finally:
                 session.close()
@@ -1876,52 +1661,32 @@ class CuentasPorCobrarBCVPanel(QWidget):
                 subquery = (
                     session.query(
                         Cliente.id_cliente,
-                        func.sum(CuentaPorCobrarBCV.saldo_pendiente).label(
-                            "saldo_cliente"
-                        ),
-                        func.sum(CuentaPorCobrarBCV.saldo_favor).label(
-                            "saldo_favor_cliente"
-                        ),
+                        func.sum(CuentaPorCobrarBCV.saldo_pendiente).label("saldo_cliente"),
+                        func.sum(CuentaPorCobrarBCV.saldo_favor).label("saldo_favor_cliente"),
                     )
                     .join(
                         FacturaVenta,
                         FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura,
                     )
-                    .join(
-                        Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura
-                    )
+                    .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
                     .filter(CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")))
                     .group_by(Cliente.id_cliente)
                     .having(func.sum(CuentaPorCobrarBCV.saldo_pendiente) > 0)
                     .subquery()
                 )
 
-                total_pendiente = session.query(
-                    func.coalesce(func.sum(subquery.c.saldo_cliente), 0)
-                ).scalar()
+                total_pendiente = session.query(func.coalesce(func.sum(subquery.c.saldo_cliente), 0)).scalar()
 
-                total_favor = session.query(
-                    func.coalesce(func.sum(subquery.c.saldo_favor_cliente), 0)
-                ).scalar()
+                total_favor = session.query(func.coalesce(func.sum(subquery.c.saldo_favor_cliente), 0)).scalar()
 
-                total_clientes = session.query(
-                    func.count(subquery.c.id_cliente)
-                ).scalar()
+                total_clientes = session.query(func.count(subquery.c.id_cliente)).scalar()
 
-                self._total_pendiente = (
-                    Decimal(str(total_pendiente))
-                    if total_pendiente
-                    else Decimal("0.00")
-                )
-                self._total_favor = (
-                    Decimal(str(total_favor)) if total_favor else Decimal("0.00")
-                )
+                self._total_pendiente = Decimal(str(total_pendiente)) if total_pendiente else Decimal("0.00")
+                self._total_favor = Decimal(str(total_favor)) if total_favor else Decimal("0.00")
                 self._total_registros = total_clientes if total_clientes else 0
 
                 # Actualizar UI
-                self.lbl_total.setText(
-                    f"{self._total_registros} clientes con saldo pendiente"
-                )
+                self.lbl_total.setText(f"{self._total_registros} clientes con saldo pendiente")
                 self.lbl_saldo_total.setText(f"${float(self._total_pendiente):,.2f}")
 
                 logger.info(
@@ -1967,9 +1732,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
             )
         except Exception as e:
             logger.exception("Error al cargar cuentas por cobrar BCV")
-            MessageBox.critical(
-                self, "Error", f"No se pudieron cargar las cuentas: {str(e)}"
-            )
+            MessageBox.critical(self, "Error", f"No se pudieron cargar las cuentas: {str(e)}")
 
     def _mostrar_datos(self, resultado: dict) -> None:
         self.tabla.setRowCount(0)
@@ -1993,11 +1756,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
             saldo = _as_decimal(item.saldo_pendiente)
             saldo_text = f"${float(saldo):,.2f}"
             if self._tasa_bcv:
-                tasa_bcv = (
-                    float(self._tasa_bcv)
-                    if not isinstance(self._tasa_bcv, float)
-                    else self._tasa_bcv
-                )
+                tasa_bcv = float(self._tasa_bcv) if not isinstance(self._tasa_bcv, float) else self._tasa_bcv
                 saldo_text = f"${float(saldo):,.2f} / Bs {float(saldo * Decimal(str(tasa_bcv))):,.2f}"
             self.tabla.setItem(fila, 2, QTableWidgetItem(saldo_text))
 
@@ -2005,40 +1764,28 @@ class CuentasPorCobrarBCVPanel(QWidget):
             saldo_favor = _as_decimal(item.saldo_favor)
             saldo_favor_text = f"${float(saldo_favor):,.2f}"
             if self._tasa_bcv:
-                tasa_bcv = (
-                    float(self._tasa_bcv)
-                    if not isinstance(self._tasa_bcv, float)
-                    else self._tasa_bcv
-                )
+                tasa_bcv = float(self._tasa_bcv) if not isinstance(self._tasa_bcv, float) else self._tasa_bcv
                 saldo_favor_text = f"${float(saldo_favor):,.2f} / Bs {float(saldo_favor * Decimal(str(tasa_bcv))):,.2f}"
             self.tabla.setItem(fila, 3, QTableWidgetItem(saldo_favor_text))
 
             # DÍAS (días de crédito)
-            dias_text = (
-                str(item.dias_credito) if item.dias_credito is not None else "N/A"
-            )
+            dias_text = str(item.dias_credito) if item.dias_credito is not None else "N/A"
             self.tabla.setItem(fila, 4, QTableWidgetItem(dias_text))
 
             # FECHA FACTURA (fecha de emisión más antigua)
-            fecha_factura_text = (
-                item.fecha_emision.strftime("%d/%m/%Y") if item.fecha_emision else "N/A"
-            )
+            fecha_factura_text = item.fecha_emision.strftime("%d/%m/%Y") if item.fecha_emision else "N/A"
             self.tabla.setItem(fila, 5, QTableWidgetItem(fecha_factura_text))
 
             # ESTADO
             estado = getattr(item, "estado_visual", item.estado)
-            badge = EstadoBadge(
-                estado, COLORES_ESTADO_CXC_BCV.get(estado, COLOR_TEXT_MEDIUM)
-            )
+            badge = EstadoBadge(estado, COLORES_ESTADO_CXC_BCV.get(estado, COLOR_TEXT_MEDIUM))
             self.tabla.setCellWidget(fila, 6, badge)
 
         # Actualizar paginación
         self.total_paginas = (total + por_pagina - 1) // por_pagina if total > 0 else 1
         self.lbl_paginacion.setText(f"Página {pagina} de {self.total_paginas}")
 
-        logger.info(
-            f"Mostrando {len(items)} clientes agrupados de {total} total, página {pagina}"
-        )
+        logger.info(f"Mostrando {len(items)} clientes agrupados de {total} total, página {pagina}")
 
     def _on_filtro_cambiado(self) -> None:
         self._estado_filtro = self.estado_combo.currentData()
@@ -2070,11 +1817,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
             return
 
         row = filas[0].row()
-        if (
-            row >= 0
-            and row < self.tabla.rowCount()
-            and row < len(self._cuentas_cargadas)
-        ):
+        if row >= 0 and row < self.tabla.rowCount() and row < len(self._cuentas_cargadas):
             item = self._cuentas_cargadas[row]
             self._mostrar_cuentas_cliente(item)
 
@@ -2097,19 +1840,13 @@ class CuentasPorCobrarBCVPanel(QWidget):
                         CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")),
                         CuentaPorCobrarBCV.saldo_pendiente > 0,
                     )
-                    .options(
-                        joinedload(CuentaPorCobrarBCV.factura).joinedload(
-                            FacturaVenta.cliente
-                        )
-                    )
+                    .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
                     .order_by(CuentaPorCobrarBCV.fecha_vencimiento.desc())
                     .all()
                 )
 
                 if not cuentas:
-                    mensaje = (
-                        f"El cliente {item.nombre_cliente} no tiene cuentas pendientes."
-                    )
+                    mensaje = f"El cliente {item.nombre_cliente} no tiene cuentas pendientes."
                     MessageBox.information(self, "Sin cuentas", mensaje)
                     return
 
@@ -2126,24 +1863,17 @@ class CuentasPorCobrarBCVPanel(QWidget):
                     self.id_usuario,
                     self,
                 )
-                if (
-                    dialog.exec() == QDialog.DialogCode.Accepted
-                    and dialog.se_realizo_cobro
-                ):
+                if dialog.exec() == QDialog.DialogCode.Accepted and dialog.se_realizo_cobro:
                     self.cargar_cuentas()
             finally:
                 session.close()
         except Exception as e:
             logger.exception("Error al mostrar cuentas del cliente")
-            MessageBox.critical(
-                self, "Error", f"No se pudieron cargar las cuentas: {str(e)}"
-            )
+            MessageBox.critical(self, "Error", f"No se pudieron cargar las cuentas: {str(e)}")
 
     def _cobrar(self, cuenta: CuentaPorCobrarBCV) -> None:
         tasa_bcv_float = float(self._tasa_bcv) if self._tasa_bcv else None
-        dialog = PagoCobroBCVDialog(
-            self.session_factory, self.id_usuario, cuenta, tasa_bcv_float, self
-        )
+        dialog = PagoCobroBCVDialog(self.session_factory, self.id_usuario, cuenta, tasa_bcv_float, self)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.pago_creado:
             self.cargar_cuentas()
 
@@ -2189,16 +1919,8 @@ class CuentasPorCobrarBCVPanel(QWidget):
                         item.nombre_cliente,
                         float(item.saldo_pendiente),
                         float(item.saldo_favor),
-                        (
-                            str(item.dias_credito)
-                            if item.dias_credito is not None
-                            else "N/A"
-                        ),
-                        (
-                            item.fecha_emision.strftime("%d/%m/%Y")
-                            if item.fecha_emision
-                            else "N/A"
-                        ),
+                        (str(item.dias_credito) if item.dias_credito is not None else "N/A"),
+                        (item.fecha_emision.strftime("%d/%m/%Y") if item.fecha_emision else "N/A"),
                         item.estado,
                     ]
                     filas.append(fila)
@@ -2250,16 +1972,8 @@ class CuentasPorCobrarBCVPanel(QWidget):
                         item.nombre_cliente,
                         float(item.saldo_pendiente),
                         float(item.saldo_favor),
-                        (
-                            str(item.dias_credito)
-                            if item.dias_credito is not None
-                            else "N/A"
-                        ),
-                        (
-                            item.fecha_emision.strftime("%d/%m/%Y")
-                            if item.fecha_emision
-                            else "N/A"
-                        ),
+                        (str(item.dias_credito) if item.dias_credito is not None else "N/A"),
+                        (item.fecha_emision.strftime("%d/%m/%Y") if item.fecha_emision else "N/A"),
                         item.estado,
                     ]
                     filas.append(fila)

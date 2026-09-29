@@ -51,9 +51,7 @@ def _ejecutar_archivo_alter_database(motor, contenido_sql: str):
     DATABASE debe ser el UNICO statement de ese archivo (ver migrations/README.md).
     Devuelve una conexion nueva para que el caller siga con el resto del proceso."""
     motor.dispose()
-    with motor.connect().execution_options(
-        isolation_level="AUTOCOMMIT"
-    ) as autocommit_connection:
+    with motor.connect().execution_options(isolation_level="AUTOCOMMIT") as autocommit_connection:
         _ejecutar_batches(autocommit_connection, contenido_sql)
     motor.dispose()
     return motor.connect()
@@ -65,9 +63,7 @@ def aplicar_migraciones(motor=None, migrations_dir: Path | None = None) -> None:
 
     connection = motor.connect()
     try:
-        existe_schema_base = connection.execute(
-            text("SELECT OBJECT_ID(N'dbo.usuarios', N'U')")
-        ).scalar()
+        existe_schema_base = connection.execute(text("SELECT OBJECT_ID(N'dbo.usuarios', N'U')")).scalar()
         if existe_schema_base is None:
             raise RuntimeError(
                 "No se encontro el schema base (dbo.usuarios). Corre schema_sqlserver.sql "
@@ -77,18 +73,9 @@ def aplicar_migraciones(motor=None, migrations_dir: Path | None = None) -> None:
         connection.execute(text(_CREATE_SCHEMA_MIGRATIONS))
         connection.commit()
 
-        aplicadas = {
-            fila[0]
-            for fila in connection.execute(
-                text("SELECT [version] FROM dbo.schema_migrations")
-            )
-        }
+        aplicadas = {fila[0] for fila in connection.execute(text("SELECT [version] FROM dbo.schema_migrations"))}
         if not aplicadas:
-            connection.execute(
-                text(
-                    "INSERT INTO dbo.schema_migrations ([version]) VALUES ('0000_baseline')"
-                )
-            )
+            connection.execute(text("INSERT INTO dbo.schema_migrations ([version]) VALUES ('0000_baseline')"))
             connection.commit()
             aplicadas = {"0000_baseline"}
 
@@ -120,9 +107,7 @@ def aplicar_migraciones(motor=None, migrations_dir: Path | None = None) -> None:
         connection.close()
 
 
-def verificar_migraciones_al_dia(
-    motor=None, migrations_dir: Path | None = None
-) -> None:
+def verificar_migraciones_al_dia(motor=None, migrations_dir: Path | None = None) -> None:
     """Falla rapido con un mensaje claro si hay migraciones sin aplicar, en vez de dejar
     que el primer servicio que toque una columna/tabla nueva falle mas tarde de forma
     confusa (C25, llamada desde app/main.py al arrancar). A proposito solo lee, no aplica
@@ -133,34 +118,21 @@ def verificar_migraciones_al_dia(
     migrations_dir = migrations_dir if migrations_dir is not None else MIGRATIONS_DIR
 
     with motor.connect() as connection:
-        existe_schema_base = connection.execute(
-            text("SELECT OBJECT_ID(N'dbo.usuarios', N'U')")
-        ).scalar()
+        existe_schema_base = connection.execute(text("SELECT OBJECT_ID(N'dbo.usuarios', N'U')")).scalar()
         if existe_schema_base is None:
             raise RuntimeError(
                 "No se encontro el schema base (dbo.usuarios). Corre schema_sqlserver.sql "
                 "primero -- ver README.md, seccion 'Crear la base de datos y el schema'."
             )
 
-        existe_tabla_migraciones = connection.execute(
-            text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")
-        ).scalar()
+        existe_tabla_migraciones = connection.execute(text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")).scalar()
         aplicadas: set[str] = set()
         if existe_tabla_migraciones is not None:
-            aplicadas = {
-                fila[0]
-                for fila in connection.execute(
-                    text("SELECT [version] FROM dbo.schema_migrations")
-                )
-            }
+            aplicadas = {fila[0] for fila in connection.execute(text("SELECT [version] FROM dbo.schema_migrations"))}
         if not aplicadas:
             aplicadas = {"0000_baseline"}
 
-    pendientes = [
-        archivo.name
-        for archivo in sorted(migrations_dir.glob("*.sql"))
-        if archivo.name not in aplicadas
-    ]
+    pendientes = [archivo.name for archivo in sorted(migrations_dir.glob("*.sql")) if archivo.name not in aplicadas]
     if pendientes:
         raise RuntimeError(
             "Hay migraciones de schema sin aplicar: "

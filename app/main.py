@@ -48,9 +48,7 @@ def _manejar_excepcion_no_capturada(tipo, valor, tb):
     """P-01: sin esto, una excepcion no capturada en un slot de Qt tira la app entera
     al escritorio sin quedar en log -- solo QueryWorker.run() capturaba errores hasta
     ahora, y solo lo que pasaba por ahi."""
-    logging.getLogger(__name__).critical(
-        "Excepcion no capturada", exc_info=(tipo, valor, tb)
-    )
+    logging.getLogger(__name__).critical("Excepcion no capturada", exc_info=(tipo, valor, tb))
     sys.__excepthook__(tipo, valor, tb)
     if QApplication.instance() is not None:
         MessageBox.critical(

@@ -48,9 +48,7 @@ def test_crear_producto_requiere_codigo(db_session):
     with pytest.raises(ValueError, match="cod_producto"):
         ProductoService.crear(
             db_session,
-            **_datos_producto(
-                categoria.id_categoria, cod_producto="", creado_por=admin.id_usuario
-            ),
+            **_datos_producto(categoria.id_categoria, cod_producto="", creado_por=admin.id_usuario),
         )
 
 
@@ -76,18 +74,14 @@ def test_crear_producto_codigo_duplicado(db_session):
 def test_obtener_producto(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session)
-    encontrado = ProductoService.obtener(
-        db_session, producto.id_producto, id_usuario=admin.id_usuario
-    )
+    encontrado = ProductoService.obtener(db_session, producto.id_producto, id_usuario=admin.id_usuario)
     assert encontrado is not None
     assert encontrado.id_producto == producto.id_producto
 
 
 def test_obtener_producto_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
-    assert (
-        ProductoService.obtener(db_session, 999999, id_usuario=admin.id_usuario) is None
-    )
+    assert ProductoService.obtener(db_session, 999999, id_usuario=admin.id_usuario) is None
 
 
 def test_obtener_producto_sin_usuario_autorizado_falla(db_session):
@@ -112,17 +106,13 @@ def test_actualizar_producto(db_session):
 def test_actualizar_producto_sin_usuario_autorizado_falla(db_session):
     producto = crear_producto(db_session)
     with pytest.raises(PermisoDenegadoError):
-        ProductoService.actualizar(
-            db_session, producto.id_producto, nombre_producto="Nuevo Nombre"
-        )
+        ProductoService.actualizar(db_session, producto.id_producto, nombre_producto="Nuevo Nombre")
 
 
 def test_actualizar_producto_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Producto no encontrado"):
-        ProductoService.actualizar(
-            db_session, 999999, id_usuario=admin.id_usuario, nombre_producto="X"
-        )
+        ProductoService.actualizar(db_session, 999999, id_usuario=admin.id_usuario, nombre_producto="X")
 
 
 def test_actualizar_producto_codigo_duplicado(db_session):
@@ -130,9 +120,7 @@ def test_actualizar_producto_codigo_duplicado(db_session):
     categoria = crear_categoria(db_session)
     ProductoService.crear(
         db_session,
-        **_datos_producto(
-            categoria.id_categoria, cod_producto="SKU-001", creado_por=admin.id_usuario
-        ),
+        **_datos_producto(categoria.id_categoria, cod_producto="SKU-001", creado_por=admin.id_usuario),
     )
     otro = ProductoService.crear(
         db_session,
@@ -173,16 +161,9 @@ def test_eliminar_producto_siempre_falla_para_proteger_integridad(db_session):
     producto = crear_producto(db_session)
 
     with pytest.raises(ValueError, match="No se puede eliminar"):
-        ProductoService.eliminar(
-            db_session, producto.id_producto, id_usuario=admin.id_usuario
-        )
+        ProductoService.eliminar(db_session, producto.id_producto, id_usuario=admin.id_usuario)
 
-    assert (
-        ProductoService.obtener(
-            db_session, producto.id_producto, id_usuario=admin.id_usuario
-        )
-        is not None
-    )
+    assert ProductoService.obtener(db_session, producto.id_producto, id_usuario=admin.id_usuario) is not None
 
 
 def test_eliminar_producto_sin_usuario_autorizado_falla(db_session):
@@ -207,17 +188,13 @@ def test_cambiar_estado_producto_estado_invalido(db_session):
     producto = crear_producto(db_session)
 
     with pytest.raises(ValueError, match="nuevo_estado"):
-        ProductoService.cambiar_estado(
-            db_session, producto.id_producto, "BLOQUEADO", id_usuario=admin.id_usuario
-        )
+        ProductoService.cambiar_estado(db_session, producto.id_producto, "BLOQUEADO", id_usuario=admin.id_usuario)
 
 
 def test_cambiar_estado_producto_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Producto no encontrado"):
-        ProductoService.cambiar_estado(
-            db_session, 999999, "INACTIVO", id_usuario=admin.id_usuario
-        )
+        ProductoService.cambiar_estado(db_session, 999999, "INACTIVO", id_usuario=admin.id_usuario)
 
 
 def test_cambiar_estado_producto_sin_usuario_autorizado_falla(db_session):
@@ -231,9 +208,7 @@ def test_buscar_por_codigo(db_session):
     crear_producto(db_session, cod_producto="ABC-123")
     crear_producto(db_session, cod_producto="XYZ-999")
 
-    resultado = ProductoService.buscar(
-        db_session, codigo="ABC", id_usuario=admin.id_usuario
-    )
+    resultado = ProductoService.buscar(db_session, codigo="ABC", id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].cod_producto == "ABC-123"
@@ -249,9 +224,7 @@ def test_buscar_por_nombre(db_session):
     crear_producto(db_session, nombre_producto="Refresco Cola")
     crear_producto(db_session, nombre_producto="Agua Mineral")
 
-    resultado = ProductoService.buscar(
-        db_session, nombre="Cola", id_usuario=admin.id_usuario
-    )
+    resultado = ProductoService.buscar(db_session, nombre="Cola", id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].nombre_producto == "Refresco Cola"
@@ -262,12 +235,8 @@ def test_buscar_por_texto_incluye_codigo_o_nombre(db_session):
     crear_producto(db_session, cod_producto="COLA-001", nombre_producto="Refresco Cola")
     crear_producto(db_session, cod_producto="AGUA-002", nombre_producto="Agua Mineral")
 
-    por_codigo = ProductoService.buscar(
-        db_session, texto="COLA-001", id_usuario=admin.id_usuario
-    )
-    por_nombre = ProductoService.buscar(
-        db_session, texto="Mineral", id_usuario=admin.id_usuario
-    )
+    por_codigo = ProductoService.buscar(db_session, texto="COLA-001", id_usuario=admin.id_usuario)
+    por_nombre = ProductoService.buscar(db_session, texto="Mineral", id_usuario=admin.id_usuario)
 
     assert por_codigo["total"] == 1
     assert por_codigo["items"][0].nombre_producto == "Refresco Cola"
@@ -282,9 +251,7 @@ def test_buscar_por_categoria(db_session):
     crear_producto(db_session, categoria=categoria_a)
     crear_producto(db_session, categoria=categoria_b)
 
-    resultado = ProductoService.buscar(
-        db_session, id_categoria=categoria_a.id_categoria, id_usuario=admin.id_usuario
-    )
+    resultado = ProductoService.buscar(db_session, id_categoria=categoria_a.id_categoria, id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
 
@@ -294,9 +261,7 @@ def test_buscar_solo_con_stock(db_session):
     crear_producto(db_session, cantidad_unidad=0)
     crear_producto(db_session, cantidad_unidad=5)
 
-    resultado = ProductoService.buscar(
-        db_session, solo_con_stock=True, id_usuario=admin.id_usuario
-    )
+    resultado = ProductoService.buscar(db_session, solo_con_stock=True, id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].cantidad_unidad == Decimal("5.00")
@@ -305,23 +270,15 @@ def test_buscar_solo_con_stock(db_session):
 def test_buscar_pagina_resultados(db_session):
     admin = crear_usuario_admin(db_session)
     for i in range(5):
-        crear_producto(
-            db_session, cod_producto=f"PAG-{i:03d}", nombre_producto=f"Producto {i}"
-        )
+        crear_producto(db_session, cod_producto=f"PAG-{i:03d}", nombre_producto=f"Producto {i}")
 
-    pagina_1 = ProductoService.buscar(
-        db_session, pagina=1, por_pagina=2, id_usuario=admin.id_usuario
-    )
-    pagina_2 = ProductoService.buscar(
-        db_session, pagina=2, por_pagina=2, id_usuario=admin.id_usuario
-    )
+    pagina_1 = ProductoService.buscar(db_session, pagina=1, por_pagina=2, id_usuario=admin.id_usuario)
+    pagina_2 = ProductoService.buscar(db_session, pagina=2, por_pagina=2, id_usuario=admin.id_usuario)
 
     assert pagina_1["total"] == 5
     assert len(pagina_1["items"]) == 2
     assert len(pagina_2["items"]) == 2
-    assert {p.cod_producto for p in pagina_1["items"]}.isdisjoint(
-        {p.cod_producto for p in pagina_2["items"]}
-    )
+    assert {p.cod_producto for p in pagina_1["items"]}.isdisjoint({p.cod_producto for p in pagina_2["items"]})
 
 
 def test_obtener_alertas_stock_bajo(db_session):
@@ -329,9 +286,7 @@ def test_obtener_alertas_stock_bajo(db_session):
     crear_producto(db_session, cantidad_unidad=3, cantidad_minima=Decimal("10.00"))
     crear_producto(db_session, cantidad_unidad=50, cantidad_minima=Decimal("10.00"))
 
-    alertas = ProductoService.obtener_alertas_stock(
-        db_session, id_usuario=admin.id_usuario
-    )
+    alertas = ProductoService.obtener_alertas_stock(db_session, id_usuario=admin.id_usuario)
 
     assert len(alertas["bajo_stock"]) == 1
     assert alertas["bajo_stock"][0].cantidad_unidad == Decimal("3.00")
@@ -347,9 +302,7 @@ def test_obtener_alertas_stock_bajo_usa_minimo_configurado_por_producto(db_sessi
     crear_producto(db_session, cantidad_unidad=37, cantidad_minima=Decimal("5.00"))
     crear_producto(db_session, cantidad_unidad=15, cantidad_minima=Decimal("20.00"))
 
-    alertas = ProductoService.obtener_alertas_stock(
-        db_session, id_usuario=admin.id_usuario
-    )
+    alertas = ProductoService.obtener_alertas_stock(db_session, id_usuario=admin.id_usuario)
 
     assert len(alertas["bajo_stock"]) == 1
     assert alertas["bajo_stock"][0].cantidad_unidad == Decimal("15.00")
@@ -361,9 +314,7 @@ def test_obtener_alertas_stock_bajo_ignora_productos_sin_minimo_configurado(db_s
     admin = crear_usuario_admin(db_session)
     crear_producto(db_session, cantidad_unidad=1)
 
-    alertas = ProductoService.obtener_alertas_stock(
-        db_session, id_usuario=admin.id_usuario
-    )
+    alertas = ProductoService.obtener_alertas_stock(db_session, id_usuario=admin.id_usuario)
 
     assert len(alertas["bajo_stock"]) == 0
 
@@ -385,9 +336,7 @@ def test_obtener_alertas_stock_bajo_excluye_inactivos(db_session):
         estado_producto="INACTIVO",
     )
 
-    alertas = ProductoService.obtener_alertas_stock(
-        db_session, id_usuario=admin.id_usuario
-    )
+    alertas = ProductoService.obtener_alertas_stock(db_session, id_usuario=admin.id_usuario)
 
     assert len(alertas["bajo_stock"]) == 1
     assert alertas["bajo_stock"][0].estado_producto == "ACTIVO"
@@ -400,9 +349,7 @@ def test_obtener_alertas_proximos_vencer(db_session):
     crear_producto(db_session, fecha_vencimiento=hoy + timedelta(days=90))
     crear_producto(db_session, fecha_vencimiento=None)
 
-    alertas = ProductoService.obtener_alertas_stock(
-        db_session, dias_vencimiento=30, id_usuario=admin.id_usuario
-    )
+    alertas = ProductoService.obtener_alertas_stock(db_session, dias_vencimiento=30, id_usuario=admin.id_usuario)
 
     assert len(alertas["proximos_vencer"]) == 1
 
@@ -416,9 +363,7 @@ def test_obtener_alertas_proximos_vencer_excluye_inactivos(db_session):
         estado_producto="INACTIVO",
     )
 
-    alertas = ProductoService.obtener_alertas_stock(
-        db_session, dias_vencimiento=30, id_usuario=admin.id_usuario
-    )
+    alertas = ProductoService.obtener_alertas_stock(db_session, dias_vencimiento=30, id_usuario=admin.id_usuario)
 
     assert len(alertas["proximos_vencer"]) == 0
 
@@ -430,9 +375,7 @@ def test_establecer_precio_crea(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
 
-    precio = PrecioService.establecer_precio(
-        db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario
-    )
+    precio = PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
 
     assert precio.precio_venta == Decimal("15.00")
     assert precio.porcentaje_ganancia == Decimal("50.00")
@@ -448,18 +391,14 @@ def test_establecer_precio_sin_usuario_autorizado_falla(db_session):
 def test_establecer_precio_actualiza_existente(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
-    PrecioService.establecer_precio(
-        db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario
-    )
+    PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
 
     actualizado = PrecioService.establecer_precio(
         db_session, producto.id_producto, "20.00", id_usuario=admin.id_usuario
     )
 
     assert actualizado.precio_venta == Decimal("20.00")
-    precio = PrecioService.obtener_precio(
-        db_session, producto.id_producto, id_usuario=admin.id_usuario
-    )
+    precio = PrecioService.obtener_precio(db_session, producto.id_producto, id_usuario=admin.id_usuario)
     assert precio.precio_venta == Decimal("20.00")
 
 
@@ -469,18 +408,10 @@ def test_establecer_precio_segunda_vez_actualiza_no_duplica(db_session):
     de BD, ver migrations/0036_producto_precios_unico_por_producto.sql)."""
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
-    PrecioService.establecer_precio(
-        db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario
-    )
-    PrecioService.establecer_precio(
-        db_session, producto.id_producto, "18.00", id_usuario=admin.id_usuario
-    )
+    PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
+    PrecioService.establecer_precio(db_session, producto.id_producto, "18.00", id_usuario=admin.id_usuario)
 
-    total = (
-        db_session.query(ProductoPrecio)
-        .filter(ProductoPrecio.id_producto == producto.id_producto)
-        .count()
-    )
+    total = db_session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == producto.id_producto).count()
 
     assert total == 1
 
@@ -488,29 +419,21 @@ def test_establecer_precio_segunda_vez_actualiza_no_duplica(db_session):
 def test_establecer_precio_producto_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Producto no encontrado"):
-        PrecioService.establecer_precio(
-            db_session, 999999, "10.00", id_usuario=admin.id_usuario
-        )
+        PrecioService.establecer_precio(db_session, 999999, "10.00", id_usuario=admin.id_usuario)
 
 
 def test_establecer_precio_producto_inactivo_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    producto = crear_producto(
-        db_session, costo_producto=Decimal("10.00"), estado_producto="INACTIVO"
-    )
+    producto = crear_producto(db_session, costo_producto=Decimal("10.00"), estado_producto="INACTIVO")
     with pytest.raises(ValueError, match="inactivo"):
-        PrecioService.establecer_precio(
-            db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario
-        )
+        PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
 
 
 def test_establecer_precio_costo_cero_margen_cero(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("0.00"))
 
-    precio = PrecioService.establecer_precio(
-        db_session, producto.id_producto, "10.00", id_usuario=admin.id_usuario
-    )
+    precio = PrecioService.establecer_precio(db_session, producto.id_producto, "10.00", id_usuario=admin.id_usuario)
 
     assert precio.porcentaje_ganancia == Decimal("0.00")
 
@@ -519,20 +442,13 @@ def test_obtener_precio_sin_precio_configurado_es_none(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
 
-    assert (
-        PrecioService.obtener_precio(
-            db_session, producto.id_producto, id_usuario=admin.id_usuario
-        )
-        is None
-    )
+    assert PrecioService.obtener_precio(db_session, producto.id_producto, id_usuario=admin.id_usuario) is None
 
 
 def test_obtener_precio_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
-    PrecioService.establecer_precio(
-        db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario
-    )
+    PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
 
     with pytest.raises(PermisoDenegadoError):
         PrecioService.obtener_precio(db_session, producto.id_producto)
@@ -541,28 +457,17 @@ def test_obtener_precio_sin_usuario_autorizado_falla(db_session):
 def test_eliminar_precio(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
-    precio = PrecioService.establecer_precio(
-        db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario
-    )
+    precio = PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
 
-    PrecioService.eliminar_precio(
-        db_session, precio.id_producto_precio, id_usuario=admin.id_usuario
-    )
+    PrecioService.eliminar_precio(db_session, precio.id_producto_precio, id_usuario=admin.id_usuario)
 
-    assert (
-        PrecioService.obtener_precio(
-            db_session, producto.id_producto, id_usuario=admin.id_usuario
-        )
-        is None
-    )
+    assert PrecioService.obtener_precio(db_session, producto.id_producto, id_usuario=admin.id_usuario) is None
 
 
 def test_eliminar_precio_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
-    precio = PrecioService.establecer_precio(
-        db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario
-    )
+    precio = PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
 
     with pytest.raises(PermisoDenegadoError):
         PrecioService.eliminar_precio(db_session, precio.id_producto_precio)
@@ -573,9 +478,7 @@ def test_eliminar_precio_inexistente_no_falla(db_session):
     PrecioService.eliminar_precio(db_session, 999999, id_usuario=admin.id_usuario)
 
 
-def test_establecer_precio_bloquea_con_updlock_rowlock_concurrente(
-    db_session, test_engine
-):
+def test_establecer_precio_bloquea_con_updlock_rowlock_concurrente(db_session, test_engine):
     """Auditoria de Productos (2026-08-28), hallazgo #1: establecer_precio() leia la fila
     de ProductoPrecio existente con un SELECT sin lock -- dos ediciones de precio
     concurrentes sobre el MISMO producto podian ambas ver "no existe" (la primera vez) o
@@ -592,9 +495,7 @@ def test_establecer_precio_bloquea_con_updlock_rowlock_concurrente(
 
     admin = crear_usuario_admin(db_session)
     producto = crear_producto(db_session, costo_producto=Decimal("10.00"))
-    PrecioService.establecer_precio(
-        db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario
-    )
+    PrecioService.establecer_precio(db_session, producto.id_producto, "15.00", id_usuario=admin.id_usuario)
     id_producto, id_usuario = producto.id_producto, admin.id_usuario
 
     session_factory = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
@@ -611,9 +512,7 @@ def test_establecer_precio_bloquea_con_updlock_rowlock_concurrente(
         def _establecer_en_thread():
             sesion_hilo = session_factory()
             try:
-                precio = PrecioService.establecer_precio(
-                    sesion_hilo, id_producto, "20.00", id_usuario=id_usuario
-                )
+                precio = PrecioService.establecer_precio(sesion_hilo, id_producto, "20.00", id_usuario=id_usuario)
                 resultado["id_producto_precio"] = precio.id_producto_precio
             finally:
                 sesion_hilo.close()
@@ -623,29 +522,19 @@ def test_establecer_precio_bloquea_con_updlock_rowlock_concurrente(
 
         # El lock sigue sostenido: establecer_precio debe seguir esperando, no adelantarse.
         hilo.join(timeout=1.5)
-        assert (
-            hilo.is_alive()
-        ), "establecer_precio no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre ProductoPrecio"
+        assert hilo.is_alive(), "establecer_precio no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre ProductoPrecio"
 
         # Libera el lock (rollback: esta sesion solo leyo, no debe dejar nada escrito).
         sesion_bloqueadora.rollback()
 
         hilo.join(timeout=10)
-        assert (
-            not hilo.is_alive()
-        ), "establecer_precio no continuo tras liberarse el lock"
+        assert not hilo.is_alive(), "establecer_precio no continuo tras liberarse el lock"
         assert "id_producto_precio" in resultado
     finally:
         sesion_bloqueadora.close()
 
     db_session.refresh(producto)
-    precio_final = PrecioService.obtener_precio(
-        db_session, id_producto, id_usuario=id_usuario
-    )
+    precio_final = PrecioService.obtener_precio(db_session, id_producto, id_usuario=id_usuario)
     assert precio_final.precio_venta == Decimal("20.00")
-    total = (
-        db_session.query(ProductoPrecio)
-        .filter(ProductoPrecio.id_producto == id_producto)
-        .count()
-    )
+    total = db_session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).count()
     assert total == 1

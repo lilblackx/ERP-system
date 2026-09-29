@@ -23,13 +23,9 @@ EMAIL_MAX = 150
 _EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def _validar_longitudes(
-    nombre_usuario: str, nombre: str | None, apellido: str | None, email: str | None
-) -> None:
+def _validar_longitudes(nombre_usuario: str, nombre: str | None, apellido: str | None, email: str | None) -> None:
     if len(nombre_usuario) > NOMBRE_USUARIO_MAX:
-        raise ValueError(
-            f"nombre_usuario no puede superar {NOMBRE_USUARIO_MAX} caracteres"
-        )
+        raise ValueError(f"nombre_usuario no puede superar {NOMBRE_USUARIO_MAX} caracteres")
     if nombre and len(nombre) > NOMBRE_MAX:
         raise ValueError(f"nombre no puede superar {NOMBRE_MAX} caracteres")
     if apellido and len(apellido) > APELLIDO_MAX:
@@ -40,9 +36,7 @@ def _validar_longitudes(
         raise ValueError(f"'{email}' no tiene un formato de correo valido")
 
 
-def _validar_nombre_usuario_unico(
-    session: Session, nombre_usuario: str, excluir_id: int | None = None
-) -> None:
+def _validar_nombre_usuario_unico(session: Session, nombre_usuario: str, excluir_id: int | None = None) -> None:
     query = session.query(Usuario).filter(Usuario.nombre_usuario == nombre_usuario)
     if excluir_id is not None:
         query = query.filter(Usuario.id_usuario != excluir_id)
@@ -50,9 +44,7 @@ def _validar_nombre_usuario_unico(
         raise ValueError(f"El nombre de usuario '{nombre_usuario}' ya esta en uso")
 
 
-def _validar_email_unico(
-    session: Session, email: str, excluir_id: int | None = None
-) -> None:
+def _validar_email_unico(session: Session, email: str, excluir_id: int | None = None) -> None:
     # El correo identifica a donde van los codigos de desbloqueo/recuperacion de clave
     # (RecuperacionAccesoService) -- si dos usuarios comparten uno, cada solicitud (que
     # busca por nombre_usuario, no por email) igual termina mandando el codigo a una
@@ -86,16 +78,12 @@ def _resolver_vinculo_vendedor(
     # Un Vendedor no puede quedar vinculado a mas de un login: dos usuarios distintos
     # viendo/operando como el mismo vendedor mezclaria reportes y comisiones entre
     # ambos sin ninguna forma de distinguir quien hizo que.
-    query = session.query(Usuario).filter(
-        Usuario.id_vendedor_usuario == id_vendedor_usuario
-    )
+    query = session.query(Usuario).filter(Usuario.id_vendedor_usuario == id_vendedor_usuario)
     if excluir_id_usuario is not None:
         query = query.filter(Usuario.id_usuario != excluir_id_usuario)
     otro = query.first()
     if otro is not None:
-        raise ValueError(
-            f"El vendedor ya esta vinculado al usuario '{otro.nombre_usuario}'"
-        )
+        raise ValueError(f"El vendedor ya esta vinculado al usuario '{otro.nombre_usuario}'")
 
     return id_vendedor_usuario
 
@@ -123,9 +111,7 @@ class UsuarioService:
             # registrado queda sin forma de desbloquearse ni recuperar su clave solo
             # (_solicitar_codigo() no envia nada si usuario.email esta vacio, y responde
             # el mismo mensaje generico igual, sin avisar que fallo).
-            raise ValueError(
-                "email es requerido: es a donde se envian los codigos de desbloqueo/recuperacion de clave"
-            )
+            raise ValueError("email es requerido: es a donde se envian los codigos de desbloqueo/recuperacion de clave")
         if not clave:
             raise ValueError("clave es requerida")
         validar_password_policy(clave)
@@ -133,9 +119,7 @@ class UsuarioService:
 
         _validar_nombre_usuario_unico(session, nombre_usuario)
         _validar_email_unico(session, email)
-        id_vendedor_usuario = _resolver_vinculo_vendedor(
-            session, id_rol, id_vendedor_usuario
-        )
+        id_vendedor_usuario = _resolver_vinculo_vendedor(session, id_rol, id_vendedor_usuario)
 
         usuario = Usuario(
             nombre_usuario=nombre_usuario,
@@ -181,9 +165,7 @@ class UsuarioService:
             # Mismo motivo que en crear_usuario(): no dejar que una edicion vacie el
             # correo de un usuario existente, o lo deja sin forma de desbloquearse ni
             # recuperar su clave solo.
-            raise ValueError(
-                "email es requerido: es a donde se envian los codigos de desbloqueo/recuperacion de clave"
-            )
+            raise ValueError("email es requerido: es a donde se envian los codigos de desbloqueo/recuperacion de clave")
 
         _validar_longitudes(
             datos.get("nombre_usuario", usuario.nombre_usuario),
@@ -194,9 +176,7 @@ class UsuarioService:
 
         nuevo_nombre_usuario = datos.get("nombre_usuario")
         if nuevo_nombre_usuario and nuevo_nombre_usuario != usuario.nombre_usuario:
-            _validar_nombre_usuario_unico(
-                session, nuevo_nombre_usuario, excluir_id=id_usuario
-            )
+            _validar_nombre_usuario_unico(session, nuevo_nombre_usuario, excluir_id=id_usuario)
 
         nuevo_email = datos.get("email")
         if nuevo_email and nuevo_email != usuario.email:
@@ -267,9 +247,7 @@ class UsuarioService:
             if id_usuario == realizado_por:
                 raise ValueError("No puedes desactivar tu propia cuenta")
 
-            rol = (
-                session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
-            )
+            rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
             if rol is not None and rol.nombre == "ADMIN":
                 # Sin esto, dos ADMIN podrian desactivarse mutuamente (cada uno no puede
                 # desactivarse a si mismo, pero si al otro) hasta dejar el sistema sin
@@ -286,9 +264,7 @@ class UsuarioService:
                     .count()
                 )
                 if otros_admins_activos == 0:
-                    raise ValueError(
-                        "No se puede desactivar: es el unico administrador activo del sistema"
-                    )
+                    raise ValueError("No se puede desactivar: es el unico administrador activo del sistema")
 
         usuario.estado = nuevo_estado
         session.commit()
@@ -304,9 +280,7 @@ class UsuarioService:
         return usuario
 
     @staticmethod
-    def desbloquear_usuario(
-        session: Session, id_usuario: int, realizado_por: int | None = None
-    ) -> Usuario:
+    def desbloquear_usuario(session: Session, id_usuario: int, realizado_por: int | None = None) -> Usuario:
         """Via de escape manual para C7: si el usuario no tiene correo registrado (o el
         envio de codigo falla), no hay auto-desbloqueo por tiempo -- un ADMIN tiene que
         limpiar el bloqueo a mano. Sin panel de UI todavia (usuarios sigue en
@@ -345,9 +319,7 @@ class UsuarioService:
         if texto_busqueda:
             like = f"%{texto_busqueda}%"
             query = query.filter(
-                Usuario.nombre_usuario.ilike(like)
-                | Usuario.nombre.ilike(like)
-                | Usuario.apellido.ilike(like)
+                Usuario.nombre_usuario.ilike(like) | Usuario.nombre.ilike(like) | Usuario.apellido.ilike(like)
             )
         if id_rol:
             query = query.filter(Usuario.id_rol == id_rol)
@@ -359,10 +331,7 @@ class UsuarioService:
             {
                 "id_usuario": usuario.id_usuario,
                 "nombre_usuario": usuario.nombre_usuario,
-                "nombre_completo": " ".join(
-                    filter(None, [usuario.nombre, usuario.apellido])
-                )
-                or None,
+                "nombre_completo": " ".join(filter(None, [usuario.nombre, usuario.apellido])) or None,
                 "rol": usuario.rol.nombre if usuario.rol else None,
                 "estado": usuario.estado,
             }
@@ -375,9 +344,7 @@ class UsuarioService:
     # UsuarioService si usuarios.py importa require_permiso). Hallazgo de auditoria
     # 2026-08-22, resuelto el mismo dia.
     @staticmethod
-    def verificar_permiso(
-        session: Session, id_usuario: int, recurso: str, accion: str
-    ) -> bool:
+    def verificar_permiso(session: Session, id_usuario: int, recurso: str, accion: str) -> bool:
         usuario = session.get(Usuario, id_usuario)
         if usuario is None or usuario.id_rol is None:
             return False

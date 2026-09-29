@@ -91,9 +91,7 @@ def _crear_cxp(session, saldo: Decimal):
 def test_registrar_pago_cobro_por_caja(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     pago = PagoService.registrar_pago_cobro(
         db_session,
@@ -119,9 +117,7 @@ def test_registrar_pago_cobro_por_caja(db_session):
 def test_registrar_pago_cobro_sin_usuario_autorizado_falla(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(PermisoDenegadoError):
         PagoService.registrar_pago_cobro(
@@ -136,9 +132,7 @@ def test_registrar_pago_cobro_sin_usuario_autorizado_falla(db_session):
 def test_registrar_pago_cobro_completo_marca_pagada(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     PagoService.registrar_pago_cobro(
         db_session,
@@ -170,9 +164,7 @@ def test_registrar_pago_cobro_por_banco_actualiza_saldo(db_session):
     db_session.refresh(cuenta)
     assert cuenta.saldo_total_banco == Decimal("530.00")
 
-    movimiento = (
-        db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta).one()
-    )
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta).one()
     assert movimiento.tipo_movimiento == "abono"
     assert movimiento.monto_movimiento == Decimal("30.00")
 
@@ -202,11 +194,7 @@ def test_registrar_pago_cobro_por_banco_con_tasa_y_bolivares(db_session):
     assert pago.tasa_cambio == Decimal("900.00")
 
     # Verificar que el movimiento bancario tiene los valores de tasa y bolivares
-    movimiento = (
-        db_session.query(BancoMovimiento)
-        .filter_by(id_pago_cobro=pago.id_pago_cobro)
-        .one()
-    )
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_pago_cobro=pago.id_pago_cobro).one()
     assert movimiento.monto_bolivares == Decimal("9000.00")
     assert movimiento.tasa_cambio == Decimal("900.00")
     assert movimiento.monto_movimiento == Decimal("10.00")
@@ -258,9 +246,7 @@ def test_registrar_pago_cobro_sin_origen(db_session):
 def test_registrar_pago_cobro_con_dos_origenes(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
     cuenta = crear_cuenta_bancaria(db_session)
 
     with pytest.raises(ValueError, match="exactamente un origen"):
@@ -278,9 +264,7 @@ def test_registrar_pago_cobro_con_dos_origenes(db_session):
 def test_registrar_pago_cobro_excede_saldo(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="excede el saldo pendiente"):
         PagoService.registrar_pago_cobro(
@@ -296,9 +280,7 @@ def test_registrar_pago_cobro_excede_saldo(db_session):
 def test_registrar_pago_cobro_monto_invalido(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="mayor a cero"):
         PagoService.registrar_pago_cobro(
@@ -314,9 +296,7 @@ def test_registrar_pago_cobro_monto_invalido(db_session):
 def test_registrar_pago_cobro_cuenta_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="Cuenta por cobrar no encontrada"):
         PagoService.registrar_pago_cobro(
@@ -347,12 +327,8 @@ def test_registrar_pago_cobro_caja_sin_turno_abierto_falla(db_session):
 def test_registrar_pago_cobro_caja_con_turno_ya_cerrado_falla(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
-    CajaService.cerrar_caja(
-        db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario)
 
     with pytest.raises(ValueError, match="no tiene un turno abierto"):
         PagoService.registrar_pago_cobro(
@@ -388,9 +364,7 @@ def test_registrar_pago_cobro_guarda_moneda_y_monto_moneda_origen(db_session):
 def test_registrar_pago_cobro_moneda_por_defecto_es_usd(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     pago = PagoService.registrar_pago_cobro(
         db_session,
@@ -408,9 +382,7 @@ def test_registrar_pago_cobro_moneda_por_defecto_es_usd(db_session):
 def test_listar_pagos_cobro(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     PagoService.registrar_pago_cobro(
         db_session,
@@ -429,9 +401,7 @@ def test_listar_pagos_cobro(db_session):
         id_usuario=admin.id_usuario,
     )
 
-    pagos = PagoService.listar_pagos_cobro(
-        db_session, cxc.id_cuenta_por_cobrar, id_usuario=admin.id_usuario
-    )
+    pagos = PagoService.listar_pagos_cobro(db_session, cxc.id_cuenta_por_cobrar, id_usuario=admin.id_usuario)
     assert len(pagos) == 2
 
 
@@ -447,9 +417,7 @@ def test_listar_pagos_cobro_sin_usuario_autorizado_falla(db_session):
 def test_registrar_pago_proveedor_por_caja(db_session):
     cxp, admin = _crear_cxp(db_session, Decimal("80.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     pago = PagoService.registrar_pago_proveedor(
         db_session,
@@ -472,9 +440,7 @@ def test_registrar_pago_proveedor_por_caja(db_session):
 def test_registrar_pago_proveedor_sin_usuario_autorizado_falla(db_session):
     cxp, admin = _crear_cxp(db_session, Decimal("80.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(PermisoDenegadoError):
         PagoService.registrar_pago_proveedor(
@@ -506,9 +472,7 @@ def test_registrar_pago_proveedor_por_banco_completo(db_session):
     db_session.refresh(cxp)
     assert cxp.estado == "pagada"
 
-    movimiento = (
-        db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta).one()
-    )
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta).one()
     assert movimiento.tipo_movimiento == "cargo"
     assert movimiento.monto_movimiento == Decimal("80.00")
 
@@ -516,9 +480,7 @@ def test_registrar_pago_proveedor_por_banco_completo(db_session):
 def test_registrar_pago_proveedor_excede_saldo(db_session):
     cxp, admin = _crear_cxp(db_session, Decimal("80.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="excede el saldo pendiente"):
         PagoService.registrar_pago_proveedor(
@@ -549,9 +511,7 @@ def test_registrar_pago_proveedor_por_banco_cuenta_inactiva_falla(db_session):
 def test_registrar_pago_proveedor_cuenta_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="Cuenta por pagar no encontrada"):
         PagoService.registrar_pago_proveedor(
@@ -567,9 +527,7 @@ def test_registrar_pago_proveedor_cuenta_inexistente(db_session):
 def test_listar_pagos_proveedor(db_session):
     cxp, admin = _crear_cxp(db_session, Decimal("80.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     PagoService.registrar_pago_proveedor(
         db_session,
@@ -588,9 +546,7 @@ def test_listar_pagos_proveedor(db_session):
         id_usuario=admin.id_usuario,
     )
 
-    pagos = PagoService.listar_pagos_proveedor(
-        db_session, cxp.id_cuenta, id_usuario=admin.id_usuario
-    )
+    pagos = PagoService.listar_pagos_proveedor(db_session, cxp.id_cuenta, id_usuario=admin.id_usuario)
     assert len(pagos) == 2
 
 
@@ -649,9 +605,7 @@ def test_aplicar_abono_general_fifo_distribuye_correctamente(db_session):
     time.sleep(0.1)
 
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     # Aplicar abono general de $250 con tasa de cambio 900
     resultado = PagoService.aplicar_abono_general_cliente(
@@ -688,9 +642,7 @@ def test_aplicar_abono_general_fifo_distribuye_correctamente(db_session):
     assert cuentas[0].estado == "pagada"
     assert cuentas[1].saldo_pendiente == Decimal("50.00")  # Segunda factura parcial
     assert cuentas[1].estado == "parcial"
-    assert cuentas[2].saldo_pendiente == Decimal(
-        "300.00"
-    )  # Tercera factura sin cambios
+    assert cuentas[2].saldo_pendiente == Decimal("300.00")  # Tercera factura sin cambios
     assert cuentas[2].estado == "pendiente"
 
 
@@ -704,9 +656,7 @@ def test_aplicar_abono_general_con_tasa_cambio_calcula_bolivares_correctamente(
     _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
 
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     tasa_cambio = Decimal("950.50")
     resultado = PagoService.aplicar_abono_general_cliente(
@@ -724,9 +674,7 @@ def test_aplicar_abono_general_con_tasa_cambio_calcula_bolivares_correctamente(
     factura_actualizada = resultado["facturas_actualizadas"][0]
 
     assert factura_actualizada["monto_aplicado"] == Decimal("50.00")
-    assert factura_actualizada["monto_aplicado_bs"] == Decimal(
-        "47525.00"
-    )  # 50 * 950.50
+    assert factura_actualizada["monto_aplicado_bs"] == Decimal("47525.00")  # 50 * 950.50
 
     # Verificar que el pago registrado tenga los valores correctos
     pagos = db_session.query(PagoCobro).all()
@@ -740,14 +688,10 @@ def test_aplicar_abono_general_sobreabono_maneja_exceso_correctamente(db_session
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
 
-    facturas = _crear_facturas_cliente_cxc(
-        db_session, cliente, admin, [Decimal("100.00"), Decimal("50.00")]
-    )
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00"), Decimal("50.00")])
 
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     # Abono de $200 cuando la deuda total es $150 (sobreabono de $50)
     resultado = PagoService.aplicar_abono_general_cliente(
@@ -761,9 +705,7 @@ def test_aplicar_abono_general_sobreabono_maneja_exceso_correctamente(db_session
     )
 
     # Verificar resultado
-    assert resultado["monto_total_aplicado"] == Decimal(
-        "150.00"
-    )  # Solo se aplicó la deuda total
+    assert resultado["monto_total_aplicado"] == Decimal("150.00")  # Solo se aplicó la deuda total
     assert resultado["saldo_restante"] == Decimal("50.00")  # Exceso no aplicado
     assert resultado["es_sobreabono"] is True
     assert len(resultado["facturas_actualizadas"]) == 2  # Ambas facturas pagadas
@@ -772,9 +714,7 @@ def test_aplicar_abono_general_sobreabono_maneja_exceso_correctamente(db_session
     from app.db.models import CuentaPorCobrar
 
     cuentas = (
-        db_session.query(CuentaPorCobrar)
-        .filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas]))
-        .all()
+        db_session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas])).all()
     )
 
     for cuenta in cuentas:
@@ -787,14 +727,10 @@ def test_aplicar_abono_general_descripcion_auditoria_formato_correcto(db_session
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
 
-    facturas = _crear_facturas_cliente_cxc(
-        db_session, cliente, admin, [Decimal("100.00"), Decimal("200.00")]
-    )
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00"), Decimal("200.00")])
 
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     resultado = PagoService.aplicar_abono_general_cliente(
         db_session,
@@ -830,9 +766,7 @@ def test_aplicar_abono_general_validaciones_basicas(db_session):
     cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
 
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     # Test monto <= 0
     with pytest.raises(ValueError, match="mayor a cero"):
@@ -887,14 +821,10 @@ def test_aplicar_abono_general_transaccion_atomica(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
 
-    facturas = _crear_facturas_cliente_cxc(
-        db_session, cliente, admin, [Decimal("100.00"), Decimal("200.00")]
-    )
+    facturas = _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00"), Decimal("200.00")])
 
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     # Contar pagos antes
     pagos_antes = db_session.query(PagoCobro).count()
@@ -922,9 +852,7 @@ def test_aplicar_abono_general_transaccion_atomica(db_session):
     from app.db.models import CuentaPorCobrar
 
     cuentas = (
-        db_session.query(CuentaPorCobrar)
-        .filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas]))
-        .all()
+        db_session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_([f.id_factura for f in facturas])).all()
     )
 
     assert cuentas[0].saldo_pendiente == Decimal("100.00")
@@ -967,9 +895,7 @@ def test_aplicar_abono_general_permisos(db_session):
     _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
 
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     # Intentar sin usuario (sin permisos)
     with pytest.raises(PermisoDenegadoError):
@@ -1010,9 +936,7 @@ def test_trigger_rechaza_pago_sin_origen_si_se_inserta_sin_pasar_por_el_service(
 def test_borrar_pago_cobro_por_caja_revierte_saldo_y_borra_movimiento(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     pago = PagoService.registrar_pago_cobro(
         db_session,
@@ -1024,18 +948,13 @@ def test_borrar_pago_cobro_por_caja_revierte_saldo_y_borra_movimiento(db_session
     )
     id_pago = pago.id_pago_cobro
 
-    db_session.query(PagoCobro).filter_by(id_pago_cobro=id_pago).delete(
-        synchronize_session=False
-    )
+    db_session.query(PagoCobro).filter_by(id_pago_cobro=id_pago).delete(synchronize_session=False)
     db_session.commit()
 
     db_session.refresh(cxc)
     assert cxc.saldo_pendiente == Decimal("100.00")
     assert cxc.estado == "pendiente"
-    assert (
-        db_session.query(CajaMovimiento).filter_by(id_pago_cobro=id_pago).first()
-        is None
-    )
+    assert db_session.query(CajaMovimiento).filter_by(id_pago_cobro=id_pago).first() is None
 
 
 def test_borrar_pago_cobro_por_banco_revierte_saldo_bancario_y_borra_movimiento(
@@ -1054,17 +973,12 @@ def test_borrar_pago_cobro_por_banco_revierte_saldo_bancario_y_borra_movimiento(
     )
     id_pago = pago.id_pago_cobro
 
-    db_session.query(PagoCobro).filter_by(id_pago_cobro=id_pago).delete(
-        synchronize_session=False
-    )
+    db_session.query(PagoCobro).filter_by(id_pago_cobro=id_pago).delete(synchronize_session=False)
     db_session.commit()
 
     db_session.refresh(cuenta)
     assert cuenta.saldo_total_banco == Decimal("500.00")
-    assert (
-        db_session.query(BancoMovimiento).filter_by(id_pago_cobro=id_pago).first()
-        is None
-    )
+    assert db_session.query(BancoMovimiento).filter_by(id_pago_cobro=id_pago).first() is None
 
 
 def test_borrar_pago_cobro_con_turno_de_caja_ya_cerrado_recalcula_saldo_cierre(
@@ -1098,15 +1012,11 @@ def test_borrar_pago_cobro_con_turno_de_caja_ya_cerrado_recalcula_saldo_cierre(
     )
     id_pago = pago.id_pago_cobro
 
-    CajaService.cerrar_caja(
-        db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario
-    )
+    CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario)
     db_session.refresh(caja)
     assert caja.saldo_cierre == Decimal("90.00")  # 50 de apertura + 40 de entrada
 
-    db_session.query(PagoCobro).filter_by(id_pago_cobro=id_pago).delete(
-        synchronize_session=False
-    )
+    db_session.query(PagoCobro).filter_by(id_pago_cobro=id_pago).delete(synchronize_session=False)
     db_session.commit()
 
     db_session.refresh(caja)
@@ -1127,9 +1037,7 @@ def test_borrar_pago_proveedor_por_banco_revierte_saldo_bancario(db_session):
     )
     id_pago = pago.id_pago_proveedor
 
-    db_session.query(PagoProveedor).filter_by(id_pago_proveedor=id_pago).delete(
-        synchronize_session=False
-    )
+    db_session.query(PagoProveedor).filter_by(id_pago_proveedor=id_pago).delete(synchronize_session=False)
     db_session.commit()
 
     db_session.refresh(cuenta)
@@ -1167,9 +1075,7 @@ def test_registrar_pago_proveedor_por_caja_valida_turno_abierto(db_session):
     assert saldo_actual == Decimal("160.00")
 
     # Cerrar caja
-    CajaService.cerrar_caja(
-        db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario
-    )
+    CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario)
 
     # Intentar pagar contra caja cerrada - debe fallar
     with pytest.raises(ValueError, match="no tiene un turno abierto"):
@@ -1183,9 +1089,7 @@ def test_registrar_pago_proveedor_por_caja_valida_turno_abierto(db_session):
         )
 
 
-def test_registrar_pago_cobro_bloquea_con_updlock_rowlock_concurrente(
-    db_session, test_engine
-):
+def test_registrar_pago_cobro_bloquea_con_updlock_rowlock_concurrente(db_session, test_engine):
     """Auditoria de CxC (2026-08-28), hallazgo H2: _aplicar_pago_cobro leia la
     CuentaPorCobrar con session.get() sin lock -- dos cobros concurrentes contra la MISMA
     cuenta podian ambos leer el mismo saldo_pendiente antes de que ninguno commitee, pasar
@@ -1205,9 +1109,7 @@ def test_registrar_pago_cobro_bloquea_con_updlock_rowlock_concurrente(
 
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
     id_cxc, id_caja, id_usuario = (
         cxc.id_cuenta_por_cobrar,
         caja.id_caja,
@@ -1245,17 +1147,13 @@ def test_registrar_pago_cobro_bloquea_con_updlock_rowlock_concurrente(
 
         # El lock sigue sostenido: registrar_pago_cobro debe seguir esperando, no adelantarse.
         hilo.join(timeout=1.5)
-        assert (
-            hilo.is_alive()
-        ), "registrar_pago_cobro no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre la CxC"
+        assert hilo.is_alive(), "registrar_pago_cobro no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre la CxC"
 
         # Libera el lock (rollback: esta sesion solo leyo, no debe dejar nada escrito).
         sesion_bloqueadora.rollback()
 
         hilo.join(timeout=10)
-        assert (
-            not hilo.is_alive()
-        ), "registrar_pago_cobro no continuo tras liberarse el lock"
+        assert not hilo.is_alive(), "registrar_pago_cobro no continuo tras liberarse el lock"
         assert "id_pago_cobro" in resultado
     finally:
         sesion_bloqueadora.close()
@@ -1271,9 +1169,7 @@ def test_listar_cuentas_por_cobrar_sin_filtro(db_session):
     cxc1, admin = _crear_cxc(db_session, Decimal("100.00"))
     cxc2, _ = _crear_cxc(db_session, Decimal("50.00"))
 
-    resultado = PagoService.listar_cuentas_por_cobrar(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = PagoService.listar_cuentas_por_cobrar(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 2
     assert {c.id_cuenta_por_cobrar for c in resultado["items"]} == {
@@ -1287,9 +1183,7 @@ def test_listar_cuentas_por_cobrar_filtra_por_cliente(db_session):
     _crear_cxc(db_session, Decimal("50.00"))
     id_cliente = cxc1.factura.id_cliente_factura
 
-    resultado = PagoService.listar_cuentas_por_cobrar(
-        db_session, id_cliente=id_cliente, id_usuario=admin.id_usuario
-    )
+    resultado = PagoService.listar_cuentas_por_cobrar(db_session, id_cliente=id_cliente, id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].id_cuenta_por_cobrar == cxc1.id_cuenta_por_cobrar
@@ -1302,9 +1196,7 @@ def test_listar_cuentas_por_cobrar_filtra_por_estado_vencida(db_session):
     cxc.fecha_vencimiento = date.today() - timedelta(days=5)
     db_session.commit()
 
-    resultado_vencida = PagoService.listar_cuentas_por_cobrar(
-        db_session, estado="vencida", id_usuario=admin.id_usuario
-    )
+    resultado_vencida = PagoService.listar_cuentas_por_cobrar(db_session, estado="vencida", id_usuario=admin.id_usuario)
     assert resultado_vencida["total"] == 1
     assert resultado_vencida["items"][0].estado_visual == "vencida"
 
@@ -1317,9 +1209,7 @@ def test_listar_cuentas_por_cobrar_filtra_por_estado_vencida(db_session):
 def test_listar_cuentas_por_cobrar_filtra_por_estado_pagada(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
     PagoService.registrar_pago_cobro(
         db_session,
         id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
@@ -1329,9 +1219,7 @@ def test_listar_cuentas_por_cobrar_filtra_por_estado_pagada(db_session):
         id_usuario=admin.id_usuario,
     )
 
-    resultado = PagoService.listar_cuentas_por_cobrar(
-        db_session, estado="pagada", id_usuario=admin.id_usuario
-    )
+    resultado = PagoService.listar_cuentas_por_cobrar(db_session, estado="pagada", id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].estado_visual == "pagada"
@@ -1366,9 +1254,7 @@ def test_listar_cuentas_por_cobrar_excluye_facturas_de_contado(db_session):
         ],
     )
 
-    resultado = PagoService.listar_cuentas_por_cobrar(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resultado = PagoService.listar_cuentas_por_cobrar(db_session, id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 0
     assert resultado["items"] == []

@@ -9,9 +9,7 @@ from app.services.permisos import require_permiso
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
-def _validar_unico(
-    session: Session, nombre_ruta: str, excluir_id: int | None = None
-) -> None:
+def _validar_unico(session: Session, nombre_ruta: str, excluir_id: int | None = None) -> None:
     query = session.query(Ruta).filter(Ruta.nombre_ruta == nombre_ruta)
     if excluir_id is not None:
         query = query.filter(Ruta.id_ruta != excluir_id)
@@ -32,24 +30,16 @@ def _validar_zona(zona_geojson: str) -> list[list[float]]:
         raise ValueError("La zona de cobertura debe tener al menos 3 vertices")
     for vertice in vertices:
         if not (isinstance(vertice, list | tuple) and len(vertice) == 2):
-            raise ValueError(
-                "Cada vertice de la zona debe ser un par [latitud, longitud]"
-            )
+            raise ValueError("Cada vertice de la zona debe ser un par [latitud, longitud]")
         lat, lng = vertice
         if not (-90 <= float(lat) <= 90):
-            raise ValueError(
-                "La latitud de un vertice de la zona debe estar entre -90 y 90"
-            )
+            raise ValueError("La latitud de un vertice de la zona debe estar entre -90 y 90")
         if not (-180 <= float(lng) <= 180):
-            raise ValueError(
-                "La longitud de un vertice de la zona debe estar entre -180 y 180"
-            )
+            raise ValueError("La longitud de un vertice de la zona debe estar entre -180 y 180")
     return vertices
 
 
-def _punto_en_poligono(
-    lat: float, lng: float, vertices: list[tuple[float, float]]
-) -> bool:
+def _punto_en_poligono(lat: float, lng: float, vertices: list[tuple[float, float]]) -> bool:
     """Ray casting -- True si (lat,lng) cae dentro del poligono `vertices` (se asume
     cerrado implicitamente uniendo el ultimo vertice con el primero, igual que lo dibuja
     Leaflet). Aproximacion planar (trata lat/lng como coordenadas cartesianas): valida
@@ -61,9 +51,7 @@ def _punto_en_poligono(
     for i in range(n):
         lat_i, lng_i = vertices[i]
         lat_j, lng_j = vertices[j]
-        if (lng_i > lng) != (lng_j > lng) and lat < (lat_j - lat_i) * (lng - lng_i) / (
-            lng_j - lng_i
-        ) + lat_i:
+        if (lng_i > lng) != (lng_j > lng) and lat < (lat_j - lat_i) * (lng - lng_i) / (lng_j - lng_i) + lat_i:
             dentro = not dentro
         j = i
     return dentro
@@ -71,9 +59,7 @@ def _punto_en_poligono(
 
 class RutaService:
     @staticmethod
-    def obtener(
-        session: Session, id_ruta: int, id_usuario: int | None = None
-    ) -> Ruta | None:
+    def obtener(session: Session, id_ruta: int, id_usuario: int | None = None) -> Ruta | None:
         require_permiso(session, id_usuario, "rutas", "ver")
         return session.get(Ruta, id_ruta)
 
@@ -90,9 +76,7 @@ class RutaService:
         query = session.query(Ruta)
         if texto_busqueda:
             like = f"%{texto_busqueda}%"
-            query = query.filter(
-                Ruta.nombre_ruta.ilike(like) | Ruta.descripcion_ruta.ilike(like)
-            )
+            query = query.filter(Ruta.nombre_ruta.ilike(like) | Ruta.descripcion_ruta.ilike(like))
         if estado_ruta:
             query = query.filter(Ruta.estado_ruta == estado_ruta)
         query = query.order_by(Ruta.nombre_ruta)
@@ -131,9 +115,7 @@ class RutaService:
         return ruta
 
     @staticmethod
-    def actualizar(
-        session: Session, id_ruta: int, id_usuario: int | None = None, **datos
-    ) -> Ruta:
+    def actualizar(session: Session, id_ruta: int, id_usuario: int | None = None, **datos) -> Ruta:
         require_permiso(session, id_usuario, "rutas", "editar")
         ruta = session.get(Ruta, id_ruta)
         if ruta is None:
@@ -148,9 +130,7 @@ class RutaService:
         if nuevo_nombre and nuevo_nombre != ruta.nombre_ruta:
             _validar_unico(session, nuevo_nombre, excluir_id=id_ruta)
 
-        nueva_zona = (
-            datos["zona_geojson"] if "zona_geojson" in datos else ruta.zona_geojson
-        )
+        nueva_zona = datos["zona_geojson"] if "zona_geojson" in datos else ruta.zona_geojson
         _validar_zona(nueva_zona)
 
         for campo, valor in datos.items():
@@ -181,9 +161,7 @@ class RutaService:
         )
 
     @staticmethod
-    def cambiar_estado(
-        session: Session, id_ruta: int, nuevo_estado: str, id_usuario: int | None = None
-    ) -> Ruta:
+    def cambiar_estado(session: Session, id_ruta: int, nuevo_estado: str, id_usuario: int | None = None) -> Ruta:
         require_permiso(session, id_usuario, "rutas", "eliminar")
         if nuevo_estado not in ESTADOS_VALIDOS:
             raise ValueError(f"nuevo_estado debe ser uno de {ESTADOS_VALIDOS}")

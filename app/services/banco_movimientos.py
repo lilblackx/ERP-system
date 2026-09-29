@@ -103,9 +103,7 @@ class BancoMovimientoService:
         return query.order_by(BancoMovimiento.fecha_movimiento.desc()).all()
 
     @staticmethod
-    def obtener_saldo_actual(
-        session: Session, id_cuenta: int, id_usuario: int | None = None
-    ) -> float:
+    def obtener_saldo_actual(session: Session, id_cuenta: int, id_usuario: int | None = None) -> float:
         """Obtiene el saldo actual de una cuenta bancaria."""
         require_permiso(session, id_usuario, "bancos", "ver")
         cuenta = session.get(CuentaBancaria, id_cuenta)

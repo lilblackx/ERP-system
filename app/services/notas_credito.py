@@ -165,9 +165,7 @@ class NotaCreditoService:
         nota = session.execute(
             select(NotaCreditoCliente)
             .where(NotaCreditoCliente.id_nota_credito == id_nota_credito)
-            .with_hint(
-                NotaCreditoCliente, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
-            )
+            .with_hint(NotaCreditoCliente, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
         ).scalar_one_or_none()
         if nota is None:
             raise ValueError("Nota de credito no encontrada")
@@ -176,9 +174,7 @@ class NotaCreditoService:
                 f"La nota de credito '{nota.numero_nota_credito}' no esta disponible (estado: {nota.estado})"
             )
         if monto > nota.saldo_disponible:
-            raise ValueError(
-                f"El monto {monto} excede el saldo disponible {nota.saldo_disponible} de la nota"
-            )
+            raise ValueError(f"El monto {monto} excede el saldo disponible {nota.saldo_disponible} de la nota")
 
         factura_destino = session.get(FacturaVenta, id_factura_destino)
         if factura_destino is None:
@@ -186,9 +182,7 @@ class NotaCreditoService:
         if factura_destino.id_cliente_factura != nota.id_cliente:
             raise ValueError("La nota de credito pertenece a otro cliente")
         if factura_destino.estado_factura == "ANULADA":
-            raise ValueError(
-                "No se puede aplicar una nota de credito a una factura anulada"
-            )
+            raise ValueError("No se puede aplicar una nota de credito a una factura anulada")
 
         cxc = session.execute(
             select(CuentaPorCobrar)
@@ -198,9 +192,7 @@ class NotaCreditoService:
         if cxc is None or cxc.estado not in ("pendiente", "parcial"):
             raise ValueError("La factura destino no tiene saldo pendiente")
         if monto > cxc.saldo_pendiente:
-            raise ValueError(
-                f"El monto {monto} excede el saldo pendiente {cxc.saldo_pendiente} de la factura destino"
-            )
+            raise ValueError(f"El monto {monto} excede el saldo pendiente {cxc.saldo_pendiente} de la factura destino")
 
         nota.saldo_disponible -= monto
         if nota.saldo_disponible == 0:
@@ -273,13 +265,9 @@ class NotaCreditoService:
         if monto <= 0:
             raise ValueError("El monto a devolver debe ser mayor a cero")
         if metodo_devolucion not in ("efectivo", "pago_movil", "transferencia"):
-            raise ValueError(
-                "metodo_devolucion debe ser 'efectivo', 'pago_movil' o 'transferencia'"
-            )
+            raise ValueError("metodo_devolucion debe ser 'efectivo', 'pago_movil' o 'transferencia'")
         if id_autorizador is None:
-            raise ValueError(
-                "La devolucion de una nota de credito requiere autorizacion de un supervisor"
-            )
+            raise ValueError("La devolucion de una nota de credito requiere autorizacion de un supervisor")
         require_permiso(session, id_autorizador, "notas_credito", "editar")
 
         # WITH (UPDLOCK, ROWLOCK): mismo patron que aplicar_nota_credito_cliente() -- evita
@@ -288,9 +276,7 @@ class NotaCreditoService:
         nota = session.execute(
             select(NotaCreditoCliente)
             .where(NotaCreditoCliente.id_nota_credito == id_nota_credito)
-            .with_hint(
-                NotaCreditoCliente, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
-            )
+            .with_hint(NotaCreditoCliente, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
         ).scalar_one_or_none()
         if nota is None:
             raise ValueError("Nota de credito no encontrada")
@@ -299,23 +285,17 @@ class NotaCreditoService:
                 f"La nota de credito '{nota.numero_nota_credito}' no esta disponible (estado: {nota.estado})"
             )
         if monto > nota.saldo_disponible:
-            raise ValueError(
-                f"El monto {monto} excede el saldo disponible {nota.saldo_disponible} de la nota"
-            )
+            raise ValueError(f"El monto {monto} excede el saldo disponible {nota.saldo_disponible} de la nota")
 
         fecha = datetime.now()
         # Obtener nombre del cliente para la descripción
         cliente = session.get(Cliente, nota.id_cliente)
         nombre_cliente = cliente.nombre_razon_social if cliente else "Desconocido"
-        descripcion = (
-            f"Devolucion nota de credito {nota.numero_nota_credito} - {nombre_cliente}"
-        )
+        descripcion = f"Devolucion nota de credito {nota.numero_nota_credito} - {nombre_cliente}"
 
         if metodo_devolucion == "efectivo":
             if id_caja is None:
-                raise ValueError(
-                    "La devolucion en efectivo requiere indicar la caja de origen"
-                )
+                raise ValueError("La devolucion en efectivo requiere indicar la caja de origen")
             caja = session.execute(
                 select(Caja)
                 .where(Caja.id_caja == id_caja)
@@ -324,9 +304,7 @@ class NotaCreditoService:
             if caja is None:
                 raise ValueError("Caja no encontrada")
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                raise ValueError(
-                    f"La caja '{caja.nombre_caja}' no tiene un turno abierto"
-                )
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
             saldo_actual = CajaService.calcular_saldo_actual(session, id_caja)
             if saldo_actual < monto:
                 raise ValueError(
@@ -343,16 +321,12 @@ class NotaCreditoService:
             )
         else:
             if id_cuenta_bancaria is None:
-                raise ValueError(
-                    "La devolucion por pago movil/transferencia requiere una cuenta bancaria de origen"
-                )
+                raise ValueError("La devolucion por pago movil/transferencia requiere una cuenta bancaria de origen")
             cuenta = session.get(CuentaBancaria, id_cuenta_bancaria)
             if cuenta is None:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta.estado_cuenta != "ACTIVO":
-                raise ValueError(
-                    f"La cuenta bancaria '{cuenta.numero_cuenta}' esta inactiva"
-                )
+                raise ValueError(f"La cuenta bancaria '{cuenta.numero_cuenta}' esta inactiva")
             referencia = (referencia or "").strip()
             if len(referencia) < 4:
                 raise ValueError(
@@ -360,9 +334,7 @@ class NotaCreditoService:
                     "de al menos 4 caracteres"
                 )
             if len(referencia) > 50:
-                raise ValueError(
-                    "La referencia bancaria no puede superar 50 caracteres"
-                )
+                raise ValueError("La referencia bancaria no puede superar 50 caracteres")
             BancoService._registrar_egreso_vuelto(
                 session,
                 id_cuenta=id_cuenta_bancaria,

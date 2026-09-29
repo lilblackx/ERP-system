@@ -13,14 +13,10 @@ class CategoriaService:
         return session.query(Categoria).order_by(Categoria.nombre).all()
 
     @staticmethod
-    def listar_con_conteo(
-        session: Session, id_usuario: int | None = None
-    ) -> list[dict]:
+    def listar_con_conteo(session: Session, id_usuario: int | None = None) -> list[dict]:
         require_permiso(session, id_usuario, "categorias", "ver")
         filas = (
-            session.query(
-                Categoria, func.count(Inventario.id_producto).label("total_productos")
-            )
+            session.query(Categoria, func.count(Inventario.id_producto).label("total_productos"))
             .outerjoin(Inventario, Inventario.id_categoria == Categoria.id_categoria)
             .group_by(
                 Categoria.id_categoria,
@@ -31,25 +27,16 @@ class CategoriaService:
             .order_by(Categoria.nombre)
             .all()
         )
-        return [
-            {"categoria": categoria, "total_productos": total}
-            for categoria, total in filas
-        ]
+        return [{"categoria": categoria, "total_productos": total} for categoria, total in filas]
 
     @staticmethod
-    def obtener(
-        session: Session, id_categoria: int, id_usuario: int | None = None
-    ) -> Categoria | None:
+    def obtener(session: Session, id_categoria: int, id_usuario: int | None = None) -> Categoria | None:
         require_permiso(session, id_usuario, "categorias", "ver")
         return session.get(Categoria, id_categoria)
 
     @staticmethod
     def contar_productos(session: Session, id_categoria: int) -> int:
-        return (
-            session.query(Inventario)
-            .filter(Inventario.id_categoria == id_categoria)
-            .count()
-        )
+        return session.query(Inventario).filter(Inventario.id_categoria == id_categoria).count()
 
     @staticmethod
     def crear(session: Session, **datos) -> Categoria:
@@ -72,9 +59,7 @@ class CategoriaService:
         return categoria
 
     @staticmethod
-    def actualizar(
-        session: Session, id_categoria: int, id_usuario: int | None = None, **datos
-    ) -> Categoria:
+    def actualizar(session: Session, id_categoria: int, id_usuario: int | None = None, **datos) -> Categoria:
         require_permiso(session, id_usuario, "categorias", "editar")
         categoria = session.get(Categoria, id_categoria)
         if categoria is None:
@@ -97,17 +82,13 @@ class CategoriaService:
         return categoria
 
     @staticmethod
-    def eliminar(
-        session: Session, id_categoria: int, id_usuario: int | None = None
-    ) -> None:
+    def eliminar(session: Session, id_categoria: int, id_usuario: int | None = None) -> None:
         require_permiso(session, id_usuario, "categorias", "eliminar")
         categoria = session.get(Categoria, id_categoria)
         if categoria is None:
             return
         if CategoriaService.contar_productos(session, id_categoria) > 0:
-            raise ValueError(
-                "No se puede eliminar: existen productos asociados a la categoria"
-            )
+            raise ValueError("No se puede eliminar: existen productos asociados a la categoria")
         detalle = {"id_categoria": categoria.id_categoria, "nombre": categoria.nombre}
         session.delete(categoria)
         session.commit()

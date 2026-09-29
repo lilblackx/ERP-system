@@ -4,9 +4,7 @@ from email.message import EmailMessage
 from app import config
 
 
-def enviar_correo(
-    destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str | None = None
-) -> None:
+def enviar_correo(destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str | None = None) -> None:
     """Unico punto de envio de correo de la app -- los tests monkeypatchean esta funcion
     para no golpear un servidor SMTP real (ver tests/services/test_recuperacion_acceso.py).
 
@@ -16,9 +14,7 @@ def enviar_correo(
     `cuerpo_html` es opcional: si se pasa, el mensaje se arma como multipart/alternative
     (RFC 2046) con ambas versiones -- el cliente de correo elige la que sepa mostrar."""
     if not config.SMTP_USER or not config.SMTP_PASSWORD:
-        raise RuntimeError(
-            "SMTP no esta configurado (SMTP_USER/SMTP_PASSWORD faltantes en .env)"
-        )
+        raise RuntimeError("SMTP no esta configurado (SMTP_USER/SMTP_PASSWORD faltantes en .env)")
 
     msg = EmailMessage()
     msg["Subject"] = asunto

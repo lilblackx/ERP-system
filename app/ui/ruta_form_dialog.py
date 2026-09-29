@@ -134,9 +134,7 @@ def _ordenar_por_angulo(
         return list(vertices)
     centro_lat = sum(v[0] for v in vertices) / len(vertices)
     centro_lng = sum(v[1] for v in vertices) / len(vertices)
-    return sorted(
-        vertices, key=lambda v: math.atan2(v[0] - centro_lat, v[1] - centro_lng)
-    )
+    return sorted(vertices, key=lambda v: math.atan2(v[0] - centro_lat, v[1] - centro_lng))
 
 
 class RutaFormDialog(QDialog):
@@ -164,9 +162,7 @@ class RutaFormDialog(QDialog):
         # click sobre el mapa, asi que mas area de mapa hace la tarea mas facil.
         self.setFixedSize(620, 780)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
@@ -185,9 +181,7 @@ class RutaFormDialog(QDialog):
 
         icon_lbl = QLabel()
         fa_icon_name = "fa5s.edit" if self.ruta else "fa5s.draw-polygon"
-        icon_lbl.setPixmap(
-            qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22))
-        )
+        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -201,9 +195,7 @@ class RutaFormDialog(QDialog):
 
         titulo_text = "Editar Ruta" if self.ruta else "Nueva Ruta"
         lbl_titulo = QLabel(titulo_text)
-        lbl_titulo.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         lbl_subtitulo = QLabel("Zona de cobertura para asignar a los vendedores.")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
@@ -263,16 +255,12 @@ class RutaFormDialog(QDialog):
         lbl_zona.setTextFormat(Qt.TextFormat.RichText)
         card_mapa_layout.addWidget(lbl_zona)
 
-        lbl_instrucciones = QLabel(
-            "Haz clic en el mapa para marcar los vértices del contorno de la zona (mínimo 3)."
-        )
+        lbl_instrucciones = QLabel("Haz clic en el mapa para marcar los vértices del contorno de la zona (mínimo 3).")
         lbl_instrucciones.setWordWrap(True)
         lbl_instrucciones.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
         card_mapa_layout.addWidget(lbl_instrucciones)
 
-        self.mapa = MapaWidget(
-            editable=True, modo="zona", centrar_en_dispositivo=self.ruta is None
-        )
+        self.mapa = MapaWidget(editable=True, modo="zona", centrar_en_dispositivo=self.ruta is None)
         self.mapa.setMinimumHeight(340)
         self.mapa.vertice_zona_agregado.connect(self._on_vertice_agregado)
         card_mapa_layout.addWidget(self.mapa)
@@ -378,9 +366,7 @@ class RutaFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "El nombre de la ruta es obligatorio."
-            )
+            MessageBox.warning(self, "Dato requerido", "El nombre de la ruta es obligatorio.")
             self.nombre_input.setFocus()
             return
 

@@ -138,9 +138,7 @@ class BancoFormDialog(QDialog):
         self.setWindowTitle("Editar Banco" if banco else "Nuevo Banco")
         self.setFixedWidth(800)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
@@ -160,9 +158,7 @@ class BancoFormDialog(QDialog):
 
         icon_lbl = QLabel()
         fa_icon_name = "fa5s.university" if self.banco else "fa5s.plus-circle"
-        icon_lbl.setPixmap(
-            qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22))
-        )
+        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -176,9 +172,7 @@ class BancoFormDialog(QDialog):
 
         titulo_text = "Editar Banco" if self.banco else "Nuevo Banco"
         lbl_titulo = QLabel(titulo_text)
-        lbl_titulo.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         lbl_subtitulo = QLabel("Complete los datos requeridos para registrar el banco.")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
@@ -246,9 +240,7 @@ class BancoFormDialog(QDialog):
         self.identificacion_input.setMaxLength(20)
         self.identificacion_input.setFixedHeight(36)
         # Validador para RIF/Cédula: 1-8 dígitos opcionalmente seguidos de guión y un dígito
-        id_validator = QRegularExpressionValidator(
-            QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$")
-        )
+        id_validator = QRegularExpressionValidator(QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$"))
         self.identificacion_input.setValidator(id_validator)
         grid.addWidget(lbl_rif, 4, 0)
         grid.addWidget(self.identificacion_input, 5, 0)
@@ -289,21 +281,15 @@ class BancoFormDialog(QDialog):
         auditoria_layout.addWidget(lbl_auditoria)
 
         self.fecha_creacion_label = QLabel()
-        self.fecha_creacion_label.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED};"
-        )
+        self.fecha_creacion_label.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         auditoria_layout.addWidget(self.fecha_creacion_label)
 
         self.creado_por_label = QLabel()
-        self.creado_por_label.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED};"
-        )
+        self.creado_por_label.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         auditoria_layout.addWidget(self.creado_por_label)
 
         self.modificado_por_label = QLabel()
-        self.modificado_por_label.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED};"
-        )
+        self.modificado_por_label.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         auditoria_layout.addWidget(self.modificado_por_label)
 
         card_layout.addLayout(grid)
@@ -358,20 +344,14 @@ class BancoFormDialog(QDialog):
             self.fecha_creacion_label.setText("Fecha de creación: N/A")
 
         if banco.creador:
-            nombre_creador = (
-                banco.creador.nombre
-                or banco.creador.nombre_usuario
-                or f"ID {banco.creado_por}"
-            )
+            nombre_creador = banco.creador.nombre or banco.creador.nombre_usuario or f"ID {banco.creado_por}"
             self.creado_por_label.setText(f"Creado por: {nombre_creador}")
         else:
             self.creado_por_label.setText("Creado por: N/A")
 
         if banco.modificador:
             nombre_modificador = (
-                banco.modificador.nombre
-                or banco.modificador.nombre_usuario
-                or f"ID {banco.modificado_por}"
+                banco.modificador.nombre or banco.modificador.nombre_usuario or f"ID {banco.modificado_por}"
             )
             self.modificado_por_label.setText(f"Modificado por: {nombre_modificador}")
         else:
@@ -379,21 +359,15 @@ class BancoFormDialog(QDialog):
 
     def _validar_y_aceptar(self):
         if not self.codigo_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "El código del banco es obligatorio."
-            )
+            MessageBox.warning(self, "Dato requerido", "El código del banco es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "El nombre del banco es obligatorio."
-            )
+            MessageBox.warning(self, "Dato requerido", "El nombre del banco es obligatorio.")
             self.nombre_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "La identificación (RIF) es obligatoria."
-            )
+            MessageBox.warning(self, "Dato requerido", "La identificación (RIF) es obligatoria.")
             self.identificacion_input.setFocus()
             return
         self.accept()

@@ -44,9 +44,7 @@ def crear_categoria(session: Session, **overrides) -> Categoria:
     return categoria
 
 
-def crear_producto(
-    session: Session, cantidad_unidad: Decimal | int = 100, **overrides
-) -> Inventario:
+def crear_producto(session: Session, cantidad_unidad: Decimal | int = 100, **overrides) -> Inventario:
     categoria = overrides.pop("categoria", None) or crear_categoria(session)
     datos = {
         "id_categoria": categoria.id_categoria,
@@ -114,9 +112,7 @@ def crear_cliente(
     return cliente
 
 
-def crear_proveedor(
-    session: Session, limite_credito: Decimal | int = 0, **overrides
-) -> Proveedor:
+def crear_proveedor(session: Session, limite_credito: Decimal | int = 0, **overrides) -> Proveedor:
     datos = {
         "codigo_proveedor": _siguiente("PROV-"),
         "identificacion_proveedor": _siguiente("J-"),
@@ -144,9 +140,7 @@ def crear_banco(session: Session, **overrides) -> Banco:
     return banco
 
 
-def crear_cuenta_bancaria(
-    session: Session, saldo_total_banco: Decimal | int = 0, **overrides
-) -> CuentaBancaria:
+def crear_cuenta_bancaria(session: Session, saldo_total_banco: Decimal | int = 0, **overrides) -> CuentaBancaria:
     banco = overrides.pop("banco", None) or crear_banco(session)
     datos = {
         "id_banco": banco.id_banco,

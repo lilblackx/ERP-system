@@ -9,10 +9,7 @@ from tests.factories import crear_usuario_admin
 
 def test_obtener_configuracion_sin_datos(db_session):
     admin = crear_usuario_admin(db_session)
-    assert (
-        EmpresaService.obtener_configuracion(db_session, id_usuario=admin.id_usuario)
-        is None
-    )
+    assert EmpresaService.obtener_configuracion(db_session, id_usuario=admin.id_usuario) is None
 
 
 def test_obtener_configuracion_sin_usuario_autorizado_falla(db_session):

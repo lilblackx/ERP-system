@@ -154,9 +154,7 @@ class DevolverNotaCreditoDialog(QDialog):
         self.setMinimumWidth(420)
         self.resize(420, 400)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
         self._cargar_origenes()
@@ -171,9 +169,7 @@ class DevolverNotaCreditoDialog(QDialog):
         header = QHBoxLayout()
         header.setSpacing(12)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY).pixmap(QSize(20, 20))
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -181,9 +177,7 @@ class DevolverNotaCreditoDialog(QDialog):
         icon_lbl.setFixedSize(34, 34)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_titulo = QLabel("Devolver Nota de Crédito")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         header.addWidget(icon_lbl)
         header.addWidget(lbl_titulo)
         header.addStretch()
@@ -209,9 +203,7 @@ class DevolverNotaCreditoDialog(QDialog):
 
         lbl_monto = QLabel(f"Monto a devolver {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01")
-        )
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)
         card_layout.addWidget(lbl_monto)
         card_layout.addWidget(self.monto_input)
@@ -233,12 +225,8 @@ class DevolverNotaCreditoDialog(QDialog):
         card_layout.addWidget(lbl_origen)
         card_layout.addWidget(self.origen_combo)
 
-        self.lbl_aviso = QLabel(
-            "Toda devolución requiere autorización de un supervisor."
-        )
-        self.lbl_aviso.setStyleSheet(
-            f"color: {COLOR_DANGER}; font-size: 11px; font-style: italic;"
-        )
+        self.lbl_aviso = QLabel("Toda devolución requiere autorización de un supervisor.")
+        self.lbl_aviso.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 11px; font-style: italic;")
         card_layout.addWidget(self.lbl_aviso)
 
         root.addWidget(card, stretch=1)
@@ -278,28 +266,20 @@ class DevolverNotaCreditoDialog(QDialog):
 
     def _nota_seleccionada(self) -> NotaCreditoCliente | None:
         id_nota = self.nota_combo.currentData()
-        return next(
-            (n for n in self.notas_disponibles if n.id_nota_credito == id_nota), None
-        )
+        return next((n for n in self.notas_disponibles if n.id_nota_credito == id_nota), None)
 
     def _cargar_origenes(self) -> None:
         try:
             cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cajas = []
-        self._cajas_abiertas = [
-            c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None
-        ]
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
 
         try:
-            cuentas = BancoService.listar_cuentas(
-                self.session, id_usuario=self.id_usuario
-            )
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cuentas = []
-        self._cuentas_activas = [
-            c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"
-        ]
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
 
     def _toggle_origen(self) -> None:
         metodo = self.metodo_combo.currentData()
@@ -324,9 +304,7 @@ class DevolverNotaCreditoDialog(QDialog):
             else:
                 self.origen_combo.setEnabled(True)
                 for cuenta in self._cuentas_activas:
-                    nombre_banco = (
-                        cuenta.banco.nombre_banco if cuenta.banco else "Banco"
-                    )
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     etiqueta = f"{nombre_banco} - {cuenta.numero_cuenta}"
                     self.origen_combo.addItem(etiqueta, ("banco", cuenta.id_cuenta))
         self.origen_combo.blockSignals(False)
@@ -355,11 +333,7 @@ class DevolverNotaCreditoDialog(QDialog):
             "Un supervisor debe autorizar esta devolución."
         )
         es_bancario = metodo != "efectivo"
-        motivo_label = (
-            "Número de referencia bancaria"
-            if es_bancario
-            else "Motivo de la devolución"
-        )
+        motivo_label = "Número de referencia bancaria" if es_bancario else "Motivo de la devolución"
         dialogo = AutorizacionDialog(
             self.session,
             recurso="notas_credito",
@@ -371,10 +345,7 @@ class DevolverNotaCreditoDialog(QDialog):
             motivo_max_length=50 if es_bancario else None,
             parent=self,
         )
-        if (
-            dialogo.exec() != QDialog.DialogCode.Accepted
-            or dialogo.usuario_autorizador is None
-        ):
+        if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
             return
 
         try:
@@ -395,9 +366,7 @@ class DevolverNotaCreditoDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(
-                self, "Sin permiso", "No tiene permiso para devolver notas de crédito."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tiene permiso para devolver notas de crédito.")
             return
 
         self.accept()

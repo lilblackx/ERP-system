@@ -39,9 +39,7 @@ _URL_NOMINATIM_BUSQUEDA = "https://nominatim.openstreetmap.org/search"
 
 def _get_json(url: str) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(
-        request, timeout=_TIMEOUT_SEGUNDOS
-    ) as resp:  # noqa: S310 (URL fija, https)
+    with urllib.request.urlopen(request, timeout=_TIMEOUT_SEGUNDOS) as resp:  # noqa: S310 (URL fija, https)
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -68,9 +66,7 @@ def buscar_lugares(texto: str) -> list[dict]:
     2026-09-01, pedido del usuario): sin esto Nominatim devuelve homonimos de cualquier
     pais (ej. "Condominio 9" en Mexico/Chile), que para una distribuidora que opera solo
     en Venezuela son ruido puro -- nunca la ubicacion que el usuario esta buscando."""
-    query = urllib.parse.urlencode(
-        {"q": texto, "format": "json", "limit": 5, "countrycodes": "ve"}
-    )
+    query = urllib.parse.urlencode({"q": texto, "format": "json", "limit": 5, "countrycodes": "ve"})
     try:
         datos = _get_json(f"{_URL_NOMINATIM_BUSQUEDA}?{query}")
     except Exception:

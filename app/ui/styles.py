@@ -57,17 +57,11 @@ def generar_iconos_qss() -> None:
 
     _ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     if not ICON_CHEVRON_DOWN_PATH.exists():
-        qta.icon("fa5s.chevron-down", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(
-            str(ICON_CHEVRON_DOWN_PATH)
-        )
+        qta.icon("fa5s.chevron-down", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(str(ICON_CHEVRON_DOWN_PATH))
     if not ICON_CHEVRON_UP_PATH.exists():
-        qta.icon("fa5s.chevron-up", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(
-            str(ICON_CHEVRON_UP_PATH)
-        )
+        qta.icon("fa5s.chevron-up", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(str(ICON_CHEVRON_UP_PATH))
     if not ICON_CHECK_PATH.exists():
-        qta.icon("fa5s.check", color="#FFFFFF").pixmap(12, 12).save(
-            str(ICON_CHECK_PATH)
-        )
+        qta.icon("fa5s.check", color="#FFFFFF").pixmap(12, 12).save(str(ICON_CHECK_PATH))
 
 
 # ── Paleta principal ────────────────────────────────────────────────────────
@@ -557,9 +551,7 @@ def color_con_alpha(color_hex: str, alpha: int = 26) -> str:
     return f"rgba({c.red()}, {c.green()}, {c.blue()}, {alpha})"
 
 
-def aplicar_sombra(
-    widget: QWidget, blur: int = 18, y_offset: int = 3, alpha: int = 35
-) -> None:
+def aplicar_sombra(widget: QWidget, blur: int = 18, y_offset: int = 3, alpha: int = 35) -> None:
     """Sombra sutil de elevacion para tarjetas/tablas (QSS no soporta box-shadow en
     widgets normales -- esto es QGraphicsDropShadowEffect, nativo de Qt, sin
     dependencias nuevas). Color fijo tono slate-900 translucido para que la sombra
@@ -572,9 +564,7 @@ def aplicar_sombra(
     widget.setGraphicsEffect(sombra)
 
 
-def alinear_encabezados(
-    tabla: QTableWidget, alineaciones: dict[int, Qt.AlignmentFlag]
-) -> None:
+def alinear_encabezados(tabla: QTableWidget, alineaciones: dict[int, Qt.AlignmentFlag]) -> None:
     """QHeaderView centra el texto de sus secciones por defecto, mientras que
     QTableWidgetItem se alinea a la izquierda por defecto -- sin esto, el encabezado de
     cada columna de texto queda corrido respecto a sus datos (ver GUIA_ESTILO_UI.md §5).
@@ -655,9 +645,7 @@ class LabelElidable(QLabel):
         super().setText(self._elidido())
 
     def _elidido(self) -> str:
-        return self.fontMetrics().elidedText(
-            self._texto_completo, Qt.TextElideMode.ElideRight, self.width()
-        )
+        return self.fontMetrics().elidedText(self._texto_completo, Qt.TextElideMode.ElideRight, self.width())
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 (override de Qt)
         # Fijo y chico a proposito (no basado en el texto actual, ni siquiera elidido):
@@ -743,9 +731,7 @@ class FlowLayout(QLayout):
                 alto_fila = 0
 
             if not test_only:
-                item.setGeometry(
-                    QRect(x, y, item.sizeHint().width(), item.sizeHint().height())
-                )
+                item.setGeometry(QRect(x, y, item.sizeHint().width(), item.sizeHint().height()))
 
             x = siguiente_x
             alto_fila = max(alto_fila, item.sizeHint().height())

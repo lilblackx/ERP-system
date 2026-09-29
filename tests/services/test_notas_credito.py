@@ -178,9 +178,7 @@ def test_listar_notas_credito_cliente(db_session):
         id_usuario=admin.id_usuario,
     )
 
-    notas = NotaCreditoService.listar_notas_credito_cliente(
-        db_session, cliente.id_cliente, id_usuario=admin.id_usuario
-    )
+    notas = NotaCreditoService.listar_notas_credito_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
     assert len(notas) == 2
 
 
@@ -280,11 +278,7 @@ def test_aplicar_nota_credito_cliente_ok(db_session):
     assert nota_actualizada.saldo_disponible == Decimal("0.00")
     assert nota_actualizada.estado == "aplicada"
 
-    cxc = (
-        db_session.query(CuentaPorCobrar)
-        .filter_by(id_factura=factura_destino.id_factura)
-        .one()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura_destino.id_factura).one()
     assert cxc.saldo_pendiente == Decimal("30.00")
     assert cxc.estado == "parcial"
 
@@ -373,9 +367,7 @@ def test_aplicar_nota_credito_cliente_de_otro_cliente_falla(db_session):
         motivo="x",
         id_usuario=admin.id_usuario,
     )
-    cliente_b = crear_cliente(
-        db_session, limite_credito=Decimal("1000.00"), dias_credito=30
-    )
+    cliente_b = crear_cliente(db_session, limite_credito=Decimal("1000.00"), dias_credito=30)
     factura_destino_b = _crear_factura_credito(db_session, cliente_b, monto="80.00")
 
     with pytest.raises(ValueError, match="otro cliente"):
@@ -488,9 +480,7 @@ def test_devolver_nota_credito_cliente_efectivo_ok(db_session):
     )
     assert salida is not None
     assert salida.monto_movimiento == Decimal("50.00")
-    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal(
-        "450.00"
-    )
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("450.00")
 
 
 def test_devolver_nota_credito_cliente_bancario_ok(db_session):
@@ -738,6 +728,4 @@ def test_listar_notas_credito_proveedor(db_session):
 def test_listar_notas_credito_proveedor_sin_usuario_autorizado_falla(db_session):
     proveedor, _, _ = _crear_compra(db_session)
     with pytest.raises(PermisoDenegadoError):
-        NotaCreditoService.listar_notas_credito_proveedor(
-            db_session, proveedor.id_proveedor
-        )
+        NotaCreditoService.listar_notas_credito_proveedor(db_session, proveedor.id_proveedor)

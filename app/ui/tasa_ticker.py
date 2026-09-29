@@ -90,9 +90,7 @@ class TasaTicker(QWidget):
         layout.setContentsMargins(20, 0, 20, 0)
         layout.setSpacing(14)
 
-        self.bloque_bcv, self.lbl_valor_bcv, self.lbl_delta_bcv = self._make_bloque(
-            "Tasa BCV"
-        )
+        self.bloque_bcv, self.lbl_valor_bcv, self.lbl_delta_bcv = self._make_bloque("Tasa BCV")
         # QLabel con background-color, no QFrame: QFrame.Shape.VLine con "color:" en QSS
         # no pinta nada (ver GUIA_ESTILO_UI.md 8.8). 1px con COLOR_BORDER, igual que la
         # linea inferior de la franja -- antes hizo falta subirlo a 2px oscuro para que se
@@ -103,14 +101,10 @@ class TasaTicker(QWidget):
         separador.setFixedWidth(1)
         separador.setFixedHeight(16)
         separador.setStyleSheet(f"background-color: {COLOR_BORDER};")
-        self.bloque_paralelo, self.lbl_valor_paralelo, self.lbl_delta_paralelo = (
-            self._make_bloque("Dólar paralelo")
-        )
+        self.bloque_paralelo, self.lbl_valor_paralelo, self.lbl_delta_paralelo = self._make_bloque("Dólar paralelo")
 
         self.lbl_actualizado = QLabel("")
-        self.lbl_actualizado.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; background: transparent;"
-        )
+        self.lbl_actualizado.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; background: transparent;")
 
         layout.addWidget(self.bloque_bcv)
         layout.addWidget(separador)
@@ -128,9 +122,7 @@ class TasaTicker(QWidget):
         h.setSpacing(6)
 
         lbl_etiqueta = QLabel(etiqueta)
-        lbl_etiqueta.setStyleSheet(
-            f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;"
-        )
+        lbl_etiqueta.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
 
         lbl_valor = QLabel("—")
         lbl_valor.setStyleSheet(
@@ -156,9 +148,7 @@ class TasaTicker(QWidget):
         # aborta el proceso ("QThread: Destroyed while thread is still running").
         if getattr(self, "_worker", None) is not None and self._worker.isRunning():
             return
-        self._worker = QueryWorker(
-            self.session_factory, _tarea_tasa_actual, id_usuario=self.usuario.id_usuario
-        )
+        self._worker = QueryWorker(self.session_factory, _tarea_tasa_actual, id_usuario=self.usuario.id_usuario)
         self._worker.resultado.connect(self._mostrar_tasa)
         self._worker.error.connect(self._ocultar_por_error)
         self._worker.start()
@@ -174,9 +164,7 @@ class TasaTicker(QWidget):
         if datos.get("tasa_paralelo") is not None:
             self.bloque_paralelo.setVisible(True)
             self.lbl_valor_paralelo.setText(f"Bs. {float(datos['tasa_paralelo']):,.2f}")
-            self._set_delta(
-                self.lbl_delta_paralelo, datos.get("porcentaje_vs_ayer_paralelo")
-            )
+            self._set_delta(self.lbl_delta_paralelo, datos.get("porcentaje_vs_ayer_paralelo"))
         else:
             self.bloque_paralelo.setVisible(False)
 
@@ -202,9 +190,7 @@ class TasaTicker(QWidget):
             color, icono = COLOR_DANGER, "▼"
         else:
             color, icono = COLOR_TEXT_MUTED, ""
-        lbl.setStyleSheet(
-            f"font-size: 11px; font-weight: bold; color: {color}; background: transparent;"
-        )
+        lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {color}; background: transparent;")
         lbl.setText(f"{icono} {abs(porcentaje):.1f}%".strip())
 
     def _actualizar_elapsed(self) -> None:

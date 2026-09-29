@@ -19,25 +19,17 @@ COOLDOWN_SOLICITUD = timedelta(seconds=60)
 TIPO_DESBLOQUEO = "DESBLOQUEO"
 TIPO_RECUPERAR_CLAVE = "RECUPERAR_CLAVE"
 
-MENSAJE_SOLICITUD_GENERICO = (
-    "Si el usuario existe y tiene un correo registrado, se envio un codigo."
-)
+MENSAJE_SOLICITUD_GENERICO = "Si el usuario existe y tiene un correo registrado, se envio un codigo."
 
 
 def _nombre_empresa(session: Session) -> str:
-    config_empresa = (
-        session.query(ConfiguracionEmpresa)
-        .order_by(ConfiguracionEmpresa.id_config)
-        .first()
-    )
+    config_empresa = session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
     if config_empresa and config_empresa.razon_social_empresa:
         return config_empresa.razon_social_empresa
     return "Mi Empresa"  # mismo fallback que MainWindow._obtener_nombre_empresa
 
 
-def _construir_html_codigo(
-    nombre_empresa: str, titulo: str, codigo: str, minutos_validez: int
-) -> str:
+def _construir_html_codigo(nombre_empresa: str, titulo: str, codigo: str, minutos_validez: int) -> str:
     """Version HTML del correo de codigo (desbloqueo/recuperar clave) -- antes solo se
     mandaba texto plano (`msg.set_content`), pedido del usuario de que se vea corporativo
     y formal en vez de un mail crudo (2026-08-28). Layout con tablas + estilos inline (no
@@ -117,9 +109,7 @@ def _hash_codigo(codigo: str) -> str:
 
 
 def _buscar_usuario(session: Session, nombre_usuario: str) -> Usuario | None:
-    return (
-        session.query(Usuario).filter(Usuario.nombre_usuario == nombre_usuario).first()
-    )
+    return session.query(Usuario).filter(Usuario.nombre_usuario == nombre_usuario).first()
 
 
 def _dentro_del_cooldown(session: Session, usuario: Usuario, tipo: str) -> bool:
@@ -159,22 +149,15 @@ def _crear_y_enviar_codigo(session: Session, usuario: Usuario, tipo: str) -> Non
     session.add(registro)
     session.commit()
 
-    asunto = (
-        "Codigo de desbloqueo de cuenta"
-        if tipo == TIPO_DESBLOQUEO
-        else "Codigo para recuperar tu clave"
-    )
+    asunto = "Codigo de desbloqueo de cuenta" if tipo == TIPO_DESBLOQUEO else "Codigo para recuperar tu clave"
     minutos_validez = int(VALIDEZ_CODIGO.total_seconds() // 60)
     # cuerpo (texto plano) se mantiene igual que antes -- es el fallback para clientes de
     # correo sin HTML y lo unico que la suite de tests inspecciona (_extraer_codigo en
     # test_recuperacion_acceso.py). cuerpo_html es la version "corporativa" nueva.
     cuerpo = (
-        f"Tu codigo es: {codigo}\n\nVence en {minutos_validez} minutos. "
-        "Si no solicitaste esto, ignora este correo."
+        f"Tu codigo es: {codigo}\n\nVence en {minutos_validez} minutos. Si no solicitaste esto, ignora este correo."
     )
-    cuerpo_html = _construir_html_codigo(
-        _nombre_empresa(session), asunto, codigo, minutos_validez
-    )
+    cuerpo_html = _construir_html_codigo(_nombre_empresa(session), asunto, codigo, minutos_validez)
     enviar_correo(usuario.email, asunto, cuerpo, cuerpo_html=cuerpo_html)
 
     AuditoriaService.registrar_evento(
@@ -193,17 +176,11 @@ def _solicitar_codigo(session: Session, nombre_usuario: str, tipo: str) -> None:
     reenvia el codigo pero tampoco se avisa nada distinto -- una respuesta diferente
     revelaria que el usuario existe y tiene correo, aunque no se le mande nada nuevo."""
     usuario = _buscar_usuario(session, nombre_usuario)
-    if (
-        usuario is not None
-        and usuario.email
-        and not _dentro_del_cooldown(session, usuario, tipo)
-    ):
+    if usuario is not None and usuario.email and not _dentro_del_cooldown(session, usuario, tipo):
         _crear_y_enviar_codigo(session, usuario, tipo)
 
 
-def _consumir_codigo(
-    session: Session, usuario: Usuario, tipo: str, codigo_ingresado: str
-) -> None:
+def _consumir_codigo(session: Session, usuario: Usuario, tipo: str, codigo_ingresado: str) -> None:
     """Verifica el codigo vigente mas reciente de ese tipo para el usuario. Lanza
     ValueError con un mensaje apto para mostrar tal cual al usuario (mismo criterio que
     C3: nunca un str(exc) tecnico)."""
@@ -221,9 +198,7 @@ def _consumir_codigo(
         .first()
     )
     if registro is None:
-        raise ValueError(
-            "No hay un codigo pendiente para este usuario. Solicite uno nuevo."
-        )
+        raise ValueError("No hay un codigo pendiente para este usuario. Solicite uno nuevo.")
 
     if registro.fecha_expiracion < datetime.now():
         registro.usado = True
@@ -233,9 +208,7 @@ def _consumir_codigo(
     if registro.intentos_verificacion >= MAX_INTENTOS_VERIFICACION:
         registro.usado = True
         session.commit()
-        raise ValueError(
-            "Se agotaron los intentos para este codigo. Solicite uno nuevo."
-        )
+        raise ValueError("Se agotaron los intentos para este codigo. Solicite uno nuevo.")
 
     if not hmac.compare_digest(_hash_codigo(codigo_ingresado), registro.codigo_hash):
         registro.intentos_verificacion += 1
@@ -255,9 +228,7 @@ class RecuperacionAccesoService:
         return MENSAJE_SOLICITUD_GENERICO
 
     @staticmethod
-    def verificar_codigo_desbloqueo(
-        session: Session, nombre_usuario: str, codigo: str
-    ) -> None:
+    def verificar_codigo_desbloqueo(session: Session, nombre_usuario: str, codigo: str) -> None:
         usuario = _buscar_usuario(session, nombre_usuario)
         if usuario is None:
             raise ValueError("Codigo incorrecto.")
@@ -282,9 +253,7 @@ class RecuperacionAccesoService:
         return MENSAJE_SOLICITUD_GENERICO
 
     @staticmethod
-    def verificar_codigo_y_cambiar_clave(
-        session: Session, nombre_usuario: str, codigo: str, nueva_clave: str
-    ) -> None:
+    def verificar_codigo_y_cambiar_clave(session: Session, nombre_usuario: str, codigo: str, nueva_clave: str) -> None:
         usuario = _buscar_usuario(session, nombre_usuario)
         if usuario is None:
             raise ValueError("Codigo incorrecto.")

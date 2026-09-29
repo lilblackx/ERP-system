@@ -138,9 +138,7 @@ def test_crear_cuenta_cobrar_otro_cliente_inexistente(db_session):
 def test_registrar_abono_sin_usuario_autorizado_falla(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(PermisoDenegadoError):
         OtrosMovimientosService.registrar_abono_otro(
@@ -162,9 +160,7 @@ def test_registrar_abono_sin_origen(db_session):
 def test_registrar_abono_dos_origenes(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
     banco = crear_cuenta_bancaria(db_session)
 
     with pytest.raises(ValueError, match="exactamente un origen"):
@@ -181,9 +177,7 @@ def test_registrar_abono_dos_origenes(db_session):
 def test_registrar_abono_monto_invalido(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="mayor a cero"):
         OtrosMovimientosService.registrar_abono_otro(
@@ -198,9 +192,7 @@ def test_registrar_abono_monto_invalido(db_session):
 def test_registrar_abono_cuenta_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="no encontrada"):
         OtrosMovimientosService.registrar_abono_otro(
@@ -215,9 +207,7 @@ def test_registrar_abono_cuenta_inexistente(db_session):
 def test_registrar_abono_cuenta_ya_pagada(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session, monto=Decimal("50.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
     OtrosMovimientosService.registrar_abono_otro(
         db_session,
         cuenta.id_cuenta,
@@ -239,9 +229,7 @@ def test_registrar_abono_cuenta_ya_pagada(db_session):
 def test_registrar_abono_excede_saldo(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session, monto=Decimal("50.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="excede el saldo pendiente"):
         OtrosMovimientosService.registrar_abono_otro(
@@ -306,9 +294,7 @@ def test_registrar_abono_caja_sin_turno_abierto(db_session):
 def test_registrar_abono_parcial_por_caja(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session, monto=Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     actualizada = OtrosMovimientosService.registrar_abono_otro(
         db_session,
@@ -340,9 +326,7 @@ def test_registrar_abono_completo_por_banco(db_session):
     assert actualizada.saldo_pendiente == Decimal("0.00")
     assert actualizada.estado == "pagada"
 
-    movimiento = (
-        db_session.query(BancoMovimiento).filter_by(id_cuenta=banco.id_cuenta).one()
-    )
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=banco.id_cuenta).one()
     assert movimiento.tipo_movimiento == "abono"
 
 
@@ -352,9 +336,7 @@ def test_registrar_abono_completo_por_banco(db_session):
 def test_listar_cuentas_cobrar_otro_estado_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="estado invalido"):
-        OtrosMovimientosService.listar_cuentas_cobrar_otro(
-            db_session, estado="no_existe", id_usuario=admin.id_usuario
-        )
+        OtrosMovimientosService.listar_cuentas_cobrar_otro(db_session, estado="no_existe", id_usuario=admin.id_usuario)
 
 
 def test_listar_cuentas_cobrar_otro_sin_usuario_autorizado_falla(db_session):
@@ -365,13 +347,9 @@ def test_listar_cuentas_cobrar_otro_sin_usuario_autorizado_falla(db_session):
 def test_listar_cuentas_cobrar_otro_filtra_por_estado(db_session):
     cliente = crear_cliente(db_session)
     _crear_cxc_otro(db_session, monto=Decimal("50.00"), cliente=cliente)
-    otra, _cliente2, admin = _crear_cxc_otro(
-        db_session, monto=Decimal("30.00"), cliente=cliente
-    )
+    otra, _cliente2, admin = _crear_cxc_otro(db_session, monto=Decimal("30.00"), cliente=cliente)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
     OtrosMovimientosService.registrar_abono_otro(
         db_session,
         otra.id_cuenta,
@@ -782,7 +760,5 @@ def test_listar_partidas_no_conciliadas_filtra_por_estado(db_session):
 def test_check_saldo_pendiente_rechaza_negativo_en_cuenta_cobrar_otro(db_session):
     cuenta, _cliente, _admin = _crear_cxc_otro(db_session, monto=Decimal("100.00"))
     cuenta.saldo_pendiente = Decimal("-1.00")
-    with pytest.raises(
-        IntegrityError, match="CK_cuentas_por_cobrar_otros_saldo_no_negativo"
-    ):
+    with pytest.raises(IntegrityError, match="CK_cuentas_por_cobrar_otros_saldo_no_negativo"):
         db_session.commit()

@@ -115,9 +115,7 @@ def test_authenticate_accion_exito_personalizada(db_session):
     admin = crear_usuario_admin(db_session)
     _crear_usuario_activo(db_session)
 
-    authenticate(
-        db_session, "jperez", "Secreta123", accion_exito="AUTORIZACION_DESCUENTO"
-    )
+    authenticate(db_session, "jperez", "Secreta123", accion_exito="AUTORIZACION_DESCUENTO")
 
     sin_login = AuditoriaService.consultar_auditoria(
         db_session, modulo="AUTH", accion="LOGIN", id_usuario_actor=admin.id_usuario
@@ -136,9 +134,7 @@ def test_authenticate_accion_fallo_personalizada(db_session):
     admin = crear_usuario_admin(db_session)
     _crear_usuario_activo(db_session)
 
-    authenticate(
-        db_session, "jperez", "ClaveMala", accion_fallo="AUTORIZACION_DESCUENTO_FALLIDA"
-    )
+    authenticate(db_session, "jperez", "ClaveMala", accion_fallo="AUTORIZACION_DESCUENTO_FALLIDA")
 
     sin_login_fallido = AuditoriaService.consultar_auditoria(
         db_session,

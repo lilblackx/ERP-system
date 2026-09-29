@@ -130,9 +130,7 @@ def test_emitir_factura_contado_abre_y_liquida_cuenta_por_cobrar_con_un_pago(
     crear_precio_producto(db_session, producto, "20.00")
     cliente = crear_cliente(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     factura = VentaService.emitir_factura(
         db_session,
@@ -157,16 +155,10 @@ def test_emitir_factura_contado_abre_y_liquida_cuenta_por_cobrar_con_un_pago(
         ],
     )
 
-    cxc = (
-        db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
     assert cxc.saldo_pendiente == Decimal("0.00")
     assert cxc.estado == "pagada"
-    pago = (
-        db_session.query(PagoCobro)
-        .filter_by(id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar)
-        .one()
-    )
+    pago = db_session.query(PagoCobro).filter_by(id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar).one()
     assert pago.monto == Decimal("20.00")
     assert pago.moneda == "USD"
     assert pago.metodo_pago == "efectivo"
@@ -180,9 +172,7 @@ def test_emitir_factura_contado_multiples_formas_de_pago_multimoneda(db_session)
     crear_precio_producto(db_session, producto, "100.00")
     cliente = crear_cliente(db_session)
     cuenta = crear_cuenta_bancaria(db_session)
-    TasaService.registrar_tasa(
-        db_session, tasa_bcv="40.00", creado_por=admin.id_usuario
-    )
+    TasaService.registrar_tasa(db_session, tasa_bcv="40.00", creado_por=admin.id_usuario)
 
     factura = VentaService.emitir_factura(
         db_session,
@@ -213,16 +203,10 @@ def test_emitir_factura_contado_multiples_formas_de_pago_multimoneda(db_session)
         ],
     )
 
-    cxc = (
-        db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
     assert cxc.saldo_pendiente == Decimal("0.00")
     assert cxc.estado == "pagada"
-    pagos = (
-        db_session.query(PagoCobro)
-        .filter_by(id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar)
-        .all()
-    )
+    pagos = db_session.query(PagoCobro).filter_by(id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar).all()
     assert len(pagos) == 2
     assert sum(p.monto for p in pagos) == Decimal("100.00")
 
@@ -259,12 +243,7 @@ def test_emitir_factura_contado_pago_insuficiente_falla_y_no_deja_nada(db_sessio
             ],
         )
 
-    assert (
-        db_session.query(FacturaVenta)
-        .filter_by(id_cliente_factura=cliente.id_cliente)
-        .first()
-        is None
-    )
+    assert db_session.query(FacturaVenta).filter_by(id_cliente_factura=cliente.id_cliente).first() is None
 
 
 def test_emitir_factura_contado_sin_pagos_falla(db_session):
@@ -377,11 +356,7 @@ def test_emitir_factura_credito_abre_cuenta_por_cobrar(db_session):
         ],
     )
 
-    cxc = (
-        db_session.query(CuentaPorCobrar)
-        .filter_by(id_factura=factura.id_factura)
-        .first()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).first()
     assert cxc is not None
     assert cxc.saldo_pendiente == Decimal("60.00")
     assert cxc.estado == "pendiente"
@@ -551,9 +526,7 @@ def test_emitir_factura_vendedor_inexistente_falla(db_session):
 def test_emitir_factura_producto_inactivo_falla(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    producto = crear_producto(
-        db_session, cantidad_unidad=50, estado_producto="INACTIVO"
-    )
+    producto = crear_producto(db_session, cantidad_unidad=50, estado_producto="INACTIVO")
     crear_precio_producto(db_session, producto, "20.00")
     cliente = crear_cliente(db_session)
 
@@ -622,9 +595,7 @@ def test_emitir_factura_agrupa_items_repetidos_para_validar_stock(db_session):
         )
 
 
-def test_emitir_factura_bloquea_stock_con_updlock_rowlock_concurrente(
-    db_session, test_engine
-):
+def test_emitir_factura_bloquea_stock_con_updlock_rowlock_concurrente(db_session, test_engine):
     """N3 (auditoria de facturacion 2026-08-25): el WITH (UPDLOCK, ROWLOCK) sobre
     Inventario (ventas.py, validacion de stock) solo estaba verificado leyendo el codigo,
     nunca ejercitado con dos conexiones reales compitiendo por el mismo producto -- este
@@ -689,9 +660,7 @@ def test_emitir_factura_bloquea_stock_con_updlock_rowlock_concurrente(
 
         # El lock sigue sostenido: emitir_factura debe seguir esperando, no adelantarse.
         hilo.join(timeout=1.5)
-        assert (
-            hilo.is_alive()
-        ), "emitir_factura no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre Inventario"
+        assert hilo.is_alive(), "emitir_factura no se bloqueo por el UPDLOCK/ROWLOCK esperado sobre Inventario"
 
         # Libera el lock (rollback: esta sesion solo leyo, no debe dejar nada escrito).
         sesion_bloqueadora.rollback()
@@ -726,9 +695,7 @@ def test_emitir_factura_observaciones_supera_255_caracteres_falla(db_session):
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     cliente = crear_cliente(db_session)
-    with pytest.raises(
-        ValueError, match="observaciones no puede superar 255 caracteres"
-    ):
+    with pytest.raises(ValueError, match="observaciones no puede superar 255 caracteres"):
         VentaService.emitir_factura(
             db_session,
             id_cliente=cliente.id_cliente,
@@ -825,12 +792,7 @@ def test_anular_factura_contado_repone_stock(db_session):
     assert factura.estado_factura == "ANULADA"
     assert producto.cantidad_unidad == Decimal("50.00")  # se repone
     assert factura.total_venta == Decimal("0.00")
-    assert (
-        db_session.query(FacturaDetalle)
-        .filter_by(id_factura=factura.id_factura)
-        .count()
-        == 0
-    )
+    assert db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).count() == 0
 
 
 def test_anular_factura_sin_usuario_autorizado_falla(db_session):
@@ -856,9 +818,7 @@ def test_anular_factura_sin_usuario_autorizado_falla(db_session):
     )
 
     with pytest.raises(PermisoDenegadoError):
-        VentaService.anular_factura(
-            db_session, factura.id_factura, id_usuario=None, motivo="Error de carga"
-        )
+        VentaService.anular_factura(db_session, factura.id_factura, id_usuario=None, motivo="Error de carga")
 
 
 def test_anular_factura_credito_repone_stock_y_cierra_cxc(db_session):
@@ -882,9 +842,7 @@ def test_anular_factura_credito_repone_stock_y_cierra_cxc(db_session):
             }
         ],
     )
-    cxc = (
-        db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
 
     VentaService.anular_factura(
         db_session,
@@ -922,9 +880,7 @@ def test_anular_factura_con_pago_aplicado_genera_nota_de_credito(db_session):
     crear_precio_producto(db_session, producto, "20.00")
     cliente = crear_cliente(db_session, limite_credito=1000)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     factura = VentaService.emitir_factura(
         db_session,
@@ -940,9 +896,7 @@ def test_anular_factura_con_pago_aplicado_genera_nota_de_credito(db_session):
             }
         ],
     )
-    cxc = (
-        db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
     pago = PagoService.registrar_pago_cobro(
         db_session,
         id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
@@ -972,20 +926,11 @@ def test_anular_factura_con_pago_aplicado_genera_nota_de_credito(db_session):
     assert cxc.saldo_pendiente == Decimal("0.00")
 
     # el pago original y su movimiento de caja quedan intactos, sin revertir
-    assert db_session.query(PagoCobro).filter_by(
-        id_pago_cobro=id_pago_cobro
-    ).one().monto == Decimal("10.00")
-    assert (
-        db_session.query(CajaMovimiento).filter_by(id_pago_cobro=id_pago_cobro).first()
-        is not None
-    )
+    assert db_session.query(PagoCobro).filter_by(id_pago_cobro=id_pago_cobro).one().monto == Decimal("10.00")
+    assert db_session.query(CajaMovimiento).filter_by(id_pago_cobro=id_pago_cobro).first() is not None
 
     # y la plata ya cobrada queda como nota de credito a favor del cliente
-    nota = (
-        db_session.query(NotaCreditoCliente)
-        .filter_by(id_factura_origen=factura.id_factura)
-        .one()
-    )
+    nota = db_session.query(NotaCreditoCliente).filter_by(id_factura_origen=factura.id_factura).one()
     assert nota.id_cliente == cliente.id_cliente
     assert nota.numero_nota_credito.startswith("NC-")
     assert nota.monto == Decimal("10.00")
@@ -1034,14 +979,8 @@ def test_anular_factura_con_comision_pendiente_borra_comision_y_anula(db_session
             }
         ],
     )
-    detalle = (
-        db_session.query(FacturaDetalle)
-        .filter_by(id_factura=factura.id_factura)
-        .first()
-    )
-    id_factura_detalle = (
-        detalle.id_factura_detalle
-    )  # capturado antes de que anular_factura borre la fila
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    id_factura_detalle = detalle.id_factura_detalle  # capturado antes de que anular_factura borre la fila
     db_session.add(
         ComisionFactura(
             id_factura_detalle=id_factura_detalle,
@@ -1064,12 +1003,7 @@ def test_anular_factura_con_comision_pendiente_borra_comision_y_anula(db_session
     db_session.refresh(producto)
     assert factura.estado_factura == "ANULADA"
     assert producto.cantidad_unidad == Decimal("50.00")  # stock repuesto
-    assert (
-        db_session.query(ComisionFactura)
-        .filter_by(id_factura_detalle=id_factura_detalle)
-        .first()
-        is None
-    )
+    assert db_session.query(ComisionFactura).filter_by(id_factura_detalle=id_factura_detalle).first() is None
 
 
 def test_anular_factura_con_comision_pagada_bloqueada(db_session):
@@ -1096,11 +1030,7 @@ def test_anular_factura_con_comision_pagada_bloqueada(db_session):
             }
         ],
     )
-    detalle = (
-        db_session.query(FacturaDetalle)
-        .filter_by(id_factura=factura.id_factura)
-        .first()
-    )
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
     db_session.add(
         ComisionFactura(
             id_factura_detalle=detalle.id_factura_detalle,
@@ -1152,16 +1082,8 @@ def test_emitir_factura_con_vendedor_calcula_comision_sobre_diferencia(db_sessio
         ],
     )
 
-    detalle = (
-        db_session.query(FacturaDetalle)
-        .filter_by(id_factura=factura.id_factura)
-        .first()
-    )
-    comision = (
-        db_session.query(ComisionFactura)
-        .filter_by(id_factura_detalle=detalle.id_factura_detalle)
-        .one()
-    )
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
     assert comision.id_vendedor == vendedor.id_vendedor
     assert comision.monto_base_comision == Decimal("3.00")  # 1.00 (lista) * 3
     assert comision.monto_venta_comision == Decimal("6.00")  # 2.00 (real) * 3
@@ -1194,16 +1116,8 @@ def test_emitir_factura_precio_igual_al_de_lista_comision_cero(db_session):
         ],
     )
 
-    detalle = (
-        db_session.query(FacturaDetalle)
-        .filter_by(id_factura=factura.id_factura)
-        .first()
-    )
-    comisiones = (
-        db_session.query(ComisionFactura)
-        .filter_by(id_factura_detalle=detalle.id_factura_detalle)
-        .all()
-    )
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    comisiones = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).all()
     assert len(comisiones) == 0  # no crea comisión si monto es 0
 
 
@@ -1239,19 +1153,9 @@ def test_emitir_factura_precio_menor_al_de_lista_requiere_autorizacion_y_comisio
 
     assert factura.autorizado_por_descuento == admin.id_usuario
     assert factura.motivo_descuento == "Cliente frecuente"
-    detalle = (
-        db_session.query(FacturaDetalle)
-        .filter_by(id_factura=factura.id_factura)
-        .first()
-    )
-    comisiones = (
-        db_session.query(ComisionFactura)
-        .filter_by(id_factura_detalle=detalle.id_factura_detalle)
-        .all()
-    )
-    assert (
-        len(comisiones) == 0
-    )  # no crea comisión si precio < precio_lista (monto <= 0)
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    comisiones = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).all()
+    assert len(comisiones) == 0  # no crea comisión si precio < precio_lista (monto <= 0)
 
 
 def test_emitir_factura_precio_menor_al_de_lista_sin_autorizacion_falla(db_session):
@@ -1332,9 +1236,7 @@ def test_emitir_factura_sin_precio_de_lista_falla(db_session):
     vendedor requiere autorizacion (descuento) o genera comision."""
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    producto = crear_producto(
-        db_session, cantidad_unidad=50
-    )  # sin crear_precio_producto
+    producto = crear_producto(db_session, cantidad_unidad=50)  # sin crear_precio_producto
     cliente = crear_cliente(db_session)
 
     with pytest.raises(ValueError, match="no tienen precio de venta configurado"):
@@ -1404,9 +1306,7 @@ def test_anular_factura_sin_motivo(db_session):
     )
 
     with pytest.raises(ValueError, match="motivo"):
-        VentaService.anular_factura(
-            db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo=""
-        )
+        VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="")
 
 
 def test_anular_factura_ya_anulada(db_session):
@@ -1430,9 +1330,7 @@ def test_anular_factura_ya_anulada(db_session):
             }
         ],
     )
-    VentaService.anular_factura(
-        db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Motivo 1"
-    )
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Motivo 1")
 
     with pytest.raises(ValueError, match="ya esta anulada"):
         VentaService.anular_factura(
@@ -1482,9 +1380,7 @@ def test_listar_facturas_filtra_por_cliente(db_session):
         ],
     )
 
-    resultado = VentaService.listar_facturas(
-        db_session, id_cliente=cliente_a.id_cliente, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.listar_facturas(db_session, id_cliente=cliente_a.id_cliente, id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].id_cliente_factura == cliente_a.id_cliente
@@ -1536,12 +1432,8 @@ def test_listar_facturas_nombre_cliente_escapa_wildcards(db_session):
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=50)
     crear_precio_producto(db_session, producto, "20.00")
-    cliente_sin_guion = crear_cliente(
-        db_session, nombre_razon_social="ABC Distribuidora"
-    )
-    cliente_con_guion = crear_cliente(
-        db_session, nombre_razon_social="A_C Distribuidora"
-    )
+    cliente_sin_guion = crear_cliente(db_session, nombre_razon_social="ABC Distribuidora")
+    cliente_con_guion = crear_cliente(db_session, nombre_razon_social="A_C Distribuidora")
 
     for cliente in (cliente_sin_guion, cliente_con_guion):
         VentaService.emitir_factura(
@@ -1560,9 +1452,7 @@ def test_listar_facturas_nombre_cliente_escapa_wildcards(db_session):
             ],
         )
 
-    resultado = VentaService.listar_facturas(
-        db_session, nombre_cliente="A_C", id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.listar_facturas(db_session, nombre_cliente="A_C", id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].id_cliente_factura == cliente_con_guion.id_cliente
@@ -1599,15 +1489,9 @@ def test_listar_facturas_texto_busqueda_matchea_numero_cliente_o_vendedor(db_ses
         texto_busqueda=factura.numero_factura[-4:],
         id_usuario=admin.id_usuario,
     )
-    por_cliente = VentaService.listar_facturas(
-        db_session, texto_busqueda="Unico", id_usuario=admin.id_usuario
-    )
-    por_vendedor = VentaService.listar_facturas(
-        db_session, texto_busqueda="Distinguible", id_usuario=admin.id_usuario
-    )
-    sin_match = VentaService.listar_facturas(
-        db_session, texto_busqueda="NoExiste123", id_usuario=admin.id_usuario
-    )
+    por_cliente = VentaService.listar_facturas(db_session, texto_busqueda="Unico", id_usuario=admin.id_usuario)
+    por_vendedor = VentaService.listar_facturas(db_session, texto_busqueda="Distinguible", id_usuario=admin.id_usuario)
+    sin_match = VentaService.listar_facturas(db_session, texto_busqueda="NoExiste123", id_usuario=admin.id_usuario)
 
     for resultado in (por_numero, por_cliente, por_vendedor):
         assert resultado["total"] == 1
@@ -1653,9 +1537,7 @@ def test_listar_facturas_filtra_por_estado_vencida(db_session):
         fecha_vencimiento=date.today() + timedelta(days=30),
     )
 
-    resultado = VentaService.listar_facturas(
-        db_session, estado="VENCIDA", id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.listar_facturas(db_session, estado="VENCIDA", id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].id_factura == factura_vencida.id_factura
@@ -1699,9 +1581,7 @@ def test_listar_facturas_filtra_por_estado_pagada(db_session):
         ],
     )
 
-    resultado = VentaService.listar_facturas(
-        db_session, estado="PAGADA", id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.listar_facturas(db_session, estado="PAGADA", id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].id_factura == factura_pagada.id_factura
@@ -1730,9 +1610,7 @@ def test_obtener_factura_incluye_detalles(db_session):
         ],
     )
 
-    resultado = VentaService.obtener_factura(
-        db_session, factura.id_factura, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
 
     assert resultado["factura"].id_factura == factura.id_factura
     assert resultado["factura"].cliente.id_cliente == cliente.id_cliente
@@ -1765,9 +1643,7 @@ def test_obtener_factura_credito_recien_emitida_estado_visual_emitida(db_session
         fecha_vencimiento=date.today() + timedelta(days=30),
     )
 
-    resultado = VentaService.obtener_factura(
-        db_session, factura.id_factura, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
 
     assert resultado["factura"].estado_visual == "EMITIDA"
 
@@ -1779,9 +1655,7 @@ def test_obtener_factura_credito_pago_parcial_estado_visual_parcial(db_session):
     crear_precio_producto(db_session, producto, "100.00")
     cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     factura = VentaService.emitir_factura(
         db_session,
@@ -1798,9 +1672,7 @@ def test_obtener_factura_credito_pago_parcial_estado_visual_parcial(db_session):
         ],
         fecha_vencimiento=date.today() + timedelta(days=30),
     )
-    cxc = (
-        db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
     PagoService.registrar_pago_cobro(
         db_session,
         id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
@@ -1810,9 +1682,7 @@ def test_obtener_factura_credito_pago_parcial_estado_visual_parcial(db_session):
         id_usuario=admin.id_usuario,
     )
 
-    resultado = VentaService.obtener_factura(
-        db_session, factura.id_factura, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
 
     assert resultado["factura"].estado_visual == "PARCIAL"
 
@@ -1840,9 +1710,7 @@ def test_obtener_factura_credito_vencida_estado_visual_vencida(db_session):
         fecha_vencimiento=date.today() - timedelta(days=5),
     )
 
-    resultado = VentaService.obtener_factura(
-        db_session, factura.id_factura, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
 
     assert resultado["factura"].estado_visual == "VENCIDA"
 
@@ -1869,13 +1737,9 @@ def test_obtener_factura_anulada_estado_visual_anulada(db_session):
             }
         ],
     )
-    VentaService.anular_factura(
-        db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Motivo"
-    )
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Motivo")
 
-    resultado = VentaService.obtener_factura(
-        db_session, factura.id_factura, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
 
     assert resultado["factura"].estado_visual == "ANULADA"
 
@@ -2000,9 +1864,7 @@ def test_emitir_factura_con_iva_activo_calcula_monto_y_snapshot(db_session):
     assert factura.iva_aplicado is True
     assert factura.porcentaje_iva_aplicado == Decimal("16.00")
     assert factura.monto_iva == Decimal("16.00")
-    assert factura.total_venta == Decimal(
-        "100.00"
-    )  # total_venta sigue siendo el subtotal
+    assert factura.total_venta == Decimal("100.00")  # total_venta sigue siendo el subtotal
 
 
 def test_emitir_factura_con_iva_desactivado_no_calcula_iva_aunque_haya_config(
@@ -2076,9 +1938,7 @@ def test_emitir_factura_credito_con_iva_suma_iva_a_cuenta_por_cobrar(db_session)
         ],
     )
 
-    cxc = (
-        db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
     assert cxc.saldo_pendiente == Decimal("116.00")  # 100 + 16% IVA
 
 
@@ -2176,9 +2036,7 @@ def test_emitir_factura_monto_descuento_autorizado_resta_del_total(db_session):
 
     assert factura.monto_descuento == Decimal("10.00")
     assert factura.autorizado_por_descuento == admin.id_usuario
-    assert factura.total_venta == Decimal(
-        "100.00"
-    )  # subtotal crudo, sin tocar (triggers)
+    assert factura.total_venta == Decimal("100.00")  # subtotal crudo, sin tocar (triggers)
 
 
 def test_emitir_factura_monto_descuento_mayor_al_subtotal_falla(db_session):
@@ -2273,9 +2131,7 @@ def test_emitir_factura_credito_con_descuento_y_iva_ajusta_cuenta_por_cobrar(
     )
 
     assert factura.monto_iva == Decimal("12.80")
-    cxc = (
-        db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
-    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
     assert cxc.saldo_pendiente == Decimal("92.80")
 
 
@@ -2448,9 +2304,7 @@ def test_consultar_limite_disponible_sin_deuda(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
 
-    resultado = VentaService.consultar_limite_disponible(
-        db_session, cliente.id_cliente, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.consultar_limite_disponible(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
 
     assert resultado["limite_credito"] == Decimal("500.00")
     assert resultado["deuda_actual"] == Decimal("0.00")
@@ -2480,9 +2334,7 @@ def test_consultar_limite_disponible_descuenta_deuda_vigente(db_session):
         ],
     )
 
-    resultado = VentaService.consultar_limite_disponible(
-        db_session, cliente.id_cliente, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.consultar_limite_disponible(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
 
     assert resultado["deuda_actual"] == Decimal("120.00")
     assert resultado["disponible"] == Decimal("380.00")
@@ -2492,13 +2344,9 @@ def test_consultar_limite_disponible_cliente_sin_dias_credito_no_es_elegible(
     db_session,
 ):
     admin = crear_usuario_admin(db_session)
-    cliente = crear_cliente(
-        db_session, limite_credito=Decimal("500.00"), dias_credito=0
-    )
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"), dias_credito=0)
 
-    resultado = VentaService.consultar_limite_disponible(
-        db_session, cliente.id_cliente, id_usuario=admin.id_usuario
-    )
+    resultado = VentaService.consultar_limite_disponible(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
 
     # El limite y el disponible siguen calculandose tal cual (son datos reales del
     # cliente), pero elegible_credito=False deja claro que ese disponible no tiene
@@ -2510,9 +2358,7 @@ def test_consultar_limite_disponible_cliente_sin_dias_credito_no_es_elegible(
 def test_consultar_limite_disponible_cliente_inexistente_falla(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Cliente no encontrado"):
-        VentaService.consultar_limite_disponible(
-            db_session, 999999, id_usuario=admin.id_usuario
-        )
+        VentaService.consultar_limite_disponible(db_session, 999999, id_usuario=admin.id_usuario)
 
 
 def test_consultar_limite_disponible_sin_usuario_autorizado_falla(db_session):
@@ -2645,9 +2491,7 @@ def test_emitir_factura_vuelto_bancario_autorizado_ok(db_session):
     crear_precio_producto(db_session, producto, "100.00")
     cliente = crear_cliente(db_session)
     cuenta = crear_cuenta_bancaria(db_session)
-    cuenta_vuelto = crear_cuenta_bancaria(
-        db_session, saldo_total_banco=Decimal("1000.00")
-    )
+    cuenta_vuelto = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("1000.00"))
 
     factura = VentaService.emitir_factura(
         db_session,
@@ -2751,9 +2595,7 @@ def test_emitir_factura_vuelto_efectivo_no_requiere_autorizacion(db_session):
     assert salida.monto_movimiento == Decimal("50.00")
 
     # 500 apertura + 150 cobrado - 50 vuelto = 600
-    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal(
-        "600.00"
-    )
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("600.00")
 
 
 def test_emitir_factura_vuelto_efectivo_saldo_insuficiente_falla(db_session):

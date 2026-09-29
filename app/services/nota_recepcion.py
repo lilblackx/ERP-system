@@ -57,9 +57,7 @@ class NotaRecepcionService:
         if oc is None:
             raise ValueError("Orden de compra no encontrada")
         if oc.estado == "ANULADA":
-            raise ValueError(
-                "No se puede recibir mercancia de una orden de compra anulada"
-            )
+            raise ValueError("No se puede recibir mercancia de una orden de compra anulada")
 
         # WITH (UPDLOCK, ROWLOCK): sin esto, dos recepciones concurrentes sobre la misma OC
         # leen el mismo cantidad_pendiente (aun no comiteado por la otra), ambas validan
@@ -81,9 +79,7 @@ class NotaRecepcionService:
                     CompraOCDetalle.id_detalle.in_(ids_solicitados),
                 )
                 .order_by(CompraOCDetalle.id_detalle)
-                .with_hint(
-                    CompraOCDetalle, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
-                )
+                .with_hint(CompraOCDetalle, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
             ).scalars()
         }
 
@@ -92,18 +88,14 @@ class NotaRecepcionService:
             id_oc_detalle = item["id_oc_detalle"]
             detalle_oc = detalles_oc.get(id_oc_detalle)
             if detalle_oc is None:
-                raise ValueError(
-                    f"La linea de OC {id_oc_detalle} no pertenece a la orden de compra {id_oc}"
-                )
+                raise ValueError(f"La linea de OC {id_oc_detalle} no pertenece a la orden de compra {id_oc}")
 
             cantidad_recibida = Decimal(str(item["cantidad_recibida"]))
             cantidad_rechazada = Decimal(str(item.get("cantidad_rechazada") or 0))
             if cantidad_recibida <= 0:
                 raise ValueError("cantidad_recibida debe ser mayor a cero")
             if cantidad_rechazada < 0 or cantidad_rechazada > cantidad_recibida:
-                raise ValueError(
-                    "cantidad_rechazada no puede ser negativa ni mayor a la cantidad recibida"
-                )
+                raise ValueError("cantidad_rechazada no puede ser negativa ni mayor a la cantidad recibida")
             if cantidad_recibida > detalle_oc.cantidad_pendiente:
                 raise ValueError(
                     f"Se intenta recibir {cantidad_recibida} del producto {detalle_oc.id_producto}, pero solo "
@@ -137,9 +129,7 @@ class NotaRecepcionService:
         session.commit()
         session.refresh(nr)
 
-        logger.info(
-            "NR %s registrada: OC=%s usuario=%s", nr.numero_nr, oc.numero_oc, id_usuario
-        )
+        logger.info("NR %s registrada: OC=%s usuario=%s", nr.numero_nr, oc.numero_oc, id_usuario)
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
@@ -189,14 +179,10 @@ class NotaRecepcionService:
                 .first()
             )
             if detalle_nr is None:
-                raise ValueError(
-                    f"El producto {id_producto} no fue recibido en la NR {nr.numero_nr}"
-                )
+                raise ValueError(f"El producto {id_producto} no fue recibido en la NR {nr.numero_nr}")
 
             ya_devuelto = (
-                session.query(
-                    func.coalesce(func.sum(NotaDevolucionDetalle.cantidad_devuelta), 0)
-                )
+                session.query(func.coalesce(func.sum(NotaDevolucionDetalle.cantidad_devuelta), 0))
                 .join(
                     NotaDevolucion,
                     NotaDevolucion.id_devolucion == NotaDevolucionDetalle.id_devolucion,
@@ -207,9 +193,7 @@ class NotaRecepcionService:
                 )
                 .scalar()
             )
-            disponible_para_devolver = detalle_nr.cantidad_rechazada - Decimal(
-                str(ya_devuelto)
-            )
+            disponible_para_devolver = detalle_nr.cantidad_rechazada - Decimal(str(ya_devuelto))
             if cantidad_devuelta > disponible_para_devolver:
                 raise ValueError(
                     f"Solo hay {disponible_para_devolver} unidades rechazadas del producto {id_producto} "
@@ -299,16 +283,10 @@ class NotaRecepcionService:
         }
 
     @staticmethod
-    def obtener_nota_recepcion(
-        session: Session, id_nr: int, id_usuario: int | None = None
-    ) -> dict:
+    def obtener_nota_recepcion(session: Session, id_nr: int, id_usuario: int | None = None) -> dict:
         require_permiso(session, id_usuario, "compras", "ver")
         nr = session.get(NotaRecepcion, id_nr)
         if nr is None:
             raise ValueError("Nota de recepcion no encontrada")
-        detalles = (
-            session.query(NotaRecepcionDetalle)
-            .filter(NotaRecepcionDetalle.id_nr == id_nr)
-            .all()
-        )
+        detalles = session.query(NotaRecepcionDetalle).filter(NotaRecepcionDetalle.id_nr == id_nr).all()
         return {"nota": nr, "detalles": detalles}

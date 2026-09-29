@@ -160,9 +160,7 @@ class MovimientoManualDialog(QDialog):
         layout.addWidget(self.tipo_combo)
 
         layout.addWidget(QLabel("Monto"))
-        self.monto_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ "
-        )
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         layout.addWidget(self.monto_input)
 
         layout.addWidget(QLabel("Descripción"))
@@ -212,9 +210,7 @@ class HistorialMovimientosDialog(QDialog):
         self.setMinimumWidth(700)
         self.resize(700, 500)
         self.setStyleSheet(DIALOG_STYLE_HISTORIAL)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
         # Cargar historial directamente
@@ -256,27 +252,17 @@ class HistorialMovimientosDialog(QDialog):
 
         # Tabla de movimientos
         self.tabla = QTableWidget(0, 5)
-        self.tabla.setHorizontalHeaderLabels(
-            ["Fecha", "Tipo", "Descripción", "Monto", "Origen"]
-        )
+        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Descripción", "Monto", "Origen"])
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabla.setAlternatingRowColors(True)
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.ResizeToContents
-        )
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         alinear_encabezados(
@@ -297,19 +283,13 @@ class HistorialMovimientosDialog(QDialog):
         footer.setSpacing(24)
 
         self.lbl_total_entradas = QLabel("Total Entradas: $0.00")
-        self.lbl_total_entradas.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};"
-        )
+        self.lbl_total_entradas.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};")
 
         self.lbl_total_salidas = QLabel("Total Salidas: $0.00")
-        self.lbl_total_salidas.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {COLOR_DANGER};"
-        )
+        self.lbl_total_salidas.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_DANGER};")
 
         self.lbl_saldo = QLabel("Saldo Neto: $0.00")
-        self.lbl_saldo.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {COLOR_PRIMARY};"
-        )
+        self.lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_PRIMARY};")
 
         footer.addWidget(self.lbl_total_entradas)
         footer.addWidget(self.lbl_total_salidas)
@@ -337,9 +317,7 @@ class HistorialMovimientosDialog(QDialog):
 
             if self.fecha_desde.text().strip():
                 try:
-                    fecha_desde = datetime.strptime(
-                        self.fecha_desde.text().strip(), "%d/%m/%Y"
-                    ).date()
+                    fecha_desde = datetime.strptime(self.fecha_desde.text().strip(), "%d/%m/%Y").date()
                 except ValueError:
                     MessageBox.warning(
                         self,
@@ -350,9 +328,7 @@ class HistorialMovimientosDialog(QDialog):
 
             if self.fecha_hasta.text().strip():
                 try:
-                    fecha_hasta = datetime.strptime(
-                        self.fecha_hasta.text().strip(), "%d/%m/%Y"
-                    ).date()
+                    fecha_hasta = datetime.strptime(self.fecha_hasta.text().strip(), "%d/%m/%Y").date()
                 except ValueError:
                     MessageBox.warning(
                         self,
@@ -371,9 +347,7 @@ class HistorialMovimientosDialog(QDialog):
 
             session = self.session_factory()
             try:
-                query = session.query(CajaMovimiento).filter(
-                    CajaMovimiento.id_caja == self.id_caja
-                )
+                query = session.query(CajaMovimiento).filter(CajaMovimiento.id_caja == self.id_caja)
 
                 if fecha_desde:
                     desde_dt = datetime.combine(fecha_desde, datetime.min.time())
@@ -395,20 +369,14 @@ class HistorialMovimientosDialog(QDialog):
 
                     es_entrada = mov.tipo_movimiento == "entrada"
                     tipo_item = QTableWidgetItem("Entrada" if es_entrada else "Salida")
-                    tipo_item.setForeground(
-                        Qt.GlobalColor.darkGreen if es_entrada else Qt.GlobalColor.red
-                    )
+                    tipo_item.setForeground(Qt.GlobalColor.darkGreen if es_entrada else Qt.GlobalColor.red)
                     self.tabla.setItem(fila, 1, tipo_item)
 
-                    self.tabla.setItem(
-                        fila, 2, QTableWidgetItem(mov.descripcion_movimiento or "")
-                    )
+                    self.tabla.setItem(fila, 2, QTableWidgetItem(mov.descripcion_movimiento or ""))
 
                     monto = mov.monto_movimiento or Decimal("0.00")
                     item_monto = QTableWidgetItem(f"$ {monto:,.2f}")
-                    item_monto.setTextAlignment(
-                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-                    )
+                    item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                     self.tabla.setItem(fila, 3, item_monto)
 
                     # Determinar origen
@@ -426,9 +394,7 @@ class HistorialMovimientosDialog(QDialog):
                     else:
                         total_salidas += monto
 
-                self.lbl_total_entradas.setText(
-                    f"Total Entradas: ${total_entradas:,.2f}"
-                )
+                self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
                 self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
                 saldo_neto = total_entradas - total_salidas
                 self.lbl_saldo.setText(f"Saldo Neto: ${saldo_neto:,.2f}")
@@ -438,9 +404,7 @@ class HistorialMovimientosDialog(QDialog):
 
         except Exception as e:
             logger.exception("Fallo al cargar historial de movimientos")
-            MessageBox.critical(
-                self, "Error", f"No se pudo cargar el historial: {str(e)}"
-            )
+            MessageBox.critical(self, "Error", f"No se pudo cargar el historial: {str(e)}")
 
 
 class CajasPanel(QWidget):
@@ -474,9 +438,7 @@ class CajasPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Cajas")
-        lbl.setStyleSheet(
-            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -525,15 +487,9 @@ class CajasPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Fixed
-        )
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(2, 100)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
@@ -548,9 +504,7 @@ class CajasPanel(QWidget):
         h.addStretch()
 
         self.btn_movimiento = QPushButton("Movimiento Manual")
-        self.btn_movimiento.setIcon(
-            qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_DARK)
-        )
+        self.btn_movimiento.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_DARK))
         self.btn_movimiento.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_movimiento.clicked.connect(self.registrar_movimiento_manual)
 
@@ -577,9 +531,7 @@ class CajasPanel(QWidget):
 
         session = self.session_factory()
         try:
-            caja = CajaService.crear_caja(
-                session, nombre, id_usuario=self.usuario.id_usuario
-            )
+            caja = CajaService.crear_caja(session, nombre, id_usuario=self.usuario.id_usuario)
             self.cargar_cajas()
             MessageBox.information(
                 self,
@@ -602,19 +554,13 @@ class CajasPanel(QWidget):
     def cargar_cajas(self) -> None:
         session = self.session_factory()
         try:
-            estados = CajaService.obtener_estado_cajas(
-                session, id_usuario=self.usuario.id_usuario
-            )
+            estados = CajaService.obtener_estado_cajas(session, id_usuario=self.usuario.id_usuario)
             self._poblar_tabla(estados)
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para consultar cajas."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cajas.")
         except Exception:
             logger.exception("Fallo al cargar el estado de las cajas")
-            MessageBox.critical(
-                self, "Error de conexión", "No se pudo cargar el estado de las cajas."
-            )
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el estado de las cajas.")
         finally:
             session.close()
 
@@ -622,15 +568,11 @@ class CajasPanel(QWidget):
         self.tabla.setRowCount(len(estados))
         for fila, est in enumerate(estados):
             item_id = QTableWidgetItem(str(est["id_caja"]))
-            item_id.setTextAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_id.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 0, item_id)
 
             item_nombre = QTableWidgetItem(est["nombre_caja"] or "")
-            item_nombre.setTextAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_nombre.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 1, item_nombre)
 
             color = COLOR_SUCCESS if est["estado"] == "ABIERTA" else COLOR_DANGER
@@ -638,42 +580,26 @@ class CajasPanel(QWidget):
             self.tabla.setCellWidget(fila, 2, badge)
 
             item_cajero = QTableWidgetItem(est["cajero"] or "—")
-            item_cajero.setTextAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_cajero.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_cajero)
 
             apertura = est.get("fecha_apertura")
-            item_apertura = QTableWidgetItem(
-                apertura.strftime("%d/%m/%Y %H:%M") if apertura else "—"
-            )
-            item_apertura.setTextAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_apertura = QTableWidgetItem(apertura.strftime("%d/%m/%Y %H:%M") if apertura else "—")
+            item_apertura.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 4, item_apertura)
 
             saldo_apertura = est["saldo_apertura"]
-            item_saldo_apertura = QTableWidgetItem(
-                f"$ {saldo_apertura:,.2f}" if saldo_apertura is not None else "—"
-            )
-            item_saldo_apertura.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_saldo_apertura = QTableWidgetItem(f"$ {saldo_apertura:,.2f}" if saldo_apertura is not None else "—")
+            item_saldo_apertura.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 5, item_saldo_apertura)
 
             saldo_cierre = est["saldo_cierre"]
-            item_saldo_cierre = QTableWidgetItem(
-                f"$ {saldo_cierre:,.2f}" if saldo_cierre is not None else "—"
-            )
-            item_saldo_cierre.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_saldo_cierre = QTableWidgetItem(f"$ {saldo_cierre:,.2f}" if saldo_cierre is not None else "—")
+            item_saldo_cierre.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_saldo_cierre)
 
             item_movimientos = QTableWidgetItem(str(est["cantidad_movimientos"]))
-            item_movimientos.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_movimientos.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_movimientos)
 
         self.lbl_total.setText(f"{len(estados)} caja{'s' if len(estados) != 1 else ''}")
@@ -681,9 +607,7 @@ class CajasPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(
-                self, "Selección requerida", "Selecciona una caja de la lista."
-            )
+            MessageBox.information(self, "Selección requerida", "Selecciona una caja de la lista.")
             return None
         item = self.tabla.item(filas[0].row(), 0)
         if item is None:
@@ -711,9 +635,7 @@ class CajasPanel(QWidget):
                 return
 
             print(f"DEBUG: Abriendo diálogo de cierre para caja {caja.nombre_caja}")
-            dialogo = CajaCierreDialog(
-                session, caja, self.usuario.id_usuario, parent=self
-            )
+            dialogo = CajaCierreDialog(session, caja, self.usuario.id_usuario, parent=self)
             print(f"DEBUG: Diálogo ejecutado, cerrada={dialogo.cerrada}")
             if dialogo.exec() and dialogo.cerrada:
                 MessageBox.information(
@@ -731,9 +653,7 @@ class CajasPanel(QWidget):
             print(f"DEBUG: Exception al cerrar turno: {str(exc)}")
             print(traceback.format_exc())
             logger.exception("Fallo al cerrar el turno de la caja %s", id_caja)
-            MessageBox.critical(
-                self, "Error", f"No se pudo cerrar el turno de caja: {str(exc)}"
-            )
+            MessageBox.critical(self, "Error", f"No se pudo cerrar el turno de caja: {str(exc)}")
         finally:
             session.close()
 
@@ -784,9 +704,7 @@ class CajasPanel(QWidget):
         except Exception:
             session.rollback()
             logger.exception("Fallo al registrar movimiento manual de caja %s", id_caja)
-            MessageBox.critical(
-                self, "Error", "No se pudo registrar el movimiento de caja."
-            )
+            MessageBox.critical(self, "Error", "No se pudo registrar el movimiento de caja.")
         finally:
             session.close()
             self.btn_movimiento.setEnabled(True)
@@ -819,11 +737,7 @@ class CajasPanel(QWidget):
         except Exception as e:
             import traceback
 
-            logger.exception(
-                "Fallo al abrir historial de movimientos para caja %s", id_caja
-            )
+            logger.exception("Fallo al abrir historial de movimientos para caja %s", id_caja)
             print(f"Error al abrir historial: {str(e)}")
             print(traceback.format_exc())
-            MessageBox.critical(
-                self, "Error", f"No se pudo abrir el historial de movimientos: {str(e)}"
-            )
+            MessageBox.critical(self, "Error", f"No se pudo abrir el historial de movimientos: {str(e)}")

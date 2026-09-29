@@ -144,9 +144,7 @@ class AplicarNotaCreditoDialog(QDialog):
         self.setMinimumWidth(420)
         self.resize(420, 340)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
         self._on_seleccion_cambiada()
@@ -159,9 +157,7 @@ class AplicarNotaCreditoDialog(QDialog):
         header = QHBoxLayout()
         header.setSpacing(12)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.receipt", color=COLOR_PRIMARY).pixmap(QSize(20, 20))
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.receipt", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -169,9 +165,7 @@ class AplicarNotaCreditoDialog(QDialog):
         icon_lbl.setFixedSize(34, 34)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_titulo = QLabel("Aplicar Nota de Crédito")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         header.addWidget(icon_lbl)
         header.addWidget(lbl_titulo)
         header.addStretch()
@@ -201,18 +195,14 @@ class AplicarNotaCreditoDialog(QDialog):
         self.factura_combo.setFixedHeight(32)
         for factura in self.facturas_pendientes:
             etiqueta = f"{factura['numero_factura']} — pendiente ${float(factura['saldo_pendiente']):,.2f}"
-            self.factura_combo.addItem(
-                etiqueta, (factura["id_factura"], float(factura["saldo_pendiente"]))
-            )
+            self.factura_combo.addItem(etiqueta, (factura["id_factura"], float(factura["saldo_pendiente"])))
         self.factura_combo.currentIndexChanged.connect(self._on_seleccion_cambiada)
         card_layout.addWidget(lbl_factura)
         card_layout.addWidget(self.factura_combo)
 
         lbl_monto = QLabel(f"Monto a aplicar {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
-        self.monto_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01")
-        )
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)
         card_layout.addWidget(lbl_monto)
         card_layout.addWidget(self.monto_input)
@@ -252,26 +242,20 @@ class AplicarNotaCreditoDialog(QDialog):
     def _on_seleccion_cambiada(self) -> None:
         id_nota = self.nota_combo.currentData()
         origen_factura = self.factura_combo.currentData()
-        nota = next(
-            (n for n in self.notas_disponibles if n.id_nota_credito == id_nota), None
-        )
+        nota = next((n for n in self.notas_disponibles if n.id_nota_credito == id_nota), None)
         if nota is None or origen_factura is None:
             self.monto_input.min_value = Decimal("0")
             self.monto_input.max_value = Decimal("0")
             self.monto_input.set_value(Decimal("0"))
             self.btn_aplicar.setEnabled(False)
-            self.lbl_ayuda.setText(
-                "No hay notas de crédito o facturas con saldo pendiente disponibles."
-            )
+            self.lbl_ayuda.setText("No hay notas de crédito o facturas con saldo pendiente disponibles.")
             return
 
         _, saldo_pendiente_factura = origen_factura
         maximo = min(float(nota.saldo_disponible), saldo_pendiente_factura)
         maximo_decimal = Decimal(str(maximo))
         self.monto_input.min_value = Decimal("0.01")
-        self.monto_input.max_value = (
-            maximo_decimal if maximo_decimal > 0 else Decimal("0.01")
-        )
+        self.monto_input.max_value = maximo_decimal if maximo_decimal > 0 else Decimal("0.01")
         self.monto_input.set_value(maximo_decimal)
         self.btn_aplicar.setEnabled(maximo > 0)
         self.lbl_ayuda.setText(
@@ -300,9 +284,7 @@ class AplicarNotaCreditoDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(
-                self, "Sin permiso", "No tiene permiso para aplicar notas de crédito."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tiene permiso para aplicar notas de crédito.")
             return
 
         self.accept()

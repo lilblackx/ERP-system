@@ -22,9 +22,7 @@ def test_obtener_historial_cliente_dias_credito_no_cambia_retroactivamente(db_se
     vendedor = crear_vendedor(db_session)
     producto = crear_producto(db_session, cantidad_unidad=10)
     crear_precio_producto(db_session, producto, "50.00")
-    cliente = crear_cliente(
-        db_session, limite_credito=Decimal("1000.00"), dias_credito=10
-    )
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"), dias_credito=10)
 
     factura = VentaService.emitir_factura(
         db_session,

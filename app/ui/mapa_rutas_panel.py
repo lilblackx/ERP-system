@@ -115,9 +115,7 @@ class MapaRutasPanel(QWidget):
         session = self.session_factory()
         try:
             ruta_actual = self.ruta_combo.currentData()
-            resultado = RutaService.listar(
-                session, id_usuario=self.usuario.id_usuario, por_pagina=1_000_000
-            )
+            resultado = RutaService.listar(session, id_usuario=self.usuario.id_usuario, por_pagina=1_000_000)
             self.ruta_combo.blockSignals(True)
             self.ruta_combo.clear()
             for ruta in resultado["items"]:
@@ -127,14 +125,10 @@ class MapaRutasPanel(QWidget):
             self.ruta_combo.blockSignals(False)
             self._cargar_mapa()
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para consultar rutas."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar rutas.")
         except Exception:
             logger.exception("Fallo al cargar el combo de rutas del mapa")
-            MessageBox.critical(
-                self, "Error de conexión", "No se pudo cargar la lista de rutas."
-            )
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de rutas.")
         finally:
             session.close()
 
@@ -150,37 +144,25 @@ class MapaRutasPanel(QWidget):
 
         session = self.session_factory()
         try:
-            ruta = RutaService.obtener(
-                session, id_ruta, id_usuario=self.usuario.id_usuario
-            )
+            ruta = RutaService.obtener(session, id_ruta, id_usuario=self.usuario.id_usuario)
             if ruta is None:
                 return
-            clientes = listar_clientes_por_ruta(
-                session, id_ruta, id_usuario=self.usuario.id_usuario
-            )
+            clientes = listar_clientes_por_ruta(session, id_ruta, id_usuario=self.usuario.id_usuario)
 
             self._ultimos_clientes = [
                 (float(c.latitud), float(c.longitud), c.nombre_razon_social)
                 for c in clientes
                 if c.latitud is not None and c.longitud is not None
             ]
-            self._ultima_zona = (
-                [tuple(v) for v in json.loads(ruta.zona_geojson)]
-                if ruta.zona_geojson
-                else None
-            )
+            self._ultima_zona = [tuple(v) for v in json.loads(ruta.zona_geojson)] if ruta.zona_geojson else None
 
             self._repintar_mapa()
 
             total_clientes_ruta = len(clientes)
             if not self._ultima_zona:
-                self.lbl_info.setText(
-                    f"{total_clientes_ruta} cliente(s) geolocalizado(s). La ruta no tiene zona."
-                )
+                self.lbl_info.setText(f"{total_clientes_ruta} cliente(s) geolocalizado(s). La ruta no tiene zona.")
             else:
-                self.lbl_info.setText(
-                    f"{total_clientes_ruta} cliente(s) geolocalizado(s)."
-                )
+                self.lbl_info.setText(f"{total_clientes_ruta} cliente(s) geolocalizado(s).")
         except PermisoDenegadoError:
             MessageBox.warning(
                 self,
@@ -202,9 +184,7 @@ class MapaRutasPanel(QWidget):
             self.mapa.establecer_zona(self._ultima_zona)
         else:
             self.mapa.limpiar_zona()
-        clientes = (
-            self._ultimos_clientes if self.chk_mostrar_clientes.isChecked() else []
-        )
+        clientes = self._ultimos_clientes if self.chk_mostrar_clientes.isChecked() else []
         self.mapa.mostrar_puntos(clientes)
 
     def _buscar_cliente(self) -> None:
@@ -219,11 +199,7 @@ class MapaRutasPanel(QWidget):
                 id_usuario=self.usuario.id_usuario,
                 por_pagina=LIMITE_BUSQUEDA_CLIENTES,
             )
-            candidatos = [
-                c
-                for c in resultado["items"]
-                if c.latitud is not None and c.longitud is not None
-            ]
+            candidatos = [c for c in resultado["items"] if c.latitud is not None and c.longitud is not None]
             if not candidatos:
                 MessageBox.information(
                     self,
@@ -236,18 +212,12 @@ class MapaRutasPanel(QWidget):
             if id_ruta_cliente is not None:
                 idx = self.ruta_combo.findData(id_ruta_cliente)
                 if idx >= 0 and idx != self.ruta_combo.currentIndex():
-                    self.ruta_combo.setCurrentIndex(
-                        idx
-                    )  # dispara _cargar_mapa() via currentIndexChanged
+                    self.ruta_combo.setCurrentIndex(idx)  # dispara _cargar_mapa() via currentIndexChanged
             self.mapa.centrar(float(cliente.latitud), float(cliente.longitud), zoom=16)
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para consultar clientes."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al buscar cliente '%s' en el mapa de rutas", texto)
-            MessageBox.critical(
-                self, "Error de conexión", "No se pudo buscar el cliente."
-            )
+            MessageBox.critical(self, "Error de conexión", "No se pudo buscar el cliente.")
         finally:
             session.close()

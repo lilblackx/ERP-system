@@ -99,8 +99,7 @@ def _mostrar_campos_bolivares(dialogo, qtbot) -> None:
 
     # Wait for the bolivares fields to be visible and enabled
     qtbot.waitUntil(
-        lambda: dialogo.bolivares_input is not None
-        and dialogo.bolivares_input.isEnabled(),
+        lambda: dialogo.bolivares_input is not None and dialogo.bolivares_input.isEnabled(),
         timeout=15000,
     )
     qtbot.wait(50)  # Small delay to ensure UI is ready
@@ -124,8 +123,7 @@ def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
 
     # Wait for the widget to be fully initialized and enabled
     qtbot.waitUntil(
-        lambda: dialogo.bolivares_input is not None
-        and dialogo.bolivares_input.isEnabled(),
+        lambda: dialogo.bolivares_input is not None and dialogo.bolivares_input.isEnabled(),
         timeout=15000,
     )
     qtbot.wait(50)  # Small delay to ensure UI is ready
@@ -181,11 +179,7 @@ def test_validar_y_aceptar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     qtbot.addWidget(dialogo)
     dialogo.show()
     qtbot.waitExposed(dialogo, timeout=15000)
-    dialogo._cajas_abiertas = [
-        SimpleNamespace(
-            id_caja=1, nombre_caja="Caja 1", fecha_apertura=1, fecha_cierre=None
-        )
-    ]
+    dialogo._cajas_abiertas = [SimpleNamespace(id_caja=1, nombre_caja="Caja 1", fecha_apertura=1, fecha_cierre=None)]
     dialogo._toggle_origen()
     dialogo.origen_combo.setCurrentIndex(0)
 

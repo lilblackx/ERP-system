@@ -39,9 +39,7 @@ def _datos_usuario(**overrides) -> dict:
 def test_crear_usuario(db_session):
     admin = crear_usuario_admin(db_session)
 
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     assert usuario.id_usuario is not None
     assert usuario.nombre_usuario == "jperez"
@@ -67,9 +65,7 @@ def test_crear_usuario_requiere_nombre_usuario(db_session):
 def test_crear_usuario_requiere_clave(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="clave"):
-        UsuarioService.crear_usuario(
-            db_session, **_datos_usuario(clave=""), realizado_por=admin.id_usuario
-        )
+        UsuarioService.crear_usuario(db_session, **_datos_usuario(clave=""), realizado_por=admin.id_usuario)
 
 
 def test_crear_usuario_requiere_email(db_session):
@@ -78,16 +74,12 @@ def test_crear_usuario_requiere_email(db_session):
     recuperar el acceso por si solo."""
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="email"):
-        UsuarioService.crear_usuario(
-            db_session, **_datos_usuario(email=""), realizado_por=admin.id_usuario
-        )
+        UsuarioService.crear_usuario(db_session, **_datos_usuario(email=""), realizado_por=admin.id_usuario)
 
 
 def test_crear_usuario_nombre_duplicado(db_session):
     admin = crear_usuario_admin(db_session)
-    UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     with pytest.raises(ValueError, match="ya esta en uso"):
         UsuarioService.crear_usuario(
@@ -102,9 +94,7 @@ def test_crear_usuario_email_duplicado(db_session):
     de desbloqueo/recuperacion -- dos usuarios con el mismo correo podrian recibir el
     codigo del otro."""
     admin = crear_usuario_admin(db_session)
-    UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     with pytest.raises(ValueError, match="ya esta en uso"):
         UsuarioService.crear_usuario(
@@ -155,9 +145,7 @@ def test_crear_usuario_no_vincula_vendedor_si_rol_no_es_vendedor(db_session):
 def test_crear_usuario_rechaza_clave_debil(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="politica de seguridad"):
-        UsuarioService.crear_usuario(
-            db_session, **_datos_usuario(clave="debil"), realizado_por=admin.id_usuario
-        )
+        UsuarioService.crear_usuario(db_session, **_datos_usuario(clave="debil"), realizado_por=admin.id_usuario)
 
 
 def test_crear_usuario_rol_vendedor_pero_vendedor_inexistente(db_session):
@@ -203,28 +191,20 @@ def test_crear_usuario_vendedor_ya_vinculado_a_otro_usuario_falla(db_session):
 def test_editar_usuario_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Usuario no encontrado"):
-        UsuarioService.editar_usuario(
-            db_session, 999999, {"nombre": "X"}, realizado_por=admin.id_usuario
-        )
+        UsuarioService.editar_usuario(db_session, 999999, {"nombre": "X"}, realizado_por=admin.id_usuario)
 
 
 def test_editar_usuario_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     with pytest.raises(PermisoDenegadoError):
-        UsuarioService.editar_usuario(
-            db_session, usuario.id_usuario, {"nombre": "Carlos"}
-        )
+        UsuarioService.editar_usuario(db_session, usuario.id_usuario, {"nombre": "Carlos"})
 
 
 def test_editar_usuario_actualiza_campos(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     actualizado = UsuarioService.editar_usuario(
         db_session,
@@ -240,9 +220,7 @@ def test_editar_usuario_no_permite_vaciar_email(db_session):
     """Mismo motivo que test_crear_usuario_requiere_email: una edicion no debe poder
     dejar a un usuario existente sin correo registrado."""
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     with pytest.raises(ValueError, match="email"):
         UsuarioService.editar_usuario(
@@ -255,9 +233,7 @@ def test_editar_usuario_no_permite_vaciar_email(db_session):
 
 def test_editar_usuario_ignora_clave_en_datos(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
     clave_original = usuario.clave
 
     actualizado = UsuarioService.editar_usuario(
@@ -272,9 +248,7 @@ def test_editar_usuario_ignora_clave_en_datos(db_session):
 
 def test_editar_usuario_nueva_clave_la_hashea(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     actualizado = UsuarioService.editar_usuario(
         db_session,
@@ -290,9 +264,7 @@ def test_editar_usuario_nueva_clave_la_hashea(db_session):
 
 def test_editar_usuario_rechaza_clave_debil(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     with pytest.raises(ValueError, match="politica de seguridad"):
         UsuarioService.editar_usuario(
@@ -389,20 +361,14 @@ def test_editar_usuario_mismo_email_no_falla(db_session):
 
 def test_cambiar_estado_invalido(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
     with pytest.raises(ValueError, match="nuevo_estado"):
-        UsuarioService.cambiar_estado(
-            db_session, usuario.id_usuario, "BLOQUEADO", realizado_por=admin.id_usuario
-        )
+        UsuarioService.cambiar_estado(db_session, usuario.id_usuario, "BLOQUEADO", realizado_por=admin.id_usuario)
 
 
 def test_cambiar_estado_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     with pytest.raises(PermisoDenegadoError):
         UsuarioService.cambiar_estado(db_session, usuario.id_usuario, "INACTIVO")
@@ -411,16 +377,12 @@ def test_cambiar_estado_sin_usuario_autorizado_falla(db_session):
 def test_cambiar_estado_usuario_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Usuario no encontrado"):
-        UsuarioService.cambiar_estado(
-            db_session, 999999, "INACTIVO", realizado_por=admin.id_usuario
-        )
+        UsuarioService.cambiar_estado(db_session, 999999, "INACTIVO", realizado_por=admin.id_usuario)
 
 
 def test_cambiar_estado_ok(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     actualizado = UsuarioService.cambiar_estado(
         db_session, usuario.id_usuario, "INACTIVO", realizado_por=admin.id_usuario
@@ -436,9 +398,7 @@ def test_cambiar_estado_no_permite_auto_desactivarse(db_session):
     admin = crear_usuario_admin(db_session)
 
     with pytest.raises(ValueError, match="No puedes desactivar tu propia cuenta"):
-        UsuarioService.cambiar_estado(
-            db_session, admin.id_usuario, "INACTIVO", realizado_por=admin.id_usuario
-        )
+        UsuarioService.cambiar_estado(db_session, admin.id_usuario, "INACTIVO", realizado_por=admin.id_usuario)
 
 
 def test_cambiar_estado_no_permite_desactivar_al_unico_admin_activo(db_session):
@@ -451,9 +411,7 @@ def test_cambiar_estado_no_permite_desactivar_al_unico_admin_activo(db_session):
     rol_supervisor = crear_rol(db_session, nombre="SUPERVISOR")
     permiso = crear_permiso(db_session, recurso="usuarios", accion="editar")
     asignar_permiso(db_session, rol_supervisor, permiso)
-    supervisor = crear_usuario(
-        db_session, nombre_usuario="supervisor1", id_rol=rol_supervisor.id_rol
-    )
+    supervisor = crear_usuario(db_session, nombre_usuario="supervisor1", id_rol=rol_supervisor.id_rol)
 
     with pytest.raises(ValueError, match="unico administrador activo"):
         UsuarioService.cambiar_estado(
@@ -481,16 +439,12 @@ def test_cambiar_estado_permite_desactivar_admin_si_hay_otro_activo(db_session):
 
 def test_desbloquear_usuario_limpia_bloqueo_e_intentos(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
     usuario.intentos_fallidos = 5
     usuario.bloqueado_desde = datetime.now()
     db_session.commit()
 
-    actualizado = UsuarioService.desbloquear_usuario(
-        db_session, usuario.id_usuario, realizado_por=admin.id_usuario
-    )
+    actualizado = UsuarioService.desbloquear_usuario(db_session, usuario.id_usuario, realizado_por=admin.id_usuario)
 
     assert actualizado.bloqueado_desde is None
     assert actualizado.intentos_fallidos == 0
@@ -498,9 +452,7 @@ def test_desbloquear_usuario_limpia_bloqueo_e_intentos(db_session):
 
 def test_desbloquear_usuario_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    usuario = UsuarioService.crear_usuario(
-        db_session, **_datos_usuario(), realizado_por=admin.id_usuario
-    )
+    usuario = UsuarioService.crear_usuario(db_session, **_datos_usuario(), realizado_por=admin.id_usuario)
 
     with pytest.raises(PermisoDenegadoError):
         UsuarioService.desbloquear_usuario(db_session, usuario.id_usuario)
@@ -509,9 +461,7 @@ def test_desbloquear_usuario_sin_usuario_autorizado_falla(db_session):
 def test_desbloquear_usuario_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Usuario no encontrado"):
-        UsuarioService.desbloquear_usuario(
-            db_session, 999999, realizado_por=admin.id_usuario
-        )
+        UsuarioService.desbloquear_usuario(db_session, 999999, realizado_por=admin.id_usuario)
 
 
 # --- listar_usuarios --------------------------------------------------------------
@@ -530,9 +480,7 @@ def test_listar_usuarios_filtra_por_texto(db_session):
         realizado_por=admin.id_usuario,
     )
 
-    resultado = UsuarioService.listar_usuarios(
-        db_session, texto_busqueda="Juan", id_usuario=admin.id_usuario
-    )
+    resultado = UsuarioService.listar_usuarios(db_session, texto_busqueda="Juan", id_usuario=admin.id_usuario)
 
     assert len(resultado) == 1
     assert resultado[0]["nombre_usuario"] == "jperez"
@@ -557,9 +505,7 @@ def test_listar_usuarios_filtra_por_rol(db_session):
         realizado_por=admin.id_usuario,
     )
 
-    resultado = UsuarioService.listar_usuarios(
-        db_session, id_rol=rol.id_rol, id_usuario=admin.id_usuario
-    )
+    resultado = UsuarioService.listar_usuarios(db_session, id_rol=rol.id_rol, id_usuario=admin.id_usuario)
 
     assert len(resultado) == 1
     assert resultado[0]["nombre_usuario"] == "admin1"
@@ -578,19 +524,11 @@ def test_listar_usuarios_filtra_por_estado(db_session):
         **_datos_usuario(nombre_usuario="inactivo1"),
         realizado_por=admin.id_usuario,
     )
-    UsuarioService.cambiar_estado(
-        db_session, inactivo.id_usuario, "INACTIVO", realizado_por=admin.id_usuario
-    )
+    UsuarioService.cambiar_estado(db_session, inactivo.id_usuario, "INACTIVO", realizado_por=admin.id_usuario)
 
-    resultado = UsuarioService.listar_usuarios(
-        db_session, estado="ACTIVO", id_usuario=admin.id_usuario
-    )
+    resultado = UsuarioService.listar_usuarios(db_session, estado="ACTIVO", id_usuario=admin.id_usuario)
 
-    assert [
-        u["nombre_usuario"]
-        for u in resultado
-        if u["nombre_usuario"] in ("activo1", "inactivo1")
-    ] == ["activo1"]
+    assert [u["nombre_usuario"] for u in resultado if u["nombre_usuario"] in ("activo1", "inactivo1")] == ["activo1"]
     assert activo.estado == "ACTIVO"
 
 
@@ -602,9 +540,7 @@ def test_listar_usuarios_nombre_completo(db_session):
         realizado_por=admin.id_usuario,
     )
 
-    resultado = UsuarioService.listar_usuarios(
-        db_session, texto_busqueda="jperez2", id_usuario=admin.id_usuario
-    )
+    resultado = UsuarioService.listar_usuarios(db_session, texto_busqueda="jperez2", id_usuario=admin.id_usuario)
 
     assert resultado[0]["nombre_completo"] == "Juan Perez"
 
@@ -617,20 +553,12 @@ def test_listar_usuarios_nombre_completo(db_session):
 
 
 def test_verificar_permiso_usuario_inexistente(db_session):
-    assert (
-        UsuarioService.verificar_permiso(db_session, 999999, "clientes", "crear")
-        is False
-    )
+    assert UsuarioService.verificar_permiso(db_session, 999999, "clientes", "crear") is False
 
 
 def test_verificar_permiso_usuario_sin_rol(db_session):
     usuario = crear_usuario(db_session)
-    assert (
-        UsuarioService.verificar_permiso(
-            db_session, usuario.id_usuario, "clientes", "crear"
-        )
-        is False
-    )
+    assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "crear") is False
 
 
 def test_verificar_permiso_concedido(db_session):
@@ -639,12 +567,7 @@ def test_verificar_permiso_concedido(db_session):
     asignar_permiso(db_session, rol, permiso)
     usuario = crear_usuario(db_session, id_rol=rol.id_rol)
 
-    assert (
-        UsuarioService.verificar_permiso(
-            db_session, usuario.id_usuario, "clientes", "crear"
-        )
-        is True
-    )
+    assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "crear") is True
 
 
 def test_verificar_permiso_no_concedido(db_session):
@@ -653,12 +576,7 @@ def test_verificar_permiso_no_concedido(db_session):
     asignar_permiso(db_session, rol, permiso)
     usuario = crear_usuario(db_session, id_rol=rol.id_rol)
 
-    assert (
-        UsuarioService.verificar_permiso(
-            db_session, usuario.id_usuario, "clientes", "eliminar"
-        )
-        is False
-    )
+    assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "eliminar") is False
 
 
 def test_verificar_permiso_usuario_inactivo_es_false_aunque_tenga_el_permiso(
@@ -671,12 +589,7 @@ def test_verificar_permiso_usuario_inactivo_es_false_aunque_tenga_el_permiso(
     asignar_permiso(db_session, rol, permiso)
     usuario = crear_usuario(db_session, id_rol=rol.id_rol, estado="INACTIVO")
 
-    assert (
-        UsuarioService.verificar_permiso(
-            db_session, usuario.id_usuario, "clientes", "crear"
-        )
-        is False
-    )
+    assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "crear") is False
 
 
 def test_verificar_permiso_usuario_bloqueado_es_false_aunque_tenga_el_permiso(
@@ -687,16 +600,9 @@ def test_verificar_permiso_usuario_bloqueado_es_false_aunque_tenga_el_permiso(
     rol = crear_rol(db_session)
     permiso = crear_permiso(db_session, recurso="clientes", accion="crear")
     asignar_permiso(db_session, rol, permiso)
-    usuario = crear_usuario(
-        db_session, id_rol=rol.id_rol, bloqueado_desde=datetime.now()
-    )
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol, bloqueado_desde=datetime.now())
 
-    assert (
-        UsuarioService.verificar_permiso(
-            db_session, usuario.id_usuario, "clientes", "crear"
-        )
-        is False
-    )
+    assert UsuarioService.verificar_permiso(db_session, usuario.id_usuario, "clientes", "crear") is False
 
 
 def test_verificar_permiso_admin_bypassa_sin_filas_en_rol_permisos(db_session):
@@ -706,15 +612,5 @@ def test_verificar_permiso_admin_bypassa_sin_filas_en_rol_permisos(db_session):
     real (sin filas en rol_permisos, ver el seed de schema_sqlserver.sql) quedaba
     evaluado como si no tuviera ningun permiso."""
     admin = crear_usuario_admin(db_session)
-    assert (
-        UsuarioService.verificar_permiso(
-            db_session, admin.id_usuario, "clientes", "eliminar"
-        )
-        is True
-    )
-    assert (
-        UsuarioService.verificar_permiso(
-            db_session, admin.id_usuario, "usuarios", "crear"
-        )
-        is True
-    )
+    assert UsuarioService.verificar_permiso(db_session, admin.id_usuario, "clientes", "eliminar") is True
+    assert UsuarioService.verificar_permiso(db_session, admin.id_usuario, "usuarios", "crear") is True

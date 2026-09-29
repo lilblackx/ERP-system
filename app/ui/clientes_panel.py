@@ -86,9 +86,7 @@ ESTADOS_FILTRO = [
 ]
 
 
-def _filas_clientes_query(
-    session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria
-) -> list[list]:
+def _filas_clientes_query(session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria) -> list[list]:
     resultado = list_clientes(
         session,
         texto_busqueda,
@@ -133,9 +131,7 @@ def _tarea_exportar_clientes_excel(
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
     de clientes a un archivo (openpyxl) es lo bastante lento como para congelar la
     ventana si se hace en el hilo de GUI."""
-    filas = _filas_clientes_query(
-        session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria
-    )
+    filas = _filas_clientes_query(session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria)
     exportar_excel(ruta, COLS_VISIBLES, filas)
     return ruta, len(filas)
 
@@ -151,9 +147,7 @@ def _tarea_exportar_clientes_pdf(
     filtros,
     col_widths,
 ) -> tuple[str, int]:
-    filas = _filas_clientes_query(
-        session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria
-    )
+    filas = _filas_clientes_query(session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria)
     exportar_pdf(
         ruta,
         "Reporte de Clientes",
@@ -214,9 +208,7 @@ class ClientesPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Clientes")
-        lbl.setStyleSheet(
-            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -244,9 +236,7 @@ class ClientesPanel(QWidget):
         # (nombre / identificacion) que se combinaban con AND, obligando a saber en cual
         # escribir cada dato.
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText(
-            "Buscar por nombre, identificación, email o teléfono…"
-        )
+        self.buscar_input.setPlaceholderText("Buscar por nombre, identificación, email o teléfono…")
         self.buscar_input.addAction(
             qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
             QLineEdit.ActionPosition.LeadingPosition,
@@ -275,14 +265,10 @@ class ClientesPanel(QWidget):
         session = self.session_factory()
         try:
             vendedores = (
-                session.query(Vendedor)
-                .filter(Vendedor.estado_vendedor == "ACTIVO")
-                .order_by(Vendedor.nombre_vendedor)
+                session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor)
             )
             for vendedor in vendedores:
-                self.vendedor_combo.addItem(
-                    vendedor.nombre_vendedor, vendedor.id_vendedor
-                )
+                self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
         finally:
             session.close()
         self.vendedor_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
@@ -292,12 +278,8 @@ class ClientesPanel(QWidget):
         self.categoria_combo.addItem("Todas las categorías")
         session = self.session_factory()
         try:
-            for categoria in session.query(CategoriaCliente).order_by(
-                CategoriaCliente.nombre
-            ):
-                self.categoria_combo.addItem(
-                    categoria.nombre, categoria.id_categoria_cliente
-                )
+            for categoria in session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):
+                self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
         finally:
             session.close()
         self.categoria_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
@@ -309,14 +291,10 @@ class ClientesPanel(QWidget):
                 ("Categoría", self.categoria_combo),
             ]
         )
-        self.btn_exportar = BotonExportar(
-            on_excel=self.exportar_excel_clientes, on_pdf=self.exportar_pdf_clientes
-        )
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_clientes, on_pdf=self.exportar_pdf_clientes)
 
         h.addWidget(self.buscar_input)
-        h.addSpacerItem(
-            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        )
+        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
@@ -346,21 +324,11 @@ class ClientesPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            7, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            8, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            9, QHeaderView.ResizeMode.Fixed
-        )
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(9, 120)
         # Antes esto agregaba QSS propio encima de TABLE_QSS (fondo "#E3F2FD" a mano para
         # filas no-alternas y su propio color de seleccion) -- una version vieja/paralela
@@ -391,9 +359,7 @@ class ClientesPanel(QWidget):
         self.btn_anterior.clicked.connect(self._pagina_anterior)
 
         self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(
-            qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK)
-        )
+        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
         self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.clicked.connect(self._pagina_siguiente)
@@ -465,14 +431,10 @@ class ClientesPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para consultar clientes."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
         except Exception:
             logger.exception("Fallo al cargar la lista de clientes")
-            MessageBox.critical(
-                self, "Error de conexión", "No se pudo cargar la lista de clientes."
-            )
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de clientes.")
         finally:
             session.close()
 
@@ -504,24 +466,18 @@ class ClientesPanel(QWidget):
             # Columna 7: Crédito
             cred = f"${float(c.limite_credito):,.2f}" if c.limite_credito else "$0.00"
             item_cred = QTableWidgetItem(cred)
-            item_cred.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_cred.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_cred)
 
             # Columna 8: Días de crédito
             dias = str(c.dias_credito) if c.dias_credito is not None else "0"
             item_dias = QTableWidgetItem(dias)
-            item_dias.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 8, item_dias)
 
             # Columna 9: Badge de estado
             estado_cliente = c.estado_cliente or "ACTIVO"
-            color_estado = (
-                COLOR_SUCCESS if estado_cliente.upper() == "ACTIVO" else COLOR_DANGER
-            )
+            color_estado = COLOR_SUCCESS if estado_cliente.upper() == "ACTIVO" else COLOR_DANGER
             badge = EstadoBadge(estado_cliente.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 9, badge)
 
@@ -546,16 +502,11 @@ class ClientesPanel(QWidget):
     def exportar_excel_clientes(self) -> None:
         # Mismo guard que facturacion_panel.py: reasignar self._worker_export a un
         # QThread nuevo mientras el viejo sigue corriendo lo destruye a mitad de ejecucion.
-        if (
-            getattr(self, "_worker_export", None) is not None
-            and self._worker_export.isRunning()
-        ):
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal, asi que no hay nada que purgar si el usuario cancela.
-        ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar clientes", "clientes.xlsx", "Excel (*.xlsx)"
-        )
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar clientes", "clientes.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
@@ -571,14 +522,9 @@ class ClientesPanel(QWidget):
         self._worker_export.start()
 
     def exportar_pdf_clientes(self) -> None:
-        if (
-            getattr(self, "_worker_export", None) is not None
-            and self._worker_export.isRunning()
-        ):
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
-        ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar clientes", "clientes.pdf", "PDF (*.pdf)"
-        )
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar clientes", "clientes.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
@@ -623,24 +569,18 @@ class ClientesPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(
-                self, "Selección requerida", "Selecciona un cliente de la lista."
-            )
+            MessageBox.information(self, "Selección requerida", "Selecciona un cliente de la lista.")
             return None
         item = self.tabla.item(filas[0].row(), 0)
         if item is None:
-            MessageBox.warning(
-                self, "Error", "No se pudo obtener el ID del cliente seleccionado."
-            )
+            MessageBox.warning(self, "Error", "No se pudo obtener el ID del cliente seleccionado.")
             return None
         return int(item.text())
 
     def nuevo_cliente(self) -> None:
         session = self.session_factory()
         try:
-            dialogo = ClienteFormDialog(
-                session, id_usuario=self.usuario.id_usuario, parent=self
-            )
+            dialogo = ClienteFormDialog(session, id_usuario=self.usuario.id_usuario, parent=self)
             if dialogo.exec():
                 datos = dialogo.get_data()
                 datos["creado_por"] = self.usuario.id_usuario
@@ -660,9 +600,7 @@ class ClientesPanel(QWidget):
             MessageBox.warning(self, "Dato invalido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para crear clientes."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear clientes.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear cliente")
@@ -678,9 +616,7 @@ class ClientesPanel(QWidget):
         session = self.session_factory()
         try:
             cliente = session.get(Cliente, id_cliente)
-            dialogo = ClienteFormDialog(
-                session, cliente, id_usuario=self.usuario.id_usuario, parent=self
-            )
+            dialogo = ClienteFormDialog(session, cliente, id_usuario=self.usuario.id_usuario, parent=self)
             if dialogo.exec():
                 update_cliente(
                     session,
@@ -701,15 +637,11 @@ class ClientesPanel(QWidget):
             MessageBox.warning(self, "Dato invalido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para editar clientes."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar clientes.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar cliente")
-            MessageBox.critical(
-                self, "Error", "No se pudo guardar los cambios del cliente."
-            )
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del cliente.")
         finally:
             session.close()
 
@@ -732,9 +664,7 @@ class ClientesPanel(QWidget):
             if respuesta != QMessageBox.StandardButton.Yes:
                 return
 
-            cambiar_estado_cliente(
-                session, id_cliente, nuevo_estado, id_usuario=self.usuario.id_usuario
-            )
+            cambiar_estado_cliente(session, id_cliente, nuevo_estado, id_usuario=self.usuario.id_usuario)
             self.cargar_clientes()
         except PermisoDenegadoError:
             session.rollback()
@@ -746,9 +676,7 @@ class ClientesPanel(QWidget):
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del cliente %s", id_cliente)
-            MessageBox.critical(
-                self, "Error", "No se pudo cambiar el estado del cliente."
-            )
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del cliente.")
         finally:
             session.close()
 
@@ -764,9 +692,7 @@ class ClientesPanel(QWidget):
         try:
             cliente = session.get(Cliente, id_cliente)
             if cliente is None:
-                MessageBox.warning(
-                    self, "Cliente no encontrado", "El cliente seleccionado no existe."
-                )
+                MessageBox.warning(self, "Cliente no encontrado", "El cliente seleccionado no existe.")
                 return
 
             dialogo = HistorialClienteWindow(
@@ -779,9 +705,7 @@ class ClientesPanel(QWidget):
             dialogo.exec()
         except Exception:
             logger.exception("Fallo al abrir el historial del cliente %s", id_cliente)
-            MessageBox.critical(
-                self, "Error", "No se pudo abrir el historial del cliente."
-            )
+            MessageBox.critical(self, "Error", "No se pudo abrir el historial del cliente.")
         finally:
             session.close()
             self._abriendo_dialogo = False

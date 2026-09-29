@@ -26,22 +26,12 @@ SALDO_APERTURA_DEFAULT = Decimal("100.00")
 def main():
     session = SessionLocal()
     try:
-        admin = (
-            session.query(Usuario)
-            .join(Rol)
-            .filter(Rol.nombre == "ADMIN", Usuario.estado == "ACTIVO")
-            .first()
-        )
+        admin = session.query(Usuario).join(Rol).filter(Rol.nombre == "ADMIN", Usuario.estado == "ACTIVO").first()
         if admin is None:
-            print(
-                "No hay ningun usuario ADMIN activo. Cree uno con scripts/create_admin_user.py."
-            )
+            print("No hay ningun usuario ADMIN activo. Cree uno con scripts/create_admin_user.py.")
             return
 
-        nombre_caja = (
-            input(f"Nombre de la caja [{NOMBRE_CAJA_DEFAULT}]: ").strip()
-            or NOMBRE_CAJA_DEFAULT
-        )
+        nombre_caja = input(f"Nombre de la caja [{NOMBRE_CAJA_DEFAULT}]: ").strip() or NOMBRE_CAJA_DEFAULT
         caja = session.query(Caja).filter(Caja.nombre_caja == nombre_caja).first()
         if caja is None:
             caja = Caja(nombre_caja=nombre_caja, estado_caja="CERRADA")
@@ -50,9 +40,7 @@ def main():
             print(f"Caja '{nombre_caja}' creada (id={caja.id_caja}).")
 
         if caja.fecha_apertura is not None and caja.fecha_cierre is None:
-            print(
-                f"La caja '{nombre_caja}' (id={caja.id_caja}) ya esta abierta desde {caja.fecha_apertura}."
-            )
+            print(f"La caja '{nombre_caja}' (id={caja.id_caja}) ya esta abierta desde {caja.fecha_apertura}.")
             return
 
         saldo_input = input(f"Saldo de apertura [{SALDO_APERTURA_DEFAULT}]: ").strip()

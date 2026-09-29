@@ -195,9 +195,7 @@ class ProductoFormDialog(QDialog):
         self.setWindowTitle("Editar Producto" if producto else "Nuevo Producto")
         self.setFixedSize(860, 580)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
@@ -219,9 +217,7 @@ class ProductoFormDialog(QDialog):
 
         icon_lbl = QLabel()
         fa_icon_name = "fa5s.box-open" if self.producto else "fa5s.box"
-        icon_lbl.setPixmap(
-            qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22))
-        )
+        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -235,9 +231,7 @@ class ProductoFormDialog(QDialog):
 
         titulo_text = "Editar Producto" if self.producto else "Nuevo Producto"
         lbl_titulo = QLabel(titulo_text)
-        lbl_titulo.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         lbl_subtitulo = QLabel("Complete los datos del producto y su precio de venta.")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
@@ -327,9 +321,7 @@ class ProductoFormDialog(QDialog):
         lbl_desc = QLabel("Descripción")
         lbl_desc.setProperty("class", "FormLabel")
         self.descripcion_input = QLineEdit()
-        self.descripcion_input.setPlaceholderText(
-            "Detalle adicional del producto (opcional)"
-        )
+        self.descripcion_input.setPlaceholderText("Detalle adicional del producto (opcional)")
         self.descripcion_input.setFixedHeight(32)
         grid.addWidget(lbl_desc, 4, 0, 1, 2)
         grid.addWidget(self.descripcion_input, 5, 0, 1, 2)
@@ -403,9 +395,7 @@ class ProductoFormDialog(QDialog):
         grid.addWidget(self.precio_3_input, 3, 1)
 
         self.lbl_margen = QLabel("Margen: 0.00%")
-        self.lbl_margen.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; margin-top: -4px;"
-        )
+        self.lbl_margen.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; margin-top: -4px;")
         grid.addWidget(self.lbl_margen, 4, 0, 1, 2)
 
         # Compatibilidad: mantener precio_venta_input como alias de precio_1_input
@@ -445,13 +435,9 @@ class ProductoFormDialog(QDialog):
 
         # Campos de solo lectura para mostrar el calculo de cajas y unidades sueltas
         self.lbl_cajas_calculadas = QLabel("Cajas: 0")
-        self.lbl_cajas_calculadas.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED};"
-        )
+        self.lbl_cajas_calculadas.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         self.lbl_unidades_sueltas = QLabel("Unidades sueltas: 0")
-        self.lbl_unidades_sueltas.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED};"
-        )
+        self.lbl_unidades_sueltas.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         grid.addWidget(self.lbl_cajas_calculadas, 11, 0)
         grid.addWidget(self.lbl_unidades_sueltas, 11, 1)
 
@@ -488,9 +474,7 @@ class ProductoFormDialog(QDialog):
     def _cargar_categorias(self, seleccionar_id: int | None = None) -> None:
         self.categoria_combo.clear()
         try:
-            categorias = CategoriaService.listar(
-                self.session, id_usuario=self.id_usuario
-            )
+            categorias = CategoriaService.listar(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             # 'inventario'/'crear' o 'editar' no implican 'categorias'/'ver' en el catalogo
             # de permisos -- son recursos independientes (auditoria de Productos
@@ -514,16 +498,12 @@ class ProductoFormDialog(QDialog):
                 self.categoria_combo.setCurrentIndex(idx)
 
     def _crear_categoria_rapida(self) -> None:
-        nombre, ok = QInputDialog.getText(
-            self, "Nueva categoría", "Nombre de la categoría:"
-        )
+        nombre, ok = QInputDialog.getText(self, "Nueva categoría", "Nombre de la categoría:")
         nombre = nombre.strip()
         if not ok or not nombre:
             return
         try:
-            categoria = CategoriaService.crear(
-                self.session, nombre=nombre, creado_por=self.id_usuario
-            )
+            categoria = CategoriaService.crear(self.session, nombre=nombre, creado_por=self.id_usuario)
         except Exception as exc:
             MessageBox.warning(self, "No se pudo crear la categoría", str(exc))
             return
@@ -574,9 +554,7 @@ class ProductoFormDialog(QDialog):
             self.tiene_vencimiento_check.setChecked(True)
             self.vencimiento_input.setDate(QDate(producto.fecha_vencimiento))
 
-        precio = PrecioService.obtener_precio(
-            self.session, producto.id_producto, id_usuario=self.id_usuario
-        )
+        precio = PrecioService.obtener_precio(self.session, producto.id_producto, id_usuario=self.id_usuario)
         if precio:
             self.precio_1_input.set_value(getattr(precio, "precio_1", None) or 0)
             self.precio_2_input.set_value(getattr(precio, "precio_2", None) or 0)
@@ -588,15 +566,11 @@ class ProductoFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if not self.codigo_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "El código del producto es obligatorio."
-            )
+            MessageBox.warning(self, "Dato requerido", "El código del producto es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "El nombre del producto es obligatorio."
-            )
+            MessageBox.warning(self, "Dato requerido", "El nombre del producto es obligatorio.")
             self.nombre_input.setFocus()
             return
         if self.categoria_combo.currentData() is None:
@@ -643,9 +617,7 @@ class ProductoFormDialog(QDialog):
             "cantidad_minima": self.cantidad_minima_input.get_value(),
             "cantidad_caja": self.cantidad_caja_input.get_value(),
             "fecha_vencimiento": (
-                self.vencimiento_input.date().toPython()
-                if self.tiene_vencimiento_check.isChecked()
-                else None
+                self.vencimiento_input.date().toPython() if self.tiene_vencimiento_check.isChecked() else None
             ),
         }
 

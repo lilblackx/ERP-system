@@ -28,9 +28,7 @@ def _datos_cliente(**overrides) -> dict:
 def test_create_cliente(db_session):
     admin = crear_usuario_admin(db_session)
 
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     assert cliente.id_cliente is not None
     assert cliente.codigo_cliente == "CLI-001"
@@ -47,9 +45,7 @@ def test_create_cliente_requiere_codigo(db_session):
     admin = crear_usuario_admin(db_session)
 
     with pytest.raises(ValueError):
-        clientes_service.create_cliente(
-            db_session, **_datos_cliente(codigo_cliente="", creado_por=admin.id_usuario)
-        )
+        clientes_service.create_cliente(db_session, **_datos_cliente(codigo_cliente="", creado_por=admin.id_usuario))
 
 
 def test_create_cliente_requiere_identificacion(db_session):
@@ -64,24 +60,18 @@ def test_create_cliente_requiere_identificacion(db_session):
 
 def test_create_cliente_codigo_duplicado(db_session):
     admin = crear_usuario_admin(db_session)
-    clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError):
         clientes_service.create_cliente(
             db_session,
-            **_datos_cliente(
-                identificacion_cliente="99999999", creado_por=admin.id_usuario
-            ),
+            **_datos_cliente(identificacion_cliente="99999999", creado_por=admin.id_usuario),
         )
 
 
 def test_create_cliente_identificacion_duplicada(db_session):
     admin = crear_usuario_admin(db_session)
-    clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError):
         clientes_service.create_cliente(
@@ -92,9 +82,7 @@ def test_create_cliente_identificacion_duplicada(db_session):
 
 def test_list_clientes_filtra_por_texto(db_session):
     admin = crear_usuario_admin(db_session)
-    clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
     clientes_service.create_cliente(
         db_session,
         **_datos_cliente(
@@ -105,9 +93,7 @@ def test_list_clientes_filtra_por_texto(db_session):
         ),
     )
 
-    resultado = clientes_service.list_clientes(
-        db_session, texto_busqueda="Prueba", id_usuario=admin.id_usuario
-    )
+    resultado = clientes_service.list_clientes(db_session, texto_busqueda="Prueba", id_usuario=admin.id_usuario)
 
     assert resultado["total"] == 1
     assert resultado["items"][0].nombre_razon_social == "Cliente de Prueba"
@@ -135,12 +121,8 @@ def test_list_clientes_texto_busqueda_matchea_identificacion_email_o_telefono(
     por_identificacion = clientes_service.list_clientes(
         db_session, texto_busqueda="99887766", id_usuario=admin.id_usuario
     )
-    por_email = clientes_service.list_clientes(
-        db_session, texto_busqueda="zeta-unico", id_usuario=admin.id_usuario
-    )
-    por_telefono = clientes_service.list_clientes(
-        db_session, texto_busqueda="1234567", id_usuario=admin.id_usuario
-    )
+    por_email = clientes_service.list_clientes(db_session, texto_busqueda="zeta-unico", id_usuario=admin.id_usuario)
+    por_telefono = clientes_service.list_clientes(db_session, texto_busqueda="1234567", id_usuario=admin.id_usuario)
 
     for resultado in (por_identificacion, por_email, por_telefono):
         assert resultado["total"] == 1
@@ -168,26 +150,18 @@ def test_list_clientes_pagina_resultados(db_session):
             ),
         )
 
-    pagina_1 = clientes_service.list_clientes(
-        db_session, pagina=1, por_pagina=2, id_usuario=admin.id_usuario
-    )
-    pagina_2 = clientes_service.list_clientes(
-        db_session, pagina=2, por_pagina=2, id_usuario=admin.id_usuario
-    )
+    pagina_1 = clientes_service.list_clientes(db_session, pagina=1, por_pagina=2, id_usuario=admin.id_usuario)
+    pagina_2 = clientes_service.list_clientes(db_session, pagina=2, por_pagina=2, id_usuario=admin.id_usuario)
 
     assert pagina_1["total"] == 5
     assert len(pagina_1["items"]) == 2
     assert len(pagina_2["items"]) == 2
-    assert {c.id_cliente for c in pagina_1["items"]}.isdisjoint(
-        {c.id_cliente for c in pagina_2["items"]}
-    )
+    assert {c.id_cliente for c in pagina_1["items"]}.isdisjoint({c.id_cliente for c in pagina_2["items"]})
 
 
 def test_update_cliente(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     actualizado = clientes_service.update_cliente(
         db_session,
@@ -201,21 +175,15 @@ def test_update_cliente(db_session):
 
 def test_update_cliente_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(PermisoDenegadoError):
-        clientes_service.update_cliente(
-            db_session, cliente.id_cliente, nombre_razon_social="X"
-        )
+        clientes_service.update_cliente(db_session, cliente.id_cliente, nombre_razon_social="X")
 
 
 def test_update_cliente_no_permite_vaciar_codigo(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError):
         clientes_service.update_cliente(
@@ -231,9 +199,7 @@ def test_update_cliente_codigo_duplicado(db_session):
     codigo_cliente/identificacion_cliente (clientes.py:111-117) tenia codigo pero
     ningun test la ejercitaba, solo el camino de create_cliente."""
     admin = crear_usuario_admin(db_session)
-    clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
     otro = clientes_service.create_cliente(
         db_session,
         **_datos_cliente(
@@ -254,9 +220,7 @@ def test_update_cliente_codigo_duplicado(db_session):
 
 def test_update_cliente_identificacion_duplicada(db_session):
     admin = crear_usuario_admin(db_session)
-    clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
     otro = clientes_service.create_cliente(
         db_session,
         **_datos_cliente(
@@ -279,9 +243,7 @@ def test_update_cliente_permite_conservar_su_propio_codigo(db_session):
     """Guardar sin cambiar codigo_cliente/identificacion_cliente no debe chocar contra
     si mismo."""
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     actualizado = clientes_service.update_cliente(
         db_session,
@@ -298,33 +260,22 @@ def test_update_cliente_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
 
     with pytest.raises(ValueError):
-        clientes_service.update_cliente(
-            db_session, 999999, id_usuario=admin.id_usuario, nombre_razon_social="X"
-        )
+        clientes_service.update_cliente(db_session, 999999, id_usuario=admin.id_usuario, nombre_razon_social="X")
 
 
 def test_delete_cliente_siempre_falla_para_proteger_integridad(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError, match="No se puede eliminar"):
-        clientes_service.delete_cliente(
-            db_session, cliente.id_cliente, id_usuario=admin.id_usuario
-        )
+        clientes_service.delete_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
 
-    assert (
-        clientes_service.list_clientes(db_session, id_usuario=admin.id_usuario)["total"]
-        == 1
-    )
+    assert clientes_service.list_clientes(db_session, id_usuario=admin.id_usuario)["total"] == 1
 
 
 def test_delete_cliente_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(PermisoDenegadoError):
         clientes_service.delete_cliente(db_session, cliente.id_cliente)
@@ -332,9 +283,7 @@ def test_delete_cliente_sin_usuario_autorizado_falla(db_session):
 
 def test_cambiar_estado_cliente_desactiva(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     actualizado = clientes_service.cambiar_estado_cliente(
         db_session, cliente.id_cliente, "INACTIVO", id_usuario=admin.id_usuario
@@ -345,9 +294,7 @@ def test_cambiar_estado_cliente_desactiva(db_session):
 
 def test_cambiar_estado_cliente_estado_invalido(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError, match="nuevo_estado"):
         clientes_service.cambiar_estado_cliente(
@@ -359,21 +306,15 @@ def test_cambiar_estado_cliente_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
 
     with pytest.raises(ValueError, match="Cliente no encontrado"):
-        clientes_service.cambiar_estado_cliente(
-            db_session, 999999, "INACTIVO", id_usuario=admin.id_usuario
-        )
+        clientes_service.cambiar_estado_cliente(db_session, 999999, "INACTIVO", id_usuario=admin.id_usuario)
 
 
 def test_cambiar_estado_cliente_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(PermisoDenegadoError):
-        clientes_service.cambiar_estado_cliente(
-            db_session, cliente.id_cliente, "INACTIVO"
-        )
+        clientes_service.cambiar_estado_cliente(db_session, cliente.id_cliente, "INACTIVO")
 
 
 # --- geolocalizacion (latitud/longitud) -----------------------------------------------
@@ -384,9 +325,7 @@ def test_create_cliente_con_coordenadas(db_session):
 
     cliente = clientes_service.create_cliente(
         db_session,
-        **_datos_cliente(
-            creado_por=admin.id_usuario, latitud=10.4806, longitud=-66.9036
-        ),
+        **_datos_cliente(creado_por=admin.id_usuario, latitud=10.4806, longitud=-66.9036),
     )
 
     assert float(cliente.latitud) == pytest.approx(10.4806)
@@ -399,18 +338,14 @@ def test_create_cliente_requiere_latitud(db_session):
     admin = crear_usuario_admin(db_session)
 
     with pytest.raises(ValueError, match="latitud"):
-        clientes_service.create_cliente(
-            db_session, **_datos_cliente(creado_por=admin.id_usuario, latitud=None)
-        )
+        clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario, latitud=None))
 
 
 def test_create_cliente_requiere_longitud(db_session):
     admin = crear_usuario_admin(db_session)
 
     with pytest.raises(ValueError, match="longitud"):
-        clientes_service.create_cliente(
-            db_session, **_datos_cliente(creado_por=admin.id_usuario, longitud=None)
-        )
+        clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario, longitud=None))
 
 
 def test_create_cliente_latitud_fuera_de_rango_falla(db_session):
@@ -419,9 +354,7 @@ def test_create_cliente_latitud_fuera_de_rango_falla(db_session):
     with pytest.raises(ValueError, match="latitud"):
         clientes_service.create_cliente(
             db_session,
-            **_datos_cliente(
-                creado_por=admin.id_usuario, latitud=200, longitud=-66.9036
-            ),
+            **_datos_cliente(creado_por=admin.id_usuario, latitud=200, longitud=-66.9036),
         )
 
 
@@ -431,17 +364,13 @@ def test_create_cliente_longitud_fuera_de_rango_falla(db_session):
     with pytest.raises(ValueError, match="longitud"):
         clientes_service.create_cliente(
             db_session,
-            **_datos_cliente(
-                creado_por=admin.id_usuario, latitud=10.4806, longitud=200
-            ),
+            **_datos_cliente(creado_por=admin.id_usuario, latitud=10.4806, longitud=200),
         )
 
 
 def test_update_cliente_cambia_coordenadas(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     actualizado = clientes_service.update_cliente(
         db_session,
@@ -456,26 +385,18 @@ def test_update_cliente_cambia_coordenadas(db_session):
 
 def test_update_cliente_no_permite_vaciar_latitud(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError, match="latitud"):
-        clientes_service.update_cliente(
-            db_session, cliente.id_cliente, id_usuario=admin.id_usuario, latitud=None
-        )
+        clientes_service.update_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario, latitud=None)
 
 
 def test_update_cliente_no_permite_vaciar_longitud(db_session):
     admin = crear_usuario_admin(db_session)
-    cliente = clientes_service.create_cliente(
-        db_session, **_datos_cliente(creado_por=admin.id_usuario)
-    )
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
 
     with pytest.raises(ValueError, match="longitud"):
-        clientes_service.update_cliente(
-            db_session, cliente.id_cliente, id_usuario=admin.id_usuario, longitud=None
-        )
+        clientes_service.update_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario, longitud=None)
 
 
 def test_update_cliente_conserva_coordenadas_existentes_al_editar_otro_campo(
@@ -484,9 +405,7 @@ def test_update_cliente_conserva_coordenadas_existentes_al_editar_otro_campo(
     admin = crear_usuario_admin(db_session)
     cliente = clientes_service.create_cliente(
         db_session,
-        **_datos_cliente(
-            creado_por=admin.id_usuario, latitud=10.4806, longitud=-66.9036
-        ),
+        **_datos_cliente(creado_por=admin.id_usuario, latitud=10.4806, longitud=-66.9036),
     )
 
     actualizado = clientes_service.update_cliente(
@@ -524,9 +443,7 @@ def test_listar_clientes_por_ruta(db_session):
         longitud=-66.0,
     )
 
-    resultado = clientes_service.listar_clientes_por_ruta(
-        db_session, ruta.id_ruta, id_usuario=admin.id_usuario
-    )
+    resultado = clientes_service.listar_clientes_por_ruta(db_session, ruta.id_ruta, id_usuario=admin.id_usuario)
 
     assert [c.id_cliente for c in resultado] == [cliente_con_coords.id_cliente]
 

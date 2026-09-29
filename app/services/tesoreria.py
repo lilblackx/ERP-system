@@ -44,18 +44,12 @@ def _require_admin(session: Session, id_usuario: int | None) -> Usuario:
     if usuario is None:
         raise PermisoDenegadoError(f"Usuario {id_usuario} no encontrado")
     if usuario.estado != "ACTIVO":
-        raise PermisoDenegadoError(
-            f"El usuario '{usuario.nombre_usuario}' esta inactivo"
-        )
+        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta inactivo")
     if usuario.bloqueado_desde is not None:
-        raise PermisoDenegadoError(
-            f"El usuario '{usuario.nombre_usuario}' esta bloqueado"
-        )
+        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
     rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
     if rol is None or rol.nombre != "ADMIN":
-        raise PermisoDenegadoError(
-            "Solo un administrador puede gestionar cajas (crear, abrir o cerrar turnos)"
-        )
+        raise PermisoDenegadoError("Solo un administrador puede gestionar cajas (crear, abrir o cerrar turnos)")
     return usuario
 
 
@@ -84,9 +78,7 @@ class BancoService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(banco)
 
@@ -100,9 +92,7 @@ class BancoService:
         return banco
 
     @staticmethod
-    def actualizar_banco(
-        session: Session, id_banco: int, id_usuario: int | None = None, **datos
-    ) -> Banco:
+    def actualizar_banco(session: Session, id_banco: int, id_usuario: int | None = None, **datos) -> Banco:
         require_permiso(session, id_usuario, "bancos", "editar")
         banco = session.get(Banco, id_banco)
         if banco is None:
@@ -116,9 +106,7 @@ class BancoService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(banco)
 
@@ -138,9 +126,7 @@ class BancoService:
     # cambiar_estado_banco(..., "INACTIVO") para retirarlo de circulacion preservando el
     # historial. Decision de producto 2026-08-22 (hallazgo de auditoria del mismo dia).
     @staticmethod
-    def eliminar_banco(
-        session: Session, id_banco: int, id_usuario: int | None = None
-    ) -> None:
+    def eliminar_banco(session: Session, id_banco: int, id_usuario: int | None = None) -> None:
         require_permiso(session, id_usuario, "bancos", "eliminar")
         raise ValueError(
             "No se puede eliminar un banco para proteger la integridad de los datos. "
@@ -169,9 +155,7 @@ class BancoService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(banco)
 
@@ -211,9 +195,7 @@ class BancoService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(cuenta)
 
@@ -230,9 +212,7 @@ class BancoService:
         return cuenta
 
     @staticmethod
-    def actualizar_cuenta(
-        session: Session, id_cuenta: int, id_usuario: int | None = None, **datos
-    ) -> CuentaBancaria:
+    def actualizar_cuenta(session: Session, id_cuenta: int, id_usuario: int | None = None, **datos) -> CuentaBancaria:
         require_permiso(session, id_usuario, "bancos", "editar")
         cuenta = session.get(CuentaBancaria, id_cuenta)
         if cuenta is None:
@@ -246,9 +226,7 @@ class BancoService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(cuenta)
 
@@ -270,9 +248,7 @@ class BancoService:
     # "INACTIVO") para retirarla de circulacion preservando el historial. Decision de
     # producto 2026-08-22 (hallazgo de auditoria del mismo dia).
     @staticmethod
-    def eliminar_cuenta(
-        session: Session, id_cuenta: int, id_usuario: int | None = None
-    ) -> None:
+    def eliminar_cuenta(session: Session, id_cuenta: int, id_usuario: int | None = None) -> None:
         require_permiso(session, id_usuario, "bancos", "eliminar")
         raise ValueError(
             "No se puede eliminar una cuenta bancaria para proteger la integridad de los datos. "
@@ -301,9 +277,7 @@ class BancoService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(cuenta)
 
@@ -317,9 +291,7 @@ class BancoService:
         return cuenta
 
     @staticmethod
-    def obtener_resumen_cuentas(
-        session: Session, id_usuario: int | None = None
-    ) -> list[dict]:
+    def obtener_resumen_cuentas(session: Session, id_usuario: int | None = None) -> list[dict]:
         require_permiso(session, id_usuario, "bancos", "ver")
         cuentas = (
             session.query(CuentaBancaria)
@@ -438,12 +410,7 @@ class CajaService:
     @staticmethod
     def listar_cajas(session: Session, id_usuario: int | None = None) -> list[Caja]:
         require_permiso(session, id_usuario, "cajas", "ver")
-        return (
-            session.query(Caja)
-            .options(joinedload(Caja.usuario))
-            .order_by(Caja.nombre_caja)
-            .all()
-        )
+        return session.query(Caja).options(joinedload(Caja.usuario)).order_by(Caja.nombre_caja).all()
 
     @staticmethod
     def crear_caja(session: Session, nombre_caja: str, id_usuario: int | None) -> Caja:
@@ -466,9 +433,7 @@ class CajaService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(caja)
 
@@ -484,9 +449,7 @@ class CajaService:
         return caja
 
     @staticmethod
-    def abrir_caja(
-        session: Session, id_caja: int, id_usuario: int, saldo_apertura
-    ) -> Caja:
+    def abrir_caja(session: Session, id_caja: int, id_usuario: int, saldo_apertura) -> Caja:
         _require_admin(session, id_usuario)
         aplicar_lock_timeout(session)
         # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18 -- bloquea la fila hasta el
@@ -494,9 +457,7 @@ class CajaService:
         # espere en vez de leer el mismo estado stale y pisar el saldo_apertura ya fijado
         # (C22).
         caja = session.execute(
-            select(Caja)
-            .where(Caja.id_caja == id_caja)
-            .with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            select(Caja).where(Caja.id_caja == id_caja).with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
         ).scalar_one_or_none()
         if caja is None:
             raise ValueError("Caja no encontrada")
@@ -517,9 +478,7 @@ class CajaService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(caja)
 
@@ -546,9 +505,7 @@ class CajaService:
         aplicar_lock_timeout(session)
         # Ver el comentario de abrir_caja() -- mismo patron.
         caja = session.execute(
-            select(Caja)
-            .where(Caja.id_caja == id_caja)
-            .with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            select(Caja).where(Caja.id_caja == id_caja).with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
         ).scalar_one_or_none()
         if caja is None:
             raise ValueError("Caja no encontrada")
@@ -566,9 +523,7 @@ class CajaService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(caja)
 
@@ -590,25 +545,19 @@ class CajaService:
         return caja
 
     @staticmethod
-    def obtener_estado_cajas(
-        session: Session, id_usuario: int | None = None
-    ) -> list[dict]:
+    def obtener_estado_cajas(session: Session, id_usuario: int | None = None) -> list[dict]:
         cajas = CajaService.listar_cajas(session, id_usuario=id_usuario)
         resultado = []
         for caja in cajas:
             esta_abierta = caja.fecha_apertura is not None and caja.fecha_cierre is None
 
-            query_movimientos = session.query(
-                func.count(CajaMovimiento.id_movimiento)
-            ).filter(CajaMovimiento.id_caja == caja.id_caja)
+            query_movimientos = session.query(func.count(CajaMovimiento.id_movimiento)).filter(
+                CajaMovimiento.id_caja == caja.id_caja
+            )
             if caja.fecha_apertura is not None:
-                query_movimientos = query_movimientos.filter(
-                    CajaMovimiento.fecha_registro >= caja.fecha_apertura
-                )
+                query_movimientos = query_movimientos.filter(CajaMovimiento.fecha_registro >= caja.fecha_apertura)
             if caja.fecha_cierre is not None:
-                query_movimientos = query_movimientos.filter(
-                    CajaMovimiento.fecha_registro <= caja.fecha_cierre
-                )
+                query_movimientos = query_movimientos.filter(CajaMovimiento.fecha_registro <= caja.fecha_cierre)
             cantidad_movimientos = query_movimientos.scalar()
 
             resultado.append(
@@ -636,9 +585,7 @@ class CajaService:
     ) -> CajaMovimiento:
         require_permiso(session, id_usuario, "cajas", "crear")
         if tipo not in TIPOS_MOVIMIENTO_CAJA:
-            raise ValueError(
-                f"tipo invalido: {tipo}, debe ser uno de {TIPOS_MOVIMIENTO_CAJA}"
-            )
+            raise ValueError(f"tipo invalido: {tipo}, debe ser uno de {TIPOS_MOVIMIENTO_CAJA}")
         if Decimal(str(monto)) <= 0:
             raise ValueError("El monto debe ser mayor a cero")
 
@@ -664,9 +611,7 @@ class CajaService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
-                ) from e
+                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(movimiento)
 
@@ -725,15 +670,11 @@ class CajaService:
             )
             .scalar()
         )
-        saldo_apertura = (
-            caja.saldo_apertura if caja.saldo_apertura is not None else Decimal("0.00")
-        )
+        saldo_apertura = caja.saldo_apertura if caja.saldo_apertura is not None else Decimal("0.00")
         return saldo_apertura + Decimal(str(entradas)) - Decimal(str(salidas))
 
     @staticmethod
-    def listar_movimientos_turno(
-        session: Session, id_caja: int, id_usuario: int | None = None
-    ) -> list[CajaMovimiento]:
+    def listar_movimientos_turno(session: Session, id_caja: int, id_usuario: int | None = None) -> list[CajaMovimiento]:
         """Movimientos del turno EN CURSO (o del ultimo turno si ya se cerro) -- mismo
         filtro de rango de fecha que calcular_saldo_actual(), para que el detalle mostrado
         antes de cerrar coincida exactamente con lo que compone el saldo calculado."""

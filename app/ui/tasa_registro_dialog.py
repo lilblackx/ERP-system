@@ -97,9 +97,7 @@ class TasaRegistroDialog(QDialog):
         self.setWindowTitle("Registrar Tasa del Día")
         self.setFixedSize(420, 380)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
@@ -111,9 +109,7 @@ class TasaRegistroDialog(QDialog):
         header = QHBoxLayout()
         header.setSpacing(12)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(QSize(20, 20))
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -123,12 +119,8 @@ class TasaRegistroDialog(QDialog):
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
         lbl_titulo = QLabel("Registrar Tasa del Día")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
-        lbl_subtitulo = QLabel(
-            "Queda como un registro histórico nuevo, no reemplaza el anterior."
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_subtitulo = QLabel("Queda como un registro histórico nuevo, no reemplaza el anterior.")
         lbl_subtitulo.setWordWrap(True)
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         titulos.addWidget(lbl_titulo)

@@ -81,9 +81,7 @@ def obtener_ubicacion_precisa_windows() -> dict:
         geolocator = Geolocator()
         geolocator.desired_accuracy = PositionAccuracy.HIGH
         try:
-            posicion = await asyncio.wait_for(
-                geolocator.get_geoposition_async(), timeout=_TIMEOUT_SEGUNDOS
-            )
+            posicion = await asyncio.wait_for(geolocator.get_geoposition_async(), timeout=_TIMEOUT_SEGUNDOS)
             logger.info("Geolocator get_geoposition_async exitoso")
         except TimeoutError:
             logger.warning(

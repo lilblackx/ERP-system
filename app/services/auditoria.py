@@ -44,11 +44,7 @@ class AuditoriaService:
         if not modulo:
             raise ValueError("modulo es requerido")
 
-        detalle_texto = (
-            json.dumps(detalle, default=str, ensure_ascii=False)
-            if isinstance(detalle, dict)
-            else detalle
-        )
+        detalle_texto = json.dumps(detalle, default=str, ensure_ascii=False) if isinstance(detalle, dict) else detalle
 
         evento = Auditoria(
             id_usuario=id_usuario,
@@ -112,10 +108,7 @@ class AuditoriaService:
 
         total = query.count()
         eventos = (
-            query.order_by(Auditoria.fecha_evento.desc())
-            .offset((pagina - 1) * por_pagina)
-            .limit(por_pagina)
-            .all()
+            query.order_by(Auditoria.fecha_evento.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
         )
         return {
             "items": eventos,

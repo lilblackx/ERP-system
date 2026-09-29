@@ -25,9 +25,7 @@ ESTADOS_CXC_OTRO = ("pendiente", "parcial", "pagada", "vencida")
 
 def _validar_origen_pago(id_caja: int | None, id_cuenta_bancaria: int | None) -> None:
     if (id_caja is None) == (id_cuenta_bancaria is None):
-        raise ValueError(
-            "Debe indicar exactamente un origen del pago: id_caja o id_cuenta_bancaria"
-        )
+        raise ValueError("Debe indicar exactamente un origen del pago: id_caja o id_cuenta_bancaria")
 
 
 class OtrosMovimientosService:
@@ -50,9 +48,7 @@ class OtrosMovimientosService:
         if cliente is None:
             raise ValueError("Cliente no encontrado")
         if cliente.estado_cliente != "ACTIVO":
-            raise ValueError(
-                f"El cliente '{cliente.nombre_razon_social}' esta inactivo"
-            )
+            raise ValueError(f"El cliente '{cliente.nombre_razon_social}' esta inactivo")
 
         cuenta = CuentaPorCobrarOtro(
             monto_total=monto_total,
@@ -112,35 +108,27 @@ class OtrosMovimientosService:
         cuenta = session.execute(
             select(CuentaPorCobrarOtro)
             .where(CuentaPorCobrarOtro.id_cuenta == id_cuenta)
-            .with_hint(
-                CuentaPorCobrarOtro, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
-            )
+            .with_hint(CuentaPorCobrarOtro, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
         ).scalar_one_or_none()
         if cuenta is None:
             raise ValueError("Cuenta por cobrar (otros) no encontrada")
         if cuenta.estado == "pagada":
             raise ValueError("La cuenta ya esta pagada en su totalidad")
         if monto > cuenta.saldo_pendiente:
-            raise ValueError(
-                f"El monto excede el saldo pendiente ({cuenta.saldo_pendiente})"
-            )
+            raise ValueError(f"El monto excede el saldo pendiente ({cuenta.saldo_pendiente})")
 
         if id_cuenta_bancaria is not None:
             cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
             if cuenta_bancaria is None:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
-                raise ValueError(
-                    f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva"
-                )
+                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
         if id_caja is not None:
             caja = session.get(Caja, id_caja)
             if caja is None:
                 raise ValueError("Caja no encontrada")
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                raise ValueError(
-                    f"La caja '{caja.nombre_caja}' no tiene un turno abierto"
-                )
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
 
         cuenta.saldo_pendiente = cuenta.saldo_pendiente - monto
         cuenta.estado = "pagada" if cuenta.saldo_pendiente <= 0 else "parcial"
@@ -243,13 +231,8 @@ class OtrosMovimientosService:
         if cuenta_bancaria is None:
             raise ValueError("Cuenta bancaria no encontrada")
         if cuenta_bancaria.estado_cuenta != "ACTIVO":
-            raise ValueError(
-                f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva"
-            )
-        if (
-            id_movimiento is not None
-            and session.get(BancoMovimiento, id_movimiento) is None
-        ):
+            raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+        if id_movimiento is not None and session.get(BancoMovimiento, id_movimiento) is None:
             raise ValueError("Movimiento bancario no encontrado")
 
         partida = CuentaPorPagarOtro(
@@ -306,31 +289,22 @@ class OtrosMovimientosService:
         partida = session.execute(
             select(CuentaPorPagarOtro)
             .where(CuentaPorPagarOtro.id_cuenta == id_cuenta)
-            .with_hint(
-                CuentaPorPagarOtro, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
-            )
+            .with_hint(CuentaPorPagarOtro, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
         ).scalar_one_or_none()
         if partida is None:
             raise ValueError("Partida no conciliada no encontrada")
         if partida.estado == "conciliado":
             raise ValueError("La partida ya esta completamente conciliada")
         if monto > partida.saldo_pendiente:
-            raise ValueError(
-                f"El monto excede el saldo sin conciliar de la partida ({partida.saldo_pendiente})"
-            )
-        if (
-            partida.id_cliente_identificado is not None
-            and partida.id_cliente_identificado != id_cliente
-        ):
+            raise ValueError(f"El monto excede el saldo sin conciliar de la partida ({partida.saldo_pendiente})")
+        if partida.id_cliente_identificado is not None and partida.id_cliente_identificado != id_cliente:
             raise ValueError("Esta partida ya fue atribuida a otro cliente")
 
         cliente = session.get(Cliente, id_cliente)
         if cliente is None:
             raise ValueError("Cliente no encontrado")
         if cliente.estado_cliente != "ACTIVO":
-            raise ValueError(
-                f"El cliente '{cliente.nombre_razon_social}' esta inactivo"
-            )
+            raise ValueError(f"El cliente '{cliente.nombre_razon_social}' esta inactivo")
 
         cxc = session.execute(
             select(CuentaPorCobrar)
@@ -340,13 +314,9 @@ class OtrosMovimientosService:
         if cxc is None:
             raise ValueError("Cuenta por cobrar no encontrada")
         if cxc.factura.id_cliente_factura != id_cliente:
-            raise ValueError(
-                "La cuenta por cobrar indicada no pertenece al cliente identificado"
-            )
+            raise ValueError("La cuenta por cobrar indicada no pertenece al cliente identificado")
         if monto > cxc.saldo_pendiente:
-            raise ValueError(
-                f"El monto excede el saldo pendiente de la factura ({cxc.saldo_pendiente})"
-            )
+            raise ValueError(f"El monto excede el saldo pendiente de la factura ({cxc.saldo_pendiente})")
 
         # No se crea un banco_movimientos nuevo: el dinero ya esta contabilizado en el
         # banco desde que llego la transferencia sin conciliar.
@@ -412,8 +382,7 @@ class OtrosMovimientosService:
             query = query.filter(CuentaPorPagarOtro.fecha_recepcion <= fecha_hasta)
         if responsable:
             query = query.filter(
-                (CuentaPorPagarOtro.creado_por == responsable)
-                | (CuentaPorPagarOtro.conciliado_por == responsable)
+                (CuentaPorPagarOtro.creado_por == responsable) | (CuentaPorPagarOtro.conciliado_por == responsable)
             )
 
         return query.order_by(CuentaPorPagarOtro.fecha_recepcion.desc()).all()

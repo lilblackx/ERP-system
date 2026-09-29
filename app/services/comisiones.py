@@ -63,30 +63,22 @@ class ComisionService:
         ids_producto = {detalle.id_producto_factura for detalle in detalles}
         precios_lista = {
             precio.id_producto: to_decimal(precio.precio_1)
-            for precio in session.query(ProductoPrecio)
-            .filter(ProductoPrecio.id_producto.in_(ids_producto))
-            .all()
+            for precio in session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto)).all()
         }
 
         # Obtener información de productos para saber cantidad_caja
         productos = {
             prod.id_producto: prod
-            for prod in session.query(Inventario)
-            .filter(Inventario.id_producto.in_(ids_producto))
-            .all()
+            for prod in session.query(Inventario).filter(Inventario.id_producto.in_(ids_producto)).all()
         }
 
         # Usar porcentaje_bcv pasado como parámetro, o buscar en BD si no se proporcionó
         if porcentaje_bcv is None:
             cuenta_bcv = (
-                session.query(CuentaPorCobrarBCV)
-                .filter(CuentaPorCobrarBCV.id_factura == factura.id_factura)
-                .first()
+                session.query(CuentaPorCobrarBCV).filter(CuentaPorCobrarBCV.id_factura == factura.id_factura).first()
             )
             porcentaje_bcv = (
-                to_decimal(cuenta_bcv.porcentaje)
-                if cuenta_bcv and cuenta_bcv.porcentaje
-                else Decimal("0.00")
+                to_decimal(cuenta_bcv.porcentaje) if cuenta_bcv and cuenta_bcv.porcentaje else Decimal("0.00")
             )
         else:
             porcentaje_bcv = to_decimal(porcentaje_bcv)
@@ -116,18 +108,11 @@ class ComisionService:
                 # Si el precio_unitario es cercano al precio esperado por unidad (tolerancia del 10%)
                 # O si es menor que precio_lista (cualquier precio menor que el de bulto sugiere venta por unidad)
                 tolerancia = precio_esperado_unidad * Decimal("0.10")
-                if (
-                    abs(precio_unitario - precio_esperado_unidad) <= tolerancia
-                    or precio_unitario < precio_lista
-                ):
+                if abs(precio_unitario - precio_esperado_unidad) <= tolerancia or precio_unitario < precio_lista:
                     venta_por_unidad = True
 
             # Ajustar precios base y venta según tipo de venta
-            if (
-                venta_por_unidad
-                and producto.cantidad_caja
-                and producto.cantidad_caja > 0
-            ):
+            if venta_por_unidad and producto.cantidad_caja and producto.cantidad_caja > 0:
                 cantidad_caja = to_decimal(producto.cantidad_caja)
                 precio_base_ajustado = precio_lista / cantidad_caja
                 precio_venta_ajustado = precio_unitario
@@ -138,9 +123,7 @@ class ComisionService:
             # Aplicar porcentaje BCV solo al precio base (no al precio de venta)
             # El porcentaje establece la nueva base fija para cálculo de comisión
             if porcentaje_bcv > 0:
-                precio_base_ajustado = precio_base_ajustado * (
-                    Decimal("1.00") + porcentaje_bcv / Decimal("100.00")
-                )
+                precio_base_ajustado = precio_base_ajustado * (Decimal("1.00") + porcentaje_bcv / Decimal("100.00"))
 
             monto_base = precio_base_ajustado * cantidad
             monto_venta = precio_venta_ajustado * cantidad
@@ -176,9 +159,7 @@ class ComisionService:
             # de por medio) -- la comision nace 'liberada' directo. Credito: nace 'pendiente'
             # y trg_cxc_libera_comisiones (migrations/0045) la libera cuando la cuenta por
             # cobrar de esta factura llega a 'pagada'.
-            estado_inicial = (
-                "liberada" if factura.condicion_pago == "contado" else "pendiente"
-            )
+            estado_inicial = "liberada" if factura.condicion_pago == "contado" else "pendiente"
             comision = ComisionFactura(
                 id_factura_detalle=detalle.id_factura_detalle,
                 id_vendedor=factura.id_vendedor,
@@ -206,9 +187,7 @@ class ComisionService:
         query = (
             session.query(ComisionFactura)
             .options(
-                joinedload(ComisionFactura.detalle)
-                .joinedload(FacturaDetalle.factura)
-                .joinedload(FacturaVenta.cliente),
+                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente),
                 joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.producto),
             )
             .filter(
@@ -232,9 +211,7 @@ class ComisionService:
         return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
 
     @staticmethod
-    def listar_mis_comisiones(
-        session: Session, id_usuario: int | None
-    ) -> list[ComisionFactura]:
+    def listar_mis_comisiones(session: Session, id_usuario: int | None) -> list[ComisionFactura]:
         """Retorna las comisiones del vendedor logueado. Requiere permiso reportes_comisiones:ver
         (distinto de comisiones:ver, que es para gestion/pago). El usuario debe tener un vendedor
         vinculado (Usuario.id_vendedor_usuario) -- esto es verdad para usuarios con rol VENDEDOR.
@@ -246,9 +223,7 @@ class ComisionService:
         return (
             session.query(ComisionFactura)
             .options(
-                joinedload(ComisionFactura.detalle)
-                .joinedload(FacturaDetalle.factura)
-                .joinedload(FacturaVenta.cliente),
+                joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente),
                 joinedload(ComisionFactura.detalle).joinedload(FacturaDetalle.producto),
             )
             .filter(
@@ -281,9 +256,7 @@ class PagoComisionService:
         crea directo aca, en la misma transaccion."""
         require_permiso(session, id_usuario, "comisiones", "crear")
         if (id_cuenta_bancaria is None) == (id_caja is None):
-            raise ValueError(
-                "Indique exactamente un origen del pago: cuenta bancaria o caja"
-            )
+            raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
 
         vendedor = session.get(Vendedor, id_vendedor)
         if vendedor is None:
@@ -294,9 +267,7 @@ class PagoComisionService:
             if cuenta_bancaria is None:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
-                raise ValueError(
-                    f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva"
-                )
+                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
         else:
             caja = session.get(Caja, id_caja)
             if caja is None:
@@ -313,9 +284,7 @@ class PagoComisionService:
                     ComisionFactura.estado_pago == "liberada",
                     ComisionFactura.monto_comision > 0,
                 )
-                .with_hint(
-                    ComisionFactura, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
-                )
+                .with_hint(ComisionFactura, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
             )
             .scalars()
             .all()
@@ -323,9 +292,7 @@ class PagoComisionService:
         if not comisiones_liberadas:
             raise ValueError("No hay comisiones liberadas para pagar a este vendedor")
 
-        monto_total = sum(
-            (c.monto_comision for c in comisiones_liberadas), Decimal("0.00")
-        )
+        monto_total = sum((c.monto_comision for c in comisiones_liberadas), Decimal("0.00"))
 
         pago = PagoComision(
             id_vendedor=id_vendedor,
@@ -367,8 +334,7 @@ class PagoComisionService:
                     id_caja=id_caja,
                     tipo_movimiento="salida",
                     descripcion_movimiento=(
-                        f"Pago de comisiones a vendedor #{id_vendedor}"
-                        + (f" - {referencia}" if referencia else "")
+                        f"Pago de comisiones a vendedor #{id_vendedor}" + (f" - {referencia}" if referencia else "")
                     ),
                     monto_movimiento=monto_total,
                     fecha_registro=ahora,

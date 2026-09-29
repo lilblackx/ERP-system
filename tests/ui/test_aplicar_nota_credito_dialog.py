@@ -88,9 +88,7 @@ def test_confirmar_pasa_el_monto_tecleado_al_servicio(qtbot, monkeypatch):
         llamada.update(kwargs)
         return MagicMock()
 
-    monkeypatch.setattr(
-        NotaCreditoService, "aplicar_nota_credito_cliente", staticmethod(fake_aplicar)
-    )
+    monkeypatch.setattr(NotaCreditoService, "aplicar_nota_credito_cliente", staticmethod(fake_aplicar))
 
     dialogo._confirmar()
 

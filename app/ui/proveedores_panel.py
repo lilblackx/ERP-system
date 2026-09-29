@@ -80,9 +80,7 @@ ESTADOS_FILTRO = [
 ]
 
 
-def _filas_proveedores_query(
-    session, texto_busqueda, estado_proveedor, id_usuario
-) -> list[list]:
+def _filas_proveedores_query(session, texto_busqueda, estado_proveedor, id_usuario) -> list[list]:
     resultado = ProveedorService.listar(
         session,
         texto_busqueda=texto_busqueda,
@@ -117,9 +115,7 @@ def _tarea_exportar_proveedores_excel(
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
     de proveedores a un archivo (openpyxl) es lo bastante lento como para congelar la
     ventana si se hace en el hilo de GUI."""
-    filas = _filas_proveedores_query(
-        session, texto_busqueda, estado_proveedor, id_usuario
-    )
+    filas = _filas_proveedores_query(session, texto_busqueda, estado_proveedor, id_usuario)
     exportar_excel(ruta, COLS_VISIBLES, filas)
     return ruta, len(filas)
 
@@ -133,9 +129,7 @@ def _tarea_exportar_proveedores_pdf(
     filtros,
     col_widths,
 ) -> tuple[str, int]:
-    filas = _filas_proveedores_query(
-        session, texto_busqueda, estado_proveedor, id_usuario
-    )
+    filas = _filas_proveedores_query(session, texto_busqueda, estado_proveedor, id_usuario)
     exportar_pdf(
         ruta,
         "Reporte de Proveedores",
@@ -187,9 +181,7 @@ class ProveedoresPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Proveedores")
-        lbl.setStyleSheet(
-            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -213,9 +205,7 @@ class ProveedoresPanel(QWidget):
         h.setSpacing(10)
 
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText(
-            "Buscar por nombre, identificación o código…"
-        )
+        self.buscar_input.setPlaceholderText("Buscar por nombre, identificación o código…")
         self.buscar_input.addAction(
             qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
             QLineEdit.ActionPosition.LeadingPosition,
@@ -243,9 +233,7 @@ class ProveedoresPanel(QWidget):
         )
 
         h.addWidget(self.buscar_input)
-        h.addSpacerItem(
-            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        )
+        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
@@ -273,18 +261,10 @@ class ProveedoresPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            6, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            7, QHeaderView.ResizeMode.Fixed
-        )
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(7, 120)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
@@ -308,9 +288,7 @@ class ProveedoresPanel(QWidget):
         self.btn_anterior.clicked.connect(self._pagina_anterior)
 
         self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(
-            qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK)
-        )
+        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
         self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.clicked.connect(self._pagina_siguiente)
@@ -371,14 +349,10 @@ class ProveedoresPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para consultar proveedores."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar proveedores.")
         except Exception:
             logger.exception("Fallo al cargar la lista de proveedores")
-            MessageBox.critical(
-                self, "Error de conexión", "No se pudo cargar la lista de proveedores."
-            )
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de proveedores.")
         finally:
             session.close()
 
@@ -401,15 +375,11 @@ class ProveedoresPanel(QWidget):
 
             dias = str(p.dias_credito) if p.dias_credito is not None else "0"
             item_dias = QTableWidgetItem(dias)
-            item_dias.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_dias)
 
             estado_proveedor = p.estado_proveedor or "ACTIVO"
-            color_estado = (
-                COLOR_SUCCESS if estado_proveedor.upper() == "ACTIVO" else COLOR_DANGER
-            )
+            color_estado = COLOR_SUCCESS if estado_proveedor.upper() == "ACTIVO" else COLOR_DANGER
             badge = EstadoBadge(estado_proveedor.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 7, badge)
 
@@ -430,14 +400,9 @@ class ProveedoresPanel(QWidget):
         }
 
     def exportar_excel_proveedores(self) -> None:
-        if (
-            getattr(self, "_worker_export", None) is not None
-            and self._worker_export.isRunning()
-        ):
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
-        ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar proveedores", "proveedores.xlsx", "Excel (*.xlsx)"
-        )
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar proveedores", "proveedores.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
@@ -453,14 +418,9 @@ class ProveedoresPanel(QWidget):
         self._worker_export.start()
 
     def exportar_pdf_proveedores(self) -> None:
-        if (
-            getattr(self, "_worker_export", None) is not None
-            and self._worker_export.isRunning()
-        ):
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
-        ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar proveedores", "proveedores.pdf", "PDF (*.pdf)"
-        )
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar proveedores", "proveedores.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 
@@ -496,22 +456,16 @@ class ProveedoresPanel(QWidget):
     def _on_exportar_error(self, mensaje: str) -> None:
         self.btn_exportar.setEnabled(True)
         logger.error("Fallo al exportar proveedores: %s", mensaje)
-        MessageBox.critical(
-            self, "Error", "No se pudo exportar la lista de proveedores."
-        )
+        MessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(
-                self, "Selección requerida", "Selecciona un proveedor de la lista."
-            )
+            MessageBox.information(self, "Selección requerida", "Selecciona un proveedor de la lista.")
             return None
         item = self.tabla.item(filas[0].row(), 0)
         if item is None:
-            MessageBox.warning(
-                self, "Error", "No se pudo obtener el ID del proveedor seleccionado."
-            )
+            MessageBox.warning(self, "Error", "No se pudo obtener el ID del proveedor seleccionado.")
             return None
         return int(item.text())
 
@@ -536,9 +490,7 @@ class ProveedoresPanel(QWidget):
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para crear proveedores."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear proveedores.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear proveedor")
@@ -575,15 +527,11 @@ class ProveedoresPanel(QWidget):
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para editar proveedores."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar proveedores.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar proveedor")
-            MessageBox.critical(
-                self, "Error", "No se pudo guardar los cambios del proveedor."
-            )
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del proveedor.")
         finally:
             session.close()
 
@@ -606,9 +554,7 @@ class ProveedoresPanel(QWidget):
             if respuesta != QMessageBox.StandardButton.Yes:
                 return
 
-            ProveedorService.cambiar_estado(
-                session, id_proveedor, nuevo_estado, id_usuario=self.usuario.id_usuario
-            )
+            ProveedorService.cambiar_estado(session, id_proveedor, nuevo_estado, id_usuario=self.usuario.id_usuario)
             self.cargar_proveedores()
         except PermisoDenegadoError:
             session.rollback()
@@ -619,11 +565,7 @@ class ProveedoresPanel(QWidget):
             )
         except Exception:
             session.rollback()
-            logger.exception(
-                "Fallo al cambiar el estado del proveedor %s", id_proveedor
-            )
-            MessageBox.critical(
-                self, "Error", "No se pudo cambiar el estado del proveedor."
-            )
+            logger.exception("Fallo al cambiar el estado del proveedor %s", id_proveedor)
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del proveedor.")
         finally:
             session.close()

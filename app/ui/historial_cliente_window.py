@@ -81,9 +81,7 @@ _ETIQUETAS_METODO_VUELTO = {
 def _texto_vuelto(item: dict) -> str:
     if not item["monto_vuelto"] or float(item["monto_vuelto"]) <= 0:
         return "—"
-    etiqueta = _ETIQUETAS_METODO_VUELTO.get(
-        item["metodo_vuelto"], item["metodo_vuelto"]
-    )
+    etiqueta = _ETIQUETAS_METODO_VUELTO.get(item["metodo_vuelto"], item["metodo_vuelto"])
     return f"${float(item['monto_vuelto']):,.2f} ({etiqueta})"
 
 
@@ -136,9 +134,7 @@ def _filas_historial_para_exportar(session, id_cliente: int) -> list[list]:
         dias_vencidos = "0"
         if item["tipo_transaccion"] == "factura" and item["fecha"]:
             try:
-                fecha_emision = datetime.strptime(
-                    item["fecha"], "%Y-%m-%d %H:%M"
-                ).date()
+                fecha_emision = datetime.strptime(item["fecha"], "%Y-%m-%d %H:%M").date()
                 fecha_actual = date.today()
                 dias_credito = item["dias_credito"] or 0
                 fecha_vencimiento = fecha_emision + timedelta(days=dias_credito)
@@ -170,16 +166,8 @@ def _filas_historial_para_exportar(session, id_cliente: int) -> list[list]:
             item["fecha"],
             estado,
             item["condicion_pago"] if item["tipo_transaccion"] == "factura" else "—",
-            (
-                _etiqueta_metodo_pago(item["metodo_pago"])
-                if item["tipo_transaccion"] in ("factura", "pago")
-                else "—"
-            ),
-            (
-                str(item["dias_credito"] or 0)
-                if item["tipo_transaccion"] == "factura"
-                else "—"
-            ),
+            (_etiqueta_metodo_pago(item["metodo_pago"]) if item["tipo_transaccion"] in ("factura", "pago") else "—"),
+            (str(item["dias_credito"] or 0) if item["tipo_transaccion"] == "factura" else "—"),
             dias_vencidos,
             item["observaciones"] or "",
             str(item["monto"]),
@@ -198,9 +186,7 @@ def _tarea_exportar_historial_excel(session, ruta: str, id_cliente: int) -> str:
     return ruta
 
 
-def _tarea_exportar_historial_pdf(
-    session, ruta: str, id_cliente: int, cliente_nombre: str | None
-) -> str:
+def _tarea_exportar_historial_pdf(session, ruta: str, id_cliente: int, cliente_nombre: str | None) -> str:
     filas = _filas_historial_para_exportar(session, id_cliente)
     exportar_pdf(
         ruta,
@@ -241,9 +227,7 @@ class HistorialClienteWindow(QDialog):
         self.setMinimumSize(1400, 700)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(
-            self.windowFlags()
-            | Qt.WindowType.WindowCloseButtonHint
-            & ~Qt.WindowType.WindowContextHelpButtonHint
+            self.windowFlags() | Qt.WindowType.WindowCloseButtonHint & ~Qt.WindowType.WindowContextHelpButtonHint
         )
         self._setup_ui()
         self.cargar_historial()
@@ -279,9 +263,7 @@ class HistorialClienteWindow(QDialog):
         h.setSpacing(12)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.history", color=COLOR_PRIMARY).pixmap(QSize(22, 22))
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.history", color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -293,9 +275,7 @@ class HistorialClienteWindow(QDialog):
         titulos.setSpacing(1)
         titulos.setContentsMargins(0, 0, 0, 0)
         lbl_titulo = QLabel("Historial del Cliente")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         lbl_subtitulo = QLabel(self.cliente.nombre_razon_social or "")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         titulos.addWidget(lbl_titulo)
@@ -319,24 +299,18 @@ class HistorialClienteWindow(QDialog):
         lbl_icono.setStyleSheet("background: transparent;")
 
         self.lbl_saldo_pendiente = QLabel("Cargando saldo...")
-        self.lbl_saldo_pendiente.setStyleSheet(
-            f"color: {COLOR_TEXT_DARK}; font-size: 15px; font-weight: bold;"
-        )
+        self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 15px; font-weight: bold;")
 
         # Saldo positivo (notas de crédito disponibles)
         self.lbl_saldo_positivo = QLabel()
-        self.lbl_saldo_positivo.setStyleSheet(
-            f"color: {COLOR_SUCCESS}; font-size: 14px; font-weight: 600;"
-        )
+        self.lbl_saldo_positivo.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 14px; font-weight: 600;")
         self.lbl_saldo_positivo.hide()
 
         # Notas de credito disponibles -- solo visible si el cliente tiene alguna (ver
         # cargar_historial). Antes no habia ningun indicio en la app de que un cliente
         # tuviera saldo a favor sin consumir.
         self.lbl_notas_credito = QLabel()
-        self.lbl_notas_credito.setStyleSheet(
-            f"color: {COLOR_PRIMARY}; font-size: 12px; font-weight: 600;"
-        )
+        self.lbl_notas_credito.setStyleSheet(f"color: {COLOR_PRIMARY}; font-size: 12px; font-weight: 600;")
         self.lbl_notas_credito.hide()
 
         h.addWidget(lbl_icono)
@@ -374,42 +348,18 @@ class HistorialClienteWindow(QDialog):
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.doubleClicked.connect(self.ver_detalle_factura)
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            5, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            6, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            7, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            8, QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            9, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            10, QHeaderView.ResizeMode.ResizeToContents
-        )
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(45)
@@ -429,9 +379,7 @@ class HistorialClienteWindow(QDialog):
         btn_detalle.clicked.connect(self.ver_detalle_factura)
 
         self.btn_exportar_excel = QPushButton("Exportar Excel")
-        self.btn_exportar_excel.setIcon(
-            qta.icon("fa5s.file-excel", color=COLOR_SUCCESS)
-        )
+        self.btn_exportar_excel.setIcon(qta.icon("fa5s.file-excel", color=COLOR_SUCCESS))
         self.btn_exportar_excel.setObjectName("BtnSecondary")
         self.btn_exportar_excel.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_exportar_excel.setAutoDefault(False)
@@ -448,9 +396,7 @@ class HistorialClienteWindow(QDialog):
         # disponibles/facturas con saldo pendiente (ver _actualizar_notas_credito) -- sin
         # eso no hay nada que aplicar ni devolver.
         self.btn_aplicar_nota = QPushButton("Aplicar Nota de Crédito")
-        self.btn_aplicar_nota.setIcon(
-            qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY)
-        )
+        self.btn_aplicar_nota.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY))
         self.btn_aplicar_nota.setObjectName("BtnSecondary")
         self.btn_aplicar_nota.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_aplicar_nota.setAutoDefault(False)
@@ -458,9 +404,7 @@ class HistorialClienteWindow(QDialog):
         self.btn_aplicar_nota.clicked.connect(self.aplicar_nota_credito)
 
         self.btn_devolver_nota = QPushButton("Devolver Nota de Crédito")
-        self.btn_devolver_nota.setIcon(
-            qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY)
-        )
+        self.btn_devolver_nota.setIcon(qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY))
         self.btn_devolver_nota.setObjectName("BtnSecondary")
         self.btn_devolver_nota.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_devolver_nota.setAutoDefault(False)
@@ -509,26 +453,18 @@ class HistorialClienteWindow(QDialog):
 
             # Cargar saldo total pendiente
             saldo_total = obtener_saldo_total_pendiente(session, self.id_cliente)
-            self.lbl_saldo_pendiente.setText(
-                f"SALDO PENDIENTE : $ {float(saldo_total):,.2f}"
-            )
+            self.lbl_saldo_pendiente.setText(f"SALDO PENDIENTE : $ {float(saldo_total):,.2f}")
 
             # Color del saldo según si está vencido o no
             if saldo_total > 0:
-                self.lbl_saldo_pendiente.setStyleSheet(
-                    f"color: {COLOR_DANGER}; font-size: 16px; font-weight: bold;"
-                )
+                self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 16px; font-weight: bold;")
             else:
-                self.lbl_saldo_pendiente.setStyleSheet(
-                    f"color: {COLOR_SUCCESS}; font-size: 16px; font-weight: bold;"
-                )
+                self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 16px; font-weight: bold;")
 
             # Cargar saldo total positivo (notas de crédito disponibles)
             saldo_positivo = obtener_saldo_total_positivo(session, self.id_cliente)
             if saldo_positivo > 0:
-                self.lbl_saldo_positivo.setText(
-                    f"SALDO A FAVOR : $ {float(saldo_positivo):,.2f}"
-                )
+                self.lbl_saldo_positivo.setText(f"SALDO A FAVOR : $ {float(saldo_positivo):,.2f}")
                 self.lbl_saldo_positivo.show()
             else:
                 self.lbl_saldo_positivo.hide()
@@ -536,16 +472,12 @@ class HistorialClienteWindow(QDialog):
             self._actualizar_notas_credito(session, historial)
 
         except Exception:
-            logger.exception(
-                "Fallo al cargar el historial del cliente %s", self.id_cliente
-            )
+            logger.exception("Fallo al cargar el historial del cliente %s", self.id_cliente)
             # Antes fallaba en silencio: la tabla quedaba vacia y "Cargando saldo..."
             # congelado, indistinguible de un cliente sin historial real -- un error de
             # conexion no debe verse igual que "sin facturas" (mismo criterio que
             # facturacion_panel.py: QMessageBox.critical en cada carga que puede fallar).
-            MessageBox.critical(
-                self, "Error de conexión", "No se pudo cargar el historial del cliente."
-            )
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el historial del cliente.")
         finally:
             session.close()
 
@@ -562,19 +494,13 @@ class HistorialClienteWindow(QDialog):
             )
         except PermisoDenegadoError:
             notas = []
-        self._notas_disponibles = [
-            n for n in notas if n.estado == "disponible" and n.saldo_disponible > 0
-        ]
+        self._notas_disponibles = [n for n in notas if n.estado == "disponible" and n.saldo_disponible > 0]
 
         self._facturas_pendientes = [
             {
                 "id_factura": item["id_factura"],
                 "numero_factura": item["numero_factura"],
-                "saldo_pendiente": (
-                    item["saldo_corrido"]
-                    if item["saldo_corrido"] > 0
-                    else Decimal("0.00")
-                ),
+                "saldo_pendiente": (item["saldo_corrido"] if item["saldo_corrido"] > 0 else Decimal("0.00")),
             }
             for item in historial
             if (
@@ -589,12 +515,8 @@ class HistorialClienteWindow(QDialog):
         self.btn_aplicar_nota.setEnabled(hay_notas and bool(self._facturas_pendientes))
 
         if hay_notas:
-            total_disponible = sum(
-                float(n.saldo_disponible) for n in self._notas_disponibles
-            )
-            self.lbl_notas_credito.setText(
-                f"Notas de crédito disponibles: ${total_disponible:,.2f}"
-            )
+            total_disponible = sum(float(n.saldo_disponible) for n in self._notas_disponibles)
+            self.lbl_notas_credito.setText(f"Notas de crédito disponibles: ${total_disponible:,.2f}")
             self.lbl_notas_credito.show()
         else:
             self.lbl_notas_credito.hide()
@@ -622,9 +544,7 @@ class HistorialClienteWindow(QDialog):
     def devolver_nota_credito(self) -> None:
         session = self.session_factory()
         try:
-            dialogo = DevolverNotaCreditoDialog(
-                session, self.id_usuario, self._notas_disponibles, parent=self
-            )
+            dialogo = DevolverNotaCreditoDialog(session, self.id_usuario, self._notas_disponibles, parent=self)
             if dialogo.exec() == QDialog.DialogCode.Accepted:
                 MessageBox.information(
                     self,
@@ -658,24 +578,18 @@ class HistorialClienteWindow(QDialog):
                 color = QColor(COLOR_TEXT_DARK)
 
             item_tipo = QTableWidgetItem(tipo_label)
-            item_tipo.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_tipo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             item_tipo.setData(Qt.ItemDataRole.ForegroundRole, color)
             self.tabla.setItem(fila, 0, item_tipo)
 
             # N° Factura/Nota
             item_factura = QTableWidgetItem(item["numero_factura"])
-            item_factura.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_factura.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 1, item_factura)
 
             # Fecha
             item_fecha = QTableWidgetItem(item["fecha"])
-            item_fecha.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_fecha.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 2, item_fecha)
 
             # Estado
@@ -686,9 +600,7 @@ class HistorialClienteWindow(QDialog):
             else:
                 estado = ""
             item_estado = QTableWidgetItem(estado)
-            item_estado.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_estado.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_estado)
 
             # Condición Pago (solo para facturas)
@@ -696,9 +608,7 @@ class HistorialClienteWindow(QDialog):
                 item_condicion = QTableWidgetItem(item["condicion_pago"] or "")
             else:
                 item_condicion = QTableWidgetItem("—")
-            item_condicion.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_condicion.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 4, item_condicion)
 
             # Método Pago (solo para facturas y pagos)
@@ -709,33 +619,23 @@ class HistorialClienteWindow(QDialog):
             else:
                 metodo_pago = "—"
             item_metodo = QTableWidgetItem(metodo_pago)
-            item_metodo.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 5, item_metodo)
 
             # Días Crédito (solo para facturas)
             if tipo == "factura":
-                dias = (
-                    str(item["dias_credito"])
-                    if item["dias_credito"] is not None
-                    else ""
-                )
+                dias = str(item["dias_credito"]) if item["dias_credito"] is not None else ""
             else:
                 dias = "—"
             item_dias = QTableWidgetItem(dias)
-            item_dias.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_dias)
 
             # Días Vencidos (calculado para todas las facturas)
             dias_vencidos = ""
             if tipo == "factura" and item["fecha"]:
                 try:
-                    fecha_emision = datetime.strptime(
-                        item["fecha"], "%Y-%m-%d %H:%M"
-                    ).date()
+                    fecha_emision = datetime.strptime(item["fecha"], "%Y-%m-%d %H:%M").date()
                     fecha_actual = date.today()
                     dias_credito = item["dias_credito"] or 0
                     fecha_vencimiento = fecha_emision + timedelta(days=dias_credito)
@@ -754,33 +654,23 @@ class HistorialClienteWindow(QDialog):
                 dias_vencidos = "0"
 
             item_dias_vencidos = QTableWidgetItem(dias_vencidos)
-            item_dias_vencidos.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_dias_vencidos.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             # Color rojo si está vencido
             if dias_vencidos and dias_vencidos != "0" and dias_vencidos != "—":
-                item_dias_vencidos.setData(
-                    Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER)
-                )
+                item_dias_vencidos.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER))
             self.tabla.setItem(fila, 7, item_dias_vencidos)
 
             # Observaciones
             item_observaciones = QTableWidgetItem(item["observaciones"] or "")
-            item_observaciones.setTextAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_observaciones.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 8, item_observaciones)
 
             # Monto (positivo para facturas, negativo para pagos)
             monto = f"${float(item['monto']):,.2f}"
             item_monto = QTableWidgetItem(monto)
-            item_monto.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if item["monto"] < 0:
-                item_monto.setData(
-                    Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS)
-                )
+                item_monto.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS))
             else:
                 item_monto.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER))
             font = item_monto.font()
@@ -791,17 +681,11 @@ class HistorialClienteWindow(QDialog):
             # Saldo Corrido
             saldo_corrido = f"${float(item['saldo_corrido']):,.2f}"
             item_corrido = QTableWidgetItem(saldo_corrido)
-            item_corrido.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_corrido.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if item["saldo_corrido"] > 0:
-                item_corrido.setData(
-                    Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER)
-                )
+                item_corrido.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER))
             else:
-                item_corrido.setData(
-                    Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS)
-                )
+                item_corrido.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS))
             font_corrido = item_corrido.font()
             font_corrido.setBold(True)
             item_corrido.setFont(font_corrido)
@@ -810,9 +694,7 @@ class HistorialClienteWindow(QDialog):
     def exportar_excel(self) -> None:
         session = self.session_factory()
         try:
-            nombre_archivo = (
-                f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
-            )
+            nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
             ruta, _ = QFileDialog.getSaveFileName(
                 self,
                 "Exportar Historial a Excel",
@@ -838,9 +720,7 @@ class HistorialClienteWindow(QDialog):
     def exportar_pdf(self) -> None:
         session = self.session_factory()
         try:
-            nombre_archivo = (
-                f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
-            )
+            nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
             ruta, _ = QFileDialog.getSaveFileName(
                 self, "Exportar Historial a PDF", f"{nombre_archivo}.pdf", "PDF (*.pdf)"
             )
@@ -863,9 +743,7 @@ class HistorialClienteWindow(QDialog):
 
     def _on_exportar_excel_ok(self, ruta: str) -> None:
         self.btn_exportar_excel.setEnabled(True)
-        MessageBox.information(
-            self, "Exportación completa", f"Se exportó el historial a:\n{ruta}"
-        )
+        MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
 
     def _on_exportar_excel_error(self, mensaje: str) -> None:
         self.btn_exportar_excel.setEnabled(True)
@@ -874,9 +752,7 @@ class HistorialClienteWindow(QDialog):
 
     def _on_exportar_pdf_ok(self, ruta: str) -> None:
         self.btn_exportar_pdf.setEnabled(True)
-        MessageBox.information(
-            self, "Exportación completa", f"Se exportó el historial a:\n{ruta}"
-        )
+        MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
 
     def _on_exportar_pdf_error(self, mensaje: str) -> None:
         self.btn_exportar_pdf.setEnabled(True)
@@ -886,9 +762,7 @@ class HistorialClienteWindow(QDialog):
     def _fila_seleccionada_id_factura(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(
-                self, "Selección requerida", "Selecciona una factura de la lista."
-            )
+            MessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
             return None
         # El ID de factura está en la columna 1 (N° Factura) pero necesitamos el ID interno
         # Lo obtenemos del historial cargado usando el índice de la fila
@@ -908,14 +782,10 @@ class HistorialClienteWindow(QDialog):
             if historial[fila]["tipo_transaccion"] == "factura":
                 return historial[fila]["id_factura"]
             else:
-                MessageBox.information(
-                    self, "Selección inválida", "Selecciona una factura, no un pago."
-                )
+                MessageBox.information(self, "Selección inválida", "Selecciona una factura, no un pago.")
                 return None
         except Exception:
-            logger.exception(
-                "Fallo al obtener el ID de factura de la fila seleccionada"
-            )
+            logger.exception("Fallo al obtener el ID de factura de la fila seleccionada")
         finally:
             session.close()
         return None
@@ -930,9 +800,7 @@ class HistorialClienteWindow(QDialog):
 
         session = self.session_factory()
         try:
-            datos = VentaService.obtener_factura(
-                session, id_factura, id_usuario=self.id_usuario
-            )
+            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.id_usuario)
             dialogo = FacturaDetalleDialog(datos, session, self.id_usuario, parent=self)
             dialogo.exec()
         except ValueError as exc:
@@ -945,9 +813,7 @@ class HistorialClienteWindow(QDialog):
             )
         except Exception:
             logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
-            MessageBox.critical(
-                self, "Error", "No se pudo cargar el detalle de la factura."
-            )
+            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
             session.close()
             self._abriendo_dialogo = False

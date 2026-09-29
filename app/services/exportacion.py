@@ -99,9 +99,7 @@ def exportar_excel(
         for indice, (valor, fuente) in enumerate(lineas_empresa):
             if not valor:
                 continue
-            celda = hoja.cell(
-                row=fila_actual, column=1, value=_neutralizar_formula(valor)
-            )
+            celda = hoja.cell(row=fila_actual, column=1, value=_neutralizar_formula(valor))
             celda.font = fuente
             if indice == 0:
                 # mas alto que el resto -- separa visualmente la razon social del RIF que
@@ -126,17 +124,13 @@ def exportar_excel(
         fila_actual += 2  # fila en blanco despues del titulo
 
     for col_idx, encabezado in enumerate(encabezados, start=1):
-        hoja.cell(row=fila_actual, column=col_idx, value=encabezado).font = Font(
-            bold=True
-        )
+        hoja.cell(row=fila_actual, column=col_idx, value=encabezado).font = Font(bold=True)
     fila_actual += 1
 
     cantidad_filas = 0
     for fila in filas:
         for col_idx, valor in enumerate(fila, start=1):
-            hoja.cell(
-                row=fila_actual, column=col_idx, value=_neutralizar_formula(valor)
-            )
+            hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
         fila_actual += 1
         cantidad_filas += 1
 
@@ -149,9 +143,7 @@ def exportar_excel(
             total_row = total_row_con_label
 
         for col_idx, valor in enumerate(total_row, start=1):
-            celda = hoja.cell(
-                row=fila_actual, column=col_idx, value=_neutralizar_formula(valor)
-            )
+            celda = hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
             # Aplicar formato negrita a la fila de totales
             celda.font = Font(bold=True)
             # Si es la columna de saldo (índice 2 en cuentas por pagar), aplicar color
@@ -180,9 +172,7 @@ def _imagen_logo_pdf(logo_bytes: bytes, dimension_max: float = 55) -> Image | No
     return Image(BytesIO(logo_bytes), width=ancho_px * escala, height=alto_px * escala)
 
 
-def _bloque_empresa_pdf(
-    config_empresa: ConfiguracionEmpresa, styles
-) -> Table | Paragraph | None:
+def _bloque_empresa_pdf(config_empresa: ConfiguracionEmpresa, styles) -> Table | Paragraph | None:
     estilo_nombre = ParagraphStyle(
         "EmpresaNombre",
         parent=styles["Normal"],
@@ -191,9 +181,7 @@ def _bloque_empresa_pdf(
         textColor=_COLOR_PRIMARIO,
         spaceAfter=5,
     )
-    estilo_dato = ParagraphStyle(
-        "EmpresaDato", parent=styles["Normal"], fontSize=9, textColor=_COLOR_MUTED
-    )
+    estilo_dato = ParagraphStyle("EmpresaDato", parent=styles["Normal"], fontSize=9, textColor=_COLOR_MUTED)
 
     lineas: list[Paragraph] = []
     if config_empresa.razon_social_empresa:
@@ -208,11 +196,7 @@ def _bloque_empresa_pdf(
     if not lineas:
         return None
 
-    logo = (
-        _imagen_logo_pdf(config_empresa.logotipo_empresa)
-        if config_empresa.logotipo_empresa
-        else None
-    )
+    logo = _imagen_logo_pdf(config_empresa.logotipo_empresa) if config_empresa.logotipo_empresa else None
     if logo is None:
         return (
             lineas[0]
@@ -386,9 +370,7 @@ def exportar_pdf(
     if col_widths:
         # Normalizar anchos para que sumen el ancho disponible
         total_ancho = sum(col_widths)
-        col_widths_normalizados = [
-            w * ancho_disponible / total_ancho for w in col_widths
-        ]
+        col_widths_normalizados = [w * ancho_disponible / total_ancho for w in col_widths]
         table = Table(data, colWidths=col_widths_normalizados)
     else:
         ancho_columna = ancho_disponible / len(encabezados)

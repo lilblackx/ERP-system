@@ -94,9 +94,7 @@ def test_campo_vacio_sin_allow_empty_se_normaliza_a_cero(qtbot):
 def test_validador_rechaza_letras(qtbot):
     campo = NumericLineEdit(NumericFieldType.AMOUNT)
     qtbot.addWidget(campo)
-    _dar_foco(
-        qtbot, campo
-    )  # selecciona el "0,00" inicial -- letras rechazadas lo dejan intacto
+    _dar_foco(qtbot, campo)  # selecciona el "0,00" inicial -- letras rechazadas lo dejan intacto
     qtbot.keyClicks(campo, "abc")
     assert campo.text() == "0,00"
 

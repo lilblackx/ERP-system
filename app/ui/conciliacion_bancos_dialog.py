@@ -48,9 +48,7 @@ class ConciliacionBancosDialog(QDialog):
 
         self.setWindowTitle("Conciliación de Bancos")
         self.setStyleSheet(TABLE_QSS)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         # Tamaño mínimo adaptativo y permitir redimensionamiento
         self.setMinimumSize(1100, 750)
@@ -84,9 +82,7 @@ class ConciliacionBancosDialog(QDialog):
         header_layout.setSpacing(10)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.balance-scale", color=COLOR_PRIMARY).pixmap(24, 24)
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.balance-scale", color=COLOR_PRIMARY).pixmap(24, 24))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 2px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -95,9 +91,7 @@ class ConciliacionBancosDialog(QDialog):
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         lbl_titulo = QLabel("Conciliación de Bancos")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         header_layout.addWidget(icon_lbl)
         header_layout.addWidget(lbl_titulo)
@@ -113,9 +107,7 @@ class ConciliacionBancosDialog(QDialog):
         calendar_layout = QVBoxLayout()
         calendar_layout.setSpacing(3)
         lbl_fecha = QLabel("Fecha de Conciliación:")
-        lbl_fecha.setStyleSheet(
-            f"font-size: 11px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_fecha.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.calendar = QCalendarWidget()
         self.calendar.setGridVisible(True)
         self.calendar.setSelectedDate(self._fecha_conciliacion)
@@ -128,9 +120,7 @@ class ConciliacionBancosDialog(QDialog):
         cuenta_layout = QVBoxLayout()
         cuenta_layout.setSpacing(4)
         lbl_cuenta = QLabel("Cuenta Bancaria:")
-        lbl_cuenta.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_cuenta.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.cuenta_combo = QComboBox()
         self.cuenta_combo.setMinimumHeight(32)  # Altura mínima en lugar de fija
         self.cuenta_combo.currentIndexChanged.connect(self._on_cuenta_cambiada)
@@ -145,9 +135,7 @@ class ConciliacionBancosDialog(QDialog):
 
         # ── Resumen de saldos ──
         resumen_card = QWidget()
-        resumen_card.setStyleSheet(
-            "background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;"
-        )
+        resumen_card.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;")
         resumen_layout = QGridLayout(resumen_card)
         resumen_layout.setContentsMargins(12, 10, 12, 10)
         resumen_layout.setSpacing(10)
@@ -156,52 +144,36 @@ class ConciliacionBancosDialog(QDialog):
         resumen_layout.setColumnStretch(2, 1)
 
         self.lbl_saldo_inicial = QLabel("Saldo Inicial: $0.00")
-        self.lbl_saldo_inicial.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
+        self.lbl_saldo_inicial.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         resumen_layout.addWidget(self.lbl_saldo_inicial, 0, 0)
 
         self.lbl_total_entradas = QLabel("Total Entradas: $0.00")
-        self.lbl_total_entradas.setStyleSheet(
-            "font-size: 12px; font-weight: 600; color: #16A34A;"
-        )
+        self.lbl_total_entradas.setStyleSheet("font-size: 12px; font-weight: 600; color: #16A34A;")
         resumen_layout.addWidget(self.lbl_total_entradas, 0, 1)
 
         self.lbl_total_salidas = QLabel("Total Salidas: $0.00")
-        self.lbl_total_salidas.setStyleSheet(
-            "font-size: 12px; font-weight: 600; color: #DC2626;"
-        )
+        self.lbl_total_salidas.setStyleSheet("font-size: 12px; font-weight: 600; color: #DC2626;")
         resumen_layout.addWidget(self.lbl_total_salidas, 0, 2)
 
         # Sección de bolívares
         self.lbl_saldo_inicial_bs = QLabel("Saldo Inicial BS: 0.00")
-        self.lbl_saldo_inicial_bs.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
+        self.lbl_saldo_inicial_bs.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         resumen_layout.addWidget(self.lbl_saldo_inicial_bs, 1, 0)
 
         self.lbl_total_entradas_bs = QLabel("Total Entradas BS: 0.00")
-        self.lbl_total_entradas_bs.setStyleSheet(
-            "font-size: 12px; font-weight: 600; color: #16A34A;"
-        )
+        self.lbl_total_entradas_bs.setStyleSheet("font-size: 12px; font-weight: 600; color: #16A34A;")
         resumen_layout.addWidget(self.lbl_total_entradas_bs, 1, 1)
 
         self.lbl_total_salidas_bs = QLabel("Total Salidas BS: 0.00")
-        self.lbl_total_salidas_bs.setStyleSheet(
-            "font-size: 12px; font-weight: 600; color: #DC2626;"
-        )
+        self.lbl_total_salidas_bs.setStyleSheet("font-size: 12px; font-weight: 600; color: #DC2626;")
         resumen_layout.addWidget(self.lbl_total_salidas_bs, 1, 2)
 
         # Saldo final en bolívares
         saldo_final_bs_layout = QVBoxLayout()
         saldo_final_bs_layout.setSpacing(4)
         lbl_saldo_final_bs = QLabel("Saldo Final BS:")
-        lbl_saldo_final_bs.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
-        self.saldo_final_bs_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, allow_negative=True, decimals=2
-        )
+        lbl_saldo_final_bs.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        self.saldo_final_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, decimals=2)
         self.saldo_final_bs_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
         self.saldo_final_bs_input.valueChanged.connect(self._calcular_saldo_final_usd)
         saldo_final_bs_layout.addWidget(lbl_saldo_final_bs)
@@ -212,12 +184,8 @@ class ConciliacionBancosDialog(QDialog):
         tasa_layout = QVBoxLayout()
         tasa_layout.setSpacing(4)
         lbl_tasa = QLabel("Tasa de Cambio:")
-        lbl_tasa.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
-        self.tasa_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, allow_negative=False, decimals=2
-        )
+        lbl_tasa.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        self.tasa_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=False, decimals=2)
         self.tasa_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
         self.tasa_input.valueChanged.connect(self._calcular_saldo_final_usd)
         tasa_layout.addWidget(lbl_tasa)
@@ -228,30 +196,20 @@ class ConciliacionBancosDialog(QDialog):
         saldo_final_layout = QVBoxLayout()
         saldo_final_layout.setSpacing(4)
         lbl_saldo_final = QLabel("Saldo Final USD (Calc):")
-        lbl_saldo_final.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
-        self.saldo_final_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, allow_negative=True, prefix="$ "
-        )
+        lbl_saldo_final.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        self.saldo_final_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, prefix="$ ")
         self.saldo_final_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
-        self.saldo_final_input.setEnabled(
-            False
-        )  # Solo lectura, calculado automáticamente
+        self.saldo_final_input.setEnabled(False)  # Solo lectura, calculado automáticamente
         saldo_final_layout.addWidget(lbl_saldo_final)
         saldo_final_layout.addWidget(self.saldo_final_input)
         resumen_layout.addLayout(saldo_final_layout, 2, 2)
 
         self.lbl_diferencia = QLabel("Diferencia: $0.00")
-        self.lbl_diferencia.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
+        self.lbl_diferencia.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         resumen_layout.addWidget(self.lbl_diferencia, 3, 0)
 
         self.lbl_diferencia_bs = QLabel("Diferencia BS: 0.00")
-        self.lbl_diferencia_bs.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
+        self.lbl_diferencia_bs.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         resumen_layout.addWidget(self.lbl_diferencia_bs, 3, 1)
 
         # Icono real (qtawesome) en vez de "✓"/"✗" sueltos en el texto -- ver
@@ -262,9 +220,7 @@ class ConciliacionBancosDialog(QDialog):
         estado_layout.setSpacing(4)
         self.icon_estado = QLabel()
         self.lbl_estado_texto = QLabel("Estado: Pendiente")
-        self.lbl_estado_texto.setStyleSheet(
-            "font-size: 12px; font-weight: 600; color: #F59E0B;"
-        )
+        self.lbl_estado_texto.setStyleSheet("font-size: 12px; font-weight: 600; color: #F59E0B;")
         estado_layout.addWidget(self.icon_estado)
         estado_layout.addWidget(self.lbl_estado_texto)
         estado_layout.addStretch()
@@ -379,18 +335,14 @@ class ConciliacionBancosDialog(QDialog):
         cuentas = (
             self.session.query(CuentaBancaria)
             .join(Banco)
-            .filter(
-                CuentaBancaria.estado_cuenta == "ACTIVO", Banco.estado_banco == "ACTIVO"
-            )
+            .filter(CuentaBancaria.estado_cuenta == "ACTIVO", Banco.estado_banco == "ACTIVO")
             .order_by(Banco.nombre_banco, CuentaBancaria.numero_cuenta)
             .all()
         )
         self.cuenta_combo.clear()
         for cuenta in cuentas:
             banco_nombre = cuenta.banco.nombre_banco if cuenta.banco else "N/A"
-            self.cuenta_combo.addItem(
-                f"{banco_nombre} - {cuenta.numero_cuenta}", cuenta.id_cuenta
-            )
+            self.cuenta_combo.addItem(f"{banco_nombre} - {cuenta.numero_cuenta}", cuenta.id_cuenta)
 
     def _on_fecha_cambiada(self):
         """Maneja el cambio de fecha."""
@@ -424,16 +376,12 @@ class ConciliacionBancosDialog(QDialog):
         """Agrega un movimiento manual."""
         id_cuenta = self.cuenta_combo.currentData()
         if id_cuenta is None:
-            MessageBox.warning(
-                self, "Selección requerida", "Seleccione una cuenta bancaria."
-            )
+            MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
             return
 
         # Obtener tasa actual del diálogo principal
         tasa_value = self.tasa_input.get_value()
-        tasa_actual = (
-            float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
-        )
+        tasa_actual = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
 
         dialog = MovimientoManualDialog(tipo, parent=self, tasa_inicial=tasa_actual)
 
@@ -502,9 +450,7 @@ class ConciliacionBancosDialog(QDialog):
             todos_movimientos.append(
                 {
                     "tipo": mov.tipo_movimiento,
-                    "monto": (
-                        float(mov.monto_movimiento) if mov.monto_movimiento else 0.0
-                    ),
+                    "monto": (float(mov.monto_movimiento) if mov.monto_movimiento else 0.0),
                     "tasa": tasa,
                     "monto_bs": monto_bs,
                     "origen": origen,
@@ -544,11 +490,7 @@ class ConciliacionBancosDialog(QDialog):
             self.table.insertRow(row)
 
             # Fecha
-            fecha_str = (
-                movimiento["fecha"].strftime("%d/%m/%Y %H:%M")
-                if movimiento["fecha"]
-                else "Pendiente"
-            )
+            fecha_str = movimiento["fecha"].strftime("%d/%m/%Y %H:%M") if movimiento["fecha"] else "Pendiente"
             self.table.setItem(row, 0, QTableWidgetItem(fecha_str))
 
             # Tipo
@@ -561,32 +503,20 @@ class ConciliacionBancosDialog(QDialog):
 
             # Monto
             item_monto = QTableWidgetItem(f"${movimiento['monto']:,.2f}")
-            item_monto.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 2, item_monto)
 
             # Tasa
             tasa_texto = (
-                f"{movimiento['tasa']:,.2f}"
-                if movimiento["tasa"] is not None and movimiento["tasa"] > 0
-                else "N/A"
+                f"{movimiento['tasa']:,.2f}" if movimiento["tasa"] is not None and movimiento["tasa"] > 0 else "N/A"
             )
             item_tasa = QTableWidgetItem(tasa_texto)
-            item_tasa.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_tasa.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 3, item_tasa)
 
             # Monto BS
-            item_monto_bs = QTableWidgetItem(
-                f"{movimiento['monto_bs']:,.2f}"
-                if movimiento["monto_bs"] > 0
-                else "0.00"
-            )
-            item_monto_bs.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_monto_bs = QTableWidgetItem(f"{movimiento['monto_bs']:,.2f}" if movimiento["monto_bs"] > 0 else "0.00")
+            item_monto_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 4, item_monto_bs)
 
             # Origen
@@ -609,20 +539,14 @@ class ConciliacionBancosDialog(QDialog):
         """Marca el día como conciliado si la diferencia en bolívares es 0."""
         id_cuenta = self.cuenta_combo.currentData()
         if id_cuenta is None:
-            MessageBox.warning(
-                self, "Selección requerida", "Seleccione una cuenta bancaria."
-            )
+            MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
             return
 
         # Verificar que la diferencia en bolívares sea 0
         saldo_final_bs_value = self.saldo_final_bs_input.get_value()
-        saldo_final_manual_bs = (
-            float(saldo_final_bs_value) if saldo_final_bs_value is not None else 0.0
-        )
+        saldo_final_manual_bs = float(saldo_final_bs_value) if saldo_final_bs_value is not None else 0.0
         tasa_value = self.tasa_input.get_value()
-        tasa_cambio = (
-            float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
-        )
+        tasa_cambio = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
 
         # Calcular saldo final en USD
         saldo_final_manual = 0.0
@@ -645,9 +569,7 @@ class ConciliacionBancosDialog(QDialog):
         fecha_fin = datetime.datetime.combine(fecha, datetime.time.max)
 
         fecha_anterior = fecha - datetime.timedelta(days=1)
-        fecha_anterior_fin = datetime.datetime.combine(
-            fecha_anterior, datetime.time.max
-        )
+        fecha_anterior_fin = datetime.datetime.combine(fecha_anterior, datetime.time.max)
 
         movimientos_anteriores = (
             self.session.query(BancoMovimiento)
@@ -755,35 +677,23 @@ class ConciliacionBancosDialog(QDialog):
     def _guardar_movimientos(self):
         """Guarda los movimientos manuales en la base de datos."""
         if not self._movimientos_manuales:
-            MessageBox.information(
-                self, "Sin movimientos", "No hay movimientos manuales para guardar."
-            )
+            MessageBox.information(self, "Sin movimientos", "No hay movimientos manuales para guardar.")
             return
 
         id_cuenta = self.cuenta_combo.currentData()
         if id_cuenta is None:
-            MessageBox.warning(
-                self, "Selección requerida", "Seleccione una cuenta bancaria."
-            )
+            MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
             return
 
         fecha = self._fecha_conciliacion.toPython()
-        fecha_movimiento = datetime.datetime.combine(
-            fecha, datetime.datetime.now().time()
-        )
+        fecha_movimiento = datetime.datetime.combine(fecha, datetime.datetime.now().time())
         tasa_value = self.tasa_input.get_value()
-        tasa_cambio = (
-            float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
-        )
+        tasa_cambio = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
 
         # Obtener la tasa actual de control_de_tasas si existe
         tasa_registro = None
         if tasa_cambio > 0:
-            tasa_registro = (
-                self.session.query(ControlDeTasa)
-                .order_by(ControlDeTasa.fecha_tasa.desc())
-                .first()
-            )
+            tasa_registro = self.session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc()).first()
 
         try:
             for movimiento in self._movimientos_manuales:
@@ -804,10 +714,7 @@ class ConciliacionBancosDialog(QDialog):
                 )
                 # Actualizar la fecha del movimiento a la fecha de conciliación
                 movimientos = (
-                    self.session.query(BancoMovimiento)
-                    .order_by(BancoMovimiento.id_movimiento.desc())
-                    .limit(1)
-                    .all()
+                    self.session.query(BancoMovimiento).order_by(BancoMovimiento.id_movimiento.desc()).limit(1).all()
                 )
                 if movimientos:
                     movimientos[0].fecha_movimiento = fecha_movimiento
@@ -827,9 +734,7 @@ class ConciliacionBancosDialog(QDialog):
             )
         except Exception as e:
             self.session.rollback()
-            MessageBox.critical(
-                self, "Error", f"Error al guardar movimientos: {str(e)}"
-            )
+            MessageBox.critical(self, "Error", f"Error al guardar movimientos: {str(e)}")
 
     def _calcular_conciliacion(self):
         """Calcula la conciliación bancaria."""
@@ -843,15 +748,11 @@ class ConciliacionBancosDialog(QDialog):
 
         # Obtener tasa de cambio actual
         tasa_value = self.tasa_input.get_value()
-        tasa_cambio = (
-            float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
-        )
+        tasa_cambio = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
 
         # Obtener saldo inicial (saldo al final del día anterior)
         fecha_anterior = fecha - datetime.timedelta(days=1)
-        fecha_anterior_fin = datetime.datetime.combine(
-            fecha_anterior, datetime.time.max
-        )
+        fecha_anterior_fin = datetime.datetime.combine(fecha_anterior, datetime.time.max)
 
         movimientos_anteriores = (
             self.session.query(BancoMovimiento)
@@ -935,9 +836,7 @@ class ConciliacionBancosDialog(QDialog):
 
         # Saldo final en bolívares ingresado por el usuario
         saldo_final_bs_value = self.saldo_final_bs_input.get_value()
-        saldo_final_manual_bs = (
-            float(saldo_final_bs_value) if saldo_final_bs_value is not None else 0.0
-        )
+        saldo_final_manual_bs = float(saldo_final_bs_value) if saldo_final_bs_value is not None else 0.0
 
         # Calcular saldo final en USD (monto BS / tasa)
         saldo_final_manual = 0.0
@@ -958,30 +857,20 @@ class ConciliacionBancosDialog(QDialog):
         self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
         self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
         self.lbl_saldo_inicial_bs.setText(f"Saldo Inicial BS: {saldo_inicial_bs:,.2f}")
-        self.lbl_total_entradas_bs.setText(
-            f"Total Entradas BS: {total_entradas_bs:,.2f}"
-        )
+        self.lbl_total_entradas_bs.setText(f"Total Entradas BS: {total_entradas_bs:,.2f}")
         self.lbl_total_salidas_bs.setText(f"Total Salidas BS: {total_salidas_bs:,.2f}")
         self.lbl_diferencia.setText(f"Diferencia: ${diferencia:,.2f}")
         self.lbl_diferencia_bs.setText(f"Diferencia BS: {diferencia_bs:,.2f}")
 
         # Verificar si está cuadrado (diferencia debe ser 0 en BS)
         if abs(diferencia_bs) < 0.01:
-            self.icon_estado.setPixmap(
-                qta.icon("fa5s.check-circle", color="#16A34A").pixmap(QSize(14, 14))
-            )
+            self.icon_estado.setPixmap(qta.icon("fa5s.check-circle", color="#16A34A").pixmap(QSize(14, 14)))
             self.lbl_estado_texto.setText("Estado: Cuadrado")
-            self.lbl_estado_texto.setStyleSheet(
-                "font-size: 12px; font-weight: 600; color: #16A34A;"
-            )
+            self.lbl_estado_texto.setStyleSheet("font-size: 12px; font-weight: 600; color: #16A34A;")
         else:
-            self.icon_estado.setPixmap(
-                qta.icon("fa5s.times-circle", color="#DC2626").pixmap(QSize(14, 14))
-            )
+            self.icon_estado.setPixmap(qta.icon("fa5s.times-circle", color="#DC2626").pixmap(QSize(14, 14)))
             self.lbl_estado_texto.setText("Estado: Desbalanceado")
-            self.lbl_estado_texto.setStyleSheet(
-                "font-size: 12px; font-weight: 600; color: #DC2626;"
-            )
+            self.lbl_estado_texto.setStyleSheet("font-size: 12px; font-weight: 600; color: #DC2626;")
 
         # Actualizar tabla de movimientos
         self._actualizar_tabla_manuales()
@@ -994,15 +883,11 @@ class MovimientoManualDialog(QDialog):
         super().__init__(parent)
         self.tipo = tipo
         self.tasa_inicial = tasa_inicial
-        self.setWindowTitle(
-            f"Agregar {'Entrada' if tipo == 'abono' else 'Salida'} Manual"
-        )
+        self.setWindowTitle(f"Agregar {'Entrada' if tipo == 'abono' else 'Salida'} Manual")
         self.setMinimumSize(450, 400)  # Tamaño mínimo en lugar de fijo
         self.resize(500, 450)  # Tamaño inicial mayor
         self.setStyleSheet(TABLE_QSS)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
@@ -1017,12 +902,8 @@ class MovimientoManualDialog(QDialog):
         layout.setSpacing(16)
 
         # Título
-        titulo = QLabel(
-            f"Agregar {'Entrada' if self.tipo == 'abono' else 'Salida'} Manual"
-        )
-        titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        titulo = QLabel(f"Agregar {'Entrada' if self.tipo == 'abono' else 'Salida'} Manual")
+        titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         layout.addWidget(titulo)
 
         # Formulario
@@ -1032,9 +913,7 @@ class MovimientoManualDialog(QDialog):
         form_layout.setColumnStretch(1, 2)
 
         lbl_monto_bs = QLabel("Monto BS:")
-        lbl_monto_bs.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_monto_bs.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.monto_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, decimals=2)
         self.monto_bs_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
         self.monto_bs_input.valueChanged.connect(self._calcular_monto)
@@ -1042,9 +921,7 @@ class MovimientoManualDialog(QDialog):
         form_layout.addWidget(self.monto_bs_input, 0, 1)
 
         lbl_tasa = QLabel("Tasa de Cambio:")
-        lbl_tasa.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_tasa.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.tasa_input = NumericLineEdit(NumericFieldType.AMOUNT, decimals=2)
         self.tasa_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
         self.tasa_input.valueChanged.connect(self._calcular_monto)
@@ -1052,9 +929,7 @@ class MovimientoManualDialog(QDialog):
         form_layout.addWidget(self.tasa_input, 1, 1)
 
         lbl_monto = QLabel("Monto USD (Calc):")
-        lbl_monto.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
+        lbl_monto.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.monto_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
         self.monto_input.setEnabled(False)  # Solo lectura, calculado automáticamente
@@ -1062,22 +937,16 @@ class MovimientoManualDialog(QDialog):
         form_layout.addWidget(self.monto_input, 2, 1)
 
         lbl_referencia = QLabel("Referencia:")
-        lbl_referencia.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_referencia.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.referencia_input = QLineEdit()
         self.referencia_input.setPlaceholderText("Ej: Cheque #12345")
         self.referencia_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
-        self.referencia_input.setMaxLength(
-            100
-        )  # columna referencia_bancaria VARCHAR(100)
+        self.referencia_input.setMaxLength(100)  # columna referencia_bancaria VARCHAR(100)
         form_layout.addWidget(lbl_referencia, 3, 0)
         form_layout.addWidget(self.referencia_input, 3, 1)
 
         lbl_descripcion = QLabel("Descripción:")
-        lbl_descripcion.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_descripcion.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.descripcion_input = QLineEdit()
         self.descripcion_input.setPlaceholderText("Ej: Pago de servicios")
         self.descripcion_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
@@ -1121,14 +990,10 @@ class MovimientoManualDialog(QDialog):
         tasa = self.tasa_input.get_value()
 
         if monto_bs is None or monto_bs <= 0:
-            MessageBox.warning(
-                self, "Dato requerido", "El monto BS debe ser mayor a 0."
-            )
+            MessageBox.warning(self, "Dato requerido", "El monto BS debe ser mayor a 0.")
             return
         if tasa is None or tasa <= 0:
-            MessageBox.warning(
-                self, "Dato requerido", "La tasa de cambio debe ser mayor a 0."
-            )
+            MessageBox.warning(self, "Dato requerido", "La tasa de cambio debe ser mayor a 0.")
             return
         if not self.referencia_input.text().strip():
             MessageBox.warning(self, "Dato requerido", "La referencia es obligatoria.")

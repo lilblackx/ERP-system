@@ -114,9 +114,7 @@ class OrdenCompraDetalleDialog(QDialog):
         self.resize(720, 600)
         self.setMinimumSize(720, 600)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
@@ -137,9 +135,7 @@ class OrdenCompraDetalleDialog(QDialog):
         h.setSpacing(12)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.file-signature", color=COLOR_PRIMARY).pixmap(QSize(22, 22))
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.file-signature", color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -152,9 +148,7 @@ class OrdenCompraDetalleDialog(QDialog):
         titulos.setContentsMargins(0, 0, 0, 0)
 
         lbl_titulo = QLabel(f"Orden de Compra {self.oc.numero_oc}")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         lbl_subtitulo = QLabel("Detalle de la orden")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         titulos.addWidget(lbl_titulo)
@@ -202,9 +196,7 @@ class OrdenCompraDetalleDialog(QDialog):
         titulo_row = QHBoxLayout()
         titulo_row.setSpacing(6)
         icono_titulo = QLabel()
-        icono_titulo.setPixmap(
-            qta.icon("fa5s.info-circle", color=COLOR_PRIMARY).pixmap(QSize(12, 12))
-        )
+        icono_titulo.setPixmap(qta.icon("fa5s.info-circle", color=COLOR_PRIMARY).pixmap(QSize(12, 12)))
         titulo = QLabel("DATOS DE LA ORDEN")
         titulo.setProperty("class", "SectionTitle")
         titulo_row.addWidget(icono_titulo)
@@ -221,13 +213,9 @@ class OrdenCompraDetalleDialog(QDialog):
         proveedor = self.oc.proveedor.nombre_razon_social if self.oc.proveedor else "—"
         fecha = self.oc.fecha_oc.strftime("%d/%m/%Y %H:%M") if self.oc.fecha_oc else "—"
         fecha_entrega = (
-            self.oc.fecha_estimada_entrega.strftime("%d/%m/%Y")
-            if self.oc.fecha_estimada_entrega
-            else "Sin definir"
+            self.oc.fecha_estimada_entrega.strftime("%d/%m/%Y") if self.oc.fecha_estimada_entrega else "Sin definir"
         )
-        creador = (
-            self.oc.usuario_creador.nombre_usuario if self.oc.usuario_creador else "—"
-        )
+        creador = self.oc.usuario_creador.nombre_usuario if self.oc.usuario_creador else "—"
 
         campos = [
             ("N° ODC", self.oc.numero_oc),
@@ -278,11 +266,7 @@ class OrdenCompraDetalleDialog(QDialog):
         aplicar_sombra(tabla)
 
         for fila, detalle in enumerate(self.detalles):
-            nombre = (
-                detalle.producto.nombre_producto
-                if detalle.producto
-                else "Producto eliminado"
-            )
+            nombre = detalle.producto.nombre_producto if detalle.producto else "Producto eliminado"
             cantidad_solicitada = float(detalle.cantidad_solicitada)
             cantidad_pendiente = float(detalle.cantidad_pendiente)
             precio = float(detalle.precio_unitario)
@@ -291,24 +275,16 @@ class OrdenCompraDetalleDialog(QDialog):
             item_nombre = QTableWidgetItem(nombre)
             tabla.setItem(fila, 0, item_nombre)
             item_cant_sol = QTableWidgetItem(f"{cantidad_solicitada:,.2f}")
-            item_cant_sol.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_cant_sol.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 1, item_cant_sol)
             item_cant_pen = QTableWidgetItem(f"{cantidad_pendiente:,.2f}")
-            item_cant_pen.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_cant_pen.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 2, item_cant_pen)
             item_precio = QTableWidgetItem(f"${precio:,.2f}")
-            item_precio.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 3, item_precio)
             item_total = QTableWidgetItem(f"${total:,.2f}")
-            item_total.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 4, item_total)
 
         return tabla
@@ -321,9 +297,7 @@ class OrdenCompraDetalleDialog(QDialog):
         col_totales = QVBoxLayout()
         col_totales.setSpacing(1)
         lbl_total = QLabel(f"Total de la orden: ${float(self.oc.total_oc):,.2f}")
-        lbl_total.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         col_totales.addWidget(lbl_total)
 
         btn_cerrar = QPushButton("Cerrar")

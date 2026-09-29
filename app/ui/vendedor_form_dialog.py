@@ -132,9 +132,7 @@ class VendedorFormDialog(QDialog):
         self.setWindowTitle("Editar Vendedor" if vendedor else "Nuevo Vendedor")
         self.setFixedSize(480, 530)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
 
@@ -153,9 +151,7 @@ class VendedorFormDialog(QDialog):
 
         icon_lbl = QLabel()
         fa_icon_name = "fa5s.user-edit" if self.vendedor else "fa5s.user-tie"
-        icon_lbl.setPixmap(
-            qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22))
-        )
+        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -169,13 +165,9 @@ class VendedorFormDialog(QDialog):
 
         titulo_text = "Editar Vendedor" if self.vendedor else "Nuevo Vendedor"
         lbl_titulo = QLabel(titulo_text)
-        lbl_titulo.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
-        lbl_subtitulo = QLabel(
-            "Datos de la fuerza de venta para asignarla a clientes y facturas."
-        )
+        lbl_subtitulo = QLabel("Datos de la fuerza de venta para asignarla a clientes y facturas.")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
 
         titles_layout.addWidget(lbl_titulo)
@@ -264,11 +256,7 @@ class VendedorFormDialog(QDialog):
             )["items"]
         except PermisoDenegadoError:
             rutas = []
-        if (
-            self.vendedor is not None
-            and self.vendedor.ruta is not None
-            and self.vendedor.ruta.estado_ruta != "ACTIVO"
-        ):
+        if self.vendedor is not None and self.vendedor.ruta is not None and self.vendedor.ruta.estado_ruta != "ACTIVO":
             # La ruta ya asignada puede haber sido desactivada despues -- se conserva en la
             # lista al editar para no perder el valor actual sin que el usuario lo pida.
             rutas = [*rutas, self.vendedor.ruta]
@@ -287,9 +275,7 @@ class VendedorFormDialog(QDialog):
 
         lbl_meta = QLabel("Meta de Activación (ventas/mes por cliente)")
         lbl_meta.setProperty("class", "FormLabel")
-        self.meta_activacion_input = NumericLineEdit(
-            NumericFieldType.COUNT, max_value=Decimal(999)
-        )
+        self.meta_activacion_input = NumericLineEdit(NumericFieldType.COUNT, max_value=Decimal(999))
         self.meta_activacion_input.setToolTip("0 = sin meta de activación")
         self.meta_activacion_input.setFixedHeight(32)
         grid.addWidget(lbl_meta, 10, 0, 1, 2)
@@ -338,21 +324,15 @@ class VendedorFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "El nombre del vendedor es obligatorio."
-            )
+            MessageBox.warning(self, "Dato requerido", "El nombre del vendedor es obligatorio.")
             self.nombre_input.setFocus()
             return
         if not self.codigo_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "El código del vendedor es obligatorio."
-            )
+            MessageBox.warning(self, "Dato requerido", "El código del vendedor es obligatorio.")
             self.codigo_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
-            MessageBox.warning(
-                self, "Dato requerido", "La identificación del vendedor es obligatoria."
-            )
+            MessageBox.warning(self, "Dato requerido", "La identificación del vendedor es obligatoria.")
             self.identificacion_input.setFocus()
             return
         if self.ruta_combo.currentData() is None:

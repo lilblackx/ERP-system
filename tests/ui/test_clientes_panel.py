@@ -18,9 +18,7 @@ def _crear_panel(qtbot, monkeypatch):
     return panel
 
 
-def test_ver_historial_cliente_bloquea_reentrada_pero_no_queda_trabado(
-    qtbot, monkeypatch
-):
+def test_ver_historial_cliente_bloquea_reentrada_pero_no_queda_trabado(qtbot, monkeypatch):
     panel = _crear_panel(qtbot, monkeypatch)
     panel._fila_seleccionada_id = lambda: 1
 

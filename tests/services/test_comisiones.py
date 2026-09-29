@@ -30,9 +30,7 @@ from tests.factories import (
 )
 
 
-def _crear_comisiones_liberadas(
-    session, vendedor, admin, cantidades_precios: list[tuple[Decimal, Decimal, Decimal]]
-):
+def _crear_comisiones_liberadas(session, vendedor, admin, cantidades_precios: list[tuple[Decimal, Decimal, Decimal]]):
     """cantidades_precios: lista de (precio_lista, precio_venta, cantidad) -- una linea por
     tupla, cada una en un producto distinto (ComisionFactura.id_factura_detalle es unico,
     asi que hace falta una linea real por comision). Factura de contado: la comision nace
@@ -62,15 +60,11 @@ def _crear_comisiones_liberadas(
     )
     ids_detalle = [
         id_factura_detalle
-        for (id_factura_detalle,) in session.query(
-            FacturaDetalle.id_factura_detalle
-        ).filter_by(id_factura=factura.id_factura)
+        for (id_factura_detalle,) in session.query(FacturaDetalle.id_factura_detalle).filter_by(
+            id_factura=factura.id_factura
+        )
     ]
-    return (
-        session.query(ComisionFactura)
-        .filter(ComisionFactura.id_factura_detalle.in_(ids_detalle))
-        .all()
-    )
+    return session.query(ComisionFactura).filter(ComisionFactura.id_factura_detalle.in_(ids_detalle)).all()
 
 
 # --- ComisionService.calcular_comisiones_factura (batch, N+1) ----------------------
@@ -137,11 +131,7 @@ def test_pagar_comisiones_vendedor_por_caja(db_session):
     assert comisiones[0].estado_pago == "pagada"
     assert comisiones[0].id_pago_comision == pago.id_pago_comision
 
-    movimiento = (
-        db_session.query(CajaMovimiento)
-        .filter_by(id_pago_comision=pago.id_pago_comision)
-        .one()
-    )
+    movimiento = db_session.query(CajaMovimiento).filter_by(id_pago_comision=pago.id_pago_comision).one()
     assert movimiento.tipo_movimiento == "salida"
     assert movimiento.monto_movimiento == Decimal("3.00")
 
@@ -149,9 +139,7 @@ def test_pagar_comisiones_vendedor_por_caja(db_session):
 def test_pagar_comisiones_vendedor_por_cuenta_bancaria(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    _crear_comisiones_liberadas(
-        db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("3"))]
-    )
+    _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("3"))])
     cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("500.00"))
 
     pago = PagoComisionService.pagar_comisiones_vendedor(
@@ -163,11 +151,7 @@ def test_pagar_comisiones_vendedor_por_cuenta_bancaria(db_session):
     )
 
     assert pago.monto == Decimal("3.00")
-    movimiento = (
-        db_session.query(BancoMovimiento)
-        .filter_by(id_pago_comision=pago.id_pago_comision)
-        .one()
-    )
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_pago_comision=pago.id_pago_comision).one()
     assert movimiento.tipo_movimiento == "cargo"
 
     db_session.refresh(cuenta)
@@ -202,9 +186,7 @@ def test_pagar_comisiones_vendedor_agrupa_varias_lineas_pendientes(db_session):
 def test_pagar_comisiones_vendedor_requiere_exactamente_un_origen(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    _crear_comisiones_liberadas(
-        db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))]
-    )
+    _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
     caja = crear_caja(db_session)
     cuenta = crear_cuenta_bancaria(db_session)
 
@@ -245,9 +227,7 @@ def test_pagar_comisiones_vendedor_sin_comisiones_pendientes_falla(db_session):
 def test_pagar_comisiones_vendedor_no_repaga_las_ya_pagadas(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    _crear_comisiones_liberadas(
-        db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))]
-    )
+    _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
     caja = crear_caja(db_session)
     PagoComisionService.pagar_comisiones_vendedor(
         db_session,
@@ -270,9 +250,7 @@ def test_pagar_comisiones_vendedor_no_repaga_las_ya_pagadas(db_session):
 def test_pagar_comisiones_vendedor_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    _crear_comisiones_liberadas(
-        db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))]
-    )
+    _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
     caja = crear_caja(db_session)
 
     with pytest.raises(PermisoDenegadoError):
@@ -304,9 +282,7 @@ def test_pagar_comisiones_vendedor_no_encontrado_falla(db_session):
 def test_listar_comisiones_vendedor_filtra_por_estado(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    _crear_comisiones_liberadas(
-        db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))]
-    )
+    _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
 
     liberadas = ComisionService.listar_comisiones_vendedor(
         db_session,
@@ -335,9 +311,7 @@ def test_listar_comisiones_vendedor_filtra_por_estado(db_session):
 def test_listar_pagos_comision_vendedor(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    _crear_comisiones_liberadas(
-        db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))]
-    )
+    _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
     caja = crear_caja(db_session)
     PagoComisionService.pagar_comisiones_vendedor(
         db_session,
@@ -365,12 +339,8 @@ def test_listar_mis_comisiones_retorna_solo_propias(db_session):
     admin.id_vendedor_usuario = vendedor1.id_vendedor
     db_session.commit()
 
-    _crear_comisiones_liberadas(
-        db_session, vendedor1, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))]
-    )
-    _crear_comisiones_liberadas(
-        db_session, vendedor2, admin, [(Decimal("1.00"), Decimal("3.00"), Decimal("1"))]
-    )
+    _crear_comisiones_liberadas(db_session, vendedor1, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
+    _crear_comisiones_liberadas(db_session, vendedor2, admin, [(Decimal("1.00"), Decimal("3.00"), Decimal("1"))])
 
     comisiones = ComisionService.listar_mis_comisiones(db_session, admin.id_usuario)
 
@@ -415,16 +385,8 @@ def test_comision_credito_nace_pendiente_y_no_es_pagable(db_session):
             }
         ],
     )
-    detalle = (
-        db_session.query(FacturaDetalle)
-        .filter_by(id_factura=factura.id_factura)
-        .first()
-    )
-    comision = (
-        db_session.query(ComisionFactura)
-        .filter_by(id_factura_detalle=detalle.id_factura_detalle)
-        .one()
-    )
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
     assert comision.estado_pago == "pendiente"
 
     with pytest.raises(ValueError, match="No hay comisiones liberadas"):
@@ -462,19 +424,9 @@ def test_comision_credito_se_libera_al_cobrar_cxc_completa(db_session):
             }
         ],
     )
-    detalle = (
-        db_session.query(FacturaDetalle)
-        .filter_by(id_factura=factura.id_factura)
-        .first()
-    )
-    comision = (
-        db_session.query(ComisionFactura)
-        .filter_by(id_factura_detalle=detalle.id_factura_detalle)
-        .one()
-    )
-    cxc = (
-        db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
-    )
+    detalle = db_session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).first()
+    comision = db_session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
     assert cxc.saldo_pendiente == Decimal("4.00")  # 2.00 (real) * 2
 
     # Pago parcial: la CxC queda 'parcial', la comision sigue 'pendiente'.

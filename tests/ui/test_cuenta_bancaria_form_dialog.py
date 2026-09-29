@@ -12,9 +12,7 @@ from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
 
 def _session_vacia() -> MagicMock:
     session = MagicMock()
-    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = (
-        []
-    )
+    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
     return session
 
 

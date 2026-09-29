@@ -97,9 +97,7 @@ def _tarea_emitir_factura(session: Session, id_usuario: int | None, **datos) -> 
     _on_resultado_emitir_factura). Cualquier OTRA excepcion (conexion perdida, bug) si se
     deja propagar: QueryWorker.run() ya la loguea y la reporta via la señal `error`."""
     try:
-        factura = reintentar_en_deadlock(
-            lambda: VentaService.emitir_factura(session, id_usuario=id_usuario, **datos)
-        )
+        factura = reintentar_en_deadlock(lambda: VentaService.emitir_factura(session, id_usuario=id_usuario, **datos))
     except ValueError as exc:
         return {
             "ok": False,
@@ -316,9 +314,7 @@ class FacturaFormDialog(QDialog):
         self.resize(920, 740)
         self.setMinimumSize(820, 640)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._clientes: list = []
         self._productos: list = []
@@ -391,11 +387,7 @@ class FacturaFormDialog(QDialog):
         h.setSpacing(12)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.file-invoice-dollar", color=COLOR_PRIMARY).pixmap(
-                QSize(22, 22)
-            )
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.file-invoice-dollar", color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -407,12 +399,8 @@ class FacturaFormDialog(QDialog):
         titulos.setSpacing(1)
         titulos.setContentsMargins(0, 0, 0, 0)
         lbl_titulo = QLabel("Nueva Factura")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
-        lbl_subtitulo = QLabel(
-            "Seleccione el cliente, agregue productos y emita la factura."
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_subtitulo = QLabel("Seleccione el cliente, agregue productos y emita la factura.")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         titulos.addWidget(lbl_titulo)
         titulos.addWidget(lbl_subtitulo)
@@ -434,9 +422,7 @@ class FacturaFormDialog(QDialog):
         # emitir) -- si el usuario no tiene permiso 'tasas'/'ver' o no hay ninguna tasa
         # registrada, no bloquea el formulario, solo oculta el indicador.
         try:
-            tasa = TasaService.obtener_tasa_actual(
-                self.session, id_usuario=self.id_usuario
-            )
+            tasa = TasaService.obtener_tasa_actual(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             self.lbl_tasa.hide()
             return
@@ -463,9 +449,7 @@ class FacturaFormDialog(QDialog):
         (ver su docstring): el IVA es una regla de negocio global que necesita cualquier
         usuario que pueda facturar, no solo quien administra el resto de la configuracion
         de la empresa."""
-        self._iva_activo, self._iva_porcentaje = EmpresaService.obtener_iva_vigente(
-            self.session
-        )
+        self._iva_activo, self._iva_porcentaje = EmpresaService.obtener_iva_vigente(self.session)
 
     def _calcular_iva(self, subtotal_con_descuento: float) -> float:
         """Misma formula que VentaService.emitir_factura(): IVA sobre el subtotal YA
@@ -482,19 +466,13 @@ class FacturaFormDialog(QDialog):
             cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cajas = []
-        self._cajas_abiertas_vuelto = [
-            c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None
-        ]
+        self._cajas_abiertas_vuelto = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
 
         try:
-            cuentas = BancoService.listar_cuentas(
-                self.session, id_usuario=self.id_usuario
-            )
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cuentas = []
-        self._cuentas_activas_vuelto = [
-            c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"
-        ]
+        self._cuentas_activas_vuelto = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
 
     def _make_card_cabecera(self) -> QWidget:
         card = QWidget()
@@ -517,17 +495,13 @@ class FacturaFormDialog(QDialog):
         lbl_cliente = QLabel(f"Cliente {ASTERISCO_REQUERIDO}")
         lbl_cliente.setProperty("class", "FormLabel")
         self.cliente_buscar_input = QLineEdit()
-        self.cliente_buscar_input.setPlaceholderText(
-            "Buscar cliente por nombre o identificación…"
-        )
+        self.cliente_buscar_input.setPlaceholderText("Buscar cliente por nombre o identificación…")
         self.cliente_buscar_input.setFixedHeight(30)
         self.cliente_buscar_input.textChanged.connect(self._filtrar_clientes)
         # Mismo criterio que producto_buscar_input: Enter fuerza la busqueda (sin
         # esperar el debounce) y salta a Buscar producto para seguir sin mouse
         # (auditoria UX de facturacion, cajero).
-        self.cliente_buscar_input.returnPressed.connect(
-            self._on_cliente_buscar_return_pressed
-        )
+        self.cliente_buscar_input.returnPressed.connect(self._on_cliente_buscar_return_pressed)
 
         self.btn_nuevo_cliente = QPushButton()
         self.btn_nuevo_cliente.setIcon(qta.icon("fa5s.plus", color=COLOR_PRIMARY))
@@ -574,9 +548,7 @@ class FacturaFormDialog(QDialog):
         lbl_porcentaje_bcv = QLabel("Porcentaje BCV")
         lbl_porcentaje_bcv.setProperty("class", "FormLabel")
         self.chk_porcentaje_bcv = QCheckBox("Aplicar porcentaje BCV")
-        self.chk_porcentaje_bcv.setStyleSheet(
-            f"color: {COLOR_TEXT_DARK}; font-size: 13px;"
-        )
+        self.chk_porcentaje_bcv.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 13px;")
         self.chk_porcentaje_bcv.toggled.connect(self._toggle_porcentaje_bcv)
         self.porcentaje_bcv_input = NumericLineEdit(
             NumericFieldType.PERCENTAGE,
@@ -622,21 +594,15 @@ class FacturaFormDialog(QDialog):
         fila_dias = QHBoxLayout(self.dias_credito_widget)
         fila_dias.setContentsMargins(0, 4, 0, 0)
         fila_dias.setSpacing(8)
-        self.chk_dias_configurados = QCheckBox(
-            "Usar días de crédito configurados del cliente"
-        )
+        self.chk_dias_configurados = QCheckBox("Usar días de crédito configurados del cliente")
         # Estilo inline explicito -- el texto no pintaba (aunque .text()/.isVisible()
         # eran correctos) al depender del cascade de DIALOG_STYLE, mismo sintoma que el
         # boton "Cerrar" de historial_cliente_window.py resuelto antes en esta sesion.
-        self.chk_dias_configurados.setStyleSheet(
-            f"color: {COLOR_TEXT_DARK}; font-size: 13px;"
-        )
+        self.chk_dias_configurados.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 13px;")
         self.chk_dias_configurados.setChecked(True)
         self.chk_dias_configurados.toggled.connect(self._on_toggle_dias_configurados)
         self.lbl_dias_configurados = QLabel()
-        self.lbl_dias_configurados.setStyleSheet(
-            f"color: {COLOR_TEXT_MUTED}; font-size: 12px;"
-        )
+        self.lbl_dias_configurados.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
         self.dias_credito_custom_input = NumericLineEdit(
             NumericFieldType.COUNT,
             min_value=Decimal(1),
@@ -644,14 +610,10 @@ class FacturaFormDialog(QDialog):
             suffix=" días",
         )
         self.dias_credito_custom_input.setFixedHeight(32)
-        self.dias_credito_custom_input.valueChanged.connect(
-            self._actualizar_vencimiento_calculado
-        )
+        self.dias_credito_custom_input.valueChanged.connect(self._actualizar_vencimiento_calculado)
         self.dias_credito_custom_input.hide()
         self.lbl_autorizacion_dias = QLabel("Requiere autorización de un supervisor")
-        self.lbl_autorizacion_dias.setStyleSheet(
-            f"color: {COLOR_DANGER}; font-size: 11px; font-style: italic;"
-        )
+        self.lbl_autorizacion_dias.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 11px; font-style: italic;")
         self.lbl_autorizacion_dias.hide()
         fila_dias.addWidget(self.chk_dias_configurados)
         fila_dias.addWidget(self.lbl_dias_configurados)
@@ -689,9 +651,7 @@ class FacturaFormDialog(QDialog):
         layout.setSpacing(8)
 
         fila_titulo = QHBoxLayout()
-        lbl_ayuda = QLabel(
-            "Registre una o más formas de pago que cubran el total de la factura."
-        )
+        lbl_ayuda = QLabel("Registre una o más formas de pago que cubran el total de la factura.")
         lbl_ayuda.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         fila_titulo.addWidget(lbl_ayuda)
         fila_titulo.addStretch()
@@ -707,9 +667,7 @@ class FacturaFormDialog(QDialog):
         layout.addLayout(fila_titulo)
 
         self.tabla_pagos = QTableWidget(0, 5)
-        self.tabla_pagos.setHorizontalHeaderLabels(
-            ["Método", "Moneda", "Monto", "Origen / Referencia", ""]
-        )
+        self.tabla_pagos.setHorizontalHeaderLabels(["Método", "Moneda", "Monto", "Origen / Referencia", ""])
         alinear_encabezados(
             self.tabla_pagos,
             {
@@ -725,12 +683,8 @@ class FacturaFormDialog(QDialog):
         self.tabla_pagos.setShowGrid(False)
         self.tabla_pagos.verticalHeader().setVisible(False)
         self.tabla_pagos.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla_pagos.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla_pagos.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.Fixed
-        )
+        self.tabla_pagos.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla_pagos.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla_pagos.setColumnWidth(4, 70)
         self.tabla_pagos.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla_pagos)
@@ -750,9 +704,7 @@ class FacturaFormDialog(QDialog):
         vuelto_layout.setSpacing(6)
 
         self.lbl_vuelto_monto = QLabel()
-        self.lbl_vuelto_monto.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};"
-        )
+        self.lbl_vuelto_monto.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};")
         vuelto_layout.addWidget(self.lbl_vuelto_monto)
 
         fila_vuelto = QHBoxLayout()
@@ -784,9 +736,7 @@ class FacturaFormDialog(QDialog):
         self.lbl_aviso_vuelto_bancario = QLabel(
             "Requiere referencia bancaria y autorización de un supervisor al facturar"
         )
-        self.lbl_aviso_vuelto_bancario.setStyleSheet(
-            f"color: {COLOR_DANGER}; font-size: 11px; font-style: italic;"
-        )
+        self.lbl_aviso_vuelto_bancario.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 11px; font-style: italic;")
         self.lbl_aviso_vuelto_bancario.hide()
         vuelto_layout.addWidget(self.lbl_aviso_vuelto_bancario)
 
@@ -818,22 +768,16 @@ class FacturaFormDialog(QDialog):
             else:
                 self.origen_vuelto_combo.setEnabled(True)
                 for cuenta in self._cuentas_activas_vuelto:
-                    nombre_banco = (
-                        cuenta.banco.nombre_banco if cuenta.banco else "Banco"
-                    )
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     etiqueta = f"{nombre_banco} - {_enmascarar(cuenta.numero_cuenta)}"
-                    self.origen_vuelto_combo.addItem(
-                        etiqueta, ("banco", cuenta.id_cuenta)
-                    )
+                    self.origen_vuelto_combo.addItem(etiqueta, ("banco", cuenta.id_cuenta))
         self.origen_vuelto_combo.blockSignals(False)
         self.lbl_aviso_vuelto_bancario.setVisible(not es_efectivo)
 
     def _agregar_pago(self) -> None:
         total_pagado = sum(self._convertir_pago_a_usd(pago) for pago in self.pagos)
         saldo_pendiente = max(self._total_factura_actual() - total_pagado, 0.0)
-        dialogo = PagoLineaDialog(
-            self.session, self.id_usuario, monto_sugerido=saldo_pendiente, parent=self
-        )
+        dialogo = PagoLineaDialog(self.session, self.id_usuario, monto_sugerido=saldo_pendiente, parent=self)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.pagos.append(dialogo.get_data())
             self._refrescar_tabla_pagos()
@@ -869,21 +813,15 @@ class FacturaFormDialog(QDialog):
             monto_usd = self._convertir_pago_a_usd(pago)
             total_usd += monto_usd
 
-            item_metodo = QTableWidgetItem(
-                _ETIQUETAS_METODO.get(pago["metodo_pago"]) or pago["metodo_pago"] or "—"
-            )
+            item_metodo = QTableWidgetItem(_ETIQUETAS_METODO.get(pago["metodo_pago"]) or pago["metodo_pago"] or "—")
             self.tabla_pagos.setItem(fila, 0, item_metodo)
-            item_moneda = QTableWidgetItem(
-                _ETIQUETAS_MONEDA.get(pago["moneda"]) or pago["moneda"] or "—"
-            )
+            item_moneda = QTableWidgetItem(_ETIQUETAS_MONEDA.get(pago["moneda"]) or pago["moneda"] or "—")
             self.tabla_pagos.setItem(fila, 1, item_moneda)
             texto_monto = f"{pago['monto_moneda_origen']:,.2f}"
             if pago["moneda"] not in ("USD", "USDT"):
                 texto_monto += f" (${monto_usd:,.2f})"
             item_monto = QTableWidgetItem(texto_monto)
-            item_monto.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_pagos.setItem(fila, 2, item_monto)
             origen = pago.get("referencia") or ""
             item_origen = QTableWidgetItem(origen)
@@ -904,16 +842,12 @@ class FacturaFormDialog(QDialog):
         total_factura = self._total_factura_actual()
         falta = total_factura - total_usd
         if falta > 0.005:
-            self.lbl_total_pagos.setStyleSheet(
-                f"font-size: 12px; font-weight: 600; color: {COLOR_DANGER};"
-            )
+            self.lbl_total_pagos.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_DANGER};")
             self.lbl_total_pagos.setText(
                 f"Total factura: ${total_factura:,.2f}  ·  Pagado: ${total_usd:,.2f}  ·  Falta: ${falta:,.2f}"
             )
         else:
-            self.lbl_total_pagos.setStyleSheet(
-                f"font-size: 12px; font-weight: 600; color: {COLOR_SUCCESS};"
-            )
+            self.lbl_total_pagos.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_SUCCESS};")
             self.lbl_total_pagos.setText(
                 f"Total factura: ${total_factura:,.2f}  ·  Pagado: ${total_usd:,.2f}  ·  Cubierto"
             )
@@ -954,18 +888,14 @@ class FacturaFormDialog(QDialog):
         # la busqueda de una vez -- sin esto el Enter no hacia nada y quedaba a merced del
         # debounce -- y salta directo a Cantidad en vez de necesitar el mouse (auditoria
         # UX de facturacion, cajero).
-        self.producto_buscar_input.returnPressed.connect(
-            self._on_producto_buscar_return_pressed
-        )
+        self.producto_buscar_input.returnPressed.connect(self._on_producto_buscar_return_pressed)
 
         self.producto_combo = QComboBox()
         self.producto_combo.setFixedHeight(32)
         self.producto_combo.setMinimumWidth(220)
         self.producto_combo.currentIndexChanged.connect(self._on_producto_cambiado)
 
-        self.cantidad_input = NumericLineEdit(
-            NumericFieldType.QUANTITY, min_value=Decimal("0.01")
-        )
+        self.cantidad_input = NumericLineEdit(NumericFieldType.QUANTITY, min_value=Decimal("0.01"))
         self.cantidad_input.set_value(1)
         self.cantidad_input.setFixedHeight(32)
         self.cantidad_input.setFixedWidth(100)
@@ -974,9 +904,7 @@ class FacturaFormDialog(QDialog):
         # tocar el mouse (auditoria UX de facturacion, cajero).
         self.cantidad_input.returnPressed.connect(self._agregar_item)
 
-        self.precio_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ "
-        )
+        self.precio_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         self.precio_input.setFixedHeight(32)
         self.precio_input.setFixedWidth(130)
         self.precio_input.returnPressed.connect(self._agregar_item)
@@ -1011,27 +939,19 @@ class FacturaFormDialog(QDialog):
         fila_precio_seleccion.setSpacing(8)
 
         lbl_seleccion_precio = QLabel("Precio a facturar:")
-        lbl_seleccion_precio.setStyleSheet(
-            f"font-size: 12px; color: {COLOR_TEXT_MEDIUM}; font-weight: 600;"
-        )
+        lbl_seleccion_precio.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MEDIUM}; font-weight: 600;")
 
         self.precio_seleccion_combo = QComboBox()
         self.precio_seleccion_combo.setFixedHeight(32)
         self.precio_seleccion_combo.setMinimumWidth(150)
-        self.precio_seleccion_combo.currentIndexChanged.connect(
-            self._on_precio_seleccion_cambiado
-        )
+        self.precio_seleccion_combo.currentIndexChanged.connect(self._on_precio_seleccion_cambiado)
 
         self.lbl_comision = QLabel("Comisión: $0.00")
-        self.lbl_comision.setStyleSheet(
-            f"font-size: 12px; color: {COLOR_SUCCESS}; font-weight: 600;"
-        )
+        self.lbl_comision.setStyleSheet(f"font-size: 12px; color: {COLOR_SUCCESS}; font-weight: 600;")
         self.lbl_comision.setVisible(False)
 
         self.lbl_tipo_precio = QLabel("(por bulto)")
-        self.lbl_tipo_precio.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-style: italic;"
-        )
+        self.lbl_tipo_precio.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-style: italic;")
 
         fila_precio_seleccion.addWidget(lbl_seleccion_precio)
         fila_precio_seleccion.addWidget(self.precio_seleccion_combo)
@@ -1048,9 +968,7 @@ class FacturaFormDialog(QDialog):
         layout.addWidget(self.nota_item_input)
 
         self.tabla_items = QTableWidget(0, 5)
-        self.tabla_items.setHorizontalHeaderLabels(
-            ["Producto", "Cantidad", "Precio Unit.", "Subtotal", ""]
-        )
+        self.tabla_items.setHorizontalHeaderLabels(["Producto", "Cantidad", "Precio Unit.", "Subtotal", ""])
         alinear_encabezados(
             self.tabla_items,
             {
@@ -1066,12 +984,8 @@ class FacturaFormDialog(QDialog):
         self.tabla_items.setShowGrid(False)
         self.tabla_items.verticalHeader().setVisible(False)
         self.tabla_items.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla_items.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla_items.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.Fixed
-        )
+        self.tabla_items.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla_items.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla_items.setColumnWidth(4, 70)
         self.tabla_items.setStyleSheet(TABLE_QSS)
         # La fila de dias de credito (card cabecera) puede aparecer/desaparecer segun el
@@ -1096,9 +1010,7 @@ class FacturaFormDialog(QDialog):
         fila_total.addWidget(self.descuento_input)
         fila_total.addStretch()
         self.lbl_total = QLabel("Total: $0.00")
-        self.lbl_total.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        self.lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         fila_total.addWidget(self.lbl_total)
         layout.addLayout(fila_total)
 
@@ -1135,20 +1047,12 @@ class FacturaFormDialog(QDialog):
     def _cargar_clientes(self) -> None:
         self._buscar_clientes(None)
 
-    def _buscar_clientes(
-        self, texto: str | None, *, abrir_dropdown: bool = False
-    ) -> None:
-        resultado = list_clientes(
-            self.session, texto, id_usuario=self.id_usuario, por_pagina=LIMITE_CATALOGO
-        )
-        self._clientes = [
-            c for c in resultado["items"] if (c.estado_cliente or "ACTIVO") == "ACTIVO"
-        ]
+    def _buscar_clientes(self, texto: str | None, *, abrir_dropdown: bool = False) -> None:
+        resultado = list_clientes(self.session, texto, id_usuario=self.id_usuario, por_pagina=LIMITE_CATALOGO)
+        self._clientes = [c for c in resultado["items"] if (c.estado_cliente or "ACTIVO") == "ACTIVO"]
         self._poblar_combo_clientes(self._clientes, abrir_dropdown=abrir_dropdown)
 
-    def _poblar_combo_clientes(
-        self, clientes: list, *, abrir_dropdown: bool = False
-    ) -> None:
+    def _poblar_combo_clientes(self, clientes: list, *, abrir_dropdown: bool = False) -> None:
         self.cliente_combo.blockSignals(True)
         self.cliente_combo.clear()
         # Placeholder SIEMPRE primero, con data=None -- nunca se preselecciona un cliente
@@ -1162,9 +1066,7 @@ class FacturaFormDialog(QDialog):
             if cliente.id_legal and cliente.identificacion_cliente:
                 identificacion = f"{cliente.id_legal}-{cliente.identificacion_cliente}"
             else:
-                identificacion = (
-                    cliente.id_legal or cliente.identificacion_cliente or "s/i"
-                )
+                identificacion = cliente.id_legal or cliente.identificacion_cliente or "s/i"
             etiqueta = f"{cliente.nombre_razon_social} ({identificacion})"
             self.cliente_combo.addItem(etiqueta, cliente.id_cliente)
         self.cliente_combo.blockSignals(False)
@@ -1186,9 +1088,7 @@ class FacturaFormDialog(QDialog):
         sobre este mismo dialogo y, si se guarda, recarga el combo y deja el cliente
         recien creado ya seleccionado -- el cajero no pierde ni el carrito ni el resto de
         los datos que ya habia cargado."""
-        dialogo = ClienteFormDialog(
-            self.session, cliente=None, id_usuario=self.id_usuario, parent=self
-        )
+        dialogo = ClienteFormDialog(self.session, cliente=None, id_usuario=self.id_usuario, parent=self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         datos = dialogo.get_data()
@@ -1209,9 +1109,7 @@ class FacturaFormDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para crear clientes."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear clientes.")
             return
         except Exception:
             self.session.rollback()
@@ -1239,9 +1137,7 @@ class FacturaFormDialog(QDialog):
         if not hasattr(self, "_timer_busqueda_cliente"):
             self._timer_busqueda_cliente = QTimer(self)
             self._timer_busqueda_cliente.setSingleShot(True)
-            self._timer_busqueda_cliente.timeout.connect(
-                self._buscar_clientes_tras_debounce
-            )
+            self._timer_busqueda_cliente.timeout.connect(self._buscar_clientes_tras_debounce)
         self._timer_busqueda_cliente.start(DEBOUNCE_BUSQUEDA_MS)
 
     def _buscar_clientes_tras_debounce(self) -> None:
@@ -1295,9 +1191,7 @@ class FacturaFormDialog(QDialog):
         if not checked:
             cliente = self._cliente_seleccionado()
             self.dias_credito_custom_input.blockSignals(True)
-            self.dias_credito_custom_input.set_value(
-                cliente.dias_credito if cliente else 30
-            )
+            self.dias_credito_custom_input.set_value(cliente.dias_credito if cliente else 30)
             self.dias_credito_custom_input.blockSignals(False)
         self._actualizar_vencimiento_calculado()
 
@@ -1347,9 +1241,7 @@ class FacturaFormDialog(QDialog):
             return
 
         try:
-            info = VentaService.consultar_limite_disponible(
-                self.session, id_cliente, id_usuario=self.id_usuario
-            )
+            info = VentaService.consultar_limite_disponible(self.session, id_cliente, id_usuario=self.id_usuario)
         except (ValueError, PermisoDenegadoError):
             self.lbl_alerta_credito.hide()
             self.btn_emitir.setEnabled(True)
@@ -1391,15 +1283,8 @@ class FacturaFormDialog(QDialog):
         # factura sea el propio vendedor, y antes tenia que elegirse a mano en cada
         # factura (auditoria UX de facturacion, cajero). No pisa la seleccion si ese
         # vendedor no esta en la lista (inactivo, o el usuario no tiene vinculo).
-        usuario_actual = (
-            self.session.get(Usuario, self.id_usuario)
-            if self.id_usuario is not None
-            else None
-        )
-        if (
-            usuario_actual is not None
-            and usuario_actual.id_vendedor_usuario is not None
-        ):
+        usuario_actual = self.session.get(Usuario, self.id_usuario) if self.id_usuario is not None else None
+        if usuario_actual is not None and usuario_actual.id_vendedor_usuario is not None:
             indice = self.vendedor_combo.findData(usuario_actual.id_vendedor_usuario)
             if indice >= 0:
                 self.vendedor_combo.setCurrentIndex(indice)
@@ -1441,9 +1326,7 @@ class FacturaFormDialog(QDialog):
         # Actualizar los precios en el combo de selección de precio
         id_producto = self.producto_combo.currentData()
         if id_producto is not None:
-            precio = PrecioService.obtener_precio(
-                self.session, id_producto, id_usuario=self.id_usuario
-            )
+            precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
             if precio:
                 # Actualizar los precios originales
                 self._precios_originales = {
@@ -1458,42 +1341,24 @@ class FacturaFormDialog(QDialog):
 
                 porcentaje_bcv = self.porcentaje_bcv_input.get_value()
                 if porcentaje_bcv is not None and porcentaje_bcv > 0:
-                    precio_1_mostrar = precio.precio_1 * (
-                        1 + float(porcentaje_bcv) / 100
-                    )
-                    self.precio_seleccion_combo.addItem(
-                        f"Precio 1: ${precio_1_mostrar:,.2f}", 1
-                    )
+                    precio_1_mostrar = precio.precio_1 * (1 + float(porcentaje_bcv) / 100)
+                    self.precio_seleccion_combo.addItem(f"Precio 1: ${precio_1_mostrar:,.2f}", 1)
 
                     if precio.precio_2 is not None:
-                        precio_2_mostrar = precio.precio_2 * (
-                            1 + float(porcentaje_bcv) / 100
-                        )
-                        self.precio_seleccion_combo.addItem(
-                            f"Precio 2: ${precio_2_mostrar:,.2f}", 2
-                        )
+                        precio_2_mostrar = precio.precio_2 * (1 + float(porcentaje_bcv) / 100)
+                        self.precio_seleccion_combo.addItem(f"Precio 2: ${precio_2_mostrar:,.2f}", 2)
 
                     if precio.precio_3 is not None:
-                        precio_3_mostrar = precio.precio_3 * (
-                            1 + float(porcentaje_bcv) / 100
-                        )
-                        self.precio_seleccion_combo.addItem(
-                            f"Precio 3: ${precio_3_mostrar:,.2f}", 3
-                        )
+                        precio_3_mostrar = precio.precio_3 * (1 + float(porcentaje_bcv) / 100)
+                        self.precio_seleccion_combo.addItem(f"Precio 3: ${precio_3_mostrar:,.2f}", 3)
                 else:
-                    self.precio_seleccion_combo.addItem(
-                        f"Precio 1: ${precio.precio_1:,.2f}", 1
-                    )
+                    self.precio_seleccion_combo.addItem(f"Precio 1: ${precio.precio_1:,.2f}", 1)
 
                     if precio.precio_2 is not None:
-                        self.precio_seleccion_combo.addItem(
-                            f"Precio 2: ${precio.precio_2:,.2f}", 2
-                        )
+                        self.precio_seleccion_combo.addItem(f"Precio 2: ${precio.precio_2:,.2f}", 2)
 
                     if precio.precio_3 is not None:
-                        self.precio_seleccion_combo.addItem(
-                            f"Precio 3: ${precio.precio_3:,.2f}", 3
-                        )
+                        self.precio_seleccion_combo.addItem(f"Precio 3: ${precio.precio_3:,.2f}", 3)
 
                 # Restaurar la selección anterior
                 if self.precio_seleccion_combo.count() > 0:
@@ -1540,9 +1405,7 @@ class FacturaFormDialog(QDialog):
             por_pagina=LIMITE_CATALOGO,
             id_usuario=self.id_usuario,
         )
-        self._productos = [
-            p for p in resultado["items"] if (p.estado_producto or "ACTIVO") == "ACTIVO"
-        ]
+        self._productos = [p for p in resultado["items"] if (p.estado_producto or "ACTIVO") == "ACTIVO"]
         self._poblar_combo_productos(self._productos)
 
     def _poblar_combo_productos(self, productos: list) -> None:
@@ -1574,9 +1437,7 @@ class FacturaFormDialog(QDialog):
             self._timer_busqueda_producto = QTimer(self)
             self._timer_busqueda_producto.setSingleShot(True)
             self._timer_busqueda_producto.timeout.connect(
-                lambda: self._buscar_productos(
-                    self.producto_buscar_input.text().strip() or None
-                )
+                lambda: self._buscar_productos(self.producto_buscar_input.text().strip() or None)
             )
         self._timer_busqueda_producto.start(DEBOUNCE_BUSQUEDA_MS)
 
@@ -1600,9 +1461,7 @@ class FacturaFormDialog(QDialog):
             self.precio_seleccion_combo.blockSignals(False)
             self.lbl_comision.setVisible(False)
             return
-        precio = PrecioService.obtener_precio(
-            self.session, id_producto, id_usuario=self.id_usuario
-        )
+        precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         self._precio_lista_actual = float(precio.precio_venta) if precio else None
 
         # Guardar los precios originales sin porcentaje BCV
@@ -1629,39 +1488,23 @@ class FacturaFormDialog(QDialog):
 
             if porcentaje_bcv is not None and porcentaje_bcv > 0:
                 precio_1_mostrar = precio.precio_1 * (1 + float(porcentaje_bcv) / 100)
-                self.precio_seleccion_combo.addItem(
-                    f"Precio 1: ${precio_1_mostrar:,.2f}", 1
-                )
+                self.precio_seleccion_combo.addItem(f"Precio 1: ${precio_1_mostrar:,.2f}", 1)
 
                 if precio.precio_2 is not None:
-                    precio_2_mostrar = precio.precio_2 * (
-                        1 + float(porcentaje_bcv) / 100
-                    )
-                    self.precio_seleccion_combo.addItem(
-                        f"Precio 2: ${precio_2_mostrar:,.2f}", 2
-                    )
+                    precio_2_mostrar = precio.precio_2 * (1 + float(porcentaje_bcv) / 100)
+                    self.precio_seleccion_combo.addItem(f"Precio 2: ${precio_2_mostrar:,.2f}", 2)
 
                 if precio.precio_3 is not None:
-                    precio_3_mostrar = precio.precio_3 * (
-                        1 + float(porcentaje_bcv) / 100
-                    )
-                    self.precio_seleccion_combo.addItem(
-                        f"Precio 3: ${precio_3_mostrar:,.2f}", 3
-                    )
+                    precio_3_mostrar = precio.precio_3 * (1 + float(porcentaje_bcv) / 100)
+                    self.precio_seleccion_combo.addItem(f"Precio 3: ${precio_3_mostrar:,.2f}", 3)
             else:
-                self.precio_seleccion_combo.addItem(
-                    f"Precio 1: ${precio.precio_1:,.2f}", 1
-                )
+                self.precio_seleccion_combo.addItem(f"Precio 1: ${precio.precio_1:,.2f}", 1)
 
                 if precio.precio_2 is not None:
-                    self.precio_seleccion_combo.addItem(
-                        f"Precio 2: ${precio.precio_2:,.2f}", 2
-                    )
+                    self.precio_seleccion_combo.addItem(f"Precio 2: ${precio.precio_2:,.2f}", 2)
 
                 if precio.precio_3 is not None:
-                    self.precio_seleccion_combo.addItem(
-                        f"Precio 3: ${precio.precio_3:,.2f}", 3
-                    )
+                    self.precio_seleccion_combo.addItem(f"Precio 3: ${precio.precio_3:,.2f}", 3)
 
             # Por defecto seleccionar Precio 1
             self.precio_seleccion_combo.setCurrentIndex(0)
@@ -1673,14 +1516,8 @@ class FacturaFormDialog(QDialog):
         self.precio_seleccion_combo.blockSignals(False)
 
         # Verificar si el producto tiene configuración de caja para habilitar/deshabilitar venta por unidad
-        producto_seleccionado = next(
-            (p for p in self._productos if p.id_producto == id_producto), None
-        )
-        if (
-            producto_seleccionado
-            and producto_seleccionado.cantidad_caja
-            and producto_seleccionado.cantidad_caja > 0
-        ):
+        producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
+        if producto_seleccionado and producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
             # Habilitar venta por unidad
             self.tipo_venta_combo.setEnabled(True)
         else:
@@ -1705,9 +1542,7 @@ class FacturaFormDialog(QDialog):
             self.lbl_comision.setVisible(False)
             return
 
-        precio = PrecioService.obtener_precio(
-            self.session, id_producto, id_usuario=self.id_usuario
-        )
+        precio = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         if not precio:
             self.lbl_comision.setVisible(False)
             return
@@ -1726,9 +1561,7 @@ class FacturaFormDialog(QDialog):
 
         # Obtener el tipo de venta actual
         tipo_venta = self.tipo_venta_combo.currentData()
-        producto_seleccionado = next(
-            (p for p in self._productos if p.id_producto == id_producto), None
-        )
+        producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
 
         # Calcular el precio de facturación según el tipo de venta
         if (
@@ -1779,9 +1612,7 @@ class FacturaFormDialog(QDialog):
         if id_producto is None:
             return
 
-        producto_seleccionado = next(
-            (p for p in self._productos if p.id_producto == id_producto), None
-        )
+        producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
         if producto_seleccionado is None:
             return
 
@@ -1792,14 +1623,9 @@ class FacturaFormDialog(QDialog):
             self.lbl_tipo_precio.setText("(por bulto)")
 
         if tipo_venta == "unidad":
-            if (
-                producto_seleccionado.cantidad_caja
-                and producto_seleccionado.cantidad_caja > 0
-            ):
+            if producto_seleccionado.cantidad_caja and producto_seleccionado.cantidad_caja > 0:
                 # Calcular precio por unidad dividiendo el precio seleccionado por las unidades por caja
-                precio_info = PrecioService.obtener_precio(
-                    self.session, id_producto, id_usuario=self.id_usuario
-                )
+                precio_info = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
                 if precio_info:
                     # Obtener el precio actualmente seleccionado del combo
                     precio_seleccionado = self.precio_seleccion_combo.currentData()
@@ -1839,21 +1665,15 @@ class FacturaFormDialog(QDialog):
     def _agregar_item(self) -> None:
         id_producto = self.producto_combo.currentData()
         if id_producto is None:
-            MessageBox.warning(
-                self, "Producto requerido", "Seleccione un producto para agregar."
-            )
+            MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
             return
         cantidad = float(self.cantidad_input.get_value() or 0)
         precio_unitario = float(self.precio_input.get_value() or 0)
         if cantidad <= 0:
-            MessageBox.warning(
-                self, "Cantidad inválida", "La cantidad debe ser mayor a cero."
-            )
+            MessageBox.warning(self, "Cantidad inválida", "La cantidad debe ser mayor a cero.")
             return
         if precio_unitario <= 0:
-            MessageBox.warning(
-                self, "Precio inválido", "El precio unitario debe ser mayor a cero."
-            )
+            MessageBox.warning(self, "Precio inválido", "El precio unitario debe ser mayor a cero.")
             return
 
         # Bloqueo proactivo de stock (hallazgo #5 de la auditoria de facturacion): el
@@ -1863,9 +1683,7 @@ class FacturaFormDialog(QDialog):
         # cuentan juntas). Solo informativo si el producto no esta en self._productos
         # (busqueda vieja/stale) -- el backend (VentaService.emitir_factura) vuelve a
         # validar todo con lock real, esto no lo reemplaza.
-        producto_seleccionado = next(
-            (p for p in self._productos if p.id_producto == id_producto), None
-        )
+        producto_seleccionado = next((p for p in self._productos if p.id_producto == id_producto), None)
         if producto_seleccionado is not None:
             # Obtener el tipo de venta actual
             tipo_venta = self.tipo_venta_combo.currentData()
@@ -1876,9 +1694,7 @@ class FacturaFormDialog(QDialog):
                 and producto_seleccionado.cantidad_caja
                 and producto_seleccionado.cantidad_caja > 0
             ):
-                cantidad_unidades_reales = cantidad * float(
-                    producto_seleccionado.cantidad_caja
-                )
+                cantidad_unidades_reales = cantidad * float(producto_seleccionado.cantidad_caja)
             else:
                 cantidad_unidades_reales = cantidad
 
@@ -1892,17 +1708,12 @@ class FacturaFormDialog(QDialog):
                         and producto_seleccionado.cantidad_caja
                         and producto_seleccionado.cantidad_caja > 0
                     ):
-                        cantidad_en_carrito_unidades += it["cantidad"] * float(
-                            producto_seleccionado.cantidad_caja
-                        )
+                        cantidad_en_carrito_unidades += it["cantidad"] * float(producto_seleccionado.cantidad_caja)
                     else:
                         cantidad_en_carrito_unidades += it["cantidad"]
 
             stock_disponible = float(producto_seleccionado.cantidad_unidad)
-            if (
-                cantidad_en_carrito_unidades + cantidad_unidades_reales
-                > stock_disponible
-            ):
+            if cantidad_en_carrito_unidades + cantidad_unidades_reales > stock_disponible:
                 MessageBox.warning(
                     self,
                     "Stock insuficiente",
@@ -1933,9 +1744,7 @@ class FacturaFormDialog(QDialog):
             precio_base = precio_unitario
 
         # Calcular comisión si se seleccionó Precio 2 o 3
-        precio_info = PrecioService.obtener_precio(
-            self.session, id_producto, id_usuario=self.id_usuario
-        )
+        precio_info = PrecioService.obtener_precio(self.session, id_producto, id_usuario=self.id_usuario)
         tipo_precio_seleccionado = self.precio_seleccion_combo.currentData()
         comision = 0.0
 
@@ -2016,25 +1825,17 @@ class FacturaFormDialog(QDialog):
             tipo_venta = item.get("tipo_venta", "bulto")
             tipo_venta_label = "u" if tipo_venta == "unidad" else "bulto"
             item_cant = QTableWidgetItem(f"{item['cantidad']:,.2f} {tipo_venta_label}")
-            item_cant.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_cant.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_items.setItem(fila, 1, item_cant)
             item_precio = QTableWidgetItem(f"${item['precio_unitario']:,.2f}")
-            item_precio.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             precio_lista = item.get("precio_lista")
             if precio_lista is not None and item["precio_unitario"] < precio_lista:
                 item_precio.setForeground(Qt.GlobalColor.red)
-                item_precio.setToolTip(
-                    f"Precio de lista: ${precio_lista:,.2f} -- requiere autorizacion"
-                )
+                item_precio.setToolTip(f"Precio de lista: ${precio_lista:,.2f} -- requiere autorizacion")
             self.tabla_items.setItem(fila, 2, item_precio)
             item_subtotal = QTableWidgetItem(f"${subtotal:,.2f}")
-            item_subtotal.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_subtotal.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_items.setItem(fila, 3, item_subtotal)
 
             btn_quitar = QPushButton()
@@ -2063,9 +1864,7 @@ class FacturaFormDialog(QDialog):
                 partes.append(f"− ${descuento:,.2f}")
             if monto_iva > 0:
                 partes.append(f"+ ${monto_iva:,.2f} IVA")
-            self.lbl_total.setText(
-                " ".join(partes) + f" = ${subtotal_con_descuento + monto_iva:,.2f}"
-            )
+            self.lbl_total.setText(" ".join(partes) + f" = ${subtotal_con_descuento + monto_iva:,.2f}")
         else:
             self.lbl_total.setText(f"Total: ${total:,.2f}")
 
@@ -2079,9 +1878,7 @@ class FacturaFormDialog(QDialog):
 
     def _requiere_autorizacion_descuento(self) -> bool:
         hay_precio_bajo_lista = any(
-            it.get("precio_lista") is not None
-            and it["precio_unitario"] < it["precio_lista"]
-            for it in self.items
+            it.get("precio_lista") is not None and it["precio_unitario"] < it["precio_lista"] for it in self.items
         )
         return hay_precio_bajo_lista or (self.descuento_input.get_value() or 0) > 0
 
@@ -2090,19 +1887,13 @@ class FacturaFormDialog(QDialog):
         pasar a formas de pago, y lo primero que vuelve a validar "Facturar" (el carrito
         pudo cambiar mientras el usuario estaba en la otra pestana)."""
         if self.cliente_combo.currentData() is None:
-            MessageBox.warning(
-                self, "Cliente requerido", "Seleccione un cliente para la factura."
-            )
+            MessageBox.warning(self, "Cliente requerido", "Seleccione un cliente para la factura.")
             return False
         if self.vendedor_combo.currentData() is None:
-            MessageBox.warning(
-                self, "Vendedor requerido", "Seleccione el vendedor de esta factura."
-            )
+            MessageBox.warning(self, "Vendedor requerido", "Seleccione el vendedor de esta factura.")
             return False
         if not self.items:
-            MessageBox.warning(
-                self, "Factura vacía", "Agregue al menos un producto a la factura."
-            )
+            MessageBox.warning(self, "Factura vacía", "Agregue al menos un producto a la factura.")
             return False
         return True
 
@@ -2175,10 +1966,7 @@ class FacturaFormDialog(QDialog):
                 motivo_max_length=255,
                 parent=self,
             )
-            if (
-                dialogo.exec() != QDialog.DialogCode.Accepted
-                or dialogo.usuario_autorizador is None
-            ):
+            if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
                 return
             self._id_autorizador_descuento = dialogo.usuario_autorizador.id_usuario
             self._motivo_descuento = dialogo.motivo
@@ -2200,10 +1988,7 @@ class FacturaFormDialog(QDialog):
                 motivo_max_length=255,
                 parent=self,
             )
-            if (
-                dialogo.exec() != QDialog.DialogCode.Accepted
-                or dialogo.usuario_autorizador is None
-            ):
+            if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
                 return
             self._id_autorizador_dias_credito = dialogo.usuario_autorizador.id_usuario
             self._motivo_dias_credito = dialogo.motivo
@@ -2212,8 +1997,7 @@ class FacturaFormDialog(QDialog):
         self._referencia_vuelto = None
         if es_contado:
             monto_vuelto = max(
-                sum(self._convertir_pago_a_usd(p) for p in self.pagos)
-                - self._total_factura_actual(),
+                sum(self._convertir_pago_a_usd(p) for p in self.pagos) - self._total_factura_actual(),
                 0.0,
             )
             if monto_vuelto > 0.005:
@@ -2244,10 +2028,7 @@ class FacturaFormDialog(QDialog):
                         motivo_max_length=50,
                         parent=self,
                     )
-                    if (
-                        dialogo.exec() != QDialog.DialogCode.Accepted
-                        or dialogo.usuario_autorizador is None
-                    ):
+                    if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.usuario_autorizador is None:
                         return
                     self._id_autorizador_vuelto = dialogo.usuario_autorizador.id_usuario
                     self._referencia_vuelto = dialogo.motivo
@@ -2318,8 +2099,7 @@ class FacturaFormDialog(QDialog):
         # deben quedar todas en None para el caso comun (pago exacto, sin vuelto).
         monto_vuelto = (
             max(
-                sum(self._convertir_pago_a_usd(p) for p in self.pagos)
-                - self._total_factura_actual(),
+                sum(self._convertir_pago_a_usd(p) for p in self.pagos) - self._total_factura_actual(),
                 0.0,
             )
             if not es_credito
@@ -2330,11 +2110,7 @@ class FacturaFormDialog(QDialog):
         origen_vuelto = self.origen_vuelto_combo.currentData() if hay_vuelto else None
 
         # Porcentaje BCV
-        porcentaje_bcv = (
-            self.porcentaje_bcv_input.get_value()
-            if self.chk_porcentaje_bcv.isChecked()
-            else None
-        )
+        porcentaje_bcv = self.porcentaje_bcv_input.get_value() if self.chk_porcentaje_bcv.isChecked() else None
 
         return {
             "id_cliente": self.cliente_combo.currentData(),
@@ -2356,20 +2132,10 @@ class FacturaFormDialog(QDialog):
             "motivo_dias_credito": self._motivo_dias_credito,
             "id_autorizador_dias_credito": self._id_autorizador_dias_credito,
             "metodo_vuelto": metodo_vuelto,
-            "id_caja_vuelto": (
-                origen_vuelto[1]
-                if origen_vuelto and metodo_vuelto == "efectivo"
-                else None
-            ),
-            "id_cuenta_bancaria_vuelto": (
-                origen_vuelto[1]
-                if origen_vuelto and metodo_vuelto != "efectivo"
-                else None
-            ),
+            "id_caja_vuelto": (origen_vuelto[1] if origen_vuelto and metodo_vuelto == "efectivo" else None),
+            "id_cuenta_bancaria_vuelto": (origen_vuelto[1] if origen_vuelto and metodo_vuelto != "efectivo" else None),
             "referencia_vuelto": self._referencia_vuelto if hay_vuelto else None,
-            "id_autorizador_vuelto": (
-                self._id_autorizador_vuelto if hay_vuelto else None
-            ),
+            "id_autorizador_vuelto": (self._id_autorizador_vuelto if hay_vuelto else None),
             "pagos": self.pagos if not es_credito else [],
             "porcentaje_bcv": porcentaje_bcv,
             "items": [

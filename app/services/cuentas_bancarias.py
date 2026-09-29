@@ -13,23 +13,17 @@ TIPOS_CUENTA_VALIDOS = {"AHORRO", "CORRIENTE"}
 
 class CuentaBancariaService:
     @staticmethod
-    def _validar_unico(
-        session: Session, campo: str, valor: str | None, excluir_id: int | None = None
-    ) -> None:
+    def _validar_unico(session: Session, campo: str, valor: str | None, excluir_id: int | None = None) -> None:
         if not valor:
             return
-        query = session.query(CuentaBancaria).filter(
-            getattr(CuentaBancaria, campo) == valor
-        )
+        query = session.query(CuentaBancaria).filter(getattr(CuentaBancaria, campo) == valor)
         if excluir_id is not None:
             query = query.filter(CuentaBancaria.id_cuenta != excluir_id)
         if query.first() is not None:
             raise ValueError(f"Ya existe una cuenta bancaria con {campo}='{valor}'")
 
     @staticmethod
-    def obtener(
-        session: Session, id_cuenta: int, id_usuario: int | None = None
-    ) -> CuentaBancaria | None:
+    def obtener(session: Session, id_cuenta: int, id_usuario: int | None = None) -> CuentaBancaria | None:
         require_permiso(session, id_usuario, "bancos", "ver")
         return session.get(CuentaBancaria, id_cuenta)
 
@@ -77,21 +71,14 @@ class CuentaBancariaService:
             raise ValueError("nombre_titular es requerido")
         if not datos.get("identificacion_titular"):
             raise ValueError("identificacion_titular es requerido")
-        if (
-            datos.get("tipo_cuenta_banco")
-            and datos.get("tipo_cuenta_banco") not in TIPOS_CUENTA_VALIDOS
-        ):
-            raise ValueError(
-                f"tipo_cuenta_banco debe ser uno de {TIPOS_CUENTA_VALIDOS}"
-            )
+        if datos.get("tipo_cuenta_banco") and datos.get("tipo_cuenta_banco") not in TIPOS_CUENTA_VALIDOS:
+            raise ValueError(f"tipo_cuenta_banco debe ser uno de {TIPOS_CUENTA_VALIDOS}")
 
     @staticmethod
     def crear(session: Session, **datos) -> CuentaBancaria:
         require_permiso(session, datos.get("creado_por"), "bancos", "crear")
         CuentaBancariaService._validar_requeridos(datos)
-        CuentaBancariaService._validar_unico(
-            session, "numero_cuenta", datos.get("numero_cuenta")
-        )
+        CuentaBancariaService._validar_unico(session, "numero_cuenta", datos.get("numero_cuenta"))
         # Establecer fecha de creación explícitamente
         if "fecha_creacion" not in datos:
             datos["fecha_creacion"] = datetime.datetime.now()
@@ -113,9 +100,7 @@ class CuentaBancariaService:
         return cuenta
 
     @staticmethod
-    def actualizar(
-        session: Session, id_cuenta: int, id_usuario: int | None = None, **datos
-    ) -> CuentaBancaria:
+    def actualizar(session: Session, id_cuenta: int, id_usuario: int | None = None, **datos) -> CuentaBancaria:
         require_permiso(session, id_usuario, "bancos", "editar")
         cuenta = session.get(CuentaBancaria, id_cuenta)
         if cuenta is None:
@@ -128,19 +113,12 @@ class CuentaBancariaService:
         if "identificacion_titular" in datos and not datos["identificacion_titular"]:
             raise ValueError("identificacion_titular es requerido")
         if "tipo_cuenta_banco" in datos:
-            if (
-                datos["tipo_cuenta_banco"]
-                and datos["tipo_cuenta_banco"] not in TIPOS_CUENTA_VALIDOS
-            ):
-                raise ValueError(
-                    f"tipo_cuenta_banco debe ser uno de {TIPOS_CUENTA_VALIDOS}"
-                )
+            if datos["tipo_cuenta_banco"] and datos["tipo_cuenta_banco"] not in TIPOS_CUENTA_VALIDOS:
+                raise ValueError(f"tipo_cuenta_banco debe ser uno de {TIPOS_CUENTA_VALIDOS}")
 
         nuevo_numero = datos.get("numero_cuenta")
         if nuevo_numero and nuevo_numero != cuenta.numero_cuenta:
-            CuentaBancariaService._validar_unico(
-                session, "numero_cuenta", nuevo_numero, excluir_id=id_cuenta
-            )
+            CuentaBancariaService._validar_unico(session, "numero_cuenta", nuevo_numero, excluir_id=id_cuenta)
 
         for campo, valor in datos.items():
             setattr(cuenta, campo, valor)

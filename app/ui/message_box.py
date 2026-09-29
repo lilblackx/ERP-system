@@ -111,18 +111,14 @@ class MessageBox(QDialog):
     uso nuevo que no encaje en los 4 estaticos; usar `MessageBox.question/information/
     warning/critical(parent, titulo, texto)`."""
 
-    def __init__(
-        self, parent, titulo: str, texto: str, tipo: str, confirmacion: bool = False
-    ):
+    def __init__(self, parent, titulo: str, texto: str, tipo: str, confirmacion: bool = False):
         super().__init__(parent)
         self._aceptado = False
         config = _CONFIGURACION[tipo]
 
         self.setWindowTitle(titulo)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self.setModal(True)
         self.setMinimumWidth(380)
 
@@ -138,9 +134,7 @@ class MessageBox(QDialog):
         card_layout.setSpacing(14)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon(config["icono"], color=config["color"]).pixmap(QSize(22, 22))
-        )
+        icon_lbl.setPixmap(qta.icon(config["icono"], color=config["color"]).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
             f"background-color: {color_con_alpha(config['color'], 26)};"
             f" border: 1.5px solid {color_con_alpha(config['color'], 90)};"
@@ -209,11 +203,7 @@ class MessageBox(QDialog):
     def question(parent, titulo: str, texto: str) -> QMessageBox.StandardButton:
         dialogo = MessageBox(parent, titulo, texto, tipo="question", confirmacion=True)
         dialogo.exec()
-        return (
-            QMessageBox.StandardButton.Yes
-            if dialogo._aceptado
-            else QMessageBox.StandardButton.No
-        )
+        return QMessageBox.StandardButton.Yes if dialogo._aceptado else QMessageBox.StandardButton.No
 
     @staticmethod
     def information(parent, titulo: str, texto: str) -> None:

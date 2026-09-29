@@ -15,9 +15,7 @@ from unittest.mock import MagicMock
 
 from app.ui.producto_form_dialog import ProductoFormDialog
 
-_USUARIO_ADMIN = SimpleNamespace(
-    estado="ACTIVO", bloqueado_desde=None, id_rol=1, nombre_usuario="admin"
-)
+_USUARIO_ADMIN = SimpleNamespace(estado="ACTIVO", bloqueado_desde=None, id_rol=1, nombre_usuario="admin")
 _ROL_ADMIN = SimpleNamespace(nombre="ADMIN")
 
 
@@ -108,9 +106,7 @@ def test_actualizar_margen_con_costo_cero_no_divide_por_cero(qtbot):
 
 
 def test_precargar_setea_valores_desde_producto(qtbot):
-    dialogo = ProductoFormDialog(
-        _mock_session(precio_existente=Decimal("19.99")), id_usuario=1
-    )
+    dialogo = ProductoFormDialog(_mock_session(precio_existente=Decimal("19.99")), id_usuario=1)
     qtbot.addWidget(dialogo)
     producto = SimpleNamespace(
         id_producto=7,

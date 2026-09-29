@@ -10,9 +10,7 @@ from app.services.permisos import require_permiso
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
-def _validar_unico(
-    session: Session, campo: str, valor: str, excluir_id: int | None = None
-) -> None:
+def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | None = None) -> None:
     query = session.query(Vendedor).filter(getattr(Vendedor, campo) == valor)
     if excluir_id is not None:
         query = query.filter(Vendedor.id_vendedor != excluir_id)
@@ -37,16 +35,12 @@ def _validar_ruta_activa(session: Session, id_ruta: int) -> None:
     if ruta is None:
         raise ValueError(f"id_ruta={id_ruta} no corresponde a una ruta existente")
     if (ruta.estado_ruta or "ACTIVO") != "ACTIVO":
-        raise ValueError(
-            f"La ruta '{ruta.nombre_ruta}' esta INACTIVA y no puede asignarse a un vendedor"
-        )
+        raise ValueError(f"La ruta '{ruta.nombre_ruta}' esta INACTIVA y no puede asignarse a un vendedor")
 
 
 class VendedorService:
     @staticmethod
-    def obtener(
-        session: Session, id_vendedor: int, id_usuario: int | None = None
-    ) -> Vendedor | None:
+    def obtener(session: Session, id_vendedor: int, id_usuario: int | None = None) -> Vendedor | None:
         require_permiso(session, id_usuario, "vendedores", "ver")
         return session.get(Vendedor, id_vendedor)
 
@@ -108,9 +102,7 @@ class VendedorService:
         _validar_ruta_activa(session, datos["id_ruta"])
         _validar_meta_activacion(datos.get("meta_activacion"))
         _validar_unico(session, "codigo_vendedor", datos["codigo_vendedor"])
-        _validar_unico(
-            session, "identificacion_vendedor", datos["identificacion_vendedor"]
-        )
+        _validar_unico(session, "identificacion_vendedor", datos["identificacion_vendedor"])
 
         vendedor = Vendedor(**datos)
         session.add(vendedor)
@@ -130,9 +122,7 @@ class VendedorService:
         return vendedor
 
     @staticmethod
-    def actualizar(
-        session: Session, id_vendedor: int, id_usuario: int | None = None, **datos
-    ) -> Vendedor:
+    def actualizar(session: Session, id_vendedor: int, id_usuario: int | None = None, **datos) -> Vendedor:
         require_permiso(session, id_usuario, "vendedores", "editar")
         vendedor = session.get(Vendedor, id_vendedor)
         if vendedor is None:
@@ -153,15 +143,10 @@ class VendedorService:
 
         nuevo_codigo = datos.get("codigo_vendedor")
         if nuevo_codigo and nuevo_codigo != vendedor.codigo_vendedor:
-            _validar_unico(
-                session, "codigo_vendedor", nuevo_codigo, excluir_id=id_vendedor
-            )
+            _validar_unico(session, "codigo_vendedor", nuevo_codigo, excluir_id=id_vendedor)
 
         nueva_identificacion = datos.get("identificacion_vendedor")
-        if (
-            nueva_identificacion
-            and nueva_identificacion != vendedor.identificacion_vendedor
-        ):
+        if nueva_identificacion and nueva_identificacion != vendedor.identificacion_vendedor:
             _validar_unico(
                 session,
                 "identificacion_vendedor",
@@ -192,9 +177,7 @@ class VendedorService:
     # estado_vendedor ya existia, pero nada la usaba). Decision de producto 2026-08-22
     # (hallazgo de auditoria del mismo dia).
     @staticmethod
-    def eliminar(
-        session: Session, id_vendedor: int, id_usuario: int | None = None
-    ) -> None:
+    def eliminar(session: Session, id_vendedor: int, id_usuario: int | None = None) -> None:
         require_permiso(session, id_usuario, "vendedores", "eliminar")
         raise ValueError(
             "No se puede eliminar un vendedor para proteger la integridad de los datos. "
@@ -252,21 +235,13 @@ class VendedorService:
         )
 
         total_vendido = (
-            session.query(func.coalesce(func.sum(FacturaVenta.total_venta), 0))
-            .filter(*filtros_periodo)
-            .scalar()
+            session.query(func.coalesce(func.sum(FacturaVenta.total_venta), 0)).filter(*filtros_periodo).scalar()
         )
 
-        cantidad_facturas = (
-            session.query(func.count(FacturaVenta.id_factura))
-            .filter(*filtros_periodo)
-            .scalar()
-        )
+        cantidad_facturas = session.query(func.count(FacturaVenta.id_factura)).filter(*filtros_periodo).scalar()
 
         total_clientes_asignados = (
-            session.query(func.count(Cliente.id_cliente))
-            .filter(Cliente.vendedor_cliente == id_vendedor)
-            .scalar()
+            session.query(func.count(Cliente.id_cliente)).filter(Cliente.vendedor_cliente == id_vendedor).scalar()
         )
 
         return {

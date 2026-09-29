@@ -23,9 +23,7 @@ def _crear_panel(qtbot, monkeypatch):
 def test_ver_detalle_oc_bloquea_reentrada_pero_no_queda_trabado(qtbot, monkeypatch):
     panel = _crear_panel(qtbot, monkeypatch)
     panel._fila_seleccionada_id = lambda tabla: 1
-    monkeypatch.setattr(
-        compras_mod.CompraOCService, "obtener_oc", staticmethod(lambda *a, **k: {})
-    )
+    monkeypatch.setattr(compras_mod.CompraOCService, "obtener_oc", staticmethod(lambda *a, **k: {}))
 
     llamadas_sesion = []
 
@@ -44,9 +42,7 @@ def test_ver_detalle_oc_bloquea_reentrada_pero_no_queda_trabado(qtbot, monkeypat
         return 0
 
     dialogo_mock.exec.side_effect = fake_exec
-    monkeypatch.setattr(
-        compras_mod, "OrdenCompraDetalleDialog", lambda *a, **k: dialogo_mock
-    )
+    monkeypatch.setattr(compras_mod, "OrdenCompraDetalleDialog", lambda *a, **k: dialogo_mock)
 
     panel.ver_detalle_oc()
 

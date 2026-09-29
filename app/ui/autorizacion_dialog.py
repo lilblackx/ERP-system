@@ -135,9 +135,7 @@ class AutorizacionDialog(QDialog):
         self.setWindowTitle(titulo)
         self.setFixedSize(420, 320)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui(mensaje, motivo_label)
         if motivo_max_length is not None:
@@ -150,15 +148,11 @@ class AutorizacionDialog(QDialog):
 
         header = QHBoxLayout()
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.user-shield", color=COLOR_DANGER).pixmap(22, 22)
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.user-shield", color=COLOR_DANGER).pixmap(22, 22))
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
         lbl_titulo = QLabel(self.windowTitle())
-        lbl_titulo.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         lbl_subtitulo = QLabel(mensaje)
         lbl_subtitulo.setWordWrap(True)
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
@@ -241,9 +235,7 @@ class AutorizacionDialog(QDialog):
             return
 
         if usuario is None:
-            MessageBox.warning(
-                self, "Credenciales invalidas", "Usuario o clave incorrectos."
-            )
+            MessageBox.warning(self, "Credenciales invalidas", "Usuario o clave incorrectos.")
             return
 
         try:

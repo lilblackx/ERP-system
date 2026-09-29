@@ -162,20 +162,12 @@ class _PopupAnclado(QWidget):
     def mostrar_bajo(self, boton: QPushButton) -> None:
         punto = boton.mapToGlobal(boton.rect().bottomLeft())
         ancho = self.width()
-        pantalla = (
-            QGuiApplication.screenAt(punto)
-            or boton.screen()
-            or QGuiApplication.primaryScreen()
-        )
+        pantalla = QGuiApplication.screenAt(punto) or boton.screen() or QGuiApplication.primaryScreen()
         if pantalla is not None:
             disponible = pantalla.availableGeometry()
             margen = 8
             x_max = disponible.right() - ancho - margen
-            x = (
-                min(punto.x(), x_max)
-                if x_max >= disponible.left()
-                else disponible.left() + margen
-            )
+            x = min(punto.x(), x_max) if x_max >= disponible.left() else disponible.left() + margen
             punto.setX(x)
         self.move(punto.x(), punto.y() + 4)
         self.show()
@@ -280,8 +272,7 @@ class BotonFiltros(_BotonConPopup):
         self.setStyleSheet(
             BUTTON_SECONDARY_QSS
             if not activos
-            else BUTTON_SECONDARY_QSS
-            + f"QPushButton {{ border-color: {COLOR_PRIMARY}; color: {COLOR_PRIMARY}; }}"
+            else BUTTON_SECONDARY_QSS + f"QPushButton {{ border-color: {COLOR_PRIMARY}; color: {COLOR_PRIMARY}; }}"
         )
 
 
@@ -289,9 +280,7 @@ class BotonFiltros(_BotonConPopup):
 
 
 class _ExportarPopupCard(_PopupAnclado):
-    def __init__(
-        self, on_excel: Callable[[], None], on_pdf: Callable[[], None], parent=None
-    ):
+    def __init__(self, on_excel: Callable[[], None], on_pdf: Callable[[], None], parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self.card)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -320,9 +309,7 @@ class BotonExportar(_BotonConPopup):
     """Boton "Exportar" que despliega un popup para elegir Excel o PDF, en vez de dos
     botones separados en la barra."""
 
-    def __init__(
-        self, on_excel: Callable[[], None], on_pdf: Callable[[], None], parent=None
-    ):
+    def __init__(self, on_excel: Callable[[], None], on_pdf: Callable[[], None], parent=None):
         super().__init__("Exportar", "fa5s.file-export", parent)
         self._popup = _ExportarPopupCard(on_excel, on_pdf, parent=self)
 

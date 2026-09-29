@@ -24,9 +24,7 @@ def test_crear_banco_y_listar(db_session):
 
     bancos = BancoService.listar_bancos(db_session, id_usuario=admin.id_usuario)
 
-    assert [
-        b.nombre_banco for b in bancos if b.nombre_banco in ("Banco A", "Banco Z")
-    ] == ["Banco A", "Banco Z"]
+    assert [b.nombre_banco for b in bancos if b.nombre_banco in ("Banco A", "Banco Z")] == ["Banco A", "Banco Z"]
 
 
 def test_listar_bancos_sin_usuario_autorizado_falla(db_session):
@@ -42,18 +40,14 @@ def test_crear_banco_sin_usuario_autorizado_falla(db_session):
 def test_actualizar_banco_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Banco no encontrado"):
-        BancoService.actualizar_banco(
-            db_session, 999999, id_usuario=admin.id_usuario, nombre_banco="X"
-        )
+        BancoService.actualizar_banco(db_session, 999999, id_usuario=admin.id_usuario, nombre_banco="X")
 
 
 def test_eliminar_banco_siempre_falla_para_proteger_integridad(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_banco(db_session)
     with pytest.raises(ValueError, match="No se puede eliminar"):
-        BancoService.eliminar_banco(
-            db_session, banco.id_banco, id_usuario=admin.id_usuario
-        )
+        BancoService.eliminar_banco(db_session, banco.id_banco, id_usuario=admin.id_usuario)
     assert len(BancoService.listar_bancos(db_session, id_usuario=admin.id_usuario)) == 1
 
 
@@ -61,9 +55,7 @@ def test_cambiar_estado_banco_desactiva(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_banco(db_session)
 
-    actualizado = BancoService.cambiar_estado_banco(
-        db_session, banco.id_banco, "INACTIVO", id_usuario=admin.id_usuario
-    )
+    actualizado = BancoService.cambiar_estado_banco(db_session, banco.id_banco, "INACTIVO", id_usuario=admin.id_usuario)
 
     assert actualizado.estado_banco == "INACTIVO"
 
@@ -73,17 +65,13 @@ def test_cambiar_estado_banco_estado_invalido(db_session):
     banco = crear_banco(db_session)
 
     with pytest.raises(ValueError, match="nuevo_estado"):
-        BancoService.cambiar_estado_banco(
-            db_session, banco.id_banco, "BLOQUEADO", id_usuario=admin.id_usuario
-        )
+        BancoService.cambiar_estado_banco(db_session, banco.id_banco, "BLOQUEADO", id_usuario=admin.id_usuario)
 
 
 def test_cambiar_estado_banco_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Banco no encontrado"):
-        BancoService.cambiar_estado_banco(
-            db_session, 999999, "INACTIVO", id_usuario=admin.id_usuario
-        )
+        BancoService.cambiar_estado_banco(db_session, 999999, "INACTIVO", id_usuario=admin.id_usuario)
 
 
 def test_cambiar_estado_banco_sin_usuario_autorizado_falla(db_session):
@@ -131,21 +119,15 @@ def test_crear_cuenta_banco_inactivo_falla(db_session):
 def test_actualizar_cuenta_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Cuenta bancaria no encontrada"):
-        BancoService.actualizar_cuenta(
-            db_session, 999999, id_usuario=admin.id_usuario, nombre_titular="X"
-        )
+        BancoService.actualizar_cuenta(db_session, 999999, id_usuario=admin.id_usuario, nombre_titular="X")
 
 
 def test_eliminar_cuenta_siempre_falla_para_proteger_integridad(db_session):
     admin = crear_usuario_admin(db_session)
     cuenta = crear_cuenta_bancaria(db_session)
     with pytest.raises(ValueError, match="No se puede eliminar"):
-        BancoService.eliminar_cuenta(
-            db_session, cuenta.id_cuenta, id_usuario=admin.id_usuario
-        )
-    assert (
-        len(BancoService.listar_cuentas(db_session, id_usuario=admin.id_usuario)) == 1
-    )
+        BancoService.eliminar_cuenta(db_session, cuenta.id_cuenta, id_usuario=admin.id_usuario)
+    assert len(BancoService.listar_cuentas(db_session, id_usuario=admin.id_usuario)) == 1
 
 
 def test_cambiar_estado_cuenta_desactiva(db_session):
@@ -164,17 +146,13 @@ def test_cambiar_estado_cuenta_estado_invalido(db_session):
     cuenta = crear_cuenta_bancaria(db_session)
 
     with pytest.raises(ValueError, match="nuevo_estado"):
-        BancoService.cambiar_estado_cuenta(
-            db_session, cuenta.id_cuenta, "BLOQUEADO", id_usuario=admin.id_usuario
-        )
+        BancoService.cambiar_estado_cuenta(db_session, cuenta.id_cuenta, "BLOQUEADO", id_usuario=admin.id_usuario)
 
 
 def test_cambiar_estado_cuenta_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Cuenta bancaria no encontrada"):
-        BancoService.cambiar_estado_cuenta(
-            db_session, 999999, "INACTIVO", id_usuario=admin.id_usuario
-        )
+        BancoService.cambiar_estado_cuenta(db_session, 999999, "INACTIVO", id_usuario=admin.id_usuario)
 
 
 def test_cambiar_estado_cuenta_sin_usuario_autorizado_falla(db_session):
@@ -187,9 +165,7 @@ def test_obtener_resumen_cuentas_enmascara_numero(db_session):
     admin = crear_usuario_admin(db_session)
     crear_cuenta_bancaria(db_session, numero_cuenta="01021234567890123456")
 
-    resumen = BancoService.obtener_resumen_cuentas(
-        db_session, id_usuario=admin.id_usuario
-    )
+    resumen = BancoService.obtener_resumen_cuentas(db_session, id_usuario=admin.id_usuario)
 
     assert len(resumen) == 1
     numero_enmascarado = resumen[0]["numero_cuenta"]
@@ -201,9 +177,7 @@ def test_obtener_resumen_cuentas_enmascara_numero(db_session):
 def test_obtener_movimientos_tipo_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="tipo_movimiento invalido"):
-        BancoService.obtener_movimientos(
-            db_session, tipo_movimiento="no_existe", id_usuario=admin.id_usuario
-        )
+        BancoService.obtener_movimientos(db_session, tipo_movimiento="no_existe", id_usuario=admin.id_usuario)
 
 
 def test_obtener_movimientos_sin_usuario_autorizado_falla(db_session):
@@ -234,9 +208,7 @@ def test_listar_cajas_sin_usuario_autorizado_falla(db_session):
 
 def test_crear_caja(db_session):
     admin = crear_usuario_admin(db_session)
-    caja = CajaService.crear_caja(
-        db_session, "Caja Principal", id_usuario=admin.id_usuario
-    )
+    caja = CajaService.crear_caja(db_session, "Caja Principal", id_usuario=admin.id_usuario)
 
     assert caja.id_caja is not None
     assert caja.nombre_caja == "Caja Principal"
@@ -257,9 +229,7 @@ def test_crear_caja_usuario_no_admin_falla(db_session):
     admin = crear_usuario_admin(db_session)
     rol = crear_rol(db_session)
     permiso = crear_permiso(db_session, recurso="cajas", accion="crear")
-    PermisoService.asignar_permiso(
-        db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario
-    )
+    PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)
     usuario = crear_usuario(db_session, id_rol=rol.id_rol)
 
     with pytest.raises(PermisoDenegadoError):
@@ -285,30 +255,22 @@ def test_abrir_caja(db_session):
 def test_abrir_caja_sin_usuario_autorizado_falla(db_session):
     caja = crear_caja(db_session)
     with pytest.raises(PermisoDenegadoError):
-        CajaService.abrir_caja(
-            db_session, caja.id_caja, id_usuario=None, saldo_apertura=Decimal("100.00")
-        )
+        CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=None, saldo_apertura=Decimal("100.00"))
 
 
 def test_abrir_caja_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Caja no encontrada"):
-        CajaService.abrir_caja(
-            db_session, 999999, id_usuario=admin.id_usuario, saldo_apertura=0
-        )
+        CajaService.abrir_caja(db_session, 999999, id_usuario=admin.id_usuario, saldo_apertura=0)
 
 
 def test_abrir_caja_ya_abierta(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="ya esta abierta"):
-        CajaService.abrir_caja(
-            db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-        )
+        CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
 
 def test_abrir_caja_usuario_no_admin_falla(db_session):
@@ -319,52 +281,38 @@ def test_abrir_caja_usuario_no_admin_falla(db_session):
     admin = crear_usuario_admin(db_session)
     rol = crear_rol(db_session)
     permiso = crear_permiso(db_session, recurso="cajas", accion="editar")
-    PermisoService.asignar_permiso(
-        db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario
-    )
+    PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)
     usuario = crear_usuario(db_session, id_rol=rol.id_rol)
     caja = crear_caja(db_session)
 
     with pytest.raises(PermisoDenegadoError, match="administrador"):
-        CajaService.abrir_caja(
-            db_session, caja.id_caja, id_usuario=usuario.id_usuario, saldo_apertura=0
-        )
+        CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=usuario.id_usuario, saldo_apertura=0)
 
 
 def test_cerrar_caja_usuario_no_admin_falla(db_session):
     admin = crear_usuario_admin(db_session)
     rol = crear_rol(db_session)
     permiso = crear_permiso(db_session, recurso="cajas", accion="editar")
-    PermisoService.asignar_permiso(
-        db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario
-    )
+    PermisoService.asignar_permiso(db_session, rol.id_rol, permiso.id_permiso, id_usuario=admin.id_usuario)
     usuario = crear_usuario(db_session, id_rol=rol.id_rol)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(PermisoDenegadoError, match="administrador"):
-        CajaService.cerrar_caja(
-            db_session, caja.id_caja, id_usuario_cierre=usuario.id_usuario
-        )
+        CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=usuario.id_usuario)
 
 
 def test_cerrar_caja_sin_turno_abierto(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
     with pytest.raises(ValueError, match="no tiene un turno abierto"):
-        CajaService.cerrar_caja(
-            db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario
-        )
+        CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario)
 
 
 def test_cerrar_caja_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(PermisoDenegadoError):
         CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=None)
@@ -397,9 +345,7 @@ def test_cerrar_caja_calcula_saldo_con_movimientos(db_session):
         id_usuario=admin.id_usuario,
     )
 
-    cerrada = CajaService.cerrar_caja(
-        db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario
-    )
+    cerrada = CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=admin.id_usuario)
 
     assert cerrada.estado_caja == "CERRADA"
     assert cerrada.saldo_cierre == Decimal("130.00")  # 100 + 50 - 20
@@ -408,9 +354,7 @@ def test_cerrar_caja_calcula_saldo_con_movimientos(db_session):
 def test_registrar_movimiento_manual_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(PermisoDenegadoError):
         CajaService.registrar_movimiento_manual(
@@ -426,9 +370,7 @@ def test_registrar_movimiento_manual_sin_usuario_autorizado_falla(db_session):
 def test_registrar_movimiento_manual_tipo_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="tipo invalido"):
         CajaService.registrar_movimiento_manual(
@@ -444,9 +386,7 @@ def test_registrar_movimiento_manual_tipo_invalido(db_session):
 def test_registrar_movimiento_manual_monto_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     with pytest.raises(ValueError, match="mayor a cero"):
         CajaService.registrar_movimiento_manual(

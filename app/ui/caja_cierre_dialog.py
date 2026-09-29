@@ -95,9 +95,7 @@ class CajaCierreDialog(QDialog):
     """Muestra el arqueo (movimientos del turno + saldo calculado) de una caja abierta y,
     tras confirmar, cierra el turno. `cerrada` queda True si exec() == Accepted."""
 
-    def __init__(
-        self, session: Session, caja: Caja, id_usuario_actor: int, parent=None
-    ):
+    def __init__(self, session: Session, caja: Caja, id_usuario_actor: int, parent=None):
         super().__init__(parent)
         self.session = session
         self.caja = caja
@@ -109,9 +107,7 @@ class CajaCierreDialog(QDialog):
         self.setMinimumWidth(560)
         self.resize(560, 580)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
         self._cargar_arqueo()
@@ -124,9 +120,7 @@ class CajaCierreDialog(QDialog):
         header = QHBoxLayout()
         header.setSpacing(12)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(
-            qta.icon("fa5s.cash-register", color=COLOR_DANGER).pixmap(QSize(20, 20))
-        )
+        icon_lbl.setPixmap(qta.icon("fa5s.cash-register", color=COLOR_DANGER).pixmap(QSize(20, 20)))
         icon_lbl.setStyleSheet(
             "background-color: #FEF2F2; border: 1.5px solid #FECACA; border-radius: 8px; padding: 6px;"
         )
@@ -134,16 +128,10 @@ class CajaCierreDialog(QDialog):
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
-        lbl_titulo = QLabel(
-            f"Cerrar turno — {self.caja.nombre_caja or f'Caja {self.caja.id_caja}'}"
-        )
-        lbl_titulo.setStyleSheet(
-            f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo = QLabel(f"Cerrar turno — {self.caja.nombre_caja or f'Caja {self.caja.id_caja}'}")
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         cajero = self.caja.usuario.nombre_usuario if self.caja.usuario else "—"
-        self.lbl_subtitulo = QLabel(
-            f"Cajero: {cajero} · Apertura: {self._fmt_fecha(self.caja.fecha_apertura)}"
-        )
+        self.lbl_subtitulo = QLabel(f"Cajero: {cajero} · Apertura: {self._fmt_fecha(self.caja.fecha_apertura)}")
         self.lbl_subtitulo.setWordWrap(True)
         self.lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         titulos.addWidget(lbl_titulo)
@@ -204,9 +192,7 @@ class CajaCierreDialog(QDialog):
         self.lbl_apertura = self._make_stat("Saldo de apertura", "—")
         self.lbl_entradas = self._make_stat("Entradas", "—", COLOR_SUCCESS)
         self.lbl_salidas = self._make_stat("Salidas", "—", COLOR_DANGER)
-        self.lbl_saldo_calculado = self._make_stat(
-            "Saldo calculado (a cerrar)", "—", COLOR_PRIMARY
-        )
+        self.lbl_saldo_calculado = self._make_stat("Saldo calculado (a cerrar)", "—", COLOR_PRIMARY)
 
         fila_superior.addLayout(self.lbl_apertura[0])
         fila_superior.addLayout(self.lbl_entradas[0])
@@ -219,19 +205,13 @@ class CajaCierreDialog(QDialog):
         fila_inferior.setSpacing(24)
 
         lbl_monto_fisico = QLabel("Monto físico en caja:")
-        lbl_monto_fisico.setStyleSheet(
-            f"font-size: 12px; color: {COLOR_TEXT_MUTED}; font-weight: 600;"
-        )
-        self.monto_fisico_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0"), prefix="$ "
-        )
+        lbl_monto_fisico.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; font-weight: 600;")
+        self.monto_fisico_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0"), prefix="$ ")
         self.monto_fisico_input.setFixedWidth(150)
         self.monto_fisico_input.textChanged.connect(self._calcular_diferencia)
 
         self.lbl_diferencia = QLabel("Diferencia: $0.00")
-        self.lbl_diferencia.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {COLOR_TEXT_MUTED};"
-        )
+        self.lbl_diferencia.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_TEXT_MUTED};")
 
         fila_inferior.addWidget(lbl_monto_fisico)
         fila_inferior.addWidget(self.monto_fisico_input)
@@ -248,9 +228,7 @@ class CajaCierreDialog(QDialog):
         fila_descripcion.setContentsMargins(0, 0, 0, 0)
 
         lbl_descripcion = QLabel("Descripción de la diferencia:")
-        lbl_descripcion.setStyleSheet(
-            f"font-size: 12px; color: {COLOR_TEXT_MUTED}; font-weight: 600;"
-        )
+        lbl_descripcion.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; font-weight: 600;")
         self.descripcion_input = QTextEdit()
         self.descripcion_input.setPlaceholderText("EXPLICA LA CAUSA DE LA DIFERENCIA")
         self.descripcion_input.setMaximumHeight(60)
@@ -270,9 +248,7 @@ class CajaCierreDialog(QDialog):
         col = QVBoxLayout()
         col.setSpacing(2)
         lbl_titulo = QLabel(titulo)
-        lbl_titulo.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-weight: 600;"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-weight: 600;")
         lbl_valor = QLabel(valor_inicial)
         lbl_valor.setStyleSheet(f"font-size: 16px; color: {color}; font-weight: bold;")
         col.addWidget(lbl_titulo)
@@ -288,15 +264,9 @@ class CajaCierreDialog(QDialog):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tabla.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.ResizeToContents
-        )
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         alinear_encabezados(
@@ -319,24 +289,14 @@ class CajaCierreDialog(QDialog):
             movimientos = CajaService.listar_movimientos_turno(
                 self.session, self.caja.id_caja, id_usuario=self.id_usuario_actor
             )
-            self.saldo_calculado = CajaService.calcular_saldo_actual(
-                self.session, self.caja.id_caja
-            )
+            self.saldo_calculado = CajaService.calcular_saldo_actual(self.session, self.caja.id_caja)
         except (ValueError, PermisoDenegadoError) as exc:
             MessageBox.critical(self, "No se pudo cargar el arqueo", str(exc))
             self.reject()
             return
 
-        total_entradas = sum(
-            (m.monto_movimiento or 0)
-            for m in movimientos
-            if m.tipo_movimiento == "entrada"
-        )
-        total_salidas = sum(
-            (m.monto_movimiento or 0)
-            for m in movimientos
-            if m.tipo_movimiento == "salida"
-        )
+        total_entradas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "entrada")
+        total_salidas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "salida")
 
         self.lbl_apertura[1].setText(f"$ {self.caja.saldo_apertura or 0:,.2f}")
         self.lbl_entradas[1].setText(f"+$ {total_entradas:,.2f}")
@@ -345,22 +305,14 @@ class CajaCierreDialog(QDialog):
 
         self.tabla.setRowCount(len(movimientos))
         for fila, mov in enumerate(movimientos):
-            self.tabla.setItem(
-                fila, 0, QTableWidgetItem(self._fmt_fecha(mov.fecha_registro))
-            )
+            self.tabla.setItem(fila, 0, QTableWidgetItem(self._fmt_fecha(mov.fecha_registro)))
             es_entrada = mov.tipo_movimiento == "entrada"
             tipo_item = QTableWidgetItem("Entrada" if es_entrada else "Salida")
-            tipo_item.setForeground(
-                Qt.GlobalColor.darkGreen if es_entrada else Qt.GlobalColor.red
-            )
+            tipo_item.setForeground(Qt.GlobalColor.darkGreen if es_entrada else Qt.GlobalColor.red)
             self.tabla.setItem(fila, 1, tipo_item)
-            self.tabla.setItem(
-                fila, 2, QTableWidgetItem(mov.descripcion_movimiento or "")
-            )
+            self.tabla.setItem(fila, 2, QTableWidgetItem(mov.descripcion_movimiento or ""))
             item_monto = QTableWidgetItem(f"$ {mov.monto_movimiento or 0:,.2f}")
-            item_monto.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_monto)
 
         if not movimientos:
@@ -375,23 +327,15 @@ class CajaCierreDialog(QDialog):
 
         if abs(diferencia) < Decimal("0.01"):
             self.lbl_diferencia.setText("Diferencia: $0.00")
-            self.lbl_diferencia.setStyleSheet(
-                f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};"
-            )
+            self.lbl_diferencia.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};")
             self.fila_descripcion_widget.setVisible(False)
         elif diferencia > 0:
             self.lbl_diferencia.setText(f"Diferencia: +${diferencia:,.2f} (sobrante)")
-            self.lbl_diferencia.setStyleSheet(
-                f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};"
-            )
+            self.lbl_diferencia.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_SUCCESS};")
             self.fila_descripcion_widget.setVisible(True)
         else:
-            self.lbl_diferencia.setText(
-                f"Diferencia: -${abs(diferencia):,.2f} (faltante)"
-            )
-            self.lbl_diferencia.setStyleSheet(
-                f"font-size: 13px; font-weight: bold; color: {COLOR_DANGER};"
-            )
+            self.lbl_diferencia.setText(f"Diferencia: -${abs(diferencia):,.2f} (faltante)")
+            self.lbl_diferencia.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {COLOR_DANGER};")
             self.fila_descripcion_widget.setVisible(True)
 
     def exportar_pdf(self) -> None:
@@ -405,9 +349,7 @@ class CajaCierreDialog(QDialog):
             return
 
         try:
-            config_empresa = EmpresaService.obtener_configuracion(
-                self.session, id_usuario=self.id_usuario_actor
-            )
+            config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario_actor)
 
             # Obtener movimientos del turno
             movimientos = CajaService.listar_movimientos_turno(
@@ -415,26 +357,15 @@ class CajaCierreDialog(QDialog):
             )
 
             # Calcular totales
-            total_entradas = sum(
-                (m.monto_movimiento or 0)
-                for m in movimientos
-                if m.tipo_movimiento == "entrada"
-            )
-            total_salidas = sum(
-                (m.monto_movimiento or 0)
-                for m in movimientos
-                if m.tipo_movimiento == "salida"
-            )
+            total_entradas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "entrada")
+            total_salidas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "salida")
             saldo_neto = total_entradas - total_salidas
 
             # Obtener observaciones si hay diferencia
             observaciones = None
             monto_fisico = self.monto_fisico_input.get_value() or Decimal("0.00")
             diferencia = monto_fisico - self.saldo_calculado
-            if (
-                abs(diferencia) >= Decimal("0.01")
-                and self.fila_descripcion_widget.isVisible()
-            ):
+            if abs(diferencia) >= Decimal("0.01") and self.fila_descripcion_widget.isVisible():
                 observaciones = self.descripcion_input.toPlainText().strip() or None
                 if observaciones:
                     tipo_dif = "sobrante" if diferencia > 0 else "faltante"
@@ -450,9 +381,7 @@ class CajaCierreDialog(QDialog):
                 config_empresa,
                 ruta,
             )
-            MessageBox.information(
-                self, "Exportación completa", f"Corte de caja exportado a:\n{ruta}"
-            )
+            MessageBox.information(self, "Exportación completa", f"Corte de caja exportado a:\n{ruta}")
         except PermisoDenegadoError:
             MessageBox.warning(
                 self,
@@ -475,9 +404,7 @@ class CajaCierreDialog(QDialog):
 
         if abs(diferencia) >= Decimal("0.01"):
             tipo_dif = "sobrante" if diferencia > 0 else "faltante"
-            mensaje_confirmacion += (
-                f"\n\nHay una diferencia de ${abs(diferencia):,.2f} ({tipo_dif})."
-            )
+            mensaje_confirmacion += f"\n\nHay una diferencia de ${abs(diferencia):,.2f} ({tipo_dif})."
 
         respuesta = MessageBox.question(
             self,
@@ -488,12 +415,8 @@ class CajaCierreDialog(QDialog):
             return
 
         try:
-            print(
-                f"Llamando a cerrar_caja con id_caja={self.caja.id_caja}, id_usuario={self.id_usuario_actor}"
-            )
-            CajaService.cerrar_caja(
-                self.session, self.caja.id_caja, self.id_usuario_actor
-            )
+            print(f"Llamando a cerrar_caja con id_caja={self.caja.id_caja}, id_usuario={self.id_usuario_actor}")
+            CajaService.cerrar_caja(self.session, self.caja.id_caja, self.id_usuario_actor)
         except (ValueError, PermisoDenegadoError) as exc:
             print(f"Error específico al cerrar caja: {str(exc)}")
             MessageBox.warning(self, "No se pudo cerrar la caja", str(exc))
@@ -504,16 +427,12 @@ class CajaCierreDialog(QDialog):
             logger.exception("Fallo al cerrar caja")
             print(f"Error inesperado al cerrar caja: {str(exc)}")
             print(traceback.format_exc())
-            MessageBox.warning(
-                self, "No se pudo cerrar la caja", f"Error inesperado: {str(exc)}"
-            )
+            MessageBox.warning(self, "No se pudo cerrar la caja", f"Error inesperado: {str(exc)}")
             return
 
         # Imprimir reporte automáticamente después de cerrar
         try:
-            config_empresa = EmpresaService.obtener_configuracion(
-                self.session, id_usuario=self.id_usuario_actor
-            )
+            config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario_actor)
 
             # Obtener movimientos del turno
             movimientos = CajaService.listar_movimientos_turno(
@@ -521,33 +440,20 @@ class CajaCierreDialog(QDialog):
             )
 
             # Calcular totales
-            total_entradas = sum(
-                (m.monto_movimiento or 0)
-                for m in movimientos
-                if m.tipo_movimiento == "entrada"
-            )
-            total_salidas = sum(
-                (m.monto_movimiento or 0)
-                for m in movimientos
-                if m.tipo_movimiento == "salida"
-            )
+            total_entradas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "entrada")
+            total_salidas = sum((m.monto_movimiento or 0) for m in movimientos if m.tipo_movimiento == "salida")
             saldo_neto = total_entradas - total_salidas
 
             # Obtener observaciones si hay diferencia
             observaciones = None
-            if (
-                abs(diferencia) >= Decimal("0.01")
-                and self.fila_descripcion_widget.isVisible()
-            ):
+            if abs(diferencia) >= Decimal("0.01") and self.fila_descripcion_widget.isVisible():
                 observaciones = self.descripcion_input.toPlainText().strip() or None
                 if observaciones:
                     tipo_dif = "sobrante" if diferencia > 0 else "faltante"
                     observaciones = f"Diferencia de ${abs(diferencia):,.2f} ({tipo_dif}): {observaciones}"
 
             # Imprimir usando la impresora configurada
-            nombre_impresora = (
-                config_empresa.impresora_predeterminada if config_empresa else None
-            )
+            nombre_impresora = config_empresa.impresora_predeterminada if config_empresa else None
             if nombre_impresora:
                 imprimir_corte_caja(
                     self.caja,

@@ -134,11 +134,7 @@ def _parse_raw(texto: str, decimals: int) -> Decimal | None:
         valor = Decimal(cuerpo)
     except InvalidOperation:
         return None
-    valor = (
-        valor.to_integral_value()
-        if decimals == 0
-        else valor.quantize(Decimal(1).scaleb(-decimals))
-    )
+    valor = valor.to_integral_value() if decimals == 0 else valor.quantize(Decimal(1).scaleb(-decimals))
     return -valor if negativo else valor
 
 
@@ -323,9 +319,7 @@ class NumericLineEdit(QLineEdit):
         self._value = valor
         self.setStyleSheet(self._ESTILO_ERROR if fuera_de_rango else self._ESTILO_BASE)
         if fuera_de_rango:
-            super().setToolTip(
-                f"Ajustado al rango permitido: {self.min_value} - {self.max_value}"
-            )
+            super().setToolTip(f"Ajustado al rango permitido: {self.min_value} - {self.max_value}")
         else:
             super().setToolTip(self._tooltip_normal)
         self.valueChanged.emit(self._value)
@@ -345,9 +339,7 @@ class NumericLineEdit(QLineEdit):
         if self._value is None:
             super().setText("")
             return
-        super().setText(
-            f"{self.prefix}{_formatear(self._value, self.decimals, agrupar=True)}{self.suffix}"
-        )
+        super().setText(f"{self.prefix}{_formatear(self._value, self.decimals, agrupar=True)}{self.suffix}")
 
     def get_value(self) -> Decimal | None:
         return _as_decimal(self._value, default=None)
@@ -362,9 +354,7 @@ class NumericLineEdit(QLineEdit):
             if self.max_value is not None and valor > self.max_value:
                 valor = self.max_value
             self._value = (
-                valor.quantize(Decimal(1).scaleb(-self.decimals))
-                if self.decimals
-                else valor.to_integral_value()
+                valor.quantize(Decimal(1).scaleb(-self.decimals)) if self.decimals else valor.to_integral_value()
             )
         self._refresh_display()
         self.setStyleSheet(self._ESTILO_BASE)

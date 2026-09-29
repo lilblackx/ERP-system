@@ -64,9 +64,7 @@ def test_abrir_pasa_el_saldo_tecleado_al_servicio(qtbot, monkeypatch):
         llamada["saldo_apertura"] = saldo_apertura
         return MagicMock()
 
-    monkeypatch.setattr(
-        "app.ui.caja_apertura_dialog.CajaService.abrir_caja", fake_abrir_caja
-    )
+    monkeypatch.setattr("app.ui.caja_apertura_dialog.CajaService.abrir_caja", fake_abrir_caja)
 
     dialogo._abrir()
 

@@ -28,9 +28,7 @@ from tests.factories import (
 
 def _abrir_caja_con_saldo(db_session, admin, saldo=Decimal("1000.00")):
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=saldo
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=saldo)
     return caja
 
 
@@ -125,9 +123,7 @@ def test_registrar_compra_proveedor_inactivo_falla(db_session):
 
 def test_registrar_compra_producto_inactivo_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    producto = crear_producto(
-        db_session, cantidad_unidad=10, estado_producto="INACTIVO"
-    )
+    producto = crear_producto(db_session, cantidad_unidad=10, estado_producto="INACTIVO")
     proveedor = crear_proveedor(db_session)
 
     with pytest.raises(ValueError, match="inactivo"):
@@ -351,10 +347,7 @@ def test_anular_compra_contado_repone_stock(db_session):
     assert compra.estado_compra == "ANULADA"
     assert producto.cantidad_unidad == Decimal("10.00")  # se revierte el stock recibido
     assert compra.total_compra == Decimal("0.00")
-    assert (
-        db_session.query(CompraDetalle).filter_by(id_compra=compra.id_compra).count()
-        == 0
-    )
+    assert db_session.query(CompraDetalle).filter_by(id_compra=compra.id_compra).count() == 0
 
 
 def test_anular_compra_sin_usuario_autorizado_falla(db_session):
@@ -379,9 +372,7 @@ def test_anular_compra_sin_usuario_autorizado_falla(db_session):
     )
 
     with pytest.raises(PermisoDenegadoError):
-        CompraService.anular_compra(
-            db_session, compra.id_compra, id_usuario=None, motivo="Error de carga"
-        )
+        CompraService.anular_compra(db_session, compra.id_compra, id_usuario=None, motivo="Error de carga")
 
 
 def test_anular_compra_credito_repone_stock_y_cierra_cxp(db_session):
@@ -421,9 +412,7 @@ def test_anular_compra_con_pago_aplicado_genera_nota_de_credito(db_session):
     producto = crear_producto(db_session, cantidad_unidad=10)
     proveedor = crear_proveedor(db_session, limite_credito=1000)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(
-        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
-    )
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
     compra = CompraService.registrar_compra(
         db_session,
@@ -465,21 +454,12 @@ def test_anular_compra_con_pago_aplicado_genera_nota_de_credito(db_session):
     assert cxp.estado == "anulada"
     assert cxp.saldo_pendiente == Decimal("0.00")
 
-    assert db_session.query(PagoProveedor).filter_by(
-        id_pago_proveedor=id_pago_proveedor
-    ).one().monto == Decimal("10.00")
-    assert (
-        db_session.query(CajaMovimiento)
-        .filter_by(id_pago_proveedor=id_pago_proveedor)
-        .first()
-        is not None
+    assert db_session.query(PagoProveedor).filter_by(id_pago_proveedor=id_pago_proveedor).one().monto == Decimal(
+        "10.00"
     )
+    assert db_session.query(CajaMovimiento).filter_by(id_pago_proveedor=id_pago_proveedor).first() is not None
 
-    nota = (
-        db_session.query(NotaCreditoProveedor)
-        .filter_by(id_compra_origen=compra.id_compra)
-        .one()
-    )
+    nota = db_session.query(NotaCreditoProveedor).filter_by(id_compra_origen=compra.id_compra).one()
     assert nota.id_proveedor == proveedor.id_proveedor
     assert nota.monto == Decimal("10.00")
     assert nota.saldo_disponible == Decimal("10.00")
@@ -507,9 +487,7 @@ def test_anular_compra_sin_motivo(db_session):
     )
 
     with pytest.raises(ValueError, match="motivo"):
-        CompraService.anular_compra(
-            db_session, compra.id_compra, id_usuario=admin.id_usuario, motivo=""
-        )
+        CompraService.anular_compra(db_session, compra.id_compra, id_usuario=admin.id_usuario, motivo="")
 
 
 def test_anular_compra_ya_anulada(db_session):
@@ -531,22 +509,16 @@ def test_anular_compra_ya_anulada(db_session):
         ],
         pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
     )
-    CompraService.anular_compra(
-        db_session, compra.id_compra, id_usuario=admin.id_usuario, motivo="Motivo 1"
-    )
+    CompraService.anular_compra(db_session, compra.id_compra, id_usuario=admin.id_usuario, motivo="Motivo 1")
 
     with pytest.raises(ValueError, match="ya esta anulada"):
-        CompraService.anular_compra(
-            db_session, compra.id_compra, id_usuario=admin.id_usuario, motivo="Motivo 2"
-        )
+        CompraService.anular_compra(db_session, compra.id_compra, id_usuario=admin.id_usuario, motivo="Motivo 2")
 
 
 def test_anular_compra_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Compra no encontrada"):
-        CompraService.anular_compra(
-            db_session, 999999, id_usuario=admin.id_usuario, motivo="Motivo"
-        )
+        CompraService.anular_compra(db_session, 999999, id_usuario=admin.id_usuario, motivo="Motivo")
 
 
 def test_listar_compras_filtra_por_proveedor(db_session):
@@ -640,15 +612,9 @@ def test_registrar_compra_contado_efectivo_descuenta_caja(db_session):
         pago=_pago_efectivo(caja.id_caja, Decimal("8.00")),
     )
 
-    movimiento = (
-        db_session.query(CajaMovimiento)
-        .filter_by(id_caja=caja.id_caja, tipo_movimiento="salida")
-        .one()
-    )
+    movimiento = db_session.query(CajaMovimiento).filter_by(id_caja=caja.id_caja, tipo_movimiento="salida").one()
     assert movimiento.monto_movimiento == Decimal("8.00")
-    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal(
-        "92.00"
-    )
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("92.00")
 
 
 def test_registrar_compra_contado_transferencia_registra_movimiento_bancario(
@@ -674,11 +640,7 @@ def test_registrar_compra_contado_transferencia_registra_movimiento_bancario(
         pago=_pago_transferencia(cuenta.id_cuenta, Decimal("8.00")),
     )
 
-    movimiento = (
-        db_session.query(BancoMovimiento)
-        .filter_by(id_cuenta=cuenta.id_cuenta, tipo_movimiento="cargo")
-        .one()
-    )
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta, tipo_movimiento="cargo").one()
     assert movimiento.monto_movimiento == Decimal("8.00")
     assert movimiento.referencia_movimiento == "REF-001"
 
@@ -734,9 +696,7 @@ def test_registrar_compra_contado_convierte_pago_ves_con_tasa_vigente(db_session
     producto = crear_producto(db_session)
     proveedor = crear_proveedor(db_session)
     caja = _abrir_caja_con_saldo(db_session, admin)
-    TasaService.registrar_tasa(
-        db_session, tasa_bcv=Decimal("40.00"), creado_por=admin.id_usuario
-    )
+    TasaService.registrar_tasa(db_session, tasa_bcv=Decimal("40.00"), creado_por=admin.id_usuario)
 
     compra = CompraService.registrar_compra(
         db_session,
@@ -761,14 +721,8 @@ def test_registrar_compra_contado_convierte_pago_ves_con_tasa_vigente(db_session
     )
 
     assert compra.total_compra == Decimal("8.00")
-    movimiento = (
-        db_session.query(CajaMovimiento)
-        .filter_by(id_caja=caja.id_caja, tipo_movimiento="salida")
-        .one()
-    )
-    assert movimiento.monto_movimiento == Decimal(
-        "8.00"
-    )  # el movimiento de caja se guarda en su equivalente USD
+    movimiento = db_session.query(CajaMovimiento).filter_by(id_caja=caja.id_caja, tipo_movimiento="salida").one()
+    assert movimiento.monto_movimiento == Decimal("8.00")  # el movimiento de caja se guarda en su equivalente USD
 
 
 def test_registrar_compra_credito_con_pago_falla(db_session):
@@ -814,9 +768,7 @@ def test_obtener_compra_devuelve_compra_y_detalles(db_session):
         pago=_pago_efectivo(caja.id_caja, Decimal("16.00")),
     )
 
-    resultado = CompraService.obtener_compra(
-        db_session, compra.id_compra, id_usuario=admin.id_usuario
-    )
+    resultado = CompraService.obtener_compra(db_session, compra.id_compra, id_usuario=admin.id_usuario)
 
     assert resultado["compra"].id_compra == compra.id_compra
     assert len(resultado["detalles"]) == 1
@@ -918,9 +870,7 @@ def test_crear_compra_desde_oc_contado_descuenta_caja(db_session):
 
     db_session.refresh(caja)
     assert compra.total_compra == Decimal("50.00")
-    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal(
-        "50.00"
-    )
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("50.00")
 
 
 def test_crear_compra_desde_oc_parcial_segunda_factura(db_session):
@@ -1056,9 +1006,9 @@ def test_crear_compra_desde_oc_stock_no_duplicado(db_session):
     )
 
     db_session.refresh(producto)
-    assert producto.cantidad_unidad == Decimal(
-        "10.00"
-    ), f"stock no debe cambiar al facturar: era {stock_tras_nr}, ahora es {producto.cantidad_unidad}"
+    assert producto.cantidad_unidad == Decimal("10.00"), (
+        f"stock no debe cambiar al facturar: era {stock_tras_nr}, ahora es {producto.cantidad_unidad}"
+    )
 
 
 def test_crear_compra_desde_oc_oc_anulada_falla(db_session):
@@ -1083,9 +1033,7 @@ def test_crear_compra_desde_oc_oc_anulada_falla(db_session):
     oc.estado = "ANULADA"
     db_session.commit()
 
-    with pytest.raises(
-        ValueError, match="No se puede facturar una orden de compra anulada"
-    ):
+    with pytest.raises(ValueError, match="No se puede facturar una orden de compra anulada"):
         CompraService.crear_compra_desde_oc(
             db_session,
             id_oc=oc.id_oc,

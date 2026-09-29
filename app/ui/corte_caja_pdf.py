@@ -60,26 +60,18 @@ def _armar_html(
     config_empresa=None,
 ) -> str:
     # Datos de la empresa
-    razon_social = (
-        config_empresa.razon_social_empresa if config_empresa else "Mi Empresa"
-    )
+    razon_social = config_empresa.razon_social_empresa if config_empresa else "Mi Empresa"
     rif = config_empresa.rif_empresa if config_empresa else ""
     direccion = config_empresa.direccion_empresa if config_empresa else ""
     telefono = config_empresa.telefono_empresa if config_empresa else ""
-    logo_tag = _logo_img_tag(
-        config_empresa.logotipo_empresa if config_empresa else None
-    )
+    logo_tag = _logo_img_tag(config_empresa.logotipo_empresa if config_empresa else None)
 
     # Datos del corte
     fecha_corte = datetime.now()
     cajero = caja.usuario.nombre_usuario if caja.usuario else "—"
-    fecha_apertura = (
-        caja.fecha_apertura.strftime("%d/%m/%Y %H:%M") if caja.fecha_apertura else "—"
-    )
+    fecha_apertura = caja.fecha_apertura.strftime("%d/%m/%Y %H:%M") if caja.fecha_apertura else "—"
     fecha_cierre = (
-        caja.fecha_cierre.strftime("%d/%m/%Y %H:%M")
-        if caja.fecha_cierre
-        else fecha_corte.strftime("%d/%m/%Y %H:%M")
+        caja.fecha_cierre.strftime("%d/%m/%Y %H:%M") if caja.fecha_cierre else fecha_corte.strftime("%d/%m/%Y %H:%M")
     )
 
     # Filas de movimientos
@@ -228,9 +220,7 @@ def imprimir_corte_caja(
     if nombre_impresora:
         info = QPrinterInfo.printerInfo(nombre_impresora)
         if info.isNull():
-            raise ValueError(
-                f"La impresora configurada '{nombre_impresora}' ya no está disponible en este equipo."
-            )
+            raise ValueError(f"La impresora configurada '{nombre_impresora}' ya no está disponible en este equipo.")
         impresora = QPrinter(info, QPrinter.PrinterMode.HighResolution)
     else:
         impresora = QPrinter(QPrinter.PrinterMode.HighResolution)

@@ -41,18 +41,14 @@ def _dar_foco(qtbot, campo):
 
 
 def test_monto_input_arranca_en_el_saldo_disponible_de_la_nota(qtbot):
-    dialogo = DevolverNotaCreditoDialog(
-        MagicMock(), id_usuario=None, notas_disponibles=[_nota()]
-    )
+    dialogo = DevolverNotaCreditoDialog(MagicMock(), id_usuario=None, notas_disponibles=[_nota()])
     qtbot.addWidget(dialogo)
     assert dialogo.monto_input.text() == "500,00"
     assert dialogo.monto_input.get_value() == Decimal("500.00")
 
 
 def test_monto_input_formatea_al_perder_foco(qtbot):
-    dialogo = DevolverNotaCreditoDialog(
-        MagicMock(), id_usuario=None, notas_disponibles=[_nota()]
-    )
+    dialogo = DevolverNotaCreditoDialog(MagicMock(), id_usuario=None, notas_disponibles=[_nota()])
     qtbot.addWidget(dialogo)
     _dar_foco(qtbot, dialogo.monto_input)
     qtbot.keyClicks(dialogo.monto_input, "300,5")
@@ -62,9 +58,7 @@ def test_monto_input_formatea_al_perder_foco(qtbot):
 
 
 def test_confirmar_pasa_el_monto_tecleado_al_servicio(qtbot, monkeypatch):
-    dialogo = DevolverNotaCreditoDialog(
-        MagicMock(), id_usuario=None, notas_disponibles=[_nota()]
-    )
+    dialogo = DevolverNotaCreditoDialog(MagicMock(), id_usuario=None, notas_disponibles=[_nota()])
     qtbot.addWidget(dialogo)
 
     _dar_foco(qtbot, dialogo.monto_input)
@@ -95,9 +89,7 @@ def test_confirmar_pasa_el_monto_tecleado_al_servicio(qtbot, monkeypatch):
         llamada.update(kwargs)
         return MagicMock()
 
-    monkeypatch.setattr(
-        NotaCreditoService, "devolver_nota_credito_cliente", staticmethod(fake_devolver)
-    )
+    monkeypatch.setattr(NotaCreditoService, "devolver_nota_credito_cliente", staticmethod(fake_devolver))
 
     dialogo._confirmar()
 

@@ -123,18 +123,14 @@ class ReporteService:
         segun dias transcurridos desde fecha_vencimiento hasta fecha_corte."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if orden not in _ORDEN_AGING_CXC:
-            raise ValueError(
-                f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXC)}"
-            )
+            raise ValueError(f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXC)}")
         fecha_corte = fecha_corte or date.today()
 
         query = (
             session.query(CuentaPorCobrar)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
-            .options(
-                joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente)
-            )
+            .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente))
             .filter(CuentaPorCobrar.estado.in_(ESTADOS_CXC_ABIERTOS))
         )
         if id_cliente:
@@ -146,29 +142,17 @@ class ReporteService:
         filas = []
         totales_por_bucket: dict[str, Decimal] = {}
         for cuenta in cuentas:
-            dias_vencido = (
-                (fecha_corte - cuenta.fecha_vencimiento).days
-                if cuenta.fecha_vencimiento
-                else 0
-            )
+            dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
             dias_transcurridos = (
-                (fecha_corte - cuenta.factura.fecha_emision.date()).days
-                if cuenta.factura.fecha_emision
-                else 0
+                (fecha_corte - cuenta.factura.fecha_emision.date()).days if cuenta.factura.fecha_emision else 0
             )
             bucket = _bucket_aging(dias_vencido)
-            totales_por_bucket[bucket] = (
-                totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
-            )
+            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
             filas.append(
                 {
                     "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
                     "numero_factura": cuenta.factura.numero_factura,
-                    "cliente": (
-                        cuenta.factura.cliente.nombre_razon_social
-                        if cuenta.factura.cliente
-                        else None
-                    ),
+                    "cliente": (cuenta.factura.cliente.nombre_razon_social if cuenta.factura.cliente else None),
                     "fecha_vencimiento": cuenta.fecha_vencimiento,
                     "saldo_pendiente": cuenta.saldo_pendiente,
                     "dias_vencido": dias_vencido,
@@ -180,9 +164,7 @@ class ReporteService:
         return {
             "fecha_corte": fecha_corte,
             "filas": filas,
-            "total_general": sum(
-                (f["saldo_pendiente"] for f in filas), Decimal("0.00")
-            ),
+            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
             "totales_por_bucket": totales_por_bucket,
         }
 
@@ -200,20 +182,14 @@ class ReporteService:
         segun dias transcurridos desde fecha_vencimiento hasta fecha_corte."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if orden not in _ORDEN_AGING_CXC_BCV:
-            raise ValueError(
-                f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXC_BCV)}"
-            )
+            raise ValueError(f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXC_BCV)}")
         fecha_corte = fecha_corte or date.today()
 
         query = (
             session.query(CuentaPorCobrarBCV)
-            .join(
-                FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura
-            )
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
-            .options(
-                joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente)
-            )
+            .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
             .filter(CuentaPorCobrarBCV.estado.in_(ESTADOS_CXC_BCV_ABIERTOS))
         )
         if id_cliente:
@@ -225,27 +201,15 @@ class ReporteService:
         filas = []
         totales_por_bucket: dict[str, Decimal] = {}
         for cuenta in cuentas:
-            dias_vencido = (
-                (fecha_corte - cuenta.fecha_vencimiento).days
-                if cuenta.fecha_vencimiento
-                else 0
-            )
-            dias_transcurridos = (
-                (fecha_corte - cuenta.fecha_emision).days if cuenta.fecha_emision else 0
-            )
+            dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
+            dias_transcurridos = (fecha_corte - cuenta.fecha_emision).days if cuenta.fecha_emision else 0
             bucket = _bucket_aging(dias_vencido)
-            totales_por_bucket[bucket] = (
-                totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
-            )
+            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
             filas.append(
                 {
                     "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
                     "numero_factura": cuenta.factura.numero_factura,
-                    "cliente": (
-                        cuenta.factura.cliente.nombre_razon_social
-                        if cuenta.factura.cliente
-                        else None
-                    ),
+                    "cliente": (cuenta.factura.cliente.nombre_razon_social if cuenta.factura.cliente else None),
                     "fecha_vencimiento": cuenta.fecha_vencimiento,
                     "saldo_pendiente": cuenta.saldo_pendiente,
                     "porcentaje_bcv": cuenta.porcentaje,
@@ -258,9 +222,7 @@ class ReporteService:
         return {
             "fecha_corte": fecha_corte,
             "filas": filas,
-            "total_general": sum(
-                (f["saldo_pendiente"] for f in filas), Decimal("0.00")
-            ),
+            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
             "totales_por_bucket": totales_por_bucket,
         }
 
@@ -277,9 +239,7 @@ class ReporteService:
         debe a sus proveedores."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if orden not in _ORDEN_AGING_CXP:
-            raise ValueError(
-                f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXP)}"
-            )
+            raise ValueError(f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXP)}")
         fecha_corte = fecha_corte or date.today()
 
         query = (
@@ -295,24 +255,14 @@ class ReporteService:
         filas = []
         totales_por_bucket: dict[str, Decimal] = {}
         for cuenta in cuentas:
-            dias_vencido = (
-                (fecha_corte - cuenta.fecha_vencimiento).days
-                if cuenta.fecha_vencimiento
-                else 0
-            )
+            dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
             bucket = _bucket_aging(dias_vencido)
-            totales_por_bucket[bucket] = (
-                totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
-            )
+            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
             filas.append(
                 {
                     "id_cuenta": cuenta.id_cuenta,
                     "numero_compra": cuenta.compra.numero_compra,
-                    "proveedor": (
-                        cuenta.compra.proveedor.nombre_razon_social
-                        if cuenta.compra.proveedor
-                        else None
-                    ),
+                    "proveedor": (cuenta.compra.proveedor.nombre_razon_social if cuenta.compra.proveedor else None),
                     "fecha_vencimiento": cuenta.fecha_vencimiento,
                     "saldo_pendiente": cuenta.saldo_pendiente,
                     "dias_vencido": dias_vencido,
@@ -323,9 +273,7 @@ class ReporteService:
         return {
             "fecha_corte": fecha_corte,
             "filas": filas,
-            "total_general": sum(
-                (f["saldo_pendiente"] for f in filas), Decimal("0.00")
-            ),
+            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
             "totales_por_bucket": totales_por_bucket,
         }
 
@@ -356,9 +304,7 @@ class ReporteService:
         )
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
-        facturas = query.order_by(
-            FacturaVenta.fecha_emision, FacturaVenta.numero_control
-        ).all()
+        facturas = query.order_by(FacturaVenta.fecha_emision, FacturaVenta.numero_control).all()
 
         filas = []
         total_base = Decimal("0.00")
@@ -373,14 +319,8 @@ class ReporteService:
                     "fecha_emision": factura.fecha_emision,
                     "numero_control": factura.numero_control,
                     "numero_factura": factura.numero_factura,
-                    "cliente": (
-                        factura.cliente.nombre_razon_social if factura.cliente else None
-                    ),
-                    "identificacion_cliente": (
-                        factura.cliente.identificacion_cliente
-                        if factura.cliente
-                        else None
-                    ),
+                    "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
+                    "identificacion_cliente": (factura.cliente.identificacion_cliente if factura.cliente else None),
                     "base_imponible": base_imponible,
                     "porcentaje_iva": factura.porcentaje_iva_aplicado,
                     "monto_iva": factura.monto_iva,
@@ -403,9 +343,7 @@ class ReporteService:
                 "fecha_creacion": nc.fecha_creacion,
                 "numero_nota_credito": nc.numero_nota_credito,
                 "cliente": nc.cliente.nombre_razon_social if nc.cliente else None,
-                "identificacion_cliente": (
-                    nc.cliente.identificacion_cliente if nc.cliente else None
-                ),
+                "identificacion_cliente": (nc.cliente.identificacion_cliente if nc.cliente else None),
                 "monto": nc.monto,
                 "motivo": nc.motivo,
             }
@@ -420,9 +358,7 @@ class ReporteService:
             "total_iva": total_iva,
             "total_general": total_base + total_iva,
             "notas_credito": filas_nc,
-            "total_notas_credito": sum(
-                (nc["monto"] for nc in filas_nc), Decimal("0.00")
-            ),
+            "total_notas_credito": sum((nc["monto"] for nc in filas_nc), Decimal("0.00")),
         }
 
     @staticmethod
@@ -454,9 +390,7 @@ class ReporteService:
 
         grupos: dict[date, dict] = {}
         for factura in facturas:
-            total_factura = (
-                factura.total_venta - factura.monto_descuento + factura.monto_iva
-            )
+            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
             fecha = factura.fecha_emision.date()
             clave = fecha if agrupacion == "dia" else fecha.replace(day=1)
             grupo = grupos.setdefault(
@@ -477,9 +411,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def ventas_por_cliente(
-        session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date
-    ) -> dict:
+    def ventas_por_cliente(session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date) -> dict:
         """Ranking de clientes por monto facturado (base - descuento + IVA) en el rango,
         excluyendo ANULADA."""
         require_permiso(session, id_usuario, "reportes", "ver")
@@ -499,15 +431,11 @@ class ReporteService:
 
         grupos: dict[int, dict] = {}
         for factura in facturas:
-            total_factura = (
-                factura.total_venta - factura.monto_descuento + factura.monto_iva
-            )
+            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
             grupo = grupos.setdefault(
                 factura.id_cliente_factura,
                 {
-                    "cliente": (
-                        factura.cliente.nombre_razon_social if factura.cliente else None
-                    ),
+                    "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
                     "cantidad_facturas": 0,
                     "total": Decimal("0.00"),
                 },
@@ -524,9 +452,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def ventas_por_vendedor(
-        session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date
-    ) -> dict:
+    def ventas_por_vendedor(session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date) -> dict:
         """Ranking de vendedores por monto facturado (base - descuento + IVA) en el
         rango, excluyendo ANULADA."""
         require_permiso(session, id_usuario, "reportes", "ver")
@@ -546,15 +472,11 @@ class ReporteService:
 
         grupos: dict[int, dict] = {}
         for factura in facturas:
-            total_factura = (
-                factura.total_venta - factura.monto_descuento + factura.monto_iva
-            )
+            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
             grupo = grupos.setdefault(
                 factura.id_vendedor,
                 {
-                    "vendedor": (
-                        factura.vendedor.nombre_vendedor if factura.vendedor else None
-                    ),
+                    "vendedor": (factura.vendedor.nombre_vendedor if factura.vendedor else None),
                     "cantidad_facturas": 0,
                     "total": Decimal("0.00"),
                 },
@@ -563,9 +485,7 @@ class ReporteService:
             grupo["total"] += total_factura
 
         for grupo in grupos.values():
-            grupo["ticket_promedio"] = to_decimal(grupo["total"]) / to_decimal(
-                grupo["cantidad_facturas"]
-            )
+            grupo["ticket_promedio"] = to_decimal(grupo["total"]) / to_decimal(grupo["cantidad_facturas"])
 
         filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=True)
         return {
@@ -576,9 +496,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def ventas_por_ruta(
-        session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date
-    ) -> dict:
+    def ventas_por_ruta(session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date) -> dict:
         """Mismo reporte que `ventas_por_vendedor`, agrupado por `Vendedor.id_ruta` en vez
         de por vendedor -- cubre "Dolares totales facturados por ruta" y "ticket promedio
         por ruta" (el 'drop site' pedido por el cliente, 2026-09-02: total facturado en $
@@ -602,9 +520,7 @@ class ReporteService:
 
         grupos: dict[int | None, dict] = {}
         for factura in facturas:
-            total_factura = (
-                factura.total_venta - factura.monto_descuento + factura.monto_iva
-            )
+            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
             ruta = factura.vendedor.ruta if factura.vendedor else None
             grupo = grupos.setdefault(
                 ruta.id_ruta if ruta else None,
@@ -618,9 +534,7 @@ class ReporteService:
             grupo["total"] += total_factura
 
         for grupo in grupos.values():
-            grupo["ticket_promedio"] = to_decimal(grupo["total"]) / to_decimal(
-                grupo["cantidad_facturas"]
-            )
+            grupo["ticket_promedio"] = to_decimal(grupo["total"]) / to_decimal(grupo["cantidad_facturas"])
 
         filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=True)
         return {
@@ -679,17 +593,13 @@ class ReporteService:
             cantidad_facturas = conteo_facturas.get(cliente.id_cliente, 0)
             meta = cliente.vendedor.meta_activacion if cliente.vendedor else None
             if meta:
-                efectividad_pct = round(
-                    to_decimal(cantidad_facturas) / to_decimal(meta) * Decimal("100"), 2
-                )
+                efectividad_pct = round(to_decimal(cantidad_facturas) / to_decimal(meta) * Decimal("100"), 2)
             else:
                 efectividad_pct = None
             filas.append(
                 {
                     "cliente": cliente.nombre_razon_social,
-                    "vendedor": (
-                        cliente.vendedor.nombre_vendedor if cliente.vendedor else None
-                    ),
+                    "vendedor": (cliente.vendedor.nombre_vendedor if cliente.vendedor else None),
                     "cantidad_facturas": cantidad_facturas,
                     "meta_activacion": meta,
                     "efectividad_pct": efectividad_pct,
@@ -697,13 +607,9 @@ class ReporteService:
                 }
             )
 
-        efectividades = [
-            f["efectividad_pct"] for f in filas if f["efectividad_pct"] is not None
-        ]
+        efectividades = [f["efectividad_pct"] for f in filas if f["efectividad_pct"] is not None]
         if efectividades:
-            efectividad_promedio = round(
-                to_decimal(sum(efectividades)) / to_decimal(len(efectividades)), 2
-            )
+            efectividad_promedio = round(to_decimal(sum(efectividades)) / to_decimal(len(efectividades)), 2)
         else:
             efectividad_promedio = None
         return {
@@ -750,11 +656,7 @@ class ReporteService:
             grupo = grupos.setdefault(
                 detalle.id_producto_factura,
                 {
-                    "producto": (
-                        detalle.producto.nombre_producto
-                        if detalle.producto
-                        else detalle.descripcion
-                    ),
+                    "producto": (detalle.producto.nombre_producto if detalle.producto else detalle.descripcion),
                     "cantidad": Decimal("0.00"),
                     "total": Decimal("0.00"),
                 },
@@ -762,9 +664,7 @@ class ReporteService:
             grupo["cantidad"] += detalle.cantidad_producto
             grupo["total"] += detalle.cantidad_producto * detalle.precio_unitario
 
-        filas = sorted(
-            grupos.values(), key=lambda g: g["total"], reverse=(orden == "desc")
-        )
+        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=(orden == "desc"))
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -806,19 +706,13 @@ class ReporteService:
 
         filas = []
         for producto in productos:
-            dias_para_vencer = (
-                (producto.fecha_vencimiento - fecha_actual).days
-                if producto.fecha_vencimiento
-                else 0
-            )
+            dias_para_vencer = (producto.fecha_vencimiento - fecha_actual).days if producto.fecha_vencimiento else 0
             filas.append(
                 {
                     "id_producto": producto.id_producto,
                     "cod_producto": producto.cod_producto,
                     "producto": producto.nombre_producto,
-                    "categoria": (
-                        producto.categoria.nombre if producto.categoria else None
-                    ),
+                    "categoria": (producto.categoria.nombre if producto.categoria else None),
                     "cantidad_unidad": producto.cantidad_unidad,
                     "fecha_vencimiento": producto.fecha_vencimiento,
                     "dias_para_vencer": dias_para_vencer,
@@ -833,9 +727,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def facturas_anuladas(
-        session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date
-    ) -> dict:
+    def facturas_anuladas(session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date) -> dict:
         """Listado de facturas ANULADA emitidas en el rango, con el motivo de anulacion
         (viene de Auditoria.detalle, la unica fuente que lo guarda -- FacturaVenta no
         tiene columna propia para eso). No incluye un monto: total_venta/monto_iva quedan
@@ -851,9 +743,7 @@ class ReporteService:
 
         facturas = (
             session.query(FacturaVenta)
-            .options(
-                joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor)
-            )
+            .options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor))
             .filter(FacturaVenta.estado_factura == "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
@@ -882,12 +772,8 @@ class ReporteService:
         filas = [
             {
                 "numero_factura": factura.numero_factura,
-                "cliente": (
-                    factura.cliente.nombre_razon_social if factura.cliente else None
-                ),
-                "vendedor": (
-                    factura.vendedor.nombre_vendedor if factura.vendedor else None
-                ),
+                "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
+                "vendedor": (factura.vendedor.nombre_vendedor if factura.vendedor else None),
                 "fecha_emision": factura.fecha_emision,
                 "motivo": motivos_por_factura.get(factura.numero_factura),
             }
@@ -934,9 +820,7 @@ class ReporteService:
             {
                 "numero_nota_credito": nota.numero_nota_credito,
                 "cliente": nota.cliente.nombre_razon_social if nota.cliente else None,
-                "numero_factura_origen": (
-                    nota.factura_origen.numero_factura if nota.factura_origen else None
-                ),
+                "numero_factura_origen": (nota.factura_origen.numero_factura if nota.factura_origen else None),
                 "fecha_creacion": nota.fecha_creacion,
                 "monto": nota.monto,
                 "saldo_disponible": nota.saldo_disponible,
@@ -976,9 +860,7 @@ class ReporteService:
             "credito": {"cantidad_facturas": 0, "total": Decimal("0.00")},
         }
         for factura in facturas:
-            total_factura = (
-                factura.total_venta - factura.monto_descuento + factura.monto_iva
-            )
+            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
             grupo = resumen.setdefault(
                 factura.condicion_pago,
                 {"cantidad_facturas": 0, "total": Decimal("0.00")},
@@ -993,11 +875,7 @@ class ReporteService:
                 "cantidad_facturas": grupo["cantidad_facturas"],
                 "total": grupo["total"],
                 "porcentaje": (
-                    (
-                        to_decimal(grupo["total"])
-                        / to_decimal(total_general)
-                        * Decimal("100")
-                    )
+                    (to_decimal(grupo["total"]) / to_decimal(total_general) * Decimal("100"))
                     if total_general
                     else Decimal("0.00")
                 ),
@@ -1037,17 +915,11 @@ class ReporteService:
 
         grupos: dict[int, dict] = {}
         for detalle in detalles:
-            costo_unitario = (
-                detalle.producto.costo_producto if detalle.producto else Decimal("0.00")
-            )
+            costo_unitario = detalle.producto.costo_producto if detalle.producto else Decimal("0.00")
             grupo = grupos.setdefault(
                 detalle.id_producto_factura,
                 {
-                    "producto": (
-                        detalle.producto.nombre_producto
-                        if detalle.producto
-                        else detalle.descripcion
-                    ),
+                    "producto": (detalle.producto.nombre_producto if detalle.producto else detalle.descripcion),
                     "cantidad": Decimal("0.00"),
                     "ingreso": Decimal("0.00"),
                     "costo": Decimal("0.00"),
@@ -1109,9 +981,7 @@ class ReporteService:
                 continue
             fecha = compra.fecha_emision.date()
             clave = fecha if agrupacion == "dia" else fecha.replace(day=1)
-            grupo = grupos.setdefault(
-                clave, {"fecha": clave, "cantidad_compras": 0, "total": Decimal("0.00")}
-            )
+            grupo = grupos.setdefault(clave, {"fecha": clave, "cantidad_compras": 0, "total": Decimal("0.00")})
             grupo["cantidad_compras"] += 1
             grupo["total"] += compra.total_compra
 
@@ -1126,9 +996,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def compras_por_proveedor(
-        session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date
-    ) -> dict:
+    def compras_por_proveedor(session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date) -> dict:
         """Ranking de proveedores por monto comprado en el rango, excluyendo ANULADA."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
@@ -1150,11 +1018,7 @@ class ReporteService:
             grupo = grupos.setdefault(
                 compra.id_proveedor,
                 {
-                    "proveedor": (
-                        compra.proveedor.nombre_razon_social
-                        if compra.proveedor
-                        else None
-                    ),
+                    "proveedor": (compra.proveedor.nombre_razon_social if compra.proveedor else None),
                     "cantidad_compras": 0,
                     "total": Decimal("0.00"),
                 },
@@ -1204,11 +1068,7 @@ class ReporteService:
             grupo = grupos.setdefault(
                 detalle.id_producto_compra,
                 {
-                    "producto": (
-                        detalle.producto.nombre_producto
-                        if detalle.producto
-                        else detalle.descripcion
-                    ),
+                    "producto": (detalle.producto.nombre_producto if detalle.producto else detalle.descripcion),
                     "cantidad": Decimal("0.00"),
                     "total": Decimal("0.00"),
                 },
@@ -1216,9 +1076,7 @@ class ReporteService:
             grupo["cantidad"] += detalle.cantidad_producto
             grupo["total"] += detalle.cantidad_producto * detalle.costo_unitario
 
-        filas = sorted(
-            grupos.values(), key=lambda g: g["total"], reverse=(orden == "desc")
-        )
+        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=(orden == "desc"))
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -1228,9 +1086,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def ordenes_compra_abiertas(
-        session: Session, id_usuario: int | None, id_proveedor: int | None = None
-    ) -> dict:
+    def ordenes_compra_abiertas(session: Session, id_usuario: int | None, id_proveedor: int | None = None) -> dict:
         """Ordenes de compra abiertas (PENDIENTE o PARCIAL) a la fecha actual, con lo
         solicitado/recibido/pendiente por OC -- para ver que hay comprometido con
         proveedores y todavia no ha llegado. Es una foto al presente (como los aging de
@@ -1258,9 +1114,7 @@ class ReporteService:
                 "cantidad_pendiente": oc.cantidad_solicitada - oc.cantidad_recibida,
                 "estado": oc.estado,
                 "total_oc": oc.total_oc,
-                "vencida": bool(
-                    oc.fecha_estimada_entrega and oc.fecha_estimada_entrega < hoy
-                ),
+                "vencida": bool(oc.fecha_estimada_entrega and oc.fecha_estimada_entrega < hoy),
             }
             for oc in ordenes
         ]
@@ -1310,9 +1164,7 @@ class ReporteService:
             grupo = grupos.setdefault(
                 oc.id_proveedor,
                 {
-                    "proveedor": (
-                        oc.proveedor.nombre_razon_social if oc.proveedor else None
-                    ),
+                    "proveedor": (oc.proveedor.nombre_razon_social if oc.proveedor else None),
                     "cantidad_oc": 0,
                     "a_tiempo": 0,
                     "tardias": 0,
@@ -1330,11 +1182,7 @@ class ReporteService:
         filas = []
         for grupo in grupos.values():
             evaluables = to_decimal(grupo["a_tiempo"]) + to_decimal(grupo["tardias"])
-            pct_a_tiempo = (
-                (to_decimal(grupo["a_tiempo"]) / evaluables * Decimal("100"))
-                if evaluables
-                else None
-            )
+            pct_a_tiempo = (to_decimal(grupo["a_tiempo"]) / evaluables * Decimal("100")) if evaluables else None
             filas.append({**grupo, "pct_a_tiempo": pct_a_tiempo})
         filas.sort(key=lambda f: f["cantidad_oc"], reverse=True)
 
@@ -1365,9 +1213,7 @@ class ReporteService:
             .join(NotaRecepcion, NotaRecepcion.id_nr == NotaDevolucion.id_nr)
             .join(CompraOC, CompraOC.id_oc == NotaRecepcion.id_oc)
             .options(
-                joinedload(NotaDevolucion.nota_recepcion)
-                .joinedload(NotaRecepcion.oc)
-                .joinedload(CompraOC.proveedor)
+                joinedload(NotaDevolucion.nota_recepcion).joinedload(NotaRecepcion.oc).joinedload(CompraOC.proveedor)
             )
             .filter(NotaDevolucion.fecha_devolucion >= desde_dt)
             .filter(NotaDevolucion.fecha_devolucion <= hasta_dt)
@@ -1380,9 +1226,7 @@ class ReporteService:
             {
                 "numero_nota_devolucion": d.numero_nota_devolucion,
                 "proveedor": (
-                    d.nota_recepcion.oc.proveedor.nombre_razon_social
-                    if d.nota_recepcion.oc.proveedor
-                    else None
+                    d.nota_recepcion.oc.proveedor.nombre_razon_social if d.nota_recepcion.oc.proveedor else None
                 ),
                 "numero_oc": d.nota_recepcion.oc.numero_oc,
                 "fecha_devolucion": d.fecha_devolucion,
@@ -1397,9 +1241,7 @@ class ReporteService:
             "fecha_hasta": fecha_hasta,
             "filas": filas,
             "total_devoluciones": len(filas),
-            "total_cantidad": sum(
-                (f["cantidad_total"] for f in filas), Decimal("0.00")
-            ),
+            "total_cantidad": sum((f["cantidad_total"] for f in filas), Decimal("0.00")),
         }
 
     @staticmethod
@@ -1436,12 +1278,8 @@ class ReporteService:
         filas = [
             {
                 "id_nota_credito": nota.id_nota_credito,
-                "proveedor": (
-                    nota.proveedor.nombre_razon_social if nota.proveedor else None
-                ),
-                "numero_compra_origen": (
-                    nota.compra_origen.numero_compra if nota.compra_origen else None
-                ),
+                "proveedor": (nota.proveedor.nombre_razon_social if nota.proveedor else None),
+                "numero_compra_origen": (nota.compra_origen.numero_compra if nota.compra_origen else None),
                 "fecha_creacion": nota.fecha_creacion,
                 "monto": nota.monto,
                 "saldo_disponible": nota.saldo_disponible,
@@ -1479,28 +1317,16 @@ class ReporteService:
         movimientos = query.order_by(CajaMovimiento.fecha_registro).all()
 
         total_entradas = sum(
-            (
-                to_decimal(m.monto_movimiento)
-                for m in movimientos
-                if m.tipo_movimiento == "entrada"
-            ),
+            (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "entrada"),
             Decimal("0.00"),
         )
         total_salidas = sum(
-            (
-                to_decimal(m.monto_movimiento)
-                for m in movimientos
-                if m.tipo_movimiento == "salida"
-            ),
+            (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "salida"),
             Decimal("0.00"),
         )
         saldo_apertura = caja.saldo_apertura or Decimal("0.00")
         saldo_esperado = saldo_apertura + total_entradas - total_salidas
-        diferencia = (
-            (caja.saldo_cierre - saldo_esperado)
-            if caja.saldo_cierre is not None
-            else None
-        )
+        diferencia = (caja.saldo_cierre - saldo_esperado) if caja.saldo_cierre is not None else None
 
         return {
             "id_caja": caja.id_caja,
@@ -1649,9 +1475,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def valorizacion_inventario(
-        session: Session, id_usuario: int | None, id_categoria: int | None = None
-    ) -> dict:
+    def valorizacion_inventario(session: Session, id_usuario: int | None, id_categoria: int | None = None) -> dict:
         """Valor de inventario a valor de costo actual (cantidad_unidad * costo_producto),
         snapshot de ahora mismo -- no hay costeo historico (FIFO/promedio) en el sistema,
         solo un costo_producto vigente por producto. Solo cantidad_unidad cuenta para el
@@ -1670,15 +1494,11 @@ class ReporteService:
         filas = []
         totales_por_categoria: dict[str, Decimal] = {}
         for producto in productos:
-            valor: Decimal = to_decimal(
-                producto.cantidad_unidad or Decimal("0.00")
-            ) * to_decimal(producto.costo_producto or Decimal("0.00"))
-            categoria = (
-                producto.categoria.nombre if producto.categoria else "Sin categoría"
+            valor: Decimal = to_decimal(producto.cantidad_unidad or Decimal("0.00")) * to_decimal(
+                producto.costo_producto or Decimal("0.00")
             )
-            totales_por_categoria[categoria] = (
-                totales_por_categoria.get(categoria, Decimal("0.00")) + valor
-            )
+            categoria = producto.categoria.nombre if producto.categoria else "Sin categoría"
+            totales_por_categoria[categoria] = totales_por_categoria.get(categoria, Decimal("0.00")) + valor
             filas.append(
                 {
                     "cod_producto": producto.cod_producto,
@@ -1696,9 +1516,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def productos_bajo_minimo(
-        session: Session, id_usuario: int | None, id_categoria: int | None = None
-    ) -> dict:
+    def productos_bajo_minimo(session: Session, id_usuario: int | None, id_categoria: int | None = None) -> dict:
         """cantidad_minima=0 significa 'sin minimo configurado para este producto' (default
         de migrations/0037), no 'minimo es cero unidades' -- esos productos se excluyen.
         """
@@ -1778,9 +1596,7 @@ class ReporteService:
         for producto in productos:
             ultima_venta = (
                 session.query(FacturaVenta.fecha_emision)
-                .join(
-                    FacturaDetalle, FacturaDetalle.id_factura == FacturaVenta.id_factura
-                )
+                .join(FacturaDetalle, FacturaDetalle.id_factura == FacturaVenta.id_factura)
                 .filter(FacturaDetalle.id_producto_factura == producto.id_producto)
                 .order_by(FacturaVenta.fecha_emision.desc())
                 .first()
@@ -1792,16 +1608,12 @@ class ReporteService:
                 .order_by(Compra.fecha_emision.desc())
                 .first()
             )
-            fechas = [
-                f[0] for f in (ultima_venta, ultima_compra) if f and f[0] is not None
-            ]
+            fechas = [f[0] for f in (ultima_venta, ultima_compra) if f and f[0] is not None]
             filas.append(
                 {
                     "cod_producto": producto.cod_producto,
                     "nombre_producto": producto.nombre_producto,
-                    "categoria": (
-                        producto.categoria.nombre if producto.categoria else None
-                    ),
+                    "categoria": (producto.categoria.nombre if producto.categoria else None),
                     "cantidad_unidad": producto.cantidad_unidad,
                     "costo_producto": producto.costo_producto,
                     "fecha_ultimo_movimiento": max(fechas) if fechas else None,
@@ -1831,29 +1643,15 @@ class ReporteService:
         producto = session.get(Inventario, id_producto)
         if producto is None:
             raise ValueError("Producto no encontrado")
-        if (
-            fecha_desde is not None
-            and fecha_hasta is not None
-            and fecha_desde > fecha_hasta
-        ):
+        if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
-        query = session.query(Auditoria).filter(
-            Auditoria.modulo == "INVENTARIO", Auditoria.accion == "CAMBIO_PRECIO"
-        )
+        query = session.query(Auditoria).filter(Auditoria.modulo == "INVENTARIO", Auditoria.accion == "CAMBIO_PRECIO")
         if fecha_desde is not None:
-            query = query.filter(
-                Auditoria.fecha_evento >= datetime.combine(fecha_desde, time.min)
-            )
+            query = query.filter(Auditoria.fecha_evento >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
-            query = query.filter(
-                Auditoria.fecha_evento <= datetime.combine(fecha_hasta, time.max)
-            )
-        eventos = (
-            query.options(joinedload(Auditoria.usuario))
-            .order_by(Auditoria.fecha_evento)
-            .all()
-        )
+            query = query.filter(Auditoria.fecha_evento <= datetime.combine(fecha_hasta, time.max))
+        eventos = query.options(joinedload(Auditoria.usuario)).order_by(Auditoria.fecha_evento).all()
 
         filas = []
         for evento in eventos:
@@ -1882,23 +1680,15 @@ class ReporteService:
                     margen_valor = margen_cambio.get("nuevo")
             else:
                 # Fallback a estructura antigua para compatibilidad
-                precio_valor = detalle.get("precio_nuevo") or detalle.get(
-                    "precio_venta"
-                )
-                margen_valor = detalle.get("margen_nuevo") or detalle.get(
-                    "porcentaje_ganancia"
-                )
+                precio_valor = detalle.get("precio_nuevo") or detalle.get("precio_venta")
+                margen_valor = detalle.get("margen_nuevo") or detalle.get("porcentaje_ganancia")
 
             filas.append(
                 {
                     "fecha_evento": evento.fecha_evento,
                     "precio_venta": Decimal(precio_valor) if precio_valor else None,
-                    "porcentaje_ganancia": (
-                        Decimal(margen_valor) if margen_valor else None
-                    ),
-                    "usuario": (
-                        evento.usuario.nombre_usuario if evento.usuario else None
-                    ),
+                    "porcentaje_ganancia": (Decimal(margen_valor) if margen_valor else None),
+                    "usuario": (evento.usuario.nombre_usuario if evento.usuario else None),
                 }
             )
         return {
@@ -1928,11 +1718,7 @@ class ReporteService:
         cliente = session.get(Cliente, id_cliente)
         if cliente is None:
             raise ValueError("Cliente no encontrado")
-        if (
-            fecha_desde is not None
-            and fecha_hasta is not None
-            and fecha_desde > fecha_hasta
-        ):
+        if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
         cuentas = (
@@ -1950,22 +1736,14 @@ class ReporteService:
             )
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
             .filter(FacturaVenta.id_cliente_factura == id_cliente)
-            .options(
-                joinedload(PagoCobro.cuenta_por_cobrar).joinedload(
-                    CuentaPorCobrar.factura
-                )
-            )
+            .options(joinedload(PagoCobro.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura))
             .all()
         )
 
         eventos = []
         for cuenta in cuentas:
             pagos_de_cuenta = sum(
-                (
-                    p.monto
-                    for p in pagos
-                    if p.id_cuenta_por_cobrar == cuenta.id_cuenta_por_cobrar
-                ),
+                (p.monto for p in pagos if p.id_cuenta_por_cobrar == cuenta.id_cuenta_por_cobrar),
                 Decimal("0.00"),
             )
             eventos.append(
@@ -1982,8 +1760,7 @@ class ReporteService:
                 {
                     "fecha": pago.fecha_pago,
                     "tipo": "Pago",
-                    "referencia": pago.referencia
-                    or pago.cuenta_por_cobrar.factura.numero_factura,
+                    "referencia": pago.referencia or pago.cuenta_por_cobrar.factura.numero_factura,
                     "cargo": Decimal("0.00"),
                     "abono": pago.monto,
                 }
@@ -2060,9 +1837,7 @@ class ReporteService:
             filas.append(
                 {
                     "fecha_pago": pago.fecha_pago,
-                    "cliente": (
-                        factura.cliente.nombre_razon_social if factura.cliente else None
-                    ),
+                    "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
                     "numero_factura": factura.numero_factura,
                     "metodo_pago": pago.metodo_pago,
                     "moneda": pago.moneda,
@@ -2078,9 +1853,7 @@ class ReporteService:
         }
 
     @staticmethod
-    def clientes_morosos(
-        session: Session, id_usuario: int | None, fecha_corte: date | None = None
-    ) -> dict:
+    def clientes_morosos(session: Session, id_usuario: int | None, fecha_corte: date | None = None) -> dict:
         """Agrupa por cliente las cuentas por cobrar abiertas y VENCIDAS (mismo universo que
         aging_cuentas_por_cobrar excluyendo el bucket 'vigente'), agregando saldo total
         vencido y antiguedad maxima por cliente en vez de por bucket."""
@@ -2090,20 +1863,14 @@ class ReporteService:
         cuentas = (
             session.query(CuentaPorCobrar)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
-            .options(
-                joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente)
-            )
+            .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente))
             .filter(CuentaPorCobrar.estado.in_(ESTADOS_CXC_ABIERTOS))
             .all()
         )
 
         por_cliente: dict[int | None, dict] = {}
         for cuenta in cuentas:
-            dias_vencido = (
-                (fecha_corte - cuenta.fecha_vencimiento).days
-                if cuenta.fecha_vencimiento
-                else 0
-            )
+            dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
             if dias_vencido <= 0:
                 continue
             cliente = cuenta.factura.cliente
@@ -2122,9 +1889,7 @@ class ReporteService:
             entrada["dias_vencido_max"] = max(entrada["dias_vencido_max"], dias_vencido)
             entrada["facturas_vencidas"] += 1
 
-        filas = sorted(
-            por_cliente.values(), key=lambda f: f["saldo_vencido"], reverse=True
-        )
+        filas = sorted(por_cliente.values(), key=lambda f: f["saldo_vencido"], reverse=True)
         return {
             "fecha_corte": fecha_corte,
             "filas": filas,
@@ -2142,41 +1907,25 @@ class ReporteService:
     ) -> dict:
         require_permiso(session, id_usuario, "reportes", "ver")
         if estado is not None and estado not in ESTADOS_CXC_OTRO:
-            raise ValueError(
-                f"estado invalido: {estado!r}, debe ser uno de {ESTADOS_CXC_OTRO}"
-            )
-        if (
-            fecha_desde is not None
-            and fecha_hasta is not None
-            and fecha_desde > fecha_hasta
-        ):
+            raise ValueError(f"estado invalido: {estado!r}, debe ser uno de {ESTADOS_CXC_OTRO}")
+        if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
-        query = session.query(CuentaPorCobrarOtro).options(
-            joinedload(CuentaPorCobrarOtro.cliente)
-        )
+        query = session.query(CuentaPorCobrarOtro).options(joinedload(CuentaPorCobrarOtro.cliente))
         if id_cliente is not None:
             query = query.filter(CuentaPorCobrarOtro.id_cliente == id_cliente)
         if estado is not None:
             query = query.filter(CuentaPorCobrarOtro.estado == estado)
         if fecha_desde is not None:
-            query = query.filter(
-                CuentaPorCobrarOtro.fecha_emision
-                >= datetime.combine(fecha_desde, time.min)
-            )
+            query = query.filter(CuentaPorCobrarOtro.fecha_emision >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
-            query = query.filter(
-                CuentaPorCobrarOtro.fecha_emision
-                <= datetime.combine(fecha_hasta, time.max)
-            )
+            query = query.filter(CuentaPorCobrarOtro.fecha_emision <= datetime.combine(fecha_hasta, time.max))
         cuentas = query.order_by(CuentaPorCobrarOtro.fecha_emision).all()
 
         filas = [
             {
                 "id_cuenta": cuenta.id_cuenta,
-                "cliente": (
-                    cuenta.cliente.nombre_razon_social if cuenta.cliente else None
-                ),
+                "cliente": (cuenta.cliente.nombre_razon_social if cuenta.cliente else None),
                 "descripcion": cuenta.descripcion,
                 "fecha_emision": cuenta.fecha_emision,
                 "fecha_vencimiento": cuenta.fecha_vencimiento,
@@ -2188,9 +1937,7 @@ class ReporteService:
         ]
         return {
             "filas": filas,
-            "total_general": sum(
-                (f["saldo_pendiente"] for f in filas), Decimal("0.00")
-            ),
+            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
         }
 
     # ── Tesoreria ─────────────────────────────────────────────────────────
@@ -2208,9 +1955,7 @@ class ReporteService:
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         if tipo_movimiento is not None and tipo_movimiento not in TIPOS_MOVIMIENTO_CAJA:
-            raise ValueError(
-                f"tipo_movimiento invalido: {tipo_movimiento!r}, debe ser uno de {TIPOS_MOVIMIENTO_CAJA}"
-            )
+            raise ValueError(f"tipo_movimiento invalido: {tipo_movimiento!r}, debe ser uno de {TIPOS_MOVIMIENTO_CAJA}")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
@@ -2297,34 +2042,18 @@ class ReporteService:
 
         filas = []
         for caja in turnos:
-            movimientos = (
-                session.query(CajaMovimiento)
-                .filter(CajaMovimiento.id_caja == caja.id_caja)
-                .all()
-            )
+            movimientos = session.query(CajaMovimiento).filter(CajaMovimiento.id_caja == caja.id_caja).all()
             total_entradas = sum(
-                (
-                    to_decimal(m.monto_movimiento)
-                    for m in movimientos
-                    if m.tipo_movimiento == "entrada"
-                ),
+                (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "entrada"),
                 Decimal("0.00"),
             )
             total_salidas = sum(
-                (
-                    to_decimal(m.monto_movimiento)
-                    for m in movimientos
-                    if m.tipo_movimiento == "salida"
-                ),
+                (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "salida"),
                 Decimal("0.00"),
             )
             saldo_apertura = caja.saldo_apertura or Decimal("0.00")
             saldo_esperado = saldo_apertura + total_entradas - total_salidas
-            diferencia = (
-                (caja.saldo_cierre - saldo_esperado)
-                if caja.saldo_cierre is not None
-                else None
-            )
+            diferencia = (caja.saldo_cierre - saldo_esperado) if caja.saldo_cierre is not None else None
             filas.append(
                 {
                     "id_caja": caja.id_caja,
@@ -2369,11 +2098,7 @@ class ReporteService:
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
         def _periodo(fecha: datetime) -> date:
-            return (
-                date(fecha.year, fecha.month, 1)
-                if agrupacion == "mes"
-                else fecha.date()
-            )
+            return date(fecha.year, fecha.month, 1) if agrupacion == "mes" else fecha.date()
 
         def _fila_vacia(periodo: date) -> dict:
             return {
@@ -2403,17 +2128,13 @@ class ReporteService:
 
         por_periodo: dict[date, dict] = {}
         for m in movimientos_caja:
-            fila = por_periodo.setdefault(
-                _periodo(m.fecha_registro), _fila_vacia(_periodo(m.fecha_registro))
-            )
+            fila = por_periodo.setdefault(_periodo(m.fecha_registro), _fila_vacia(_periodo(m.fecha_registro)))
             if m.tipo_movimiento == "entrada":
                 fila["entradas_caja"] += m.monto_movimiento
             else:
                 fila["salidas_caja"] += m.monto_movimiento
         for m in movimientos_banco:
-            fila = por_periodo.setdefault(
-                _periodo(m.fecha_movimiento), _fila_vacia(_periodo(m.fecha_movimiento))
-            )
+            fila = por_periodo.setdefault(_periodo(m.fecha_movimiento), _fila_vacia(_periodo(m.fecha_movimiento)))
             if m.tipo_movimiento in ("abono", "deposito"):
                 fila["entradas_banco"] += m.monto_movimiento
             else:
@@ -2421,12 +2142,7 @@ class ReporteService:
 
         filas = sorted(por_periodo.values(), key=lambda f: f["periodo"])
         for fila in filas:
-            fila["neto"] = (
-                fila["entradas_caja"]
-                + fila["entradas_banco"]
-                - fila["salidas_caja"]
-                - fila["salidas_banco"]
-            )
+            fila["neto"] = fila["entradas_caja"] + fila["entradas_banco"] - fila["salidas_caja"] - fila["salidas_banco"]
 
         return {
             "fecha_desde": fecha_desde,
@@ -2437,9 +2153,7 @@ class ReporteService:
                 (f["entradas_caja"] + f["entradas_banco"] for f in filas),
                 Decimal("0.00"),
             ),
-            "total_salidas": sum(
-                (f["salidas_caja"] + f["salidas_banco"] for f in filas), Decimal("0.00")
-            ),
+            "total_salidas": sum((f["salidas_caja"] + f["salidas_banco"] for f in filas), Decimal("0.00")),
         }
 
     # ── CxP ───────────────────────────────────────────────────────────────
@@ -2459,11 +2173,7 @@ class ReporteService:
         proveedor = session.get(Proveedor, id_proveedor)
         if proveedor is None:
             raise ValueError("Proveedor no encontrado")
-        if (
-            fecha_desde is not None
-            and fecha_hasta is not None
-            and fecha_desde > fecha_hasta
-        ):
+        if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
         cuentas = (
@@ -2481,11 +2191,7 @@ class ReporteService:
             )
             .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
             .filter(Compra.id_proveedor == id_proveedor)
-            .options(
-                joinedload(PagoProveedor.cuenta_por_pagar).joinedload(
-                    CuentaPorPagar.compra
-                )
-            )
+            .options(joinedload(PagoProveedor.cuenta_por_pagar).joinedload(CuentaPorPagar.compra))
             .all()
         )
 
@@ -2509,8 +2215,7 @@ class ReporteService:
                 {
                     "fecha": pago.fecha_pago,
                     "tipo": "Pago",
-                    "referencia": pago.referencia
-                    or pago.cuenta_por_pagar.compra.numero_compra,
+                    "referencia": pago.referencia or pago.cuenta_por_pagar.compra.numero_compra,
                     "cargo": Decimal("0.00"),
                     "abono": pago.monto,
                 }
@@ -2590,11 +2295,7 @@ class ReporteService:
             filas.append(
                 {
                     "fecha_pago": pago.fecha_pago,
-                    "proveedor": (
-                        compra.proveedor.nombre_razon_social
-                        if compra.proveedor
-                        else None
-                    ),
+                    "proveedor": (compra.proveedor.nombre_razon_social if compra.proveedor else None),
                     "numero_compra": compra.numero_compra,
                     "metodo_pago": pago.metodo_pago,
                     "monto": pago.monto,
@@ -2639,11 +2340,7 @@ class ReporteService:
         filas = [
             {
                 "numero_compra": cuenta.compra.numero_compra,
-                "proveedor": (
-                    cuenta.compra.proveedor.nombre_razon_social
-                    if cuenta.compra.proveedor
-                    else None
-                ),
+                "proveedor": (cuenta.compra.proveedor.nombre_razon_social if cuenta.compra.proveedor else None),
                 "fecha_vencimiento": cuenta.fecha_vencimiento,
                 "dias_para_vencer": (cuenta.fecha_vencimiento - hoy).days,
                 "saldo_pendiente": cuenta.saldo_pendiente,
@@ -2654,9 +2351,7 @@ class ReporteService:
             "fecha_corte": hoy,
             "dias_horizonte": dias_horizonte,
             "filas": filas,
-            "total_general": sum(
-                (f["saldo_pendiente"] for f in filas), Decimal("0.00")
-            ),
+            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
         }
 
     @staticmethod
@@ -2676,14 +2371,8 @@ class ReporteService:
         alla se resume por cuenta con totales pendiente vs conciliado."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if estado is not None and estado not in ESTADOS_CXP_OTRO:
-            raise ValueError(
-                f"estado invalido: {estado!r}, debe ser uno de {ESTADOS_CXP_OTRO}"
-            )
-        if (
-            fecha_desde is not None
-            and fecha_hasta is not None
-            and fecha_desde > fecha_hasta
-        ):
+            raise ValueError(f"estado invalido: {estado!r}, debe ser uno de {ESTADOS_CXP_OTRO}")
+        if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
         query = session.query(CuentaPorPagarOtro).options(
@@ -2691,38 +2380,24 @@ class ReporteService:
             joinedload(CuentaPorPagarOtro.cliente_identificado),
         )
         if id_cuenta_bancaria is not None:
-            query = query.filter(
-                CuentaPorPagarOtro.id_cuenta_bancaria == id_cuenta_bancaria
-            )
+            query = query.filter(CuentaPorPagarOtro.id_cuenta_bancaria == id_cuenta_bancaria)
         if estado is not None:
             query = query.filter(CuentaPorPagarOtro.estado == estado)
         if fecha_desde is not None:
-            query = query.filter(
-                CuentaPorPagarOtro.fecha_recepcion
-                >= datetime.combine(fecha_desde, time.min)
-            )
+            query = query.filter(CuentaPorPagarOtro.fecha_recepcion >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
-            query = query.filter(
-                CuentaPorPagarOtro.fecha_recepcion
-                <= datetime.combine(fecha_hasta, time.max)
-            )
+            query = query.filter(CuentaPorPagarOtro.fecha_recepcion <= datetime.combine(fecha_hasta, time.max))
         cuentas = query.order_by(CuentaPorPagarOtro.fecha_recepcion).all()
 
         filas = [
             {
                 "id_cuenta": cuenta.id_cuenta,
-                "cuenta_bancaria": (
-                    cuenta.cuenta_bancaria.numero_cuenta
-                    if cuenta.cuenta_bancaria
-                    else None
-                ),
+                "cuenta_bancaria": (cuenta.cuenta_bancaria.numero_cuenta if cuenta.cuenta_bancaria else None),
                 "referencia_bancaria": cuenta.referencia_bancaria,
                 "descripcion": cuenta.descripcion,
                 "fecha_recepcion": cuenta.fecha_recepcion,
                 "cliente_identificado": (
-                    cuenta.cliente_identificado.nombre_razon_social
-                    if cuenta.cliente_identificado
-                    else None
+                    cuenta.cliente_identificado.nombre_razon_social if cuenta.cliente_identificado else None
                 ),
                 "monto_total": cuenta.monto_total,
                 "saldo_pendiente": cuenta.saldo_pendiente,
@@ -2732,9 +2407,7 @@ class ReporteService:
         ]
         return {
             "filas": filas,
-            "total_general": sum(
-                (f["saldo_pendiente"] for f in filas), Decimal("0.00")
-            ),
+            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
         }
 
     # ── Bancos ────────────────────────────────────────────────────────────
@@ -2770,9 +2443,7 @@ class ReporteService:
         for m in todos:
             if m.fecha_movimiento < desde_dt:
                 monto = m.monto_movimiento or Decimal("0.00")
-                saldo_inicial += (
-                    monto if m.tipo_movimiento in ("abono", "deposito") else -monto
-                )
+                saldo_inicial += monto if m.tipo_movimiento in ("abono", "deposito") else -monto
 
         saldo = saldo_inicial
         filas = []
@@ -2816,30 +2487,16 @@ class ReporteService:
         partida -- 'parcial' cuenta como pendiente (saldo_pendiente ya refleja lo que
         falta conciliar de esa partida)."""
         require_permiso(session, id_usuario, "reportes", "ver")
-        if (
-            fecha_desde is not None
-            and fecha_hasta is not None
-            and fecha_desde > fecha_hasta
-        ):
+        if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
-        query = session.query(CuentaPorPagarOtro).options(
-            joinedload(CuentaPorPagarOtro.cuenta_bancaria)
-        )
+        query = session.query(CuentaPorPagarOtro).options(joinedload(CuentaPorPagarOtro.cuenta_bancaria))
         if id_cuenta_bancaria is not None:
-            query = query.filter(
-                CuentaPorPagarOtro.id_cuenta_bancaria == id_cuenta_bancaria
-            )
+            query = query.filter(CuentaPorPagarOtro.id_cuenta_bancaria == id_cuenta_bancaria)
         if fecha_desde is not None:
-            query = query.filter(
-                CuentaPorPagarOtro.fecha_recepcion
-                >= datetime.combine(fecha_desde, time.min)
-            )
+            query = query.filter(CuentaPorPagarOtro.fecha_recepcion >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
-            query = query.filter(
-                CuentaPorPagarOtro.fecha_recepcion
-                <= datetime.combine(fecha_hasta, time.max)
-            )
+            query = query.filter(CuentaPorPagarOtro.fecha_recepcion <= datetime.combine(fecha_hasta, time.max))
         partidas = query.all()
 
         por_cuenta: dict[int, dict] = {}
@@ -2863,17 +2520,11 @@ class ReporteService:
                 entrada["total_pendiente"] += partida.saldo_pendiente
                 entrada["cantidad_pendiente"] += 1
 
-        filas = sorted(
-            por_cuenta.values(), key=lambda f: f["total_pendiente"], reverse=True
-        )
+        filas = sorted(por_cuenta.values(), key=lambda f: f["total_pendiente"], reverse=True)
         return {
             "filas": filas,
-            "total_pendiente": sum(
-                (f["total_pendiente"] for f in filas), Decimal("0.00")
-            ),
-            "total_conciliado": sum(
-                (f["total_conciliado"] for f in filas), Decimal("0.00")
-            ),
+            "total_pendiente": sum((f["total_pendiente"] for f in filas), Decimal("0.00")),
+            "total_conciliado": sum((f["total_conciliado"] for f in filas), Decimal("0.00")),
         }
 
     @staticmethod
@@ -2896,9 +2547,7 @@ class ReporteService:
         for cuenta in cuentas:
             banco = cuenta.banco.nombre_banco if cuenta.banco else "Sin banco"
             saldo = cuenta.saldo_total_banco or Decimal("0.00")
-            totales_por_banco[banco] = (
-                totales_por_banco.get(banco, Decimal("0.00")) + saldo
-            )
+            totales_por_banco[banco] = totales_por_banco.get(banco, Decimal("0.00")) + saldo
             filas.append(
                 {
                     "banco": banco,
@@ -2961,9 +2610,7 @@ class ReporteService:
             entrada["cantidad_facturas"] += 1
             entrada["monto_comision"] += c.monto_comision or Decimal("0.00")
 
-        filas = sorted(
-            por_vendedor.values(), key=lambda f: f["monto_comision"], reverse=True
-        )
+        filas = sorted(por_vendedor.values(), key=lambda f: f["monto_comision"], reverse=True)
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -2980,26 +2627,16 @@ class ReporteService:
         id_vendedor: int | None = None,
     ) -> dict:
         require_permiso(session, id_usuario, "reportes", "ver")
-        if (
-            fecha_desde is not None
-            and fecha_hasta is not None
-            and fecha_desde > fecha_hasta
-        ):
+        if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
-        query = session.query(ComisionFactura).options(
-            joinedload(ComisionFactura.vendedor)
-        )
+        query = session.query(ComisionFactura).options(joinedload(ComisionFactura.vendedor))
         if id_vendedor is not None:
             query = query.filter(ComisionFactura.id_vendedor == id_vendedor)
         if fecha_desde is not None:
-            query = query.filter(
-                ComisionFactura.fecha_calculo >= datetime.combine(fecha_desde, time.min)
-            )
+            query = query.filter(ComisionFactura.fecha_calculo >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
-            query = query.filter(
-                ComisionFactura.fecha_calculo <= datetime.combine(fecha_hasta, time.max)
-            )
+            query = query.filter(ComisionFactura.fecha_calculo <= datetime.combine(fecha_hasta, time.max))
         comisiones = query.all()
 
         por_vendedor: dict[int, dict] = {}

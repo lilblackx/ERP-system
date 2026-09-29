@@ -82,14 +82,10 @@ class CompraDetalleDialog(QDialog):
     def _load_data(self) -> None:
         """Carga los datos de la compra."""
         try:
-            resultado = CompraService.obtener_compra(
-                self.session, self.id_compra, id_usuario=self.id_usuario
-            )
+            resultado = CompraService.obtener_compra(self.session, self.id_compra, id_usuario=self.id_usuario)
             self.compra = resultado["compra"]
         except PermisoDenegadoError:
-            MessageBox.warning(
-                self, "Sin permiso", "No tienes permiso para ver detalles de compras."
-            )
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver detalles de compras.")
             self.reject()
         except Exception:
             logger.exception("Fallo al cargar compra")
@@ -103,9 +99,7 @@ class CompraDetalleDialog(QDialog):
         self.setWindowTitle(f"Detalle Factura — {self.compra.numero_compra}")
         self.resize(900, 700)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 16, 20, 16)
@@ -118,9 +112,7 @@ class CompraDetalleDialog(QDialog):
         header_layout.setContentsMargins(0, 0, 0, 0)
 
         lbl_titulo = QLabel(f"Detalle Factura — {self.compra.numero_compra}")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         header_layout.addWidget(lbl_titulo)
         header_layout.addStretch()
 
@@ -148,28 +140,20 @@ class CompraDetalleDialog(QDialog):
         oc_numero = self.compra.oc.numero_oc if self.compra.oc else ""
         info_layout.addWidget(QLabel(oc_numero), row, 1)
         info_layout.addWidget(QLabel("Fecha Emisión:"), row, 2)
-        fecha_str = (
-            self.compra.fecha_emision.strftime("%d/%m/%Y")
-            if self.compra.fecha_emision
-            else ""
-        )
+        fecha_str = self.compra.fecha_emision.strftime("%d/%m/%Y") if self.compra.fecha_emision else ""
         info_layout.addWidget(QLabel(fecha_str), row, 3)
 
         row += 1
         info_layout.addWidget(QLabel("Proveedor:"), row, 0)
         proveedor = self.compra.proveedor if self.compra.proveedor else None
-        info_layout.addWidget(
-            QLabel(proveedor.nombre_razon_social if proveedor else ""), row, 1
-        )
+        info_layout.addWidget(QLabel(proveedor.nombre_razon_social if proveedor else ""), row, 1)
         info_layout.addWidget(QLabel("Condición:"), row, 2)
         condicion = "Contado" if self.compra.condicion_pago == "contado" else "Crédito"
         info_layout.addWidget(QLabel(condicion), row, 3)
 
         row += 1
         info_layout.addWidget(QLabel("Total:"), row, 0)
-        info_layout.addWidget(
-            QLabel(f"${float(self.compra.total_compra):,.2f}"), row, 1
-        )
+        info_layout.addWidget(QLabel(f"${float(self.compra.total_compra):,.2f}"), row, 1)
         info_layout.addWidget(QLabel("Usuario:"), row, 2)
         usuario = self.compra.usuario if self.compra.usuario else None
         info_layout.addWidget(QLabel(usuario.nombre if usuario else ""), row, 3)
@@ -177,17 +161,13 @@ class CompraDetalleDialog(QDialog):
         if self.compra.observaciones_compra:
             row += 1
             info_layout.addWidget(QLabel("Observaciones:"), row, 0)
-            info_layout.addWidget(
-                QLabel(self.compra.observaciones_compra), row, 1, 1, 3
-            )
+            info_layout.addWidget(QLabel(self.compra.observaciones_compra), row, 1, 1, 3)
 
         root.addWidget(info_card)
 
         # Tabla de detalles
         lbl_detalles = QLabel("Productos Facturados")
-        lbl_detalles.setStyleSheet(
-            f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_detalles.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK};")
         root.addWidget(lbl_detalles)
 
         self.tabla = self._crear_tabla_detalle()
@@ -241,28 +221,18 @@ class CompraDetalleDialog(QDialog):
 
         for fila, detalle in enumerate(detalles):
             producto = detalle.producto if detalle.producto else None
-            self.tabla.setItem(
-                fila, 0, QTableWidgetItem(producto.nombre_producto if producto else "")
-            )
+            self.tabla.setItem(fila, 0, QTableWidgetItem(producto.nombre_producto if producto else ""))
 
             item_cantidad = QTableWidgetItem(f"{float(detalle.cantidad_producto):,.2f}")
-            item_cantidad.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_cantidad.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 1, item_cantidad)
 
             item_precio = QTableWidgetItem(f"${float(detalle.costo_unitario):,.2f}")
-            item_precio.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 2, item_precio)
 
             # Calcular total línea (cantidad * costo)
-            total_linea = float(detalle.cantidad_producto) * float(
-                detalle.costo_unitario
-            )
+            total_linea = float(detalle.cantidad_producto) * float(detalle.costo_unitario)
             item_total = QTableWidgetItem(f"${total_linea:,.2f}")
-            item_total.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_total)

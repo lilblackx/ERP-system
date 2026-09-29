@@ -61,9 +61,7 @@ class ProductoAuditoriaDialog(QDialog):
 
         if self.producto_id:
             titulo = (
-                f"Auditoría de Producto: {self.producto_nombre}"
-                if self.producto_nombre
-                else "Auditoría de Producto"
+                f"Auditoría de Producto: {self.producto_nombre}" if self.producto_nombre else "Auditoría de Producto"
             )
         else:
             titulo = "Auditoría General de Productos"
@@ -72,9 +70,7 @@ class ProductoAuditoriaDialog(QDialog):
         self.setMinimumSize(1000, 600)
         self.resize(1200, 700)
         self.setStyleSheet(TABLE_QSS)
-        self.setWindowFlags(
-            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
-        )
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
         self._cargar_datos()
@@ -113,9 +109,7 @@ class ProductoAuditoriaDialog(QDialog):
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         lbl_titulo = QLabel("Auditoría de Productos")
-        lbl_titulo.setStyleSheet(
-            f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_titulo.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};")
 
         header_layout.addWidget(icon_lbl)
         header_layout.addWidget(lbl_titulo)
@@ -133,9 +127,7 @@ class ProductoAuditoriaDialog(QDialog):
 
         # Filtro por acción
         lbl_accion = QLabel("Acción:")
-        lbl_accion.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_accion.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.accion_combo = QComboBox()
         self.accion_combo.addItem("Todas las acciones")
         self.accion_combo.addItem("Creación", "CREAR_PRODUCTO")
@@ -151,9 +143,7 @@ class ProductoAuditoriaDialog(QDialog):
 
         # Filtro por nombre de producto
         lbl_nombre = QLabel("Nombre Producto:")
-        lbl_nombre.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_nombre.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.nombre_input = QLineEdit()
         self.nombre_input.setPlaceholderText("Filtrar por nombre...")
         self.nombre_input.setMinimumHeight(32)
@@ -161,9 +151,7 @@ class ProductoAuditoriaDialog(QDialog):
 
         # Filtro por rango de fechas
         lbl_fecha_inicio = QLabel("Desde:")
-        lbl_fecha_inicio.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_fecha_inicio.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.fecha_inicio = QDateEdit()
         self.fecha_inicio.setCalendarPopup(True)
         self.fecha_inicio.setDate(self.fecha_inicio.date().addDays(-30))
@@ -171,9 +159,7 @@ class ProductoAuditoriaDialog(QDialog):
         self.fecha_inicio.dateChanged.connect(self._aplicar_filtros)
 
         lbl_fecha_fin = QLabel("Hasta:")
-        lbl_fecha_fin.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};"
-        )
+        lbl_fecha_fin.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.fecha_fin = QDateEdit()
         self.fecha_fin.setCalendarPopup(True)
         self.fecha_fin.setDate(self.fecha_fin.date().currentDate())
@@ -255,24 +241,16 @@ class ProductoAuditoriaDialog(QDialog):
         resumen_layout.setSpacing(20)
 
         self.lbl_total_registros = QLabel("Total registros: 0")
-        self.lbl_total_registros.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
-        )
+        self.lbl_total_registros.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
 
         self.lbl_cambios_precio = QLabel("Cambios de precio: 0")
-        self.lbl_cambios_precio.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};"
-        )
+        self.lbl_cambios_precio.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
 
         self.lbl_movimientos_stock = QLabel("Cambios de estado: 0")
-        self.lbl_movimientos_stock.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};"
-        )
+        self.lbl_movimientos_stock.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};")
 
         self.lbl_ediciones = QLabel("Ediciones: 0")
-        self.lbl_ediciones.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};"
-        )
+        self.lbl_ediciones.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
 
         resumen_layout.addWidget(self.lbl_total_registros)
         resumen_layout.addWidget(self.lbl_cambios_precio)
@@ -302,16 +280,12 @@ class ProductoAuditoriaDialog(QDialog):
     def _cargar_datos(self):
         """Carga los datos de auditoría desde la base de datos."""
         try:
-            query = self.session.query(Auditoria).filter(
-                Auditoria.modulo == "INVENTARIO"
-            )
+            query = self.session.query(Auditoria).filter(Auditoria.modulo == "INVENTARIO")
 
             # Filtrar por producto específico si se proporcionó
             if self.producto_id:
                 # Buscar en el JSON del detalle usando LIKE con el formato JSON correcto
-                query = query.filter(
-                    Auditoria.detalle.like(f'%"id_producto": {self.producto_id}%')
-                )
+                query = query.filter(Auditoria.detalle.like(f'%"id_producto": {self.producto_id}%'))
 
             # Aplicar filtros actuales
             accion = self.accion_combo.currentData()
@@ -332,10 +306,8 @@ class ProductoAuditoriaDialog(QDialog):
                 self.fecha_fin.date().day(),
             )
             query = query.filter(
-                Auditoria.fecha_evento
-                >= datetime.combine(fecha_inicio, datetime.min.time()),
-                Auditoria.fecha_evento
-                <= datetime.combine(fecha_fin, datetime.max.time()),
+                Auditoria.fecha_evento >= datetime.combine(fecha_inicio, datetime.min.time()),
+                Auditoria.fecha_evento <= datetime.combine(fecha_fin, datetime.max.time()),
             )
 
             # Ordenar por fecha descendente
@@ -349,10 +321,7 @@ class ProductoAuditoriaDialog(QDialog):
                 resultados_filtrados = []
                 for aud in resultados:
                     nombre_producto = self._extraer_nombre_producto(aud.detalle)
-                    if (
-                        nombre_producto
-                        and nombre_filtro.lower() in nombre_producto.lower()
-                    ):
+                    if nombre_producto and nombre_filtro.lower() in nombre_producto.lower():
                         resultados_filtrados.append(aud)
                 resultados = resultados_filtrados
 
@@ -361,9 +330,7 @@ class ProductoAuditoriaDialog(QDialog):
 
         except Exception as e:
             logger.exception("Error al cargar datos de auditoría")
-            MessageBox.critical(
-                self, "Error", f"No se pudieron cargar los datos de auditoría: {str(e)}"
-            )
+            MessageBox.critical(self, "Error", f"No se pudieron cargar los datos de auditoría: {str(e)}")
 
     def _poblar_tabla(self, resultados):
         """Puebla la tabla con los resultados de auditoría."""
@@ -373,9 +340,7 @@ class ProductoAuditoriaDialog(QDialog):
             self.table.insertRow(row)
 
             # Fecha
-            fecha_item = QTableWidgetItem(
-                aud.fecha_evento.strftime("%d/%m/%Y %H:%M:%S")
-            )
+            fecha_item = QTableWidgetItem(aud.fecha_evento.strftime("%d/%m/%Y %H:%M:%S"))
             fecha_item.setData(Qt.ItemDataRole.UserRole, aud.fecha_evento)
             self.table.setItem(row, 0, fecha_item)
 
@@ -407,9 +372,7 @@ class ProductoAuditoriaDialog(QDialog):
 
             # Nombre del producto (extraído del detalle)
             nombre_producto = self._extraer_nombre_producto(aud.detalle)
-            nombre_item = QTableWidgetItem(
-                nombre_producto if nombre_producto else "N/A"
-            )
+            nombre_item = QTableWidgetItem(nombre_producto if nombre_producto else "N/A")
             self.table.setItem(row, 6, nombre_item)
 
             # ID relacionado (extraído del detalle)
@@ -508,28 +471,16 @@ class ProductoAuditoriaDialog(QDialog):
                         campo_legible = "Descripción"
                         # Truncar descripciones largas para el display
                         valor_anterior_short = (
-                            (valor_anterior[:50] + "...")
-                            if len(valor_anterior) > 50
-                            else valor_anterior
+                            (valor_anterior[:50] + "...") if len(valor_anterior) > 50 else valor_anterior
                         )
-                        valor_nuevo_short = (
-                            (valor_nuevo[:50] + "...")
-                            if len(valor_nuevo) > 50
-                            else valor_nuevo
-                        )
-                        cambios.append(
-                            f"{campo_legible}: '{valor_anterior_short}' → '{valor_nuevo_short}'"
-                        )
+                        valor_nuevo_short = (valor_nuevo[:50] + "...") if len(valor_nuevo) > 50 else valor_nuevo
+                        cambios.append(f"{campo_legible}: '{valor_anterior_short}' → '{valor_nuevo_short}'")
                     elif campo == "nombre_producto":
                         campo_legible = "Nombre"
-                        cambios.append(
-                            f"{campo_legible}: '{valor_anterior}' → '{valor_nuevo}'"
-                        )
+                        cambios.append(f"{campo_legible}: '{valor_anterior}' → '{valor_nuevo}'")
                     else:
                         campo_legible = campo.replace("_", " ").title()
-                        cambios.append(
-                            f"{campo_legible}: {valor_anterior} → {valor_nuevo}"
-                        )
+                        cambios.append(f"{campo_legible}: {valor_anterior} → {valor_nuevo}")
 
                 if cambios:
                     partes.append(f"Cambios: {', '.join(cambios)}")
@@ -547,9 +498,7 @@ class ProductoAuditoriaDialog(QDialog):
                     valor_anterior = cambio.get("anterior")
                     valor_nuevo = cambio.get("nuevo")
                     if valor_anterior is not None:
-                        partes.append(
-                            f"{campo_legible}: ${valor_anterior} → ${valor_nuevo}"
-                        )
+                        partes.append(f"{campo_legible}: ${valor_anterior} → ${valor_nuevo}")
                     else:
                         partes.append(f"{campo_legible}: ${valor_nuevo} (nuevo)")
             else:
@@ -694,13 +643,9 @@ class ProductoAuditoriaDialog(QDialog):
         total = len(resultados)
         cambios_precio = sum(1 for r in resultados if r.accion == "CAMBIO_PRECIO")
         movimientos_stock = sum(1 for r in resultados if r.accion == "MOVIMIENTO_STOCK")
-        cambios_descripcion = sum(
-            1 for r in resultados if r.accion == "CAMBIO_DESCRIPCION"
-        )
+        cambios_descripcion = sum(1 for r in resultados if r.accion == "CAMBIO_DESCRIPCION")
         cambios_nombre = sum(1 for r in resultados if r.accion == "CAMBIO_NOMBRE")
-        cambios_estado = sum(
-            1 for r in resultados if r.accion == "CAMBIAR_ESTADO_PRODUCTO"
-        )
+        cambios_estado = sum(1 for r in resultados if r.accion == "CAMBIAR_ESTADO_PRODUCTO")
         ediciones = sum(1 for r in resultados if r.accion == "ACTUALIZAR_PRODUCTO")
         creaciones = sum(1 for r in resultados if r.accion == "CREAR_PRODUCTO")
 
