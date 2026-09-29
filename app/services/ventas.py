@@ -600,7 +600,13 @@ class VentaService:
         # trg_factura_venta_cxc, triggers anidados) la apertura de la cuenta por cobrar
         # para creditos -- con saldo_pendiente = total_venta, o sea SIN el IVA todavia.
         session.flush()
-        ComisionService.calcular_comisiones_factura(session, factura, detalles_creados, id_usuario)
+        # Pasar porcentaje_bcv para que se aplique al cálculo de comisiones
+        porcentaje_bcv_param = (
+            Decimal(str(porcentaje_bcv)) if porcentaje_bcv is not None else None
+        )
+        ComisionService.calcular_comisiones_factura(
+            session, factura, detalles_creados, id_usuario, porcentaje_bcv_param
+        )
 
         # El IVA/descuento se le suman/restan a la cuenta por cobrar recien abierta -- el
         # trigger la deja en total_venta (subtotal crudo, sin descuento ni IVA) porque no
@@ -616,7 +622,10 @@ class VentaService:
             # La cuenta por cobrar original debe tener saldo 0
             if cxc is not None:
                 cxc.saldo_pendiente = Decimal("0.00")
-                cxc.estado = "pagada"
+                # Solo marcar como pagada si es contado. Si es crédito, mantener pendiente
+                # para que las comisiones no se liberen hasta que se pague la cuenta BCV
+                if condicion_pago == "contado":
+                    cxc.estado = "pagada"
         else:
             # Sin porcentaje BCV, comportamiento normal
             ajuste_cxc = monto_iva - monto_descuento

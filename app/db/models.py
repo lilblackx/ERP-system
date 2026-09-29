@@ -234,13 +234,13 @@ class Inventario(Base):
     )  # Unidades por caja (configuración)
     cantidad_caja_unidad: Mapped[decimal.Decimal] = mapped_column(
         Numeric(12, 2), server_default="0.000"
-    )  # Unidades totales (stock)
+    )  # Unidades sueltas (residuo)
     cantidad_caja_total: Mapped[decimal.Decimal] = mapped_column(
         Numeric(12, 2), server_default="0.000"
     )  # Cajas completas (calculado)
     cantidad_unidad: Mapped[decimal.Decimal] = mapped_column(
         Numeric(12, 2), server_default="0.000"
-    )  # Mantenido por compatibilidad
+    )  # Stock total en unidades
     # Umbral de "stock bajo minimo" para el reporte del mismo nombre (migrations/0037).
     # 0.00 = sin minimo configurado para ese producto (no aparece en el reporte).
     cantidad_minima: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.00")

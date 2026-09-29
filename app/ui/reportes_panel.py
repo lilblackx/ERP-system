@@ -72,6 +72,7 @@ from app.ui.workers import QueryWorker
 logger = logging.getLogger(__name__)
 
 REPORTE_AGING_CXC = "aging_cxc"
+REPORTE_AGING_CXC_BCV = "aging_cxc_bcv"
 REPORTE_AGING_CXP = "aging_cxp"
 REPORTE_LIBRO_VENTAS = "libro_ventas"
 REPORTE_VENTAS_PERIODO = "ventas_periodo"
@@ -116,6 +117,16 @@ REPORTE_COMISIONES_PAGADAS_PENDIENTES = "comisiones_pagadas_pendientes"
 REPORTE_PRODUCTOS_PROXIMOS_VENCER = "productos_proximos_vencer"
 
 COLS_AGING_CXC = ["Factura", "Cliente", "Vencimiento", "Saldo Pendiente", "Días Vencido", "Días Transcurridos", "Rango"]
+COLS_AGING_CXC_BCV = [
+    "Factura",
+    "Cliente",
+    "Vencimiento",
+    "Saldo Pendiente",
+    "% BCV",
+    "Días Vencido",
+    "Días Transcurridos",
+    "Rango",
+]
 COLS_AGING_CXP = ["Compra", "Proveedor", "Vencimiento", "Saldo Pendiente", "Días Vencido", "Rango"]
 COLS_LIBRO_VENTAS = [
     "Fecha",
@@ -398,6 +409,17 @@ def _tarea_exportar_reporte_pdf(
 
 def _tarea_aging_cxc(session, id_usuario, fecha_corte, id_cliente, id_vendedor, orden):
     return ReporteService.aging_cuentas_por_cobrar(
+        session,
+        id_usuario=id_usuario,
+        fecha_corte=fecha_corte,
+        id_cliente=id_cliente,
+        id_vendedor=id_vendedor,
+        orden=orden,
+    )
+
+
+def _tarea_aging_cxc_bcv(session, id_usuario, fecha_corte, id_cliente, id_vendedor, orden):
+    return ReporteService.aging_cuentas_por_cobrar_bcv(
         session,
         id_usuario=id_usuario,
         fecha_corte=fecha_corte,
@@ -767,6 +789,7 @@ class ReportesPanel(QWidget):
         self.tipo_combo = QComboBox()
         self.tipo_combo.setStyleSheet(COMBO_QSS)
         self.tipo_combo.addItem("Antigüedad de Saldos (CxC)", REPORTE_AGING_CXC)
+        self.tipo_combo.addItem("Antigüedad de Saldos BCV (CxC)", REPORTE_AGING_CXC_BCV)
         self.tipo_combo.addItem("Antigüedad de Saldos (CxP)", REPORTE_AGING_CXP)
         self.tipo_combo.addItem("Libro de Ventas (SENIAT)", REPORTE_LIBRO_VENTAS)
         self.tipo_combo.addItem("Ventas por Período", REPORTE_VENTAS_PERIODO)
@@ -842,6 +865,7 @@ class ReportesPanel(QWidget):
         filtros_layout.setSpacing(0)
         self._filtros_paginas = {
             REPORTE_AGING_CXC: self._make_filtros_aging(),
+            REPORTE_AGING_CXC_BCV: self._make_filtros_aging_cxc_bcv(),
             REPORTE_AGING_CXP: self._make_filtros_aging_cxp(),
             REPORTE_LIBRO_VENTAS: self._make_filtros_libro_ventas(),
             REPORTE_VENTAS_PERIODO: self._make_filtros_ventas_periodo(),
@@ -1000,6 +1024,54 @@ class ReportesPanel(QWidget):
         h.addWidget(self.proveedor_combo)
         h.addWidget(lbl_orden)
         h.addWidget(self.orden_cxp_combo)
+        return w
+
+    def _make_filtros_aging_cxc_bcv(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+
+        lbl_corte = QLabel("Corte:")
+        lbl_corte.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        self.fecha_corte_bcv_input = QDateEdit()
+        self.fecha_corte_bcv_input.setCalendarPopup(True)
+        self.fecha_corte_bcv_input.setDisplayFormat("dd/MM/yyyy")
+        self.fecha_corte_bcv_input.setDate(QDate.currentDate())
+        self.fecha_corte_bcv_input.setFixedHeight(32)
+        self.fecha_corte_bcv_input.setFixedWidth(120)
+        _estilizar_fecha(self.fecha_corte_bcv_input)
+
+        lbl_cliente = QLabel("Cliente:")
+        lbl_cliente.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        self.cliente_combo_bcv = QComboBox()
+        self.cliente_combo_bcv.setStyleSheet(COMBO_QSS)
+        self.cliente_combo_bcv.setFixedWidth(200)
+
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(
+            f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;"
+        )
+        self.vendedor_combo_bcv = QComboBox()
+        self.vendedor_combo_bcv.setStyleSheet(COMBO_QSS)
+        self.vendedor_combo_bcv.setFixedWidth(200)
+
+        lbl_orden = QLabel("Orden:")
+        lbl_orden.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        self.orden_bcv_combo = QComboBox()
+        self.orden_bcv_combo.setStyleSheet(COMBO_QSS)
+        self.orden_bcv_combo.addItem("Vencimiento", "fecha_vencimiento")
+        self.orden_bcv_combo.addItem("Saldo pendiente", "saldo_pendiente")
+
+        h.addWidget(lbl_corte)
+        h.addWidget(self.fecha_corte_bcv_input)
+        h.addWidget(lbl_cliente)
+        h.addWidget(self.cliente_combo_bcv)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_bcv)
+        h.addWidget(lbl_orden)
+        h.addWidget(self.orden_bcv_combo)
         return w
 
     def _make_filtros_libro_ventas(self) -> QWidget:
@@ -2026,6 +2098,7 @@ class ReportesPanel(QWidget):
             # reusar la misma instancia entre paginas distintas.
             for combo in (
                 self.cliente_combo,
+                self.cliente_combo_bcv,
                 self.cliente_combo_lv,
                 self.cliente_combo_nc,
                 self.cliente_combo_ecc,
@@ -2093,6 +2166,7 @@ class ReportesPanel(QWidget):
                 self.vendedor_combo_cpp,
                 self.vendedor_combo_ac,
                 self.vendedor_combo_aging,
+                self.vendedor_combo_bcv,
             ):
                 combo.clear()
                 combo.addItem("Todos los vendedores")
@@ -2190,6 +2264,16 @@ class ReportesPanel(QWidget):
                 id_cliente=self.cliente_combo.currentData(),
                 id_vendedor=self.vendedor_combo_aging.currentData(),
                 orden=self.orden_combo.currentData(),
+            )
+        elif modo == REPORTE_AGING_CXC_BCV:
+            self._worker = QueryWorker(
+                self.session_factory,
+                _tarea_aging_cxc_bcv,
+                id_usuario=self.usuario.id_usuario,
+                fecha_corte=self.fecha_corte_bcv_input.date().toPython(),
+                id_cliente=self.cliente_combo_bcv.currentData(),
+                id_vendedor=self.vendedor_combo_bcv.currentData(),
+                orden=self.orden_bcv_combo.currentData(),
             )
         elif modo == REPORTE_AGING_CXP:
             self._worker = QueryWorker(
@@ -2721,6 +2805,8 @@ class ReportesPanel(QWidget):
         self._ultimo_resultado = resultado
         if self._ultimo_modo == REPORTE_AGING_CXC:
             self._mostrar_aging(resultado)
+        elif self._ultimo_modo == REPORTE_AGING_CXC_BCV:
+            self._mostrar_aging_cxc_bcv(resultado)
         elif self._ultimo_modo == REPORTE_AGING_CXP:
             self._mostrar_aging_cxp(resultado)
         elif self._ultimo_modo == REPORTE_LIBRO_VENTAS:
@@ -2856,6 +2942,39 @@ class ReportesPanel(QWidget):
 
         self.lbl_total.setText(
             f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''} abierta{'s' if len(filas) != 1 else ''}"
+        )
+        self._mostrar_resumen_aging(resultado)
+
+    def _mostrar_aging_cxc_bcv(self, resultado: dict) -> None:
+        self._reset_tabla(
+            COLS_AGING_CXC_BCV,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
+        filas = resultado["filas"]
+        self.tabla.setRowCount(len(filas))
+        for row, f in enumerate(filas):
+            self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_factura"]))
+            self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "Consumidor final"))
+            fecha_venc = f["fecha_vencimiento"].strftime("%d/%m/%Y") if f["fecha_vencimiento"] else "N/A"
+            self.tabla.setItem(row, 2, QTableWidgetItem(fecha_venc))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['saldo_pendiente']):,.2f}"))
+            porcentaje = f"{float(f['porcentaje_bcv']):.2f}%" if f["porcentaje_bcv"] else "N/A"
+            self.tabla.setItem(row, 4, self._item_num(porcentaje))
+            self.tabla.setItem(row, 5, self._item_num(str(f["dias_vencido"])))
+            self.tabla.setItem(row, 6, self._item_num(str(f["dias_transcurridos"])))
+            self.tabla.setItem(row, 7, QTableWidgetItem(ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"])))
+
+        self.lbl_total.setText(
+            f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''} BCV abierta{'s' if len(filas) != 1 else ''}"
         )
         self._mostrar_resumen_aging(resultado)
 
@@ -4122,6 +4241,22 @@ class ReportesPanel(QWidget):
             ]
             return "aging_cxc", COLS_AGING_CXC, filas
 
+        if self._ultimo_modo == REPORTE_AGING_CXC_BCV:
+            filas = [
+                [
+                    f["numero_factura"],
+                    f["cliente"],
+                    f["fecha_vencimiento"],
+                    float(f["saldo_pendiente"]),
+                    f"{float(f['porcentaje_bcv']):.2f}%" if f["porcentaje_bcv"] else "N/A",
+                    f["dias_vencido"],
+                    f["dias_transcurridos"],
+                    ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"]),
+                ]
+                for f in self._ultimo_resultado["filas"]
+            ]
+            return "aging_cxc_bcv", COLS_AGING_CXC_BCV, filas
+
         if self._ultimo_modo == REPORTE_AGING_CXP:
             filas = [
                 [
@@ -4574,6 +4709,14 @@ class ReportesPanel(QWidget):
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
             return "Antigüedad de Saldos - Cuentas por Cobrar", filtros, [1.2, 2.0, 1.2, 1.3, 1.0, 1.0]
+
+        if self._ultimo_modo == REPORTE_AGING_CXC_BCV:
+            filtros = {
+                "Corte": resultado["fecha_corte"].strftime("%d/%m/%Y"),
+                "Cliente": self.cliente_combo_bcv.currentText(),
+                "Total general": f"${float(resultado['total_general']):,.2f}",
+            }
+            return "Antigüedad de Saldos BCV - Cuentas por Cobrar", filtros, [1.2, 2.0, 1.2, 1.0, 1.0, 1.0, 1.0]
 
         if self._ultimo_modo == REPORTE_AGING_CXP:
             filtros = {

@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -526,6 +527,7 @@ class ComisionesPanel(QWidget):
         self.grupos_filtrados: list[dict] = []
         self.total_pendiente = Decimal("0.00")
         self.total_liberada = Decimal("0.00")
+        self.solo_porcentaje_bcv = False
         # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
@@ -595,11 +597,16 @@ class ComisionesPanel(QWidget):
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._aplicar_filtro_estado)
 
+        self.chk_porcentaje_bcv = QCheckBox("Solo con porcentaje BCV")
+        self.chk_porcentaje_bcv.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        self.chk_porcentaje_bcv.stateChanged.connect(self._aplicar_filtro_estado)
+
         self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel, on_pdf=self.exportar_pdf)
 
         h.addStretch()
+        h.addWidget(self.chk_porcentaje_bcv)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -724,8 +731,12 @@ class ComisionesPanel(QWidget):
         if self.id_vendedor_actual is not None:
             session = self.session_factory()
             try:
+                self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
                 comisiones = ComisionService.listar_comisiones_vendedor(
-                    session, self.id_vendedor_actual, id_usuario=self.usuario.id_usuario
+                    session,
+                    self.id_vendedor_actual,
+                    id_usuario=self.usuario.id_usuario,
+                    solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
                 )
                 self.comisiones_cargadas = comisiones
                 self._aplicar_filtro_estado()
@@ -736,6 +747,23 @@ class ComisionesPanel(QWidget):
                 session.close()
 
     def _aplicar_filtro_estado(self) -> None:
+        # Si el checkbox de porcentaje BCV cambió, recargar desde BD
+        if self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv and self.id_vendedor_actual is not None:
+            self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+            session = self.session_factory()
+            try:
+                comisiones = ComisionService.listar_comisiones_vendedor(
+                    session,
+                    self.id_vendedor_actual,
+                    id_usuario=self.usuario.id_usuario,
+                    solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                )
+                self.comisiones_cargadas = comisiones
+            except Exception:
+                logger.exception("Fallo al recargar comisiones con filtro porcentaje BCV")
+            finally:
+                session.close()
+
         estado_filtro = self.estado_combo.currentData()
         if estado_filtro:
             filtradas = [c for c in self.comisiones_cargadas if c.estado_pago == estado_filtro]

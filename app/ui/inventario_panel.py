@@ -7,6 +7,7 @@ tabla estilizada, paginación (D-01) y exportación a Excel (R-02/R-10).
 
 import logging
 from datetime import date, timedelta
+from decimal import Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt, QTimer
@@ -96,37 +97,44 @@ def _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usua
         id_usuario=id_usuario,
     )
     precios = InventarioPanel._obtener_precios(session, [p.id_producto for p in resultado["items"]])
-    return [
-        [
-            p.id_producto,
-            p.cod_producto,
-            p.nombre_producto,
-            p.categoria.nombre if p.categoria else None,
-            float(p.cantidad_unidad),
-            # Mostrar cantidad_caja_total (cajas completas) si existe, si no calcular
-            (
-                float(p.cantidad_caja_total)
-                if hasattr(p, "cantidad_caja_total") and p.cantidad_caja_total is not None
-                else (int(p.cantidad_unidad // p.cantidad_caja) if p.cantidad_caja and p.cantidad_caja > 0 else 0)
-            ),
-            # Mostrar cantidad_caja_unidad (residuo) si existe, si no calcular
-            (
-                float(p.cantidad_caja_unidad)
-                if hasattr(p, "cantidad_caja_unidad") and p.cantidad_caja_unidad is not None
-                else (
-                    int(p.cantidad_unidad % p.cantidad_caja)
-                    if p.cantidad_caja and p.cantidad_caja > 0
-                    else int(p.cantidad_unidad)
-                )
-            ),
-            float(p.costo_producto),
-            precios.get(p.id_producto, {}).get("precio_1"),
-            precios.get(p.id_producto, {}).get("precio_2"),
-            precios.get(p.id_producto, {}).get("precio_3"),
-            p.estado_producto,
-        ]
-        for p in resultado["items"]
-    ]
+
+    filas = []
+    for p in resultado["items"]:
+        cantidad_unidad = Decimal(str(p.cantidad_unidad)) if p.cantidad_unidad is not None else Decimal("0")
+
+        # Calcular cajas y unidades sueltas dinámicamente usando Decimal
+        if p.cantidad_caja_total is not None and p.cantidad_caja_total > 0:
+            cajas = Decimal(str(p.cantidad_caja_total))
+        elif p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
+            cajas = cantidad_unidad // Decimal(str(p.cantidad_caja))
+        else:
+            cajas = Decimal("0")
+
+        if p.cantidad_caja_unidad is not None and p.cantidad_caja_unidad > 0:
+            unidades_sueltas = Decimal(str(p.cantidad_caja_unidad))
+        elif p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
+            unidades_sueltas = cantidad_unidad % Decimal(str(p.cantidad_caja))
+        else:
+            unidades_sueltas = cantidad_unidad
+
+        filas.append(
+            [
+                p.id_producto,
+                p.cod_producto,
+                p.nombre_producto,
+                p.categoria.nombre if p.categoria else None,
+                float(cantidad_unidad),
+                float(cajas),
+                float(unidades_sueltas),
+                float(p.costo_producto) if p.costo_producto is not None else 0.0,
+                precios.get(p.id_producto, {}).get("precio_1"),
+                precios.get(p.id_producto, {}).get("precio_2"),
+                precios.get(p.id_producto, {}).get("precio_3"),
+                p.estado_producto,
+            ]
+        )
+
+    return filas
 
 
 def _tarea_exportar_productos_excel(
@@ -414,9 +422,11 @@ class InventarioPanel(QWidget):
             self._actualizar_alertas(session)
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
-        except Exception:
+        except Exception as e:
             logger.exception("Fallo al cargar el catálogo de inventario")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el catálogo de inventario.")
+            MessageBox.critical(
+                self, "Error de conexión", f"No se pudo cargar el catálogo de inventario.\n\nError: {str(e)}"
+            )
         finally:
             session.close()
 
@@ -430,9 +440,9 @@ class InventarioPanel(QWidget):
         filas = session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto)).all()
         return {
             fila.id_producto: {
-                "precio_1": float(fila.precio_1),
-                "precio_2": float(fila.precio_2),
-                "precio_3": float(fila.precio_3),
+                "precio_1": float(fila.precio_1) if fila.precio_1 is not None else None,
+                "precio_2": float(fila.precio_2) if fila.precio_2 is not None else None,
+                "precio_3": float(fila.precio_3) if fila.precio_3 is not None else None,
             }
             for fila in filas
         }
@@ -469,8 +479,9 @@ class InventarioPanel(QWidget):
             # alerta"), sin decir CUAL producto ni por que (stock bajo vs. por vencer).
             item_nombre = QTableWidgetItem(p.nombre_producto or "")
             motivos = []
-            if p.cantidad_minima and p.cantidad_minima > 0 and p.cantidad_unidad < p.cantidad_minima:
-                motivos.append(f"Stock bajo (mínimo configurado: {float(p.cantidad_minima):,.2f})")
+            cantidad_minima = Decimal(str(p.cantidad_minima)) if p.cantidad_minima is not None else Decimal("0")
+            if cantidad_minima > 0 and p.cantidad_unidad is not None and p.cantidad_unidad < cantidad_minima:
+                motivos.append(f"Stock bajo (mínimo configurado: {float(cantidad_minima):,.2f})")
             if p.fecha_vencimiento is not None and p.fecha_vencimiento <= limite_vencimiento:
                 motivos.append(f"Vence el {p.fecha_vencimiento.strftime('%d/%m/%Y')}")
             if motivos:
@@ -480,17 +491,25 @@ class InventarioPanel(QWidget):
 
             self.tabla.setItem(fila, 3, QTableWidgetItem(p.categoria.nombre if p.categoria else ""))
 
-            item_cant = QTableWidgetItem(f"{float(p.cantidad_unidad):,.2f}")
+            cantidad_unidad = Decimal(str(p.cantidad_unidad)) if p.cantidad_unidad is not None else Decimal("0")
+            item_cant = QTableWidgetItem(f"{float(cantidad_unidad):,.2f}")
             item_cant.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 4, item_cant)
 
-            # Calcular cajas y unidades sueltas
-            if p.cantidad_caja and p.cantidad_caja > 0:
-                cajas = int(p.cantidad_unidad // p.cantidad_caja)
-                unidades_sueltas = int(p.cantidad_unidad % p.cantidad_caja)
+            # Calcular cajas y unidades sueltas usando Decimal
+            if p.cantidad_caja_total is not None and p.cantidad_caja_total > 0:
+                cajas = int(p.cantidad_caja_total)
+            elif p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
+                cajas = int(cantidad_unidad // Decimal(str(p.cantidad_caja)))
             else:
                 cajas = 0
-                unidades_sueltas = int(p.cantidad_unidad)
+
+            if p.cantidad_caja_unidad is not None and p.cantidad_caja_unidad > 0:
+                unidades_sueltas = int(p.cantidad_caja_unidad)
+            elif p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
+                unidades_sueltas = int(cantidad_unidad % Decimal(str(p.cantidad_caja)))
+            else:
+                unidades_sueltas = int(cantidad_unidad)
 
             item_cajas = QTableWidgetItem(str(cajas))
             item_cajas.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -500,7 +519,8 @@ class InventarioPanel(QWidget):
             item_unidades_sueltas.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_unidades_sueltas)
 
-            item_costo = QTableWidgetItem(f"${float(p.costo_producto):,.2f}")
+            costo_producto = Decimal(str(p.costo_producto)) if p.costo_producto is not None else Decimal("0")
+            item_costo = QTableWidgetItem(f"${float(costo_producto):,.2f}")
             item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_costo)
 

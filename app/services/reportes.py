@@ -45,6 +45,7 @@ from app.db.models import (
     CompraOC,
     CuentaBancaria,
     CuentaPorCobrar,
+    CuentaPorCobrarBCV,
     CuentaPorCobrarOtro,
     CuentaPorPagar,
     CuentaPorPagarOtro,
@@ -72,6 +73,7 @@ logger = logging.getLogger(__name__)
 ESTADOS_CXC_ABIERTOS = ("pendiente", "parcial", "vencida")
 ESTADOS_CXP_ABIERTOS = ("pendiente", "parcial", "vencida")
 ESTADOS_OC_ABIERTAS = ("PENDIENTE", "PARCIAL")
+ESTADOS_CXC_BCV_ABIERTOS = ("pendiente", "parcial", "vencida")
 # Espejo de ESTADOS_CXC_OTRO (app/services/otros_movimientos.py) del lado de
 # cuentas_por_pagar_otros -- ahi no existe como constante nombrada, solo un tuple inline
 # en OtrosMovimientosService.listar_partidas_no_conciliadas().
@@ -87,6 +89,10 @@ _ORDEN_AGING_CXC = {
 _ORDEN_AGING_CXP = {
     "fecha_vencimiento": CuentaPorPagar.fecha_vencimiento,
     "saldo_pendiente": CuentaPorPagar.saldo_pendiente,
+}
+_ORDEN_AGING_CXC_BCV = {
+    "fecha_vencimiento": CuentaPorCobrarBCV.fecha_vencimiento,
+    "saldo_pendiente": CuentaPorCobrarBCV.saldo_pendiente,
 }
 
 
@@ -149,6 +155,64 @@ class ReporteService:
                     "cliente": cuenta.factura.cliente.nombre_razon_social if cuenta.factura.cliente else None,
                     "fecha_vencimiento": cuenta.fecha_vencimiento,
                     "saldo_pendiente": cuenta.saldo_pendiente,
+                    "dias_vencido": dias_vencido,
+                    "dias_transcurridos": dias_transcurridos,
+                    "bucket": bucket,
+                }
+            )
+
+        return {
+            "fecha_corte": fecha_corte,
+            "filas": filas,
+            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
+            "totales_por_bucket": totales_por_bucket,
+        }
+
+    @staticmethod
+    def aging_cuentas_por_cobrar_bcv(
+        session: Session,
+        id_usuario: int | None,
+        fecha_corte: date | None = None,
+        id_cliente: int | None = None,
+        id_vendedor: int | None = None,
+        orden: str = "fecha_vencimiento",
+    ) -> dict:
+        """Antiguedad de saldos de cuentas por cobrar BCV abiertas (pendiente/parcial/vencida),
+        agrupadas en los rangos estandar de cobranza (vigente, 1-30, 31-60, 61-90, 90+)
+        segun dias transcurridos desde fecha_vencimiento hasta fecha_corte."""
+        require_permiso(session, id_usuario, "reportes", "ver")
+        if orden not in _ORDEN_AGING_CXC_BCV:
+            raise ValueError(f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXC_BCV)}")
+        fecha_corte = fecha_corte or date.today()
+
+        query = (
+            session.query(CuentaPorCobrarBCV)
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
+            .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
+            .filter(CuentaPorCobrarBCV.estado.in_(ESTADOS_CXC_BCV_ABIERTOS))
+        )
+        if id_cliente:
+            query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
+        if id_vendedor:
+            query = query.filter(Cliente.vendedor_cliente == id_vendedor)
+        cuentas = query.order_by(_ORDEN_AGING_CXC_BCV[orden]).all()
+
+        filas = []
+        totales_por_bucket: dict[str, Decimal] = {}
+        for cuenta in cuentas:
+            dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
+            dias_transcurridos = (fecha_corte - cuenta.fecha_emision).days if cuenta.fecha_emision else 0
+            bucket = _bucket_aging(dias_vencido)
+            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
+            filas.append(
+                {
+                    "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
+                    "numero_factura": cuenta.factura.numero_factura,
+                    "cliente": cuenta.factura.cliente.nombre_razon_social if cuenta.factura.cliente else None,
+                    "fecha_vencimiento": cuenta.fecha_vencimiento,
+                    "saldo_pendiente": cuenta.saldo_pendiente,
+                    "porcentaje_bcv": cuenta.porcentaje,
                     "dias_vencido": dias_vencido,
                     "dias_transcurridos": dias_transcurridos,
                     "bucket": bucket,

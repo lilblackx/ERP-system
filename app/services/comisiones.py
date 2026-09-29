@@ -11,6 +11,7 @@ from app.db.models import (
     CajaMovimiento,
     ComisionFactura,
     CuentaBancaria,
+    CuentaPorCobrarBCV,
     FacturaDetalle,
     FacturaVenta,
     Inventario,
@@ -38,6 +39,7 @@ class ComisionService:
         factura: FacturaVenta,
         detalles: list[FacturaDetalle],
         id_usuario: int | None,
+        porcentaje_bcv: Decimal | None = None,
     ) -> list[ComisionFactura]:
         """Llamada INTERNA desde VentaService.emitir_factura(), sin require_permiso propio
         -- mismo criterio que NotaCreditoService llamado desde anular_factura(): efecto
@@ -52,6 +54,8 @@ class ComisionService:
         acreditarle la comision. Si un producto no tiene precio de lista configurado
         (ProductoPrecio), esa linea se saltea -- no bloquea la venta, simplemente no genera
         comision para ese item.
+
+        porcentaje_bcv: opcional, se pasa desde ventas.py antes de crear la cuenta BCV
         """
         if not detalles:
             return []
@@ -67,6 +71,21 @@ class ComisionService:
             prod.id_producto: prod
             for prod in session.query(Inventario).filter(Inventario.id_producto.in_(ids_producto)).all()
         }
+
+        # Usar porcentaje_bcv pasado como parámetro, o buscar en BD si no se proporcionó
+        if porcentaje_bcv is None:
+            cuenta_bcv = (
+                session.query(CuentaPorCobrarBCV)
+                .filter(CuentaPorCobrarBCV.id_factura == factura.id_factura)
+                .first()
+            )
+            porcentaje_bcv = (
+                to_decimal(cuenta_bcv.porcentaje)
+                if cuenta_bcv and cuenta_bcv.porcentaje
+                else Decimal("0.00")
+            )
+        else:
+            porcentaje_bcv = to_decimal(porcentaje_bcv)
 
         comisiones = []
         for detalle in detalles:
@@ -104,6 +123,11 @@ class ComisionService:
             else:
                 precio_base_ajustado = precio_lista
                 precio_venta_ajustado = precio_unitario
+
+            # Aplicar porcentaje BCV solo al precio base (no al precio de venta)
+            # El porcentaje establece la nueva base fija para cálculo de comisión
+            if porcentaje_bcv > 0:
+                precio_base_ajustado = precio_base_ajustado * (Decimal("1.00") + porcentaje_bcv / Decimal("100.00"))
 
             monto_base = precio_base_ajustado * cantidad
             monto_venta = precio_venta_ajustado * cantidad
@@ -154,7 +178,11 @@ class ComisionService:
 
     @staticmethod
     def listar_comisiones_vendedor(
-        session: Session, id_vendedor: int, estado_pago: str | None = None, id_usuario: int | None = None
+        session: Session,
+        id_vendedor: int,
+        estado_pago: str | None = None,
+        id_usuario: int | None = None,
+        solo_con_porcentaje_bcv: bool = False,
     ) -> list[ComisionFactura]:
         require_permiso(session, id_usuario, "comisiones", "ver")
         query = (
@@ -167,6 +195,16 @@ class ComisionService:
         )
         if estado_pago:
             query = query.filter(ComisionFactura.estado_pago == estado_pago)
+
+        if solo_con_porcentaje_bcv:
+            # Filtrar solo facturas que tienen cuenta BCV con porcentaje > 0
+            from sqlalchemy import exists
+
+            subquery = exists().where(
+                CuentaPorCobrarBCV.id_factura == FacturaDetalle.id_factura, CuentaPorCobrarBCV.porcentaje > 0
+            )
+            query = query.join(ComisionFactura.detalle).filter(subquery)
+
         return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
 
     @staticmethod

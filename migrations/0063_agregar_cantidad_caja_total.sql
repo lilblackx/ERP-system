@@ -26,13 +26,14 @@ BEGIN
 	-- Calcular cajas totales cuando se actualiza cantidad_caja_unidad o cantidad_caja
 	UPDATE inv
 	SET inv.[cantidad_caja_total] = CASE 
-		WHEN inv.[cantidad_caja] > 0 THEN FLOOR(inv.[cantidad_caja_unidad] / inv.[cantidad_caja])
+		WHEN inv.[cantidad_caja] > 0 AND inv.[cantidad_caja] IS NOT NULL 
+		     THEN FLOOR(inv.[cantidad_caja_unidad] / inv.[cantidad_caja])
 		ELSE 0
 	END
 	FROM dbo.inventario inv
-	JOIN inserted i ON inv.[id_producto] = i.[id_producto]
-	WHERE inv.[cantidad_caja_unidad] <> i.[cantidad_caja_unidad] 
-	   OR inv.[cantidad_caja] <> i.[cantidad_caja]
+	INNER JOIN inserted i ON inv.[id_producto] = i.[id_producto]
+	WHERE (i.[cantidad_caja_unidad] IS NOT NULL AND inv.[cantidad_caja_unidad] <> i.[cantidad_caja_unidad]) 
+	   OR (i.[cantidad_caja] IS NOT NULL AND inv.[cantidad_caja] <> i.[cantidad_caja])
 	   OR inv.[cantidad_caja_total] IS NULL;
 END
 GO
