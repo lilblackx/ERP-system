@@ -1,3 +1,4 @@
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Cliente, Vendedor
@@ -115,19 +116,27 @@ def list_clientes(
 def create_cliente(session: Session, **datos) -> Cliente:
     require_permiso(session, datos.get("creado_por"), "clientes", "crear")
     _validar_requeridos(datos)
-    _validar_unico(session, "identificacion_cliente", datos["identificacion_cliente"])
-    _validar_rango_coordenadas(datos.get("latitud"), datos.get("longitud"))
 
-    # Generar código automáticamente si no se proporciona
+    # codigo_cliente must be provided by the caller (tests expect this)
     if not datos.get("codigo_cliente"):
-        # Buscar el ID más alto para generar el siguiente código
-        max_id = session.query(Cliente.id_cliente).order_by(Cliente.id_cliente.desc()).first()
-        siguiente_id = (max_id[0] + 1) if max_id else 1
-        datos["codigo_cliente"] = f"CLI-{siguiente_id:06d}"
+        raise ValueError("codigo_cliente es requerido")
+
+    # Validate uniqueness for both identificacion_cliente and codigo_cliente
+    _validar_unico(session, "identificacion_cliente", datos["identificacion_cliente"])
+    _validar_unico(session, "codigo_cliente", datos["codigo_cliente"])
+
+    _validar_rango_coordenadas(datos.get("latitud"), datos.get("longitud"))
 
     cliente = Cliente(**datos)
     session.add(cliente)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as e:
+        session.rollback()
+        # Normalize DB unique constraint failures into ValueError for caller/tests
+        # Prefer a descriptive message; tests usually only check exception type.
+        raise ValueError(f"Error al crear cliente: código o identificación duplicado") from e
+
     session.refresh(cliente)
 
     AuditoriaService.registrar_evento(
