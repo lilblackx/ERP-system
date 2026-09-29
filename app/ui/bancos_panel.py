@@ -53,7 +53,16 @@ from app.ui.toolbar_popups import BotonFiltros
 logger = logging.getLogger(__name__)
 
 # Columnas visibles en la tabla (índice oculto 0 = ID interno)
-COLS_VISIBLES = ["ID", "CÓDIGO", "NOMBRE", "TIPO", "RIF", "TELÉFONO", "CORREO", "ESTADO"]
+COLS_VISIBLES = [
+    "ID",
+    "CÓDIGO",
+    "NOMBRE",
+    "TIPO",
+    "RIF",
+    "TELÉFONO",
+    "CORREO",
+    "ESTADO",
+]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 
@@ -121,7 +130,9 @@ class BancosPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Bancos")
-        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -146,9 +157,12 @@ class BancosPanel(QWidget):
 
         # Barra de búsqueda
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText("Buscar por código, nombre, RIF o teléfono…")
+        self.buscar_input.setPlaceholderText(
+            "Buscar por código, nombre, RIF o teléfono…"
+        )
         self.buscar_input.addAction(
-            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
         )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
@@ -171,7 +185,9 @@ class BancosPanel(QWidget):
         self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
         h.addWidget(self.buscar_input)
-        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        h.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
         h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
         return w
@@ -198,8 +214,12 @@ class BancosPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.tabla.setStyleSheet(TABLE_QSS)
         self.tabla.doubleClicked.connect(self.editar_banco)
         self.tabla.itemSelectionChanged.connect(self._on_selection_changed)
@@ -212,7 +232,9 @@ class BancosPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         self.lbl_paginacion = QLabel("Página 1 de 1")
-        self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
+        self.lbl_paginacion.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 13px;"
+        )
 
         self.btn_anterior = QPushButton()
         self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
@@ -222,7 +244,9 @@ class BancosPanel(QWidget):
         self.btn_anterior.clicked.connect(self.pagina_anterior)
 
         self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setIcon(
+            qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK)
+        )
         self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.setEnabled(False)
@@ -240,7 +264,9 @@ class BancosPanel(QWidget):
         self.btn_editar.clicked.connect(self.editar_banco)
 
         self.btn_cambiar_estado = QPushButton("Cambiar estado")
-        self.btn_cambiar_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
+        self.btn_cambiar_estado.setIcon(
+            qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK)
+        )
         self.btn_cambiar_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_cambiar_estado.setEnabled(False)
         self.btn_cambiar_estado.clicked.connect(self.cambiar_estado_banco)
@@ -264,7 +290,9 @@ class BancosPanel(QWidget):
         en vez de sumarle paginacion al servicio."""
         session = self.session_factory()
         try:
-            bancos = BancoService.listar_bancos(session, id_usuario=self.usuario.id_usuario)
+            bancos = BancoService.listar_bancos(
+                session, id_usuario=self.usuario.id_usuario
+            )
 
             estado_filtro = self.estado_combo.currentData()
             if estado_filtro:
@@ -288,13 +316,17 @@ class BancosPanel(QWidget):
             self.bancos = []
             self._actualizar_tabla()
             self._actualizar_paginacion()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar bancos.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para consultar bancos."
+            )
         except Exception:
             logger.exception("Fallo al cargar la lista de bancos")
             self.bancos = []
             self._actualizar_tabla()
             self._actualizar_paginacion()
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de bancos.")
+            MessageBox.critical(
+                self, "Error de conexión", "No se pudo cargar la lista de bancos."
+            )
         finally:
             session.close()
 
@@ -313,7 +345,9 @@ class BancosPanel(QWidget):
             self.tabla.insertRow(row)
 
             # ID (oculto)
-            self.tabla.setItem(row, COL_ID_INTERNO, QTableWidgetItem(str(banco.id_banco)))
+            self.tabla.setItem(
+                row, COL_ID_INTERNO, QTableWidgetItem(str(banco.id_banco))
+            )
 
             # Código
             self.tabla.setItem(row, 1, QTableWidgetItem(banco.codigo_banco or "N/A"))
@@ -325,10 +359,14 @@ class BancosPanel(QWidget):
             self.tabla.setItem(row, 3, QTableWidgetItem(banco.tipo_banco or "N/A"))
 
             # RIF
-            self.tabla.setItem(row, 4, QTableWidgetItem(banco.identificacion_banco or "N/A"))
+            self.tabla.setItem(
+                row, 4, QTableWidgetItem(banco.identificacion_banco or "N/A")
+            )
 
             # Teléfono
-            self.tabla.setItem(row, 5, QTableWidgetItem(banco.numero_telefono_banco or "N/A"))
+            self.tabla.setItem(
+                row, 5, QTableWidgetItem(banco.numero_telefono_banco or "N/A")
+            )
 
             # Correo
             self.tabla.setItem(row, 6, QTableWidgetItem(banco.correo_banco or "N/A"))
@@ -345,7 +383,9 @@ class BancosPanel(QWidget):
         """Actualiza los controles de paginación."""
         total = len(self.bancos)
         self.total_paginas = max(1, (total + POR_PAGINA - 1) // POR_PAGINA)
-        self.lbl_paginacion.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
+        self.lbl_paginacion.setText(
+            f"Página {self.pagina_actual} de {self.total_paginas}"
+        )
         self.btn_anterior.setEnabled(self.pagina_actual > 1)
         self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
@@ -385,17 +425,25 @@ class BancosPanel(QWidget):
             dialog = BancoFormDialog(session, parent=self)
             if dialog.exec():
                 data = dialog.get_data()
-                BancoService.crear_banco(session, **data, creado_por=self.usuario.id_usuario)
+                BancoService.crear_banco(
+                    session, **data, creado_por=self.usuario.id_usuario
+                )
                 self.cargar_bancos()
         except IntegrityError:
             session.rollback()
-            MessageBox.warning(self, "Dato duplicado", "Ya existe un banco con esa identificación (RIF).")
+            MessageBox.warning(
+                self,
+                "Dato duplicado",
+                "Ya existe un banco con esa identificación (RIF).",
+            )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear bancos.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para crear bancos."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear banco")
@@ -420,21 +468,31 @@ class BancosPanel(QWidget):
             dialog = BancoFormDialog(session, banco, parent=self)
             if dialog.exec():
                 data = dialog.get_data()
-                BancoService.actualizar_banco(session, banco_id, id_usuario=self.usuario.id_usuario, **data)
+                BancoService.actualizar_banco(
+                    session, banco_id, id_usuario=self.usuario.id_usuario, **data
+                )
                 self.cargar_bancos()
         except IntegrityError:
             session.rollback()
-            MessageBox.warning(self, "Dato duplicado", "Ya existe un banco con esa identificación (RIF).")
+            MessageBox.warning(
+                self,
+                "Dato duplicado",
+                "Ya existe un banco con esa identificación (RIF).",
+            )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar bancos.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para editar bancos."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar banco")
-            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del banco.")
+            MessageBox.critical(
+                self, "Error", "No se pudo guardar los cambios del banco."
+            )
         finally:
             session.close()
             self._abriendo_dialogo = False
@@ -452,27 +510,39 @@ class BancosPanel(QWidget):
                 return
             nuevo_estado = "INACTIVO" if banco.estado_banco == "ACTIVO" else "ACTIVO"
             respuesta = MessageBox.question(
-                self, "Confirmar", f"¿Cambiar el estado del banco '{banco.nombre_banco}' a {nuevo_estado}?"
+                self,
+                "Confirmar",
+                f"¿Cambiar el estado del banco '{banco.nombre_banco}' a {nuevo_estado}?",
             )
             if respuesta != QMessageBox.StandardButton.Yes:
                 return
 
-            BancoService.cambiar_estado_banco(session, banco_id, nuevo_estado, id_usuario=self.usuario.id_usuario)
+            BancoService.cambiar_estado_banco(
+                session, banco_id, nuevo_estado, id_usuario=self.usuario.id_usuario
+            )
             self.cargar_bancos()
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de bancos.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para cambiar el estado de bancos.",
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del banco %s", banco_id)
-            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del banco.")
+            MessageBox.critical(
+                self, "Error", "No se pudo cambiar el estado del banco."
+            )
         finally:
             session.close()
 
     def _id_seleccionado(self) -> int | None:
         row = self.tabla.currentRow()
         if row < 0:
-            MessageBox.information(self, "Selección requerida", "Selecciona un banco de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona un banco de la lista."
+            )
             return None
         item = self.tabla.item(row, COL_ID_INTERNO)
         return int(item.text()) if item is not None else None

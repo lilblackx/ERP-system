@@ -138,14 +138,18 @@ class ProveedorFormDialog(QDialog):
     vendedor asignado ni categoría, que no aplican a un proveedor).
     """
 
-    def __init__(self, session: Session, proveedor: Proveedor | None = None, parent=None):
+    def __init__(
+        self, session: Session, proveedor: Proveedor | None = None, parent=None
+    ):
         super().__init__(parent)
         self.session = session
         self.proveedor = proveedor
         self.setWindowTitle("Editar Proveedor" if proveedor else "Nuevo Proveedor")
         self.setFixedSize(860, 420)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._build_ui()
 
@@ -165,7 +169,9 @@ class ProveedorFormDialog(QDialog):
 
         icon_lbl = QLabel()
         fa_icon_name = "fa5s.user-edit" if self.proveedor else "fa5s.truck-loading"
-        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
+        icon_lbl.setPixmap(
+            qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22))
+        )
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -179,9 +185,13 @@ class ProveedorFormDialog(QDialog):
 
         titulo_text = "Editar Proveedor" if self.proveedor else "Nuevo Proveedor"
         lbl_titulo = QLabel(titulo_text)
-        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
-        lbl_subtitulo = QLabel("Complete los datos requeridos para registrar la ficha del proveedor.")
+        lbl_subtitulo = QLabel(
+            "Complete los datos requeridos para registrar la ficha del proveedor."
+        )
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
 
         titles_layout.addWidget(lbl_titulo)
@@ -248,7 +258,9 @@ class ProveedorFormDialog(QDialog):
         self.identificacion_input.setMaxLength(20)
         self.identificacion_input.setFixedHeight(32)
         # Validador para RIF/Cédula: 1-8 dígitos opcionalmente seguidos de guión y un dígito
-        id_validator = QRegularExpressionValidator(QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$"))
+        id_validator = QRegularExpressionValidator(
+            QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$")
+        )
         self.identificacion_input.setValidator(id_validator)
 
         id_hbox.addWidget(self.tipo_id_combo)
@@ -314,7 +326,9 @@ class ProveedorFormDialog(QDialog):
         lbl_dir = QLabel("Dirección")
         lbl_dir.setProperty("class", "FormLabel")
         self.direccion_input = QLineEdit()
-        self.direccion_input.setPlaceholderText("Ej: Av. Principal, Zona Industrial, Galpón 3")
+        self.direccion_input.setPlaceholderText(
+            "Ej: Av. Principal, Zona Industrial, Galpón 3"
+        )
         self.direccion_input.setMaxLength(255)
         self.direccion_input.setFixedHeight(32)
         grid2.addWidget(lbl_dir, 2, 0, 1, 2)
@@ -323,7 +337,9 @@ class ProveedorFormDialog(QDialog):
         # Límite de Crédito
         lbl_limite = QLabel("Límite de Crédito ($)")
         lbl_limite.setProperty("class", "FormLabel")
-        self.limite_credito_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
+        self.limite_credito_input = NumericLineEdit(
+            NumericFieldType.AMOUNT, prefix="$ "
+        )
         self.limite_credito_input.setFixedHeight(32)
         grid2.addWidget(lbl_limite, 4, 0)
         grid2.addWidget(self.limite_credito_input, 5, 0)
@@ -331,9 +347,13 @@ class ProveedorFormDialog(QDialog):
         # Días de Crédito
         lbl_dias = QLabel("Días de Crédito")
         lbl_dias.setProperty("class", "FormLabel")
-        self.dias_credito_input = NumericLineEdit(NumericFieldType.COUNT, max_value=Decimal(365), suffix=" días")
+        self.dias_credito_input = NumericLineEdit(
+            NumericFieldType.COUNT, max_value=Decimal(365), suffix=" días"
+        )
         self.dias_credito_input.setFixedHeight(32)
-        self.dias_credito_input.setToolTip("0 = proveedor de contado, no se le podrá comprar a crédito")
+        self.dias_credito_input.setToolTip(
+            "0 = proveedor de contado, no se le podrá comprar a crédito"
+        )
         grid2.addWidget(lbl_dias, 4, 1)
         grid2.addWidget(self.dias_credito_input, 5, 1)
 
@@ -393,15 +413,25 @@ class ProveedorFormDialog(QDialog):
 
     def _validar_y_aceptar(self):
         if not self.codigo_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "El código del proveedor es obligatorio.")
+            MessageBox.warning(
+                self, "Dato requerido", "El código del proveedor es obligatorio."
+            )
             self.codigo_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "El número de ID Fiscal / Identificación es obligatorio.")
+            MessageBox.warning(
+                self,
+                "Dato requerido",
+                "El número de ID Fiscal / Identificación es obligatorio.",
+            )
             self.identificacion_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "La razón social o nombre del proveedor es obligatoria.")
+            MessageBox.warning(
+                self,
+                "Dato requerido",
+                "La razón social o nombre del proveedor es obligatoria.",
+            )
             self.nombre_input.setFocus()
             return
         self.accept()

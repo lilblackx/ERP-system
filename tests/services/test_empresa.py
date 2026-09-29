@@ -9,7 +9,10 @@ from tests.factories import crear_usuario_admin
 
 def test_obtener_configuracion_sin_datos(db_session):
     admin = crear_usuario_admin(db_session)
-    assert EmpresaService.obtener_configuracion(db_session, id_usuario=admin.id_usuario) is None
+    assert (
+        EmpresaService.obtener_configuracion(db_session, id_usuario=admin.id_usuario)
+        is None
+    )
 
 
 def test_obtener_configuracion_sin_usuario_autorizado_falla(db_session):
@@ -35,7 +38,11 @@ def test_guardar_configuracion_crea_si_no_existe(db_session):
 def test_guardar_configuracion_sin_usuario_autorizado_falla(db_session):
     with pytest.raises(PermisoDenegadoError):
         EmpresaService.guardar_configuracion(
-            db_session, rif="J-12345678-9", razon_social="Distribuidora DJ", direccion=None, telefono=None
+            db_session,
+            rif="J-12345678-9",
+            razon_social="Distribuidora DJ",
+            direccion=None,
+            telefono=None,
         )
 
 
@@ -119,7 +126,12 @@ def test_guardar_configuracion_registra_modificado_por(db_session):
     admin = crear_usuario_admin(db_session)
 
     config = EmpresaService.guardar_configuracion(
-        db_session, rif=None, razon_social=None, direccion=None, telefono=None, modificado_por=admin.id_usuario
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        modificado_por=admin.id_usuario,
     )
 
     assert config.modificado_por == admin.id_usuario
@@ -128,7 +140,12 @@ def test_guardar_configuracion_registra_modificado_por(db_session):
 def test_guardar_configuracion_default_iva_desactivado(db_session):
     admin = crear_usuario_admin(db_session)
     config = EmpresaService.guardar_configuracion(
-        db_session, rif=None, razon_social=None, direccion=None, telefono=None, modificado_por=admin.id_usuario
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        modificado_por=admin.id_usuario,
     )
 
     assert config.iva_activo is False

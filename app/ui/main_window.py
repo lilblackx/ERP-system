@@ -197,8 +197,14 @@ class MainWindow(QMainWindow):
             # tampoco genera eventos y esto se repite hasta que se cierre o se retome.
             self._timer_inactividad.start()
             return
-        logger.info("Sesion de usuario %s cerrada por inactividad", self.usuario.id_usuario)
-        MessageBox.information(self, "Sesión cerrada", "Tu sesión se cerró automáticamente por inactividad.")
+        logger.info(
+            "Sesion de usuario %s cerrada por inactividad", self.usuario.id_usuario
+        )
+        MessageBox.information(
+            self,
+            "Sesión cerrada",
+            "Tu sesión se cerró automáticamente por inactividad.",
+        )
         self.close()
 
     # ── RBAC del sidebar ───────────────────────────────────────────────────
@@ -212,20 +218,27 @@ class MainWindow(QMainWindow):
         try:
             visibles = set()
             for clave, (recurso, accion) in MODULO_PERMISO.items():
-                if UsuarioService.verificar_permiso(session, self.usuario.id_usuario, recurso, accion):
+                if UsuarioService.verificar_permiso(
+                    session, self.usuario.id_usuario, recurso, accion
+                ):
                     visibles.add(clave)
                     continue
                 if clave == "comisiones":
                     try:
                         if UsuarioService.verificar_permiso(
-                            session, self.usuario.id_usuario, "reportes_comisiones", "ver"
+                            session,
+                            self.usuario.id_usuario,
+                            "reportes_comisiones",
+                            "ver",
                         ):
                             visibles.add(clave)
                     except PermisoDenegadoError:
                         pass
             return visibles
         except Exception:
-            logger.exception("No se pudo calcular los modulos visibles del sidebar; se muestran todos")
+            logger.exception(
+                "No se pudo calcular los modulos visibles del sidebar; se muestran todos"
+            )
             return set(MODULO_PERMISO.keys())
         finally:
             session.close()
@@ -247,7 +260,9 @@ class MainWindow(QMainWindow):
 
         # Sidebar (full height, a la izquierda -- el ticker de tasas ya NO va arriba de
         # esto, va solo arriba del area derecha, pedido del usuario 2026-08-27).
-        self.sidebar = Sidebar(empresa_nombre, self.usuario, modulos_visibles=self._modulos_visibles)
+        self.sidebar = Sidebar(
+            empresa_nombre, self.usuario, modulos_visibles=self._modulos_visibles
+        )
         self.sidebar.modulo_seleccionado.connect(self._ir_a_modulo)
         self.sidebar.cerrar_sesion.connect(self._confirmar_cerrar_sesion)
         main_h.addWidget(self.sidebar)
@@ -293,8 +308,12 @@ class MainWindow(QMainWindow):
                 panel = PlaceholderView(nombre)
 
             if isinstance(panel, DashboardPanel):
-                panel.nueva_factura_solicitada.connect(lambda: self.navegar_a("facturacion"))
-                panel.ver_facturas_solicitado.connect(lambda: self.navegar_a("facturacion"))
+                panel.nueva_factura_solicitada.connect(
+                    lambda: self.navegar_a("facturacion")
+                )
+                panel.ver_facturas_solicitado.connect(
+                    lambda: self.navegar_a("facturacion")
+                )
             if isinstance(panel, TasasPanel):
                 panel.tasa_registrada.connect(self.ticker_tasas.cargar_tasa)
 
@@ -325,7 +344,9 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _confirmar_cerrar_sesion(self) -> None:
-        respuesta = MessageBox.question(self, "Cerrar sesión", "¿Cerrar la sesión actual?")
+        respuesta = MessageBox.question(
+            self, "Cerrar sesión", "¿Cerrar la sesión actual?"
+        )
         if respuesta == QMessageBox.StandardButton.Yes:
             # Cerrar esta ventana hace que app.exec() retorne en app/main.py (es la unica
             # ventana top-level abierta) -- el bucle de main() vuelve a mostrar LoginWindow,

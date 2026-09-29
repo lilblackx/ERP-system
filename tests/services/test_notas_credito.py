@@ -43,7 +43,13 @@ def _crear_factura(session):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
-        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "10.00"}],
+        items=[
+            {
+                "id_producto": producto.id_producto,
+                "cantidad": 1,
+                "precio_unitario": "10.00",
+            }
+        ],
         pagos=pago_contado(session),
     )
     return cliente, factura, admin
@@ -54,13 +60,24 @@ def _crear_compra(session):
     producto = crear_producto(session, cantidad_unidad=10)
     proveedor = crear_proveedor(session)
     caja = crear_caja(session)
-    CajaService.abrir_caja(session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("100.00"))
+    CajaService.abrir_caja(
+        session,
+        caja.id_caja,
+        id_usuario=admin.id_usuario,
+        saldo_apertura=Decimal("100.00"),
+    )
     compra = CompraService.registrar_compra(
         session,
         id_proveedor=proveedor.id_proveedor,
         id_usuario=admin.id_usuario,
         condicion_pago="contado",
-        items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "10.00"}],
+        items=[
+            {
+                "id_producto": producto.id_producto,
+                "cantidad": 1,
+                "costo_unitario": "10.00",
+            }
+        ],
         # Una compra de contado exige pago (validacion en compras.py, ver su docstring):
         # exactamente el total, sin vuelto -- por eso "10.00" a mano en vez de reusar
         # pago_contado() (pensado para VentaService.emitir_factura, que si tolera sobrante).
@@ -161,7 +178,9 @@ def test_listar_notas_credito_cliente(db_session):
         id_usuario=admin.id_usuario,
     )
 
-    notas = NotaCreditoService.listar_notas_credito_cliente(db_session, cliente.id_cliente, id_usuario=admin.id_usuario)
+    notas = NotaCreditoService.listar_notas_credito_cliente(
+        db_session, cliente.id_cliente, id_usuario=admin.id_usuario
+    )
     assert len(notas) == 2
 
 
@@ -225,7 +244,13 @@ def _crear_factura_credito(session, cliente, monto="80.00"):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
-        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": monto}],
+        items=[
+            {
+                "id_producto": producto.id_producto,
+                "cantidad": 1,
+                "precio_unitario": monto,
+            }
+        ],
     )
 
 
@@ -255,7 +280,11 @@ def test_aplicar_nota_credito_cliente_ok(db_session):
     assert nota_actualizada.saldo_disponible == Decimal("0.00")
     assert nota_actualizada.estado == "aplicada"
 
-    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura_destino.id_factura).one()
+    cxc = (
+        db_session.query(CuentaPorCobrar)
+        .filter_by(id_factura=factura_destino.id_factura)
+        .one()
+    )
     assert cxc.saldo_pendiente == Decimal("30.00")
     assert cxc.estado == "parcial"
 
@@ -344,7 +373,9 @@ def test_aplicar_nota_credito_cliente_de_otro_cliente_falla(db_session):
         motivo="x",
         id_usuario=admin.id_usuario,
     )
-    cliente_b = crear_cliente(db_session, limite_credito=Decimal("1000.00"), dias_credito=30)
+    cliente_b = crear_cliente(
+        db_session, limite_credito=Decimal("1000.00"), dias_credito=30
+    )
     factura_destino_b = _crear_factura_credito(db_session, cliente_b, monto="80.00")
 
     with pytest.raises(ValueError, match="otro cliente"):
@@ -427,7 +458,12 @@ def test_devolver_nota_credito_cliente_efectivo_ok(db_session):
         id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+    CajaService.abrir_caja(
+        db_session,
+        caja.id_caja,
+        id_usuario=admin.id_usuario,
+        saldo_apertura=Decimal("500.00"),
+    )
 
     nota_actualizada = NotaCreditoService.devolver_nota_credito_cliente(
         db_session,
@@ -444,12 +480,17 @@ def test_devolver_nota_credito_cliente_efectivo_ok(db_session):
 
     salida = (
         db_session.query(CajaMovimiento)
-        .filter(CajaMovimiento.id_caja == caja.id_caja, CajaMovimiento.tipo_movimiento == "salida")
+        .filter(
+            CajaMovimiento.id_caja == caja.id_caja,
+            CajaMovimiento.tipo_movimiento == "salida",
+        )
         .first()
     )
     assert salida is not None
     assert salida.monto_movimiento == Decimal("50.00")
-    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("450.00")
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal(
+        "450.00"
+    )
 
 
 def test_devolver_nota_credito_cliente_bancario_ok(db_session):
@@ -480,7 +521,10 @@ def test_devolver_nota_credito_cliente_bancario_ok(db_session):
 
     cargo = (
         db_session.query(BancoMovimiento)
-        .filter(BancoMovimiento.id_cuenta == cuenta.id_cuenta, BancoMovimiento.tipo_movimiento == "cargo")
+        .filter(
+            BancoMovimiento.id_cuenta == cuenta.id_cuenta,
+            BancoMovimiento.tipo_movimiento == "cargo",
+        )
         .first()
     )
     assert cargo is not None
@@ -499,7 +543,12 @@ def test_devolver_nota_credito_cliente_sin_autorizador_falla(db_session):
         id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+    CajaService.abrir_caja(
+        db_session,
+        caja.id_caja,
+        id_usuario=admin.id_usuario,
+        saldo_apertura=Decimal("500.00"),
+    )
 
     with pytest.raises(ValueError, match="autorizacion de un supervisor"):
         NotaCreditoService.devolver_nota_credito_cliente(
@@ -527,7 +576,12 @@ def test_devolver_nota_credito_cliente_autorizador_sin_permiso_editar_falla(db_s
         id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+    CajaService.abrir_caja(
+        db_session,
+        caja.id_caja,
+        id_usuario=admin.id_usuario,
+        saldo_apertura=Decimal("500.00"),
+    )
 
     rol = crear_rol(db_session)
     permiso_crear = crear_permiso(db_session, recurso="notas_credito", accion="crear")
@@ -557,7 +611,12 @@ def test_devolver_nota_credito_cliente_efectivo_saldo_insuficiente_falla(db_sess
         id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("0.00"))
+    CajaService.abrir_caja(
+        db_session,
+        caja.id_caja,
+        id_usuario=admin.id_usuario,
+        saldo_apertura=Decimal("0.00"),
+    )
 
     with pytest.raises(ValueError, match="no tiene saldo suficiente"):
         NotaCreditoService.devolver_nota_credito_cliente(
@@ -606,7 +665,12 @@ def test_devolver_nota_credito_cliente_excede_saldo_disponible_falla(db_session)
         id_usuario=admin.id_usuario,
     )
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+    CajaService.abrir_caja(
+        db_session,
+        caja.id_caja,
+        id_usuario=admin.id_usuario,
+        saldo_apertura=Decimal("500.00"),
+    )
 
     with pytest.raises(ValueError, match="excede el saldo disponible"):
         NotaCreditoService.devolver_nota_credito_cliente(
@@ -674,4 +738,6 @@ def test_listar_notas_credito_proveedor(db_session):
 def test_listar_notas_credito_proveedor_sin_usuario_autorizado_falla(db_session):
     proveedor, _, _ = _crear_compra(db_session)
     with pytest.raises(PermisoDenegadoError):
-        NotaCreditoService.listar_notas_credito_proveedor(db_session, proveedor.id_proveedor)
+        NotaCreditoService.listar_notas_credito_proveedor(
+            db_session, proveedor.id_proveedor
+        )

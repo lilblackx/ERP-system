@@ -37,7 +37,9 @@ def _crear_panel(qtbot, monkeypatch, config=None):
         "app.ui.config_empresa_panel.EmpresaService.obtener_configuracion",
         lambda session, id_usuario=None: config,
     )
-    panel = ConfigEmpresaPanel(MagicMock(return_value=MagicMock()), MagicMock(id_usuario=1))
+    panel = ConfigEmpresaPanel(
+        MagicMock(return_value=MagicMock()), MagicMock(id_usuario=1)
+    )
     qtbot.addWidget(panel)
     return panel
 
@@ -69,7 +71,9 @@ def test_cargar_datos_pisa_el_default_con_el_valor_guardado(qtbot, monkeypatch):
 
 def test_editar_y_guardar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     panel = _crear_panel(qtbot, monkeypatch, config=None)
-    panel.iva_activo_check.setChecked(True)  # el campo arranca deshabilitado (IVA inactivo)
+    panel.iva_activo_check.setChecked(
+        True
+    )  # el campo arranca deshabilitado (IVA inactivo)
     _escribir_y_perder_foco(qtbot, panel.iva_porcentaje_input, "12,5")
     assert panel.iva_porcentaje_input.get_value() == Decimal("12.50")
 
@@ -78,10 +82,14 @@ def test_editar_y_guardar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     def fake_guardar(**kwargs):
         llamada.update(kwargs)
 
-    monkeypatch.setattr("app.ui.config_empresa_panel.EmpresaService.guardar_configuracion", fake_guardar)
+    monkeypatch.setattr(
+        "app.ui.config_empresa_panel.EmpresaService.guardar_configuracion", fake_guardar
+    )
     # guardar_cambios() exitoso muestra un MessageBox.information() modal (QDialog.exec())
     # -- sin mockearlo el test queda colgado esperando que alguien lo cierre a mano.
-    monkeypatch.setattr("app.ui.config_empresa_panel.MessageBox.information", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "app.ui.config_empresa_panel.MessageBox.information", lambda *a, **k: None
+    )
 
     panel.guardar_cambios()
 

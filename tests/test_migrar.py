@@ -1,13 +1,19 @@
 import pytest
 from sqlalchemy import text
 
-from app.db.migrar import _CREATE_SCHEMA_MIGRATIONS, aplicar_migraciones, verificar_migraciones_al_dia
+from app.db.migrar import (
+    _CREATE_SCHEMA_MIGRATIONS,
+    aplicar_migraciones,
+    verificar_migraciones_al_dia,
+)
 
 
 def _limpiar_schema_migrations(test_engine) -> None:
     with test_engine.connect() as connection:
         connection.execute(
-            text("IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NOT NULL DROP TABLE dbo.schema_migrations")
+            text(
+                "IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NOT NULL DROP TABLE dbo.schema_migrations"
+            )
         )
         connection.commit()
 
@@ -24,7 +30,9 @@ def _preservar_schema_migrations_real(test_engine):
     completa entre dos migraciones nuevas. Este fixture guarda el contenido real antes de
     cada test de este archivo y lo restaura despues, sin importar que haga el test."""
     with test_engine.connect() as connection:
-        existe = connection.execute(text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")).scalar()
+        existe = connection.execute(
+            text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")
+        ).scalar()
         filas_previas = []
         if existe is not None:
             filas_previas = connection.execute(
@@ -35,12 +43,16 @@ def _preservar_schema_migrations_real(test_engine):
 
     with test_engine.connect() as connection:
         connection.execute(
-            text("IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NOT NULL DROP TABLE dbo.schema_migrations")
+            text(
+                "IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NOT NULL DROP TABLE dbo.schema_migrations"
+            )
         )
         connection.execute(text(_CREATE_SCHEMA_MIGRATIONS))
         for version, aplicada_en in filas_previas:
             connection.execute(
-                text("INSERT INTO dbo.schema_migrations ([version], [aplicada_en]) VALUES (:v, :a)"),
+                text(
+                    "INSERT INTO dbo.schema_migrations ([version], [aplicada_en]) VALUES (:v, :a)"
+                ),
                 {"v": version, "a": aplicada_en},
             )
         connection.commit()
@@ -52,7 +64,9 @@ def test_bootstrap_crea_tabla_y_registra_baseline(test_engine, tmp_path):
     aplicar_migraciones(motor=test_engine, migrations_dir=tmp_path)
 
     with test_engine.connect() as connection:
-        version = connection.execute(text("SELECT [version] FROM dbo.schema_migrations")).scalar()
+        version = connection.execute(
+            text("SELECT [version] FROM dbo.schema_migrations")
+        ).scalar()
     assert version == "0000_baseline"
 
 
@@ -63,7 +77,12 @@ def test_correr_dos_veces_sin_migraciones_nuevas_es_idempotente(test_engine, tmp
     aplicar_migraciones(motor=test_engine, migrations_dir=tmp_path)
 
     with test_engine.connect() as connection:
-        versiones = [fila[0] for fila in connection.execute(text("SELECT [version] FROM dbo.schema_migrations"))]
+        versiones = [
+            fila[0]
+            for fila in connection.execute(
+                text("SELECT [version] FROM dbo.schema_migrations")
+            )
+        ]
     assert versiones == ["0000_baseline"]
 
 
@@ -78,9 +97,16 @@ def test_aplica_migracion_pendiente_y_no_la_repite(test_engine, tmp_path):
         aplicar_migraciones(motor=test_engine, migrations_dir=tmp_path)
 
         with test_engine.connect() as connection:
-            versiones = {fila[0] for fila in connection.execute(text("SELECT [version] FROM dbo.schema_migrations"))}
+            versiones = {
+                fila[0]
+                for fila in connection.execute(
+                    text("SELECT [version] FROM dbo.schema_migrations")
+                )
+            }
             assert versiones == {"0000_baseline", "0001_tabla_de_prueba.sql"}
-            existe = connection.execute(text("SELECT OBJECT_ID(N'dbo.zz_migracion_prueba', N'U')")).scalar()
+            existe = connection.execute(
+                text("SELECT OBJECT_ID(N'dbo.zz_migracion_prueba', N'U')")
+            ).scalar()
             assert existe is not None
 
         # Segunda corrida: no debe volver a ejecutar el archivo ya aplicado. Como el
@@ -90,7 +116,9 @@ def test_aplica_migracion_pendiente_y_no_la_repite(test_engine, tmp_path):
     finally:
         with test_engine.connect() as connection:
             connection.execute(
-                text("IF OBJECT_ID(N'dbo.zz_migracion_prueba', N'U') IS NOT NULL DROP TABLE dbo.zz_migracion_prueba")
+                text(
+                    "IF OBJECT_ID(N'dbo.zz_migracion_prueba', N'U') IS NOT NULL DROP TABLE dbo.zz_migracion_prueba"
+                )
             )
             connection.commit()
 
@@ -103,18 +131,24 @@ def test_aplica_migracion_pendiente_y_no_la_repite(test_engine, tmp_path):
 def test_verificar_migraciones_al_dia_sin_pendientes_no_lanza(test_engine, tmp_path):
     _limpiar_schema_migrations(test_engine)
 
-    verificar_migraciones_al_dia(motor=test_engine, migrations_dir=tmp_path)  # no debe lanzar
+    verificar_migraciones_al_dia(
+        motor=test_engine, migrations_dir=tmp_path
+    )  # no debe lanzar
 
 
 def test_verificar_migraciones_al_dia_con_pendiente_lanza(test_engine, tmp_path):
     _limpiar_schema_migrations(test_engine)
-    (tmp_path / "0001_pendiente_de_prueba.sql").write_text("SELECT 1;\nGO\n", encoding="utf-8")
+    (tmp_path / "0001_pendiente_de_prueba.sql").write_text(
+        "SELECT 1;\nGO\n", encoding="utf-8"
+    )
 
     with pytest.raises(RuntimeError, match="0001_pendiente_de_prueba.sql"):
         verificar_migraciones_al_dia(motor=test_engine, migrations_dir=tmp_path)
 
 
-def test_aplica_migracion_con_alter_database_fuera_de_transaccion(test_engine, tmp_path):
+def test_aplica_migracion_con_alter_database_fuera_de_transaccion(
+    test_engine, tmp_path
+):
     """ALTER DATABASE no puede correr dentro de una transaccion abierta (Msg 226 de SQL
     Server) -- la conexion normal del runner esta en modo manual-commit (autobegin de
     SQLAlchemy), asi que sin la ruta autocommit de _ejecutar_batches este archivo fallaria.
@@ -129,7 +163,12 @@ def test_aplica_migracion_con_alter_database_fuera_de_transaccion(test_engine, t
     aplicar_migraciones(motor=test_engine, migrations_dir=tmp_path)
 
     with test_engine.connect() as connection:
-        versiones = {fila[0] for fila in connection.execute(text("SELECT [version] FROM dbo.schema_migrations"))}
+        versiones = {
+            fila[0]
+            for fila in connection.execute(
+                text("SELECT [version] FROM dbo.schema_migrations")
+            )
+        }
     assert versiones == {"0000_baseline", "0001_alter_database_de_prueba.sql"}
 
 
@@ -141,5 +180,7 @@ def test_verificar_migraciones_al_dia_no_modifica_nada(test_engine, tmp_path):
     verificar_migraciones_al_dia(motor=test_engine, migrations_dir=tmp_path)
 
     with test_engine.connect() as connection:
-        existe = connection.execute(text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")).scalar()
+        existe = connection.execute(
+            text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")
+        ).scalar()
     assert existe is None

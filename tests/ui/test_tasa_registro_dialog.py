@@ -76,7 +76,9 @@ def test_get_data_incluye_paralelo_y_cop_cuando_se_completan(qtbot):
 def test_validar_y_aceptar_rechaza_bcv_en_cero(qtbot, monkeypatch):
     # MessageBox.warning() abre un QDialog modal (.exec()) -- se reemplaza por un no-op
     # para no bloquear el test esperando un click que nunca llega bajo offscreen.
-    monkeypatch.setattr("app.ui.tasa_registro_dialog.MessageBox.warning", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "app.ui.tasa_registro_dialog.MessageBox.warning", lambda *a, **k: None
+    )
     dialogo = TasaRegistroDialog()
     qtbot.addWidget(dialogo)
     aceptado = []

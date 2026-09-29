@@ -64,12 +64,23 @@ from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "NOMBRE", "CÓDIGO", "IDENTIFICACIÓN", "RUTA", "TELÉFONO", "EMAIL", "ESTADO"]
+COLS_VISIBLES = [
+    "ID",
+    "NOMBRE",
+    "CÓDIGO",
+    "IDENTIFICACIÓN",
+    "RUTA",
+    "TELÉFONO",
+    "EMAIL",
+    "ESTADO",
+]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 
 
-def _filas_vendedores_query(session, texto_busqueda, id_usuario, estado_vendedor) -> list[list]:
+def _filas_vendedores_query(
+    session, texto_busqueda, id_usuario, estado_vendedor
+) -> list[list]:
     resultado = VendedorService.listar(
         session,
         texto_busqueda,
@@ -100,7 +111,9 @@ def _tarea_exportar_vendedores_excel(
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
     de vendedores a un archivo (openpyxl) es lo bastante lento como para congelar la
     ventana si se hace en el hilo de GUI."""
-    filas = _filas_vendedores_query(session, texto_busqueda, id_usuario, estado_vendedor)
+    filas = _filas_vendedores_query(
+        session, texto_busqueda, id_usuario, estado_vendedor
+    )
     exportar_excel(ruta, COLS_VISIBLES, filas)
     return ruta, len(filas)
 
@@ -108,8 +121,17 @@ def _tarea_exportar_vendedores_excel(
 def _tarea_exportar_vendedores_pdf(
     session, ruta: str, texto_busqueda, id_usuario, estado_vendedor, filtros, col_widths
 ) -> tuple[str, int]:
-    filas = _filas_vendedores_query(session, texto_busqueda, id_usuario, estado_vendedor)
-    exportar_pdf(ruta, "Reporte de Vendedores", COLS_VISIBLES, filas, filtros=filtros, col_widths=col_widths)
+    filas = _filas_vendedores_query(
+        session, texto_busqueda, id_usuario, estado_vendedor
+    )
+    exportar_pdf(
+        ruta,
+        "Reporte de Vendedores",
+        COLS_VISIBLES,
+        filas,
+        filtros=filtros,
+        col_widths=col_widths,
+    )
     return ruta, len(filas)
 
 
@@ -218,7 +240,9 @@ class VendedoresPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Vendedores")
-        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -244,7 +268,8 @@ class VendedoresPanel(QWidget):
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar vendedor…")
         self.buscar_input.addAction(
-            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
         )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
@@ -264,11 +289,15 @@ class VendedoresPanel(QWidget):
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
-        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_vendedores, on_pdf=self.exportar_pdf_vendedores)
+        self.btn_exportar = BotonExportar(
+            on_excel=self.exportar_excel_vendedores, on_pdf=self.exportar_pdf_vendedores
+        )
 
         h.addWidget(self.buscar_input)
         h.addWidget(self.estado_combo)
-        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        h.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
         h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_exportar)
         return w
@@ -295,9 +324,15 @@ class VendedoresPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            7, QHeaderView.ResizeMode.Fixed
+        )
         self.tabla.setColumnWidth(7, 110)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
@@ -321,7 +356,9 @@ class VendedoresPanel(QWidget):
         self.btn_anterior.clicked.connect(self._pagina_anterior)
 
         self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setIcon(
+            qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK)
+        )
         self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.clicked.connect(self._pagina_siguiente)
@@ -382,10 +419,14 @@ class VendedoresPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para consultar vendedores."
+            )
         except Exception:
             logger.exception("Fallo al cargar la lista de vendedores")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de vendedores.")
+            MessageBox.critical(
+                self, "Error de conexión", "No se pudo cargar la lista de vendedores."
+            )
         finally:
             session.close()
 
@@ -396,13 +437,19 @@ class VendedoresPanel(QWidget):
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(v.id_vendedor)))
             self.tabla.setItem(fila, 1, QTableWidgetItem(v.nombre_vendedor or ""))
             self.tabla.setItem(fila, 2, QTableWidgetItem(v.codigo_vendedor or ""))
-            self.tabla.setItem(fila, 3, QTableWidgetItem(v.identificacion_vendedor or ""))
-            self.tabla.setItem(fila, 4, QTableWidgetItem(v.ruta.nombre_ruta if v.ruta else ""))
+            self.tabla.setItem(
+                fila, 3, QTableWidgetItem(v.identificacion_vendedor or "")
+            )
+            self.tabla.setItem(
+                fila, 4, QTableWidgetItem(v.ruta.nombre_ruta if v.ruta else "")
+            )
             self.tabla.setItem(fila, 5, QTableWidgetItem(v.telefono_vendedor or ""))
             self.tabla.setItem(fila, 6, QTableWidgetItem(v.email_vendedor or ""))
 
             estado_vendedor = v.estado_vendedor or "ACTIVO"
-            color_estado = COLOR_SUCCESS if estado_vendedor.upper() == "ACTIVO" else COLOR_DANGER
+            color_estado = (
+                COLOR_SUCCESS if estado_vendedor.upper() == "ACTIVO" else COLOR_DANGER
+            )
             badge = EstadoBadge(estado_vendedor.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 7, badge)
 
@@ -423,24 +470,37 @@ class VendedoresPanel(QWidget):
         }
 
     def exportar_excel_vendedores(self) -> None:
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+        if (
+            getattr(self, "_worker_export", None) is not None
+            and self._worker_export.isRunning()
+        ):
             return
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar vendedores", "vendedores.xlsx", "Excel (*.xlsx)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar vendedores", "vendedores.xlsx", "Excel (*.xlsx)"
+        )
         if not ruta:
             return
 
         self.btn_exportar.setEnabled(False)
         self._worker_export = QueryWorker(
-            self.session_factory, _tarea_exportar_vendedores_excel, ruta=ruta, **self._filtros_actuales_exportar()
+            self.session_factory,
+            _tarea_exportar_vendedores_excel,
+            ruta=ruta,
+            **self._filtros_actuales_exportar(),
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)
         self._worker_export.error.connect(self._on_exportar_error)
         self._worker_export.start()
 
     def exportar_pdf_vendedores(self) -> None:
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+        if (
+            getattr(self, "_worker_export", None) is not None
+            and self._worker_export.isRunning()
+        ):
             return
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar vendedores", "vendedores.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar vendedores", "vendedores.pdf", "PDF (*.pdf)"
+        )
         if not ruta:
             return
 
@@ -467,24 +527,34 @@ class VendedoresPanel(QWidget):
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
         self.btn_exportar.setEnabled(True)
         ruta, cantidad = resultado
-        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} vendedores a:\n{ruta}")
+        MessageBox.information(
+            self,
+            "Exportación completa",
+            f"Se exportaron {cantidad} vendedores a:\n{ruta}",
+        )
 
     def _on_exportar_error(self, mensaje: str) -> None:
         self.btn_exportar.setEnabled(True)
         logger.error("Fallo al exportar vendedores: %s", mensaje)
-        MessageBox.critical(self, "Error", "No se pudo exportar la lista de vendedores.")
+        MessageBox.critical(
+            self, "Error", "No se pudo exportar la lista de vendedores."
+        )
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(self, "Selección requerida", "Selecciona un vendedor de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona un vendedor de la lista."
+            )
             return None
         return int(self.tabla.item(filas[0].row(), 0).text())
 
     def nuevo_vendedor(self) -> None:
         session = self.session_factory()
         try:
-            dialogo = VendedorFormDialog(session, id_usuario=self.usuario.id_usuario, parent=self)
+            dialogo = VendedorFormDialog(
+                session, id_usuario=self.usuario.id_usuario, parent=self
+            )
             if dialogo.exec():
                 datos = dialogo.get_data()
                 datos["creado_por"] = self.usuario.id_usuario
@@ -493,14 +563,18 @@ class VendedoresPanel(QWidget):
         except IntegrityError:
             session.rollback()
             MessageBox.warning(
-                self, "Dato duplicado", "El código o la identificación ya están registrados en otro vendedor."
+                self,
+                "Dato duplicado",
+                "El código o la identificación ya están registrados en otro vendedor.",
             )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear vendedores.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para crear vendedores."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear vendedor")
@@ -515,28 +589,41 @@ class VendedoresPanel(QWidget):
 
         session = self.session_factory()
         try:
-            vendedor = VendedorService.obtener(session, id_vendedor, id_usuario=self.usuario.id_usuario)
-            dialogo = VendedorFormDialog(session, vendedor, id_usuario=self.usuario.id_usuario, parent=self)
+            vendedor = VendedorService.obtener(
+                session, id_vendedor, id_usuario=self.usuario.id_usuario
+            )
+            dialogo = VendedorFormDialog(
+                session, vendedor, id_usuario=self.usuario.id_usuario, parent=self
+            )
             if dialogo.exec():
                 VendedorService.actualizar(
-                    session, id_vendedor, id_usuario=self.usuario.id_usuario, **dialogo.get_data()
+                    session,
+                    id_vendedor,
+                    id_usuario=self.usuario.id_usuario,
+                    **dialogo.get_data(),
                 )
                 self.cargar_vendedores()
         except IntegrityError:
             session.rollback()
             MessageBox.warning(
-                self, "Dato duplicado", "El código o la identificación ya están registrados en otro vendedor."
+                self,
+                "Dato duplicado",
+                "El código o la identificación ya están registrados en otro vendedor.",
             )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar vendedores.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para editar vendedores."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar vendedor")
-            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del vendedor.")
+            MessageBox.critical(
+                self, "Error", "No se pudo guardar los cambios del vendedor."
+            )
         finally:
             session.close()
 
@@ -547,24 +634,36 @@ class VendedoresPanel(QWidget):
 
         session = self.session_factory()
         try:
-            vendedor = VendedorService.obtener(session, id_vendedor, id_usuario=self.usuario.id_usuario)
+            vendedor = VendedorService.obtener(
+                session, id_vendedor, id_usuario=self.usuario.id_usuario
+            )
             estado_actual = vendedor.estado_vendedor or "ACTIVO"
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
             respuesta = MessageBox.question(
-                self, "Confirmar", f"¿Cambiar el estado del vendedor '{vendedor.nombre_vendedor}' a {nuevo_estado}?"
+                self,
+                "Confirmar",
+                f"¿Cambiar el estado del vendedor '{vendedor.nombre_vendedor}' a {nuevo_estado}?",
             )
             if respuesta != QMessageBox.StandardButton.Yes:
                 return
 
-            VendedorService.cambiar_estado(session, id_vendedor, nuevo_estado, id_usuario=self.usuario.id_usuario)
+            VendedorService.cambiar_estado(
+                session, id_vendedor, nuevo_estado, id_usuario=self.usuario.id_usuario
+            )
             self.cargar_vendedores()
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de vendedores.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para cambiar el estado de vendedores.",
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado del vendedor %s", id_vendedor)
-            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del vendedor.")
+            MessageBox.critical(
+                self, "Error", "No se pudo cambiar el estado del vendedor."
+            )
         finally:
             session.close()

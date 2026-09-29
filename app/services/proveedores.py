@@ -11,7 +11,9 @@ ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 class ProveedorService:
     @staticmethod
-    def _validar_unico(session: Session, campo: str, valor: str | None, excluir_id: int | None = None) -> None:
+    def _validar_unico(
+        session: Session, campo: str, valor: str | None, excluir_id: int | None = None
+    ) -> None:
         if not valor:
             return
         query = session.query(Proveedor).filter(getattr(Proveedor, campo) == valor)
@@ -21,7 +23,9 @@ class ProveedorService:
             raise ValueError(f"Ya existe un proveedor con {campo}='{valor}'")
 
     @staticmethod
-    def obtener(session: Session, id_proveedor: int, id_usuario: int | None = None) -> Proveedor | None:
+    def obtener(
+        session: Session, id_proveedor: int, id_usuario: int | None = None
+    ) -> Proveedor | None:
         require_permiso(session, id_usuario, "proveedores", "ver")
         return session.get(Proveedor, id_proveedor)
 
@@ -62,7 +66,12 @@ class ProveedorService:
         query = query.order_by(Proveedor.nombre_razon_social)
         total = query.count()
         proveedores = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {"items": proveedores, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        return {
+            "items": proveedores,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
     def _validar_requeridos(datos: dict) -> None:
@@ -75,8 +84,12 @@ class ProveedorService:
     def crear(session: Session, **datos) -> Proveedor:
         require_permiso(session, datos.get("creado_por"), "proveedores", "crear")
         ProveedorService._validar_requeridos(datos)
-        ProveedorService._validar_unico(session, "codigo_proveedor", datos.get("codigo_proveedor"))
-        ProveedorService._validar_unico(session, "identificacion_proveedor", datos.get("identificacion_proveedor"))
+        ProveedorService._validar_unico(
+            session, "codigo_proveedor", datos.get("codigo_proveedor")
+        )
+        ProveedorService._validar_unico(
+            session, "identificacion_proveedor", datos.get("identificacion_proveedor")
+        )
         proveedor = Proveedor(**datos)
         session.add(proveedor)
         session.commit()
@@ -87,12 +100,17 @@ class ProveedorService:
             id_usuario=proveedor.creado_por,
             accion="CREAR_PROVEEDOR",
             modulo="PROVEEDORES",
-            detalle={"id_proveedor": proveedor.id_proveedor, "nombre_razon_social": proveedor.nombre_razon_social},
+            detalle={
+                "id_proveedor": proveedor.id_proveedor,
+                "nombre_razon_social": proveedor.nombre_razon_social,
+            },
         )
         return proveedor
 
     @staticmethod
-    def actualizar(session: Session, id_proveedor: int, id_usuario: int | None = None, **datos) -> Proveedor:
+    def actualizar(
+        session: Session, id_proveedor: int, id_usuario: int | None = None, **datos
+    ) -> Proveedor:
         require_permiso(session, id_usuario, "proveedores", "editar")
         proveedor = session.get(Proveedor, id_proveedor)
         if proveedor is None:
@@ -100,17 +118,28 @@ class ProveedorService:
 
         if "codigo_proveedor" in datos and not datos["codigo_proveedor"]:
             raise ValueError("codigo_proveedor es requerido")
-        if "identificacion_proveedor" in datos and not datos["identificacion_proveedor"]:
+        if (
+            "identificacion_proveedor" in datos
+            and not datos["identificacion_proveedor"]
+        ):
             raise ValueError("identificacion_proveedor es requerido")
 
         nuevo_codigo = datos.get("codigo_proveedor")
         if nuevo_codigo and nuevo_codigo != proveedor.codigo_proveedor:
-            ProveedorService._validar_unico(session, "codigo_proveedor", nuevo_codigo, excluir_id=id_proveedor)
+            ProveedorService._validar_unico(
+                session, "codigo_proveedor", nuevo_codigo, excluir_id=id_proveedor
+            )
 
         nueva_identificacion = datos.get("identificacion_proveedor")
-        if nueva_identificacion and nueva_identificacion != proveedor.identificacion_proveedor:
+        if (
+            nueva_identificacion
+            and nueva_identificacion != proveedor.identificacion_proveedor
+        ):
             ProveedorService._validar_unico(
-                session, "identificacion_proveedor", nueva_identificacion, excluir_id=id_proveedor
+                session,
+                "identificacion_proveedor",
+                nueva_identificacion,
+                excluir_id=id_proveedor,
             )
 
         for campo, valor in datos.items():
@@ -123,7 +152,10 @@ class ProveedorService:
             id_usuario=id_usuario,
             accion="ACTUALIZAR_PROVEEDOR",
             modulo="PROVEEDORES",
-            detalle={"id_proveedor": proveedor.id_proveedor, "campos": list(datos.keys())},
+            detalle={
+                "id_proveedor": proveedor.id_proveedor,
+                "campos": list(datos.keys()),
+            },
         )
         return proveedor
 
@@ -166,7 +198,9 @@ class ProveedorService:
     # "INACTIVO") para retirarlo de circulacion preservando el historial. Decision de
     # producto 2026-08-22 (hallazgo de auditoria del mismo dia).
     @staticmethod
-    def eliminar(session: Session, id_proveedor: int, id_usuario: int | None = None) -> None:
+    def eliminar(
+        session: Session, id_proveedor: int, id_usuario: int | None = None
+    ) -> None:
         require_permiso(session, id_usuario, "proveedores", "eliminar")
         raise ValueError(
             "No se puede eliminar un proveedor para proteger la integridad de los datos. "
@@ -175,7 +209,10 @@ class ProveedorService:
 
     @staticmethod
     def cambiar_estado(
-        session: Session, id_proveedor: int, nuevo_estado: str, id_usuario: int | None = None
+        session: Session,
+        id_proveedor: int,
+        nuevo_estado: str,
+        id_usuario: int | None = None,
     ) -> Proveedor:
         require_permiso(session, id_usuario, "proveedores", "eliminar")
         if nuevo_estado not in ESTADOS_VALIDOS:
@@ -193,6 +230,9 @@ class ProveedorService:
             id_usuario=id_usuario,
             accion="CAMBIAR_ESTADO_PROVEEDOR",
             modulo="PROVEEDORES",
-            detalle={"id_proveedor": proveedor.id_proveedor, "nuevo_estado": nuevo_estado},
+            detalle={
+                "id_proveedor": proveedor.id_proveedor,
+                "nuevo_estado": nuevo_estado,
+            },
         )
         return proveedor

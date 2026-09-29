@@ -18,7 +18,12 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
-from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
+from app.services.db_utils import (
+    _es_deadlock,
+    _es_lock_timeout,
+    aplicar_lock_timeout,
+    traducir_error_trigger,
+)
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
@@ -43,7 +48,10 @@ def _validar_items(items: list[dict]) -> None:
             raise ValueError("Cada item requiere id_producto")
         if not item.get("cantidad") or Decimal(str(item["cantidad"])) <= 0:
             raise ValueError("Cada item requiere una cantidad mayor a cero")
-        if item.get("costo_unitario") is None or Decimal(str(item["costo_unitario"])) <= 0:
+        if (
+            item.get("costo_unitario") is None
+            or Decimal(str(item["costo_unitario"])) <= 0
+        ):
             raise ValueError("Cada item requiere un costo_unitario mayor a cero")
 
 
@@ -77,7 +85,9 @@ class CompraService:
         if proveedor is None:
             raise ValueError("Proveedor no encontrado")
         if proveedor.estado_proveedor != "ACTIVO":
-            raise ValueError(f"El proveedor '{proveedor.nombre_razon_social}' esta inactivo")
+            raise ValueError(
+                f"El proveedor '{proveedor.nombre_razon_social}' esta inactivo"
+            )
 
         if condicion_pago not in ("contado", "credito"):
             raise ValueError("condicion_pago debe ser 'contado' o 'credito'")
@@ -98,16 +108,23 @@ class CompraService:
             if producto is None:
                 raise ValueError(f"Producto {id_producto} no encontrado")
             if producto.estado_producto != "ACTIVO":
-                raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo")
+                raise ValueError(
+                    f"El producto '{producto.nombre_producto}' esta inactivo"
+                )
 
         total_compra = sum(
-            (Decimal(str(item["cantidad"])) * Decimal(str(item["costo_unitario"])) for item in items),
+            (
+                Decimal(str(item["cantidad"])) * Decimal(str(item["costo_unitario"]))
+                for item in items
+            ),
             Decimal("0.00"),
         )
 
         if condicion_pago == "credito":
             if pago is not None:
-                raise ValueError("Una compra a credito no admite pago -- se paga despues contra la cuenta por pagar")
+                raise ValueError(
+                    "Una compra a credito no admite pago -- se paga despues contra la cuenta por pagar"
+                )
             # WITH (UPDLOCK, ROWLOCK): mismo patron que VentaService.emitir_factura con
             # Cliente -- sin esto, dos compras a credito concurrentes al MISMO proveedor
             # pueden ambas leer la misma deuda_actual antes de que ninguna haya
@@ -119,7 +136,9 @@ class CompraService:
                 .with_hint(Proveedor, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
             ).scalar_one()
             deuda_actual = (
-                session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0))
+                session.query(
+                    func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0)
+                )
                 .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
                 .filter(
                     Compra.id_proveedor == id_proveedor,
@@ -168,7 +187,9 @@ class CompraService:
             id_caja = pago.get("id_caja")
             id_cuenta_bancaria = pago.get("id_cuenta_bancaria")
             if (id_caja is None) == (id_cuenta_bancaria is None):
-                raise ValueError("El pago debe indicar exactamente un origen: id_caja o id_cuenta_bancaria")
+                raise ValueError(
+                    "El pago debe indicar exactamente un origen: id_caja o id_cuenta_bancaria"
+                )
 
             if pago["metodo_pago"] in METODOS_QUE_REQUIEREN_CAJA:
                 if id_caja is None:
@@ -227,7 +248,9 @@ class CompraService:
         # VentaService.emitir_factura). No se revierte en anular_compra: dinero ya movido no
         # se toca, mismo criterio que pagos ya aplicados a una compra a credito.
         if condicion_pago == "contado":
-            descripcion = f"Pago de contado a proveedor por compra {compra.numero_compra}"
+            descripcion = (
+                f"Pago de contado a proveedor por compra {compra.numero_compra}"
+            )
             if caja_para_egreso is not None:
                 CajaService._registrar_egreso_vuelto(
                     session,
@@ -280,22 +303,34 @@ class CompraService:
                 "id_proveedor": id_proveedor,
                 "condicion_pago": condicion_pago,
                 "total_compra": str(compra.total_compra),
-                "pago": {"metodo_pago": pago["metodo_pago"], "moneda": pago["moneda"]} if pago else None,
+                "pago": (
+                    {"metodo_pago": pago["metodo_pago"], "moneda": pago["moneda"]}
+                    if pago
+                    else None
+                ),
             },
         )
         return compra
 
     @staticmethod
-    def obtener_compra(session: Session, id_compra: int, id_usuario: int | None = None) -> dict:
+    def obtener_compra(
+        session: Session, id_compra: int, id_usuario: int | None = None
+    ) -> dict:
         require_permiso(session, id_usuario, "compras", "ver")
         compra = session.get(Compra, id_compra)
         if compra is None:
             raise ValueError("Compra no encontrada")
-        detalles = session.query(CompraDetalle).filter(CompraDetalle.id_compra == id_compra).all()
+        detalles = (
+            session.query(CompraDetalle)
+            .filter(CompraDetalle.id_compra == id_compra)
+            .all()
+        )
         return {"compra": compra, "detalles": detalles}
 
     @staticmethod
-    def anular_compra(session: Session, id_compra: int, id_usuario: int | None, motivo: str) -> Compra:
+    def anular_compra(
+        session: Session, id_compra: int, id_usuario: int | None, motivo: str
+    ) -> Compra:
         """Anula la compra: repone el stock recibido y cierra la cuenta por pagar (si la
         hubiera). Si ya se le aplicaron pagos, no se revierten -- quedan como
         NotaCreditoProveedor a favor de la empresa, sin tocar pagos_proveedores ni sus
@@ -325,7 +360,11 @@ class CompraService:
         if compra.estado_compra == "ANULADA":
             raise ValueError("La compra ya esta anulada")
 
-        cxp = session.query(CuentaPorPagar).filter(CuentaPorPagar.id_compra == id_compra).first()
+        cxp = (
+            session.query(CuentaPorPagar)
+            .filter(CuentaPorPagar.id_compra == id_compra)
+            .first()
+        )
         monto_pagado = Decimal("0.00")
         if cxp is not None:
             monto_pagado = (
@@ -335,7 +374,9 @@ class CompraService:
             )
             monto_pagado = Decimal(str(monto_pagado))
 
-        session.query(CompraDetalle).filter(CompraDetalle.id_compra == id_compra).delete(synchronize_session=False)
+        session.query(CompraDetalle).filter(
+            CompraDetalle.id_compra == id_compra
+        ).delete(synchronize_session=False)
         if cxp is not None:
             if monto_pagado > 0:
                 cxp.estado = "anulada"
@@ -389,7 +430,9 @@ class CompraService:
             detalle={
                 "numero_compra": compra.numero_compra,
                 "motivo": motivo,
-                "nota_credito_generada": str(monto_pagado) if monto_pagado > 0 else None,
+                "nota_credito_generada": (
+                    str(monto_pagado) if monto_pagado > 0 else None
+                ),
             },
         )
         return compra
@@ -423,8 +466,18 @@ class CompraService:
             query = query.filter(Compra.id_oc.isnot(None))
 
         total = query.count()
-        compras = query.order_by(Compra.fecha_emision.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {"items": compras, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        compras = (
+            query.order_by(Compra.fecha_emision.desc())
+            .offset((pagina - 1) * por_pagina)
+            .limit(por_pagina)
+            .all()
+        )
+        return {
+            "items": compras,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
     def crear_compra_desde_oc(
@@ -449,7 +502,8 @@ class CompraService:
         toman de CompraOCDetalle, no del caller, para no divergir de lo realmente recibido.
         La regla cantidad_facturada acumulada <= cantidad_recibida se valida ACA en Python
         -- no hay trigger ni CHECK que la proteja, es una invariante entre dos tablas
-        (compra_detalle y compra_oc_detalle) que ningun trigger de esta migracion cubre."""
+        (compra_detalle y compra_oc_detalle) que ningun trigger de esta migracion cubre.
+        """
         require_permiso(session, id_usuario, "compras", "crear")
         aplicar_lock_timeout(session)
         if not items:
@@ -469,9 +523,16 @@ class CompraService:
         if proveedor is None:
             raise ValueError("Proveedor no encontrado")
         if proveedor.estado_proveedor != "ACTIVO":
-            raise ValueError(f"El proveedor '{proveedor.nombre_razon_social}' esta inactivo")
+            raise ValueError(
+                f"El proveedor '{proveedor.nombre_razon_social}' esta inactivo"
+            )
 
-        detalles_oc = {d.id_detalle: d for d in session.query(CompraOCDetalle).filter(CompraOCDetalle.id_oc == id_oc)}
+        detalles_oc = {
+            d.id_detalle: d
+            for d in session.query(CompraOCDetalle).filter(
+                CompraOCDetalle.id_oc == id_oc
+            )
+        }
 
         lineas_validadas = []
         total_compra = Decimal("0.00")
@@ -479,13 +540,17 @@ class CompraService:
             id_oc_detalle = item["id_oc_detalle"]
             detalle_oc = detalles_oc.get(id_oc_detalle)
             if detalle_oc is None:
-                raise ValueError(f"La linea de OC {id_oc_detalle} no pertenece a la orden de compra {id_oc}")
+                raise ValueError(
+                    f"La linea de OC {id_oc_detalle} no pertenece a la orden de compra {id_oc}"
+                )
 
             cantidad = Decimal(str(item["cantidad"]))
             if cantidad <= 0:
                 raise ValueError("Cada item requiere una cantidad mayor a cero")
 
-            disponible_para_facturar = detalle_oc.cantidad_recibida - detalle_oc.cantidad_facturada
+            disponible_para_facturar = (
+                detalle_oc.cantidad_recibida - detalle_oc.cantidad_facturada
+            )
             if cantidad > disponible_para_facturar:
                 raise ValueError(
                     f"Se intenta facturar {cantidad} del producto {detalle_oc.id_producto}, pero solo hay "
@@ -497,9 +562,13 @@ class CompraService:
 
         if condicion_pago == "credito":
             if pago is not None:
-                raise ValueError("Una compra a credito no admite pago -- se paga despues contra la cuenta por pagar")
+                raise ValueError(
+                    "Una compra a credito no admite pago -- se paga despues contra la cuenta por pagar"
+                )
             deuda_actual = (
-                session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0))
+                session.query(
+                    func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0)
+                )
                 .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
                 .filter(
                     Compra.id_proveedor == oc.id_proveedor,
@@ -546,7 +615,9 @@ class CompraService:
             id_caja = pago.get("id_caja")
             id_cuenta_bancaria = pago.get("id_cuenta_bancaria")
             if (id_caja is None) == (id_cuenta_bancaria is None):
-                raise ValueError("El pago debe indicar exactamente un origen: id_caja o id_cuenta_bancaria")
+                raise ValueError(
+                    "El pago debe indicar exactamente un origen: id_caja o id_cuenta_bancaria"
+                )
 
             if pago["metodo_pago"] in METODOS_QUE_REQUIEREN_CAJA:
                 if id_caja is None:
@@ -596,10 +667,14 @@ class CompraService:
         # cantidad_facturada de cabecera, derivada de sus lineas -- a diferencia de
         # cantidad_recibida (que trg_nota_recepcion_detalle_ins mantiene sola), ningun
         # trigger de esta migracion actualiza cantidad_facturada.
-        oc.cantidad_facturada = sum((d.cantidad_facturada for d in detalles_oc.values()), Decimal("0"))
+        oc.cantidad_facturada = sum(
+            (d.cantidad_facturada for d in detalles_oc.values()), Decimal("0")
+        )
 
         if condicion_pago == "contado":
-            descripcion = f"Pago de contado a proveedor por compra {compra.numero_compra}"
+            descripcion = (
+                f"Pago de contado a proveedor por compra {compra.numero_compra}"
+            )
             if caja_para_egreso is not None:
                 CajaService._registrar_egreso_vuelto(
                     session,

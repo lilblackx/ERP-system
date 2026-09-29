@@ -10,7 +10,14 @@ from datetime import datetime
 
 import qtawesome as qta
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QShowEvent
+from PySide6.QtGui import (
+    QColor,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -101,7 +108,9 @@ class KpiCard(QWidget):
         lbl_icono.setPixmap(qta.icon(icono, color=color).pixmap(15, 15))
         lbl_icono.setFixedSize(30, 30)
         lbl_icono.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_icono.setStyleSheet(f"background-color: {color_con_alpha(color)}; border-radius: 15px; border: none;")
+        lbl_icono.setStyleSheet(
+            f"background-color: {color_con_alpha(color)}; border-radius: 15px; border: none;"
+        )
 
         top.addWidget(lbl_titulo)
         top.addStretch()
@@ -151,7 +160,9 @@ class VentasSemanaChart(QWidget):
         rect = self.rect()
         if not self._puntos:
             painter.setPen(QColor(COLOR_TEXT_LIGHT))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "Sin ventas registradas esta semana")
+            painter.drawText(
+                rect, Qt.AlignmentFlag.AlignCenter, "Sin ventas registradas esta semana"
+            )
             painter.end()
             return
 
@@ -245,7 +256,12 @@ class EtiquetasDiasSemana(QWidget):
         alto = max(self.height(), 1)
         for i, lbl in enumerate(self._labels):
             centro_x = self.MARGEN_IZQ + paso_x * i
-            lbl.setGeometry(round(centro_x - self._ANCHO_ETIQUETA / 2), 0, self._ANCHO_ETIQUETA, alto)
+            lbl.setGeometry(
+                round(centro_x - self._ANCHO_ETIQUETA / 2),
+                0,
+                self._ANCHO_ETIQUETA,
+                alto,
+            )
 
     def set_datos(self, puntos: list[dict]) -> None:
         for i, lbl in enumerate(self._labels):
@@ -256,9 +272,13 @@ class EtiquetasDiasSemana(QWidget):
                     if hasattr(f, "weekday"):
                         texto = DIAS_SEMANA[f.weekday()]
                     elif isinstance(f, str):
-                        texto = DIAS_SEMANA[datetime.strptime(f[:10], "%Y-%m-%d").weekday()]
+                        texto = DIAS_SEMANA[
+                            datetime.strptime(f[:10], "%Y-%m-%d").weekday()
+                        ]
                 except Exception:
-                    logger.exception("No se pudo calcular la etiqueta del dia para el punto %s", i)
+                    logger.exception(
+                        "No se pudo calcular la etiqueta del dia para el punto %s", i
+                    )
             lbl.setText(texto)
         self._reposicionar()
 
@@ -348,7 +368,9 @@ class ListaFilasAjustable(QWidget):
 class ListaVaciaLabel(QLabel):
     def __init__(self, texto: str, parent=None):
         super().__init__(texto, parent)
-        self.setStyleSheet(f"color: {COLOR_TEXT_LIGHT}; font-size: 12px; background: transparent; border: none;")
+        self.setStyleSheet(
+            f"color: {COLOR_TEXT_LIGHT}; font-size: 12px; background: transparent; border: none;"
+        )
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
 
@@ -367,7 +389,9 @@ class FilaCaja(QWidget):
             f"font-size: 12px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
         )
         lbl_cajero = LabelElidable(caja["cajero"] or "Sin cajero asignado")
-        lbl_cajero.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; background: transparent; border: none;")
+        lbl_cajero.setStyleSheet(
+            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; background: transparent; border: none;"
+        )
         info.addWidget(lbl_nombre)
         info.addWidget(lbl_cajero)
 
@@ -430,7 +454,9 @@ class FilaInventarioAlerta(QWidget):
 class FilaFactura(QWidget):
     def __init__(self, factura: dict, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(f"background: transparent; border-bottom: 1px solid {COLOR_BORDER};")
+        self.setStyleSheet(
+            f"background: transparent; border-bottom: 1px solid {COLOR_BORDER};"
+        )
         h = QHBoxLayout(self)
         h.setContentsMargins(0, 8, 0, 8)
         h.setSpacing(8)
@@ -442,11 +468,17 @@ class FilaFactura(QWidget):
         lbl_numero.setFixedWidth(90)
 
         lbl_cliente = LabelElidable(factura["cliente"] or "Consumidor final")
-        lbl_cliente.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_DARK}; background: transparent; border: none;")
+        lbl_cliente.setStyleSheet(
+            f"font-size: 12px; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
+        )
 
         lbl_total = QLabel(f"${float(factura['total_venta']):,.2f}")
-        lbl_total.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        lbl_total.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_DARK}; background: transparent; border: none;")
+        lbl_total.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        lbl_total.setStyleSheet(
+            f"font-size: 12px; color: {COLOR_TEXT_DARK}; background: transparent; border: none;"
+        )
         lbl_total.setFixedWidth(90)
 
         estado = factura["estado_factura"] or "EMITIDA"
@@ -515,7 +547,9 @@ class DashboardPanel(QWidget):
         info = QVBoxLayout()
         info.setSpacing(2)
         lbl_titulo = QLabel("Panel general")
-        lbl_titulo.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         lbl_subtitulo = QLabel(f"Resumen de la operación · {self._nombre_empresa()}")
         lbl_subtitulo.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_MUTED};")
         lbl_subtitulo.setWordWrap(False)
@@ -555,7 +589,9 @@ class DashboardPanel(QWidget):
         h.setAlignment(info, Qt.AlignmentFlag.AlignVCenter)
         # h.addLayout(sistema_info)
         # h.setAlignment(sistema_info, Qt.AlignmentFlag.AlignVCenter)
-        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        h.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
         h.addWidget(btn_nueva_factura)
         return w
 
@@ -594,15 +630,26 @@ class DashboardPanel(QWidget):
         h.setSpacing(10)
 
         self.kpi_ventas_hoy = KpiCard("Ventas de hoy", "fa5s.chart-line", COLOR_PRIMARY)
-        self.kpi_por_cobrar = KpiCard("Por cobrar", "fa5s.file-invoice-dollar", COLOR_INFO)
-        self.kpi_por_pagar = KpiCard("Por pagar", "fa5s.hand-holding-usd", COLOR_WARNING)
+        self.kpi_por_cobrar = KpiCard(
+            "Por cobrar", "fa5s.file-invoice-dollar", COLOR_INFO
+        )
+        self.kpi_por_pagar = KpiCard(
+            "Por pagar", "fa5s.hand-holding-usd", COLOR_WARNING
+        )
         # "Stock bajo" en vez de "Productos en alerta" (2026-09-01): era, por lejos, la
         # tarjeta mas ancha de las 4 (titulo largo, empujaba el ancho minimo de toda la
         # fila) -- mismo significado, mucho mas corto; el icono (triangulo de alerta,
         # color danger) y el detalle ("Bajo el minimo") ya dan el contexto completo.
-        self.kpi_productos_alerta = KpiCard("Stock bajo", "fa5s.exclamation-triangle", COLOR_DANGER)
+        self.kpi_productos_alerta = KpiCard(
+            "Stock bajo", "fa5s.exclamation-triangle", COLOR_DANGER
+        )
 
-        cards = (self.kpi_ventas_hoy, self.kpi_por_cobrar, self.kpi_por_pagar, self.kpi_productos_alerta)
+        cards = (
+            self.kpi_ventas_hoy,
+            self.kpi_por_cobrar,
+            self.kpi_por_pagar,
+            self.kpi_productos_alerta,
+        )
         for i, card in enumerate(cards):
             if i > 0:
                 sep = _SeparadorKpi()
@@ -623,9 +670,13 @@ class DashboardPanel(QWidget):
         gv.setContentsMargins(18, 16, 18, 16)
         gv.setSpacing(8)
         lbl_titulo = QLabel("Ventas de la semana")
-        lbl_titulo.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;"
+        )
         lbl_subtitulo = QLabel("Total facturado por día, últimos 7 días")
-        lbl_subtitulo.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
+        lbl_subtitulo.setStyleSheet(
+            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;"
+        )
         self.grafico_ventas = VentasSemanaChart()
         self.etiquetas_dias = EtiquetasDiasSemana()
         gv.addWidget(lbl_titulo)
@@ -639,9 +690,13 @@ class DashboardPanel(QWidget):
         cv.setContentsMargins(18, 16, 18, 16)
         cv.setSpacing(4)
         lbl_titulo_cajas = QLabel("Cajas activas")
-        lbl_titulo_cajas.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
+        lbl_titulo_cajas.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;"
+        )
         lbl_subtitulo_cajas = QLabel("Estado de turnos abiertos hoy")
-        lbl_subtitulo_cajas.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
+        lbl_subtitulo_cajas.setStyleSheet(
+            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;"
+        )
         self.cajas_lista = ListaFilasAjustable()
         cv.addWidget(lbl_titulo_cajas)
         cv.addWidget(lbl_subtitulo_cajas)
@@ -666,7 +721,9 @@ class DashboardPanel(QWidget):
         fv.setContentsMargins(18, 16, 18, 16)
         fv.setSpacing(4)
         lbl_titulo = QLabel("Facturas recientes")
-        lbl_titulo.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;"
+        )
 
         btn_ver_mas = QPushButton(" Ver más")
         btn_ver_mas.setIcon(qta.icon("fa5s.arrow-right", color=COLOR_PRIMARY))
@@ -686,7 +743,9 @@ class DashboardPanel(QWidget):
         header_facturas.addWidget(btn_ver_mas)
 
         lbl_subtitulo = QLabel("Últimos movimientos de ventas")
-        lbl_subtitulo.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
+        lbl_subtitulo.setStyleSheet(
+            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;"
+        )
         self.facturas_lista = ListaFilasAjustable()
         fv.addLayout(header_facturas)
         fv.addWidget(lbl_subtitulo)
@@ -698,9 +757,13 @@ class DashboardPanel(QWidget):
         iv.setContentsMargins(18, 16, 18, 16)
         iv.setSpacing(4)
         lbl_titulo_inv = QLabel("Inventario en alerta")
-        lbl_titulo_inv.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;")
+        lbl_titulo_inv.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK}; border: none;"
+        )
         lbl_subtitulo_inv = QLabel("Stock por debajo del mínimo")
-        lbl_subtitulo_inv.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;")
+        lbl_subtitulo_inv.setStyleSheet(
+            f"font-size: 11px; color: {COLOR_TEXT_MUTED}; border: none;"
+        )
         self.inventario_lista = ListaFilasAjustable()
         iv.addWidget(lbl_titulo_inv)
         iv.addWidget(lbl_subtitulo_inv)
@@ -721,7 +784,11 @@ class DashboardPanel(QWidget):
         # y Qt aborta el proceso ("QThread: Destroyed while thread is still running").
         if getattr(self, "_worker", None) is not None and self._worker.isRunning():
             return
-        self._worker = QueryWorker(self.session_factory, _tarea_panel_general, id_usuario=self.usuario.id_usuario)
+        self._worker = QueryWorker(
+            self.session_factory,
+            _tarea_panel_general,
+            id_usuario=self.usuario.id_usuario,
+        )
         self._worker.resultado.connect(self._mostrar_datos)
         self._worker.error.connect(self._mostrar_error)
         self._worker.start()
@@ -739,11 +806,15 @@ class DashboardPanel(QWidget):
 
         por_cobrar = datos["por_cobrar"]
         self.kpi_por_cobrar.set_valor(f"${float(por_cobrar['saldo_total']):,.2f}")
-        self.kpi_por_cobrar.set_detalle(f"{por_cobrar['facturas_vencidas']} facturas vencidas", COLOR_DANGER)
+        self.kpi_por_cobrar.set_detalle(
+            f"{por_cobrar['facturas_vencidas']} facturas vencidas", COLOR_DANGER
+        )
 
         por_pagar = datos["por_pagar"]
         self.kpi_por_pagar.set_valor(f"${float(por_pagar['saldo_total']):,.2f}")
-        self.kpi_por_pagar.set_detalle(f"{por_pagar['compras_vencidas']} compras vencidas", COLOR_DANGER)
+        self.kpi_por_pagar.set_detalle(
+            f"{por_pagar['compras_vencidas']} compras vencidas", COLOR_DANGER
+        )
 
         self.kpi_productos_alerta.set_valor(str(datos["productos_alerta"]))
         # Ya no es solo "bajo el minimo" -- el conteo tambien suma proximos a vencer
@@ -755,13 +826,32 @@ class DashboardPanel(QWidget):
         self.grafico_ventas.set_datos(datos["grafico_semanal"])
         self.etiquetas_dias.set_datos(datos["grafico_semanal"])
 
-        self._poblar_lista(self.cajas_lista, datos["cajas_activas"], FilaCaja, "Ninguna caja abierta hoy")
-        self._poblar_lista(self.facturas_lista, datos["facturas_recientes"], FilaFactura, "Sin facturas registradas")
         self._poblar_lista(
-            self.inventario_lista, datos["inventario_alerta"], FilaInventarioAlerta, "Sin alertas de inventario"
+            self.cajas_lista,
+            datos["cajas_activas"],
+            FilaCaja,
+            "Ninguna caja abierta hoy",
+        )
+        self._poblar_lista(
+            self.facturas_lista,
+            datos["facturas_recientes"],
+            FilaFactura,
+            "Sin facturas registradas",
+        )
+        self._poblar_lista(
+            self.inventario_lista,
+            datos["inventario_alerta"],
+            FilaInventarioAlerta,
+            "Sin alertas de inventario",
         )
 
-    def _poblar_lista(self, lista: ListaFilasAjustable, items: list[dict], clase_fila, texto_vacio: str) -> None:
+    def _poblar_lista(
+        self,
+        lista: ListaFilasAjustable,
+        items: list[dict],
+        clase_fila,
+        texto_vacio: str,
+    ) -> None:
         if not items:
             lista.set_filas([ListaVaciaLabel(texto_vacio)])
             return

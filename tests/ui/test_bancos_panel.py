@@ -10,7 +10,9 @@ import app.ui.bancos_panel as bp
 
 
 def _crear_panel(qtbot, monkeypatch):
-    monkeypatch.setattr(bp.BancoService, "listar_bancos", staticmethod(lambda *a, **k: []))
+    monkeypatch.setattr(
+        bp.BancoService, "listar_bancos", staticmethod(lambda *a, **k: [])
+    )
     monkeypatch.setattr(bp.MessageBox, "critical", lambda *a, **k: None)
     monkeypatch.setattr(bp.MessageBox, "warning", lambda *a, **k: None)
     panel = bp.BancosPanel(MagicMock(), SimpleNamespace(id_usuario=1))

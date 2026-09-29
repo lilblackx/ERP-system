@@ -14,7 +14,12 @@ from app.db.models import (
     NotaCreditoCliente,
 )
 from app.services.auditoria import AuditoriaService
-from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
+from app.services.db_utils import (
+    _es_deadlock,
+    _es_lock_timeout,
+    aplicar_lock_timeout,
+    traducir_error_trigger,
+)
 from app.services.permisos import require_permiso
 from app.utils.decimal_utils import to_decimal
 
@@ -47,7 +52,9 @@ class PagoBCVService:
     ):
         """Núcleo de registrar_pago_cobro_bcv() sin el require_permiso ni el commit/refresh."""
         if (id_cuenta_bancaria is None) == (id_caja is None):
-            raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
+            raise ValueError(
+                "Indique exactamente un origen del pago: cuenta bancaria o caja"
+            )
 
         monto = to_decimal(monto)
         if monto <= 0:
@@ -59,26 +66,34 @@ class PagoBCVService:
         cuenta = session.execute(
             select(CuentaPorCobrarBCV)
             .where(CuentaPorCobrarBCV.id_cuenta_por_cobrar == id_cuenta_por_cobrar)
-            .with_hint(CuentaPorCobrarBCV, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            .with_hint(
+                CuentaPorCobrarBCV, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
+            )
         ).scalar_one_or_none()
         if cuenta is None:
             raise ValueError("Cuenta por cobrar BCV no encontrada")
         if monto > cuenta.saldo_pendiente:
-            raise ValueError(f"El monto {monto} excede el saldo pendiente {cuenta.saldo_pendiente}")
+            raise ValueError(
+                f"El monto {monto} excede el saldo pendiente {cuenta.saldo_pendiente}"
+            )
 
         if id_cuenta_bancaria is not None:
             cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
             if cuenta_bancaria is None:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
-                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+                raise ValueError(
+                    f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva"
+                )
 
         if id_caja is not None:
             caja = session.get(Caja, id_caja)
             if caja is None:
                 raise ValueError("Caja no encontrada")
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+                raise ValueError(
+                    f"La caja '{caja.nombre_caja}' no tiene un turno abierto"
+                )
 
         if fecha_pago is None:
             fecha_pago = datetime.now()
@@ -96,7 +111,9 @@ class PagoBCVService:
         if cuenta.saldo_pendiente <= 0:
             cuenta.estado = "pagada"
             cuenta.saldo_pendiente = Decimal("0.00")
-        elif cuenta.saldo_pendiente < (cuenta.factura.total_venta if cuenta.factura else Decimal("0.00")):
+        elif cuenta.saldo_pendiente < (
+            cuenta.factura.total_venta if cuenta.factura else Decimal("0.00")
+        ):
             cuenta.estado = "parcial"
 
         session.add(cuenta)
@@ -107,7 +124,9 @@ class PagoBCVService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
+                ) from e
             raise ValueError(traducir_error_trigger(e)) from e
         return cuenta
 
@@ -193,7 +212,9 @@ class PagoBCVService:
         hoy = date.today()
         query = (
             session.query(CuentaPorCobrarBCV)
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .join(
+                FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura
+            )
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
         )
         if id_cliente:
@@ -208,16 +229,23 @@ class PagoBCVService:
         elif estado in ("pendiente", "parcial"):
             query = query.filter(
                 CuentaPorCobrarBCV.estado == estado,
-                or_(CuentaPorCobrarBCV.fecha_vencimiento.is_(None), CuentaPorCobrarBCV.fecha_vencimiento >= hoy),
+                or_(
+                    CuentaPorCobrarBCV.fecha_vencimiento.is_(None),
+                    CuentaPorCobrarBCV.fecha_vencimiento >= hoy,
+                ),
             )
         elif estado:
             query = query.filter(CuentaPorCobrarBCV.estado == estado)
 
         total = query.count()
-        logger.info(f"BCV - Listar cuentas: estado filtro={estado}, busqueda={busqueda}, total encontrado={total}")
+        logger.info(
+            f"BCV - Listar cuentas: estado filtro={estado}, busqueda={busqueda}, total encontrado={total}"
+        )
 
         cuentas = (
-            query.options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
+            query.options(
+                joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente)
+            )
             .order_by(CuentaPorCobrarBCV.fecha_vencimiento.desc())
             .offset((pagina - 1) * por_pagina)
             .limit(por_pagina)
@@ -240,7 +268,12 @@ class PagoBCVService:
                 f"estado_visual={cuenta.estado_visual}, saldo={cuenta.saldo_pendiente}"
             )
 
-        return {"items": cuentas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        return {
+            "items": cuentas,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
     def listar_cuentas_por_cobrar_bcv_agrupadas(
@@ -261,14 +294,22 @@ class PagoBCVService:
             session.query(
                 Cliente.id_cliente,
                 Cliente.nombre_razon_social,
-                func.sum(CuentaPorCobrarBCV.saldo_pendiente).label("saldo_pendiente_total"),
+                func.sum(CuentaPorCobrarBCV.saldo_pendiente).label(
+                    "saldo_pendiente_total"
+                ),
                 func.sum(CuentaPorCobrarBCV.saldo_favor).label("saldo_favor_total"),
-                func.count(CuentaPorCobrarBCV.id_cuenta_por_cobrar).label("cantidad_cuentas"),
-                func.min(CuentaPorCobrarBCV.fecha_vencimiento).label("fecha_vencimiento_min"),
+                func.count(CuentaPorCobrarBCV.id_cuenta_por_cobrar).label(
+                    "cantidad_cuentas"
+                ),
+                func.min(CuentaPorCobrarBCV.fecha_vencimiento).label(
+                    "fecha_vencimiento_min"
+                ),
                 func.min(CuentaPorCobrarBCV.fecha_emision).label("fecha_emision_min"),
                 func.min(CuentaPorCobrarBCV.dias_credito).label("dias_credito_min"),
             )
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .join(
+                FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura
+            )
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
             .group_by(Cliente.id_cliente, Cliente.nombre_razon_social)
         )
@@ -288,13 +329,18 @@ class PagoBCVService:
         elif estado in ("pendiente", "parcial"):
             query = query.filter(
                 CuentaPorCobrarBCV.estado == estado,
-                or_(CuentaPorCobrarBCV.fecha_vencimiento.is_(None), CuentaPorCobrarBCV.fecha_vencimiento >= hoy),
+                or_(
+                    CuentaPorCobrarBCV.fecha_vencimiento.is_(None),
+                    CuentaPorCobrarBCV.fecha_vencimiento >= hoy,
+                ),
             )
         elif estado:
             query = query.filter(CuentaPorCobrarBCV.estado == estado)
         else:
             # Por defecto, solo mostrar cuentas pendientes/parciales
-            query = query.filter(CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")))
+            query = query.filter(
+                CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial"))
+            )
 
         # Solo mostrar clientes con saldo pendiente > 0
         query = query.having(func.sum(CuentaPorCobrarBCV.saldo_pendiente) > 0)
@@ -306,7 +352,10 @@ class PagoBCVService:
 
         # Ejecutar query con paginación
         resultados = (
-            query.order_by(Cliente.nombre_razon_social).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+            query.order_by(Cliente.nombre_razon_social)
+            .offset((pagina - 1) * por_pagina)
+            .limit(por_pagina)
+            .all()
         )
 
         # Construir lista de objetos agrupados
@@ -319,8 +368,16 @@ class PagoBCVService:
                 estado_visual = "vencida"
 
             # Crear objeto simple con los datos agrupados
-            saldo_pendiente = Decimal(str(row.saldo_pendiente_total)) if row.saldo_pendiente_total else Decimal("0.00")
-            saldo_favor = Decimal(str(row.saldo_favor_total)) if row.saldo_favor_total else Decimal("0.00")
+            saldo_pendiente = (
+                Decimal(str(row.saldo_pendiente_total))
+                if row.saldo_pendiente_total
+                else Decimal("0.00")
+            )
+            saldo_favor = (
+                Decimal(str(row.saldo_favor_total))
+                if row.saldo_favor_total
+                else Decimal("0.00")
+            )
 
             item = type(
                 "obj",
@@ -342,7 +399,12 @@ class PagoBCVService:
 
         logger.info(f"BCV - Clientes agrupados recuperados: {len(items)}")
 
-        return {"items": items, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        return {
+            "items": items,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
     def aplicar_abono_general_cliente_bcv(
@@ -397,7 +459,9 @@ class PagoBCVService:
             raise ValueError("La tasa de cambio debe ser mayor a cero")
 
         if (id_cuenta_bancaria is None) == (id_caja is None):
-            raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
+            raise ValueError(
+                "Indique exactamente un origen del pago: cuenta bancaria o caja"
+            )
 
         # Validar origen del pago
         if id_cuenta_bancaria is not None:
@@ -405,21 +469,28 @@ class PagoBCVService:
             if cuenta_bancaria is None:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
-                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' está inactiva")
+                raise ValueError(
+                    f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' está inactiva"
+                )
 
         if id_caja is not None:
             caja = session.get(Caja, id_caja)
             if caja is None:
                 raise ValueError("Caja no encontrada")
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+                raise ValueError(
+                    f"La caja '{caja.nombre_caja}' no tiene un turno abierto"
+                )
 
         # Obtener todas las cuentas por cobrar BCV pendientes del cliente
         # Ordenadas por fecha de emisión de la factura (FIFO)
         try:
             cuentas_pendientes = (
                 session.query(CuentaPorCobrarBCV)
-                .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+                .join(
+                    FacturaVenta,
+                    FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura,
+                )
                 .filter(
                     FacturaVenta.id_cliente_factura == id_cliente,
                     CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")),
@@ -428,7 +499,9 @@ class PagoBCVService:
                 .order_by(CuentaPorCobrarBCV.fecha_emision.asc())
                 .all()
             )
-            logger.info(f"BCV - Cuentas pendientes encontradas para cliente {id_cliente}: {len(cuentas_pendientes)}")
+            logger.info(
+                f"BCV - Cuentas pendientes encontradas para cliente {id_cliente}: {len(cuentas_pendientes)}"
+            )
         except Exception as e:
             logger.error(f"BCV - Error al obtener cuentas pendientes: {e}")
             raise ValueError(f"Error al obtener cuentas pendientes: {str(e)}") from e
@@ -465,8 +538,12 @@ class PagoBCVService:
                 monto_aplicar = min(monto_restante, saldo_pendiente)
 
                 # Calcular equivalentes en Bs
-                monto_aplicado_bs = (monto_aplicar * tasa_cambio).quantize(Decimal("0.01"))
-                restante_despues = (monto_restante - monto_aplicar).quantize(Decimal("0.01"))
+                monto_aplicado_bs = (monto_aplicar * tasa_cambio).quantize(
+                    Decimal("0.01")
+                )
+                restante_despues = (monto_restante - monto_aplicar).quantize(
+                    Decimal("0.01")
+                )
                 restante_bs = (restante_despues * tasa_cambio).quantize(Decimal("0.01"))
 
                 # Generar descripción de auditoría con formato exacto esperado por tests
@@ -491,7 +568,9 @@ class PagoBCVService:
                 if cuenta.factura:
                     observaciones_actuales = cuenta.factura.observaciones_factura or ""
                     separador = " | " if observaciones_actuales else ""
-                    nueva_observacion = f"{observaciones_actuales}{separador}{descripcion_auditoria}"
+                    nueva_observacion = (
+                        f"{observaciones_actuales}{separador}{descripcion_auditoria}"
+                    )
 
                     # Truncar a 255 caracteres si es necesario
                     if len(nueva_observacion) > 255:
@@ -502,7 +581,9 @@ class PagoBCVService:
                     {
                         "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
                         "id_factura": cuenta.id_factura,
-                        "numero_factura": cuenta.factura.numero_factura if cuenta.factura else "N/A",
+                        "numero_factura": (
+                            cuenta.factura.numero_factura if cuenta.factura else "N/A"
+                        ),
                         "monto_aplicado": monto_aplicar,
                         "monto_aplicado_bs": monto_aplicado_bs,
                         "saldo_restante_factura": cuenta.saldo_pendiente,
@@ -544,7 +625,9 @@ class PagoBCVService:
                             nota_credito_id,
                         )
                 except Exception as e:
-                    logger.warning("BCV - No se pudo crear nota de crédito por sobreabono: %s", e)
+                    logger.warning(
+                        "BCV - No se pudo crear nota de crédito por sobreabono: %s", e
+                    )
                     # No fallar toda la transacción si falla la nota de crédito
 
             # Commit de la transacción

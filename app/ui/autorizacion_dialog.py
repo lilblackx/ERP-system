@@ -101,7 +101,8 @@ class AutorizacionDialog(QDialog):
     """Tras exec() == Accepted, `usuario_autorizador` y `motivo` quedan poblados.
 
     `recurso`/`accion` son el permiso (app/services/permisos.py) que debe tener el
-    supervisor que autoriza -- p. ej. ("descuentos", "crear") o ("creditos", "crear")."""
+    supervisor que autoriza -- p. ej. ("descuentos", "crear") o ("creditos", "crear").
+    """
 
     def __init__(
         self,
@@ -134,7 +135,9 @@ class AutorizacionDialog(QDialog):
         self.setWindowTitle(titulo)
         self.setFixedSize(420, 320)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._build_ui(mensaje, motivo_label)
         if motivo_max_length is not None:
@@ -147,11 +150,15 @@ class AutorizacionDialog(QDialog):
 
         header = QHBoxLayout()
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon("fa5s.user-shield", color=COLOR_DANGER).pixmap(22, 22))
+        icon_lbl.setPixmap(
+            qta.icon("fa5s.user-shield", color=COLOR_DANGER).pixmap(22, 22)
+        )
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
         lbl_titulo = QLabel(self.windowTitle())
-        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         lbl_subtitulo = QLabel(mensaje)
         lbl_subtitulo.setWordWrap(True)
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
@@ -208,11 +215,17 @@ class AutorizacionDialog(QDialog):
             return
         if len(motivo) < self.motivo_min_length:
             MessageBox.warning(
-                self, "Motivo demasiado corto", f"Debe tener al menos {self.motivo_min_length} caracteres."
+                self,
+                "Motivo demasiado corto",
+                f"Debe tener al menos {self.motivo_min_length} caracteres.",
             )
             return
         if not nombre_usuario or not clave:
-            MessageBox.warning(self, "Credenciales requeridas", "Ingrese usuario y clave del supervisor.")
+            MessageBox.warning(
+                self,
+                "Credenciales requeridas",
+                "Ingrese usuario y clave del supervisor.",
+            )
             return
 
         try:
@@ -228,14 +241,18 @@ class AutorizacionDialog(QDialog):
             return
 
         if usuario is None:
-            MessageBox.warning(self, "Credenciales invalidas", "Usuario o clave incorrectos.")
+            MessageBox.warning(
+                self, "Credenciales invalidas", "Usuario o clave incorrectos."
+            )
             return
 
         try:
             require_permiso(self.session, usuario.id_usuario, self.recurso, self.accion)
         except PermisoDenegadoError:
             MessageBox.warning(
-                self, "Sin permiso", f"'{usuario.nombre_usuario}' no tiene permiso para autorizar esta acción."
+                self,
+                "Sin permiso",
+                f"'{usuario.nombre_usuario}' no tiene permiso para autorizar esta acción.",
             )
             return
 

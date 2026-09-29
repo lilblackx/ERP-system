@@ -76,7 +76,9 @@ COLORES_ESTADO_CUENTA = {
 }
 
 
-def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario) -> list[list]:
+def _filas_cuentas_bancarias_query(
+    session, texto_busqueda, estado_cuenta, id_banco, id_usuario
+) -> list[list]:
     resultado = CuentaBancariaService.listar(
         session,
         texto_busqueda=texto_busqueda,
@@ -110,16 +112,34 @@ def _tarea_exportar_cuentas_bancarias_excel(
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
     de cuentas bancarias a un archivo (openpyxl) es lo bastante lento como para
     congelar la ventana si se hace en el hilo de GUI."""
-    filas = _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario)
+    filas = _filas_cuentas_bancarias_query(
+        session, texto_busqueda, estado_cuenta, id_banco, id_usuario
+    )
     exportar_excel(ruta, COLS_VISIBLES, filas)
     return ruta, len(filas)
 
 
 def _tarea_exportar_cuentas_bancarias_pdf(
-    session, ruta: str, texto_busqueda, estado_cuenta, id_banco, id_usuario, filtros, col_widths
+    session,
+    ruta: str,
+    texto_busqueda,
+    estado_cuenta,
+    id_banco,
+    id_usuario,
+    filtros,
+    col_widths,
 ) -> tuple[str, int]:
-    filas = _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario)
-    exportar_pdf(ruta, "Reporte de Cuentas Bancarias", COLS_VISIBLES, filas, filtros=filtros, col_widths=col_widths)
+    filas = _filas_cuentas_bancarias_query(
+        session, texto_busqueda, estado_cuenta, id_banco, id_usuario
+    )
+    exportar_pdf(
+        ruta,
+        "Reporte de Cuentas Bancarias",
+        COLS_VISIBLES,
+        filas,
+        filtros=filtros,
+        col_widths=col_widths,
+    )
     return ruta, len(filas)
 
 
@@ -161,7 +181,9 @@ class CuentasBancariasPanel(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
 
         lbl_titulo = QLabel("Cuentas Bancarias")
-        lbl_titulo.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -186,9 +208,12 @@ class CuentasBancariasPanel(QWidget):
         toolbar_layout.setSpacing(10)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Buscar por número, titular o identificación…")
+        self.search_input.setPlaceholderText(
+            "Buscar por número, titular o identificación…"
+        )
         self.search_input.addAction(
-            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
         )
         self.search_input.setObjectName("SearchInput")
         self.search_input.setStyleSheet(SEARCH_QSS)
@@ -214,10 +239,14 @@ class CuentasBancariasPanel(QWidget):
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._on_estado_cambiado)
 
-        self.btn_filtrar = BotonFiltros([("Banco", self.banco_combo), ("Estado", self.estado_combo)])
+        self.btn_filtrar = BotonFiltros(
+            [("Banco", self.banco_combo), ("Estado", self.estado_combo)]
+        )
         toolbar_layout.addWidget(self.btn_filtrar)
 
-        self.btn_exportar = BotonExportar(on_excel=self._exportar_excel, on_pdf=self._exportar_pdf)
+        self.btn_exportar = BotonExportar(
+            on_excel=self._exportar_excel, on_pdf=self._exportar_pdf
+        )
         toolbar_layout.addWidget(self.btn_exportar)
 
         layout.addWidget(toolbar)
@@ -245,8 +274,12 @@ class CuentasBancariasPanel(QWidget):
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.table)
         self.table.verticalHeader().setDefaultSectionSize(45)
@@ -259,7 +292,9 @@ class CuentasBancariasPanel(QWidget):
         footer_layout.setSpacing(12)
 
         self.lbl_paginacion = QLabel("Mostrando 0 de 0 registros")
-        self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
+        self.lbl_paginacion.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 13px;"
+        )
         footer_layout.addWidget(self.lbl_paginacion)
 
         btn_anterior = QPushButton()
@@ -270,7 +305,9 @@ class CuentasBancariasPanel(QWidget):
         footer_layout.addWidget(btn_anterior)
 
         self.lbl_pagina_actual = QLabel("Página 1")
-        self.lbl_pagina_actual.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 13px; font-weight: 600;")
+        self.lbl_pagina_actual.setStyleSheet(
+            f"color: {COLOR_TEXT_DARK}; font-size: 13px; font-weight: 600;"
+        )
         footer_layout.addWidget(self.lbl_pagina_actual)
 
         btn_siguiente = QPushButton()
@@ -290,7 +327,9 @@ class CuentasBancariasPanel(QWidget):
         footer_layout.addWidget(btn_conciliacion)
 
         btn_ver_movimientos = QPushButton("Ver movimientos")
-        btn_ver_movimientos.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_DARK))
+        btn_ver_movimientos.setIcon(
+            qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_DARK)
+        )
         btn_ver_movimientos.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_ver_movimientos.clicked.connect(self._on_ver_movimientos)
         footer_layout.addWidget(btn_ver_movimientos)
@@ -321,12 +360,16 @@ class CuentasBancariasPanel(QWidget):
         auditoria que bancos_panel.py, 2026-09-02)."""
         session = self.session_factory()
         try:
-            bancos = BancoService.listar_bancos(session, id_usuario=self.usuario.id_usuario)
+            bancos = BancoService.listar_bancos(
+                session, id_usuario=self.usuario.id_usuario
+            )
             self.banco_combo.clear()
             self.banco_combo.addItem("Todos los bancos")
             for banco in bancos:
                 if banco.estado_banco == "ACTIVO":
-                    self.banco_combo.addItem(f"{banco.nombre_banco} ({banco.codigo_banco})", banco.id_banco)
+                    self.banco_combo.addItem(
+                        f"{banco.nombre_banco} ({banco.codigo_banco})", banco.id_banco
+                    )
         except PermisoDenegadoError:
             pass
         finally:
@@ -354,14 +397,22 @@ class CuentasBancariasPanel(QWidget):
             self._total_registros = 0
             self._actualizar_tabla()
             self._actualizar_paginacion()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas bancarias.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar cuentas bancarias.",
+            )
         except Exception:
             logger.exception("Fallo al cargar la lista de cuentas bancarias")
             self._cuentas = []
             self._total_registros = 0
             self._actualizar_tabla()
             self._actualizar_paginacion()
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de cuentas bancarias.")
+            MessageBox.critical(
+                self,
+                "Error de conexión",
+                "No se pudo cargar la lista de cuentas bancarias.",
+            )
         finally:
             session.close()
 
@@ -372,19 +423,39 @@ class CuentasBancariasPanel(QWidget):
             self.table.insertRow(row)
 
             self.table.setItem(row, 0, QTableWidgetItem(str(cuenta.id_cuenta)))
-            self.table.setItem(row, 1, QTableWidgetItem(cuenta.banco.nombre_banco if cuenta.banco else "N/A"))
-            self.table.setItem(row, 2, QTableWidgetItem(_enmascarar_numero_cuenta(cuenta.numero_cuenta) or "N/A"))
-            self.table.setItem(row, 3, QTableWidgetItem(cuenta.tipo_cuenta_banco or "N/A"))
+            self.table.setItem(
+                row,
+                1,
+                QTableWidgetItem(cuenta.banco.nombre_banco if cuenta.banco else "N/A"),
+            )
+            self.table.setItem(
+                row,
+                2,
+                QTableWidgetItem(
+                    _enmascarar_numero_cuenta(cuenta.numero_cuenta) or "N/A"
+                ),
+            )
+            self.table.setItem(
+                row, 3, QTableWidgetItem(cuenta.tipo_cuenta_banco or "N/A")
+            )
             self.table.setItem(row, 4, QTableWidgetItem(cuenta.nombre_titular or "N/A"))
-            self.table.setItem(row, 5, QTableWidgetItem(cuenta.identificacion_titular or "N/A"))
+            self.table.setItem(
+                row, 5, QTableWidgetItem(cuenta.identificacion_titular or "N/A")
+            )
             item_saldo = QTableWidgetItem(f"${float(cuenta.saldo_total_banco):,.2f}")
-            item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_saldo.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.table.setItem(row, 6, item_saldo)
 
             # Usar el saldo en BS directamente de la base de datos, no multiplicar por tasa
             saldo_bs = float(cuenta.saldo_total_banco_bs or 0)
-            item_saldo_bs = QTableWidgetItem(f"{saldo_bs:,.2f}" if saldo_bs > 0 else "0.00")
-            item_saldo_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_saldo_bs = QTableWidgetItem(
+                f"{saldo_bs:,.2f}" if saldo_bs > 0 else "0.00"
+            )
+            item_saldo_bs.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.table.setItem(row, 7, item_saldo_bs)
 
             estado = cuenta.estado_cuenta or "N/A"
@@ -396,7 +467,9 @@ class CuentasBancariasPanel(QWidget):
         """Actualiza los controles de paginación."""
         inicio = (self._pagina_actual - 1) * self._por_pagina + 1
         fin = min(inicio + self._por_pagina - 1, self._total_registros)
-        self.lbl_paginacion.setText(f"Mostrando {inicio}-{fin} de {self._total_registros} registros")
+        self.lbl_paginacion.setText(
+            f"Mostrando {inicio}-{fin} de {self._total_registros} registros"
+        )
         self.lbl_pagina_actual.setText(f"Página {self._pagina_actual}")
 
     def _on_busqueda_cambiada(self, texto: str):
@@ -430,14 +503,18 @@ class CuentasBancariasPanel(QWidget):
         except IntegrityError:
             session.rollback()
             MessageBox.warning(
-                self, "Dato inválido", "No se pudo guardar la cuenta bancaria: verifica el banco seleccionado."
+                self,
+                "Dato inválido",
+                "No se pudo guardar la cuenta bancaria: verifica el banco seleccionado.",
             )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear cuentas bancarias.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para crear cuentas bancarias."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear cuenta bancaria")
@@ -449,7 +526,9 @@ class CuentasBancariasPanel(QWidget):
         """Abre el diálogo para editar la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
-            MessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona una cuenta de la lista."
+            )
             return
 
         item = self.table.item(row, 0)
@@ -461,31 +540,48 @@ class CuentasBancariasPanel(QWidget):
         try:
             from app.db.models import CuentaBancaria
 
-            cuenta = session.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == cuenta_id).first()
+            cuenta = (
+                session.query(CuentaBancaria)
+                .filter(CuentaBancaria.id_cuenta == cuenta_id)
+                .first()
+            )
             if cuenta is None:
-                MessageBox.warning(self, "No encontrado", "La cuenta bancaria no existe.")
+                MessageBox.warning(
+                    self, "No encontrado", "La cuenta bancaria no existe."
+                )
                 return
 
             dialog = CuentaBancariaFormDialog(session, cuenta, parent=self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 datos = dialog.get_data()
-                CuentaBancariaService.actualizar(session, cuenta.id_cuenta, id_usuario=self.usuario.id_usuario, **datos)
+                CuentaBancariaService.actualizar(
+                    session,
+                    cuenta.id_cuenta,
+                    id_usuario=self.usuario.id_usuario,
+                    **datos,
+                )
                 self._cargar_datos()
         except IntegrityError:
             session.rollback()
             MessageBox.warning(
-                self, "Dato inválido", "No se pudo guardar la cuenta bancaria: verifica el banco seleccionado."
+                self,
+                "Dato inválido",
+                "No se pudo guardar la cuenta bancaria: verifica el banco seleccionado.",
             )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar cuentas bancarias.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para editar cuentas bancarias."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar cuenta bancaria")
-            MessageBox.critical(self, "Error", "No se pudo guardar los cambios de la cuenta bancaria.")
+            MessageBox.critical(
+                self, "Error", "No se pudo guardar los cambios de la cuenta bancaria."
+            )
         finally:
             session.close()
 
@@ -493,7 +589,9 @@ class CuentasBancariasPanel(QWidget):
         """Cambia el estado de la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
-            MessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona una cuenta de la lista."
+            )
             return
 
         item = self.table.item(row, 0)
@@ -506,30 +604,49 @@ class CuentasBancariasPanel(QWidget):
         try:
             from app.db.models import CuentaBancaria
 
-            cuenta = session.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == cuenta_id).first()
+            cuenta = (
+                session.query(CuentaBancaria)
+                .filter(CuentaBancaria.id_cuenta == cuenta_id)
+                .first()
+            )
             if cuenta is None:
-                MessageBox.warning(self, "No encontrado", "La cuenta bancaria no existe.")
+                MessageBox.warning(
+                    self, "No encontrado", "La cuenta bancaria no existe."
+                )
                 return
 
             nuevo_estado = "INACTIVO" if cuenta.estado_cuenta == "ACTIVO" else "ACTIVO"
             respuesta = MessageBox.question(
-                self, "Confirmar", f"¿Cambiar el estado de la cuenta '{cuenta.numero_cuenta}' a {nuevo_estado}?"
+                self,
+                "Confirmar",
+                f"¿Cambiar el estado de la cuenta '{cuenta.numero_cuenta}' a {nuevo_estado}?",
             )
             if respuesta != QMessageBox.StandardButton.Yes:
                 return
 
             CuentaBancariaService.cambiar_estado(
-                session, cuenta.id_cuenta, nuevo_estado, id_usuario=self.usuario.id_usuario
+                session,
+                cuenta.id_cuenta,
+                nuevo_estado,
+                id_usuario=self.usuario.id_usuario,
             )
             self._cargar_datos()
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de cuentas bancarias.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para cambiar el estado de cuentas bancarias.",
+            )
         except Exception:
             session.rollback()
             cuenta_id_log = cuenta.id_cuenta if cuenta else cuenta_id
-            logger.exception("Fallo al cambiar el estado de la cuenta bancaria %s", cuenta_id_log)
-            MessageBox.critical(self, "Error", "No se pudo cambiar el estado de la cuenta bancaria.")
+            logger.exception(
+                "Fallo al cambiar el estado de la cuenta bancaria %s", cuenta_id_log
+            )
+            MessageBox.critical(
+                self, "Error", "No se pudo cambiar el estado de la cuenta bancaria."
+            )
         finally:
             session.close()
 
@@ -538,7 +655,9 @@ class CuentasBancariasPanel(QWidget):
         row = self.table.currentRow()
         if row < 0:
             MessageBox.information(
-                self, "Selección requerida", "Selecciona una cuenta bancaria para ver sus movimientos."
+                self,
+                "Selección requerida",
+                "Selecciona una cuenta bancaria para ver sus movimientos.",
             )
             return
 
@@ -549,10 +668,19 @@ class CuentasBancariasPanel(QWidget):
             dialog.exec()
             self._cargar_datos()
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar movimientos bancarios.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar movimientos bancarios.",
+            )
         except Exception:
-            logger.exception("Fallo al abrir los movimientos de la cuenta bancaria %s", cuenta.id_cuenta)
-            MessageBox.critical(self, "Error", "No se pudo abrir los movimientos de la cuenta.")
+            logger.exception(
+                "Fallo al abrir los movimientos de la cuenta bancaria %s",
+                cuenta.id_cuenta,
+            )
+            MessageBox.critical(
+                self, "Error", "No se pudo abrir los movimientos de la cuenta."
+            )
         finally:
             session.close()
 
@@ -564,10 +692,14 @@ class CuentasBancariasPanel(QWidget):
             dialog.exec()
             self._cargar_datos()
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para conciliar bancos.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para conciliar bancos."
+            )
         except Exception:
             logger.exception("Fallo al abrir la conciliación de bancos")
-            MessageBox.critical(self, "Error", "No se pudo abrir la conciliación de bancos.")
+            MessageBox.critical(
+                self, "Error", "No se pudo abrir la conciliación de bancos."
+            )
         finally:
             session.close()
 
@@ -579,7 +711,9 @@ class CuentasBancariasPanel(QWidget):
 
     def _on_pagina_siguiente(self):
         """Avanza a la página siguiente."""
-        total_paginas = (self._total_registros + self._por_pagina - 1) // self._por_pagina
+        total_paginas = (
+            self._total_registros + self._por_pagina - 1
+        ) // self._por_pagina
         if self._pagina_actual < total_paginas:
             self._pagina_actual += 1
             self._cargar_datos()
@@ -593,10 +727,16 @@ class CuentasBancariasPanel(QWidget):
         }
 
     def _exportar_excel(self):
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+        if (
+            getattr(self, "_worker_export", None) is not None
+            and self._worker_export.isRunning()
+        ):
             return
         ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar cuentas bancarias", "cuentas_bancarias.xlsx", "Excel (*.xlsx)"
+            self,
+            "Exportar cuentas bancarias",
+            "cuentas_bancarias.xlsx",
+            "Excel (*.xlsx)",
         )
         if not ruta:
             return
@@ -613,7 +753,10 @@ class CuentasBancariasPanel(QWidget):
         self._worker_export.start()
 
     def _exportar_pdf(self):
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+        if (
+            getattr(self, "_worker_export", None) is not None
+            and self._worker_export.isRunning()
+        ):
             return
         ruta, _ = QFileDialog.getSaveFileName(
             self, "Exportar cuentas bancarias", "cuentas_bancarias.pdf", "PDF (*.pdf)"
@@ -645,12 +788,18 @@ class CuentasBancariasPanel(QWidget):
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
         self.btn_exportar.setEnabled(True)
         ruta, cantidad = resultado
-        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} cuentas bancarias a:\n{ruta}")
+        MessageBox.information(
+            self,
+            "Exportación completa",
+            f"Se exportaron {cantidad} cuentas bancarias a:\n{ruta}",
+        )
 
     def _on_exportar_error(self, mensaje: str) -> None:
         self.btn_exportar.setEnabled(True)
         logger.error("Fallo al exportar cuentas bancarias: %s", mensaje)
-        MessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
+        MessageBox.critical(
+            self, "Error", "No se pudo exportar la lista de cuentas bancarias."
+        )
 
     def closeEvent(self, event):
         """Detiene el timer de auto-refresh cuando se cierra el panel."""

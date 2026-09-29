@@ -23,7 +23,13 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import QLineEdit
 
-from app.ui.styles import COLOR_BORDER, COLOR_DANGER, COLOR_PRIMARY, COLOR_TEXT_DARK, COLOR_WHITE
+from app.ui.styles import (
+    COLOR_BORDER,
+    COLOR_DANGER,
+    COLOR_PRIMARY,
+    COLOR_TEXT_DARK,
+    COLOR_WHITE,
+)
 
 
 def _as_decimal(value, default=Decimal("0")):
@@ -60,11 +66,31 @@ class NumericFieldType(Enum):
 # (ej. cantidad_solicitada de compra_oc_detalle usa 4 decimales en vez de los 2 de
 # QUANTITY, ver app/db/models.py).
 _DEFAULTS: dict[NumericFieldType, dict[str, object]] = {
-    NumericFieldType.AMOUNT: {"decimals": 2, "min_value": Decimal("0"), "max_value": Decimal("999999999.99")},
-    NumericFieldType.QUANTITY: {"decimals": 2, "min_value": Decimal("0"), "max_value": Decimal("999999.99")},
-    NumericFieldType.PERCENTAGE: {"decimals": 2, "min_value": Decimal("0"), "max_value": Decimal("100")},
-    NumericFieldType.COUNT: {"decimals": 0, "min_value": Decimal("0"), "max_value": Decimal("999999")},
-    NumericFieldType.RATE: {"decimals": 2, "min_value": Decimal("0.01"), "max_value": Decimal("999999")},
+    NumericFieldType.AMOUNT: {
+        "decimals": 2,
+        "min_value": Decimal("0"),
+        "max_value": Decimal("999999999.99"),
+    },
+    NumericFieldType.QUANTITY: {
+        "decimals": 2,
+        "min_value": Decimal("0"),
+        "max_value": Decimal("999999.99"),
+    },
+    NumericFieldType.PERCENTAGE: {
+        "decimals": 2,
+        "min_value": Decimal("0"),
+        "max_value": Decimal("100"),
+    },
+    NumericFieldType.COUNT: {
+        "decimals": 0,
+        "min_value": Decimal("0"),
+        "max_value": Decimal("999999"),
+    },
+    NumericFieldType.RATE: {
+        "decimals": 2,
+        "min_value": Decimal("0.01"),
+        "max_value": Decimal("999999"),
+    },
 }
 
 
@@ -90,7 +116,8 @@ def _formatear(valor: Decimal, decimals: int, agrupar: bool) -> str:
 def _parse_raw(texto: str, decimals: int) -> Decimal | None:
     """Parsea texto crudo tecleado por el usuario -- el validador nunca deja pasar mas de
     un separador (',' o '.', cualquiera de los dos vale como decimal mientras se tipea),
-    asi que a diferencia de get_value() esto no necesita distinguir agrupador de miles."""
+    asi que a diferencia de get_value() esto no necesita distinguir agrupador de miles.
+    """
     texto = texto.strip()
     if not texto or texto == "-":
         return None
@@ -107,7 +134,11 @@ def _parse_raw(texto: str, decimals: int) -> Decimal | None:
         valor = Decimal(cuerpo)
     except InvalidOperation:
         return None
-    valor = valor.to_integral_value() if decimals == 0 else valor.quantize(Decimal(1).scaleb(-decimals))
+    valor = (
+        valor.to_integral_value()
+        if decimals == 0
+        else valor.quantize(Decimal(1).scaleb(-decimals))
+    )
     return -valor if negativo else valor
 
 
@@ -292,7 +323,9 @@ class NumericLineEdit(QLineEdit):
         self._value = valor
         self.setStyleSheet(self._ESTILO_ERROR if fuera_de_rango else self._ESTILO_BASE)
         if fuera_de_rango:
-            super().setToolTip(f"Ajustado al rango permitido: {self.min_value} - {self.max_value}")
+            super().setToolTip(
+                f"Ajustado al rango permitido: {self.min_value} - {self.max_value}"
+            )
         else:
             super().setToolTip(self._tooltip_normal)
         self.valueChanged.emit(self._value)
@@ -312,7 +345,9 @@ class NumericLineEdit(QLineEdit):
         if self._value is None:
             super().setText("")
             return
-        super().setText(f"{self.prefix}{_formatear(self._value, self.decimals, agrupar=True)}{self.suffix}")
+        super().setText(
+            f"{self.prefix}{_formatear(self._value, self.decimals, agrupar=True)}{self.suffix}"
+        )
 
     def get_value(self) -> Decimal | None:
         return _as_decimal(self._value, default=None)
@@ -327,7 +362,9 @@ class NumericLineEdit(QLineEdit):
             if self.max_value is not None and valor > self.max_value:
                 valor = self.max_value
             self._value = (
-                valor.quantize(Decimal(1).scaleb(-self.decimals)) if self.decimals else valor.to_integral_value()
+                valor.quantize(Decimal(1).scaleb(-self.decimals))
+                if self.decimals
+                else valor.to_integral_value()
             )
         self._refresh_display()
         self.setStyleSheet(self._ESTILO_BASE)

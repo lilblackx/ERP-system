@@ -115,13 +115,18 @@ def test_authenticate_accion_exito_personalizada(db_session):
     admin = crear_usuario_admin(db_session)
     _crear_usuario_activo(db_session)
 
-    authenticate(db_session, "jperez", "Secreta123", accion_exito="AUTORIZACION_DESCUENTO")
+    authenticate(
+        db_session, "jperez", "Secreta123", accion_exito="AUTORIZACION_DESCUENTO"
+    )
 
     sin_login = AuditoriaService.consultar_auditoria(
         db_session, modulo="AUTH", accion="LOGIN", id_usuario_actor=admin.id_usuario
     )
     con_accion_custom = AuditoriaService.consultar_auditoria(
-        db_session, modulo="AUTH", accion="AUTORIZACION_DESCUENTO", id_usuario_actor=admin.id_usuario
+        db_session,
+        modulo="AUTH",
+        accion="AUTORIZACION_DESCUENTO",
+        id_usuario_actor=admin.id_usuario,
     )
     assert sin_login["total"] == 0
     assert con_accion_custom["total"] == 1
@@ -131,13 +136,21 @@ def test_authenticate_accion_fallo_personalizada(db_session):
     admin = crear_usuario_admin(db_session)
     _crear_usuario_activo(db_session)
 
-    authenticate(db_session, "jperez", "ClaveMala", accion_fallo="AUTORIZACION_DESCUENTO_FALLIDA")
+    authenticate(
+        db_session, "jperez", "ClaveMala", accion_fallo="AUTORIZACION_DESCUENTO_FALLIDA"
+    )
 
     sin_login_fallido = AuditoriaService.consultar_auditoria(
-        db_session, modulo="AUTH", accion="LOGIN_FALLIDO", id_usuario_actor=admin.id_usuario
+        db_session,
+        modulo="AUTH",
+        accion="LOGIN_FALLIDO",
+        id_usuario_actor=admin.id_usuario,
     )
     con_accion_custom = AuditoriaService.consultar_auditoria(
-        db_session, modulo="AUTH", accion="AUTORIZACION_DESCUENTO_FALLIDA", id_usuario_actor=admin.id_usuario
+        db_session,
+        modulo="AUTH",
+        accion="AUTORIZACION_DESCUENTO_FALLIDA",
+        id_usuario_actor=admin.id_usuario,
     )
     assert sin_login_fallido["total"] == 0
     assert con_accion_custom["total"] == 1
@@ -153,7 +166,10 @@ def test_authenticate_fallido_registra_auditoria_login_fallido(db_session):
     authenticate(db_session, "jperez", "ClaveMala")
 
     resultado = AuditoriaService.consultar_auditoria(
-        db_session, modulo="AUTH", accion="LOGIN_FALLIDO", id_usuario_actor=admin.id_usuario
+        db_session,
+        modulo="AUTH",
+        accion="LOGIN_FALLIDO",
+        id_usuario_actor=admin.id_usuario,
     )
     assert resultado["total"] == 1
 
@@ -248,7 +264,8 @@ def test_validar_password_policy_rechaza_clave_mas_larga_que_72_bytes():
 
 def test_authenticate_bloqueado_no_verifica_clave_correcta(db_session):
     """Mientras la cuenta esta bloqueada, ni siquiera una clave correcta debe pasar --
-    de lo contrario el bloqueo seria inutil (bastaria con la clave real para saltarselo)."""
+    de lo contrario el bloqueo seria inutil (bastaria con la clave real para saltarselo).
+    """
     usuario = _crear_usuario_activo(db_session)
     for _ in range(MAX_INTENTOS_FALLIDOS):
         authenticate(db_session, "jperez", "ClaveMala")

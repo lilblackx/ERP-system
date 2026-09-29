@@ -29,7 +29,9 @@ from app.ui.styles import (
 class MovimientosCuentaDialog(QDialog):
     """Diálogo para ver los movimientos de una cuenta bancaria."""
 
-    def __init__(self, session: Session, cuenta: CuentaBancaria, usuario: Usuario, parent=None):
+    def __init__(
+        self, session: Session, cuenta: CuentaBancaria, usuario: Usuario, parent=None
+    ):
         super().__init__(parent)
         self.session = session
         self.cuenta = cuenta
@@ -39,7 +41,9 @@ class MovimientosCuentaDialog(QDialog):
         self.setWindowTitle(f"Movimientos - {cuenta.numero_cuenta}")
         self.setFixedSize(900, 600)
         self.setStyleSheet(TABLE_QSS)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._build_ui()
         self._cargar_movimientos()
@@ -56,7 +60,9 @@ class MovimientosCuentaDialog(QDialog):
         header_layout.setSpacing(12)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(28, 28))
+        icon_lbl.setPixmap(
+            qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(28, 28)
+        )
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 2px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 10px; padding: 8px;"
@@ -69,9 +75,13 @@ class MovimientosCuentaDialog(QDialog):
 
         banco_nombre = self.cuenta.banco.nombre_banco if self.cuenta.banco else "N/A"
         lbl_titulo = QLabel(f"Movimientos - {self.cuenta.numero_cuenta}")
-        lbl_titulo.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
-        lbl_subtitulo = QLabel(f"Banco: {banco_nombre} | Saldo Actual: ${float(self.cuenta.saldo_total_banco):,.2f}")
+        lbl_subtitulo = QLabel(
+            f"Banco: {banco_nombre} | Saldo Actual: ${float(self.cuenta.saldo_total_banco):,.2f}"
+        )
         lbl_subtitulo.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_MUTED};")
 
         titles_layout.addWidget(lbl_titulo)
@@ -136,19 +146,27 @@ class MovimientosCuentaDialog(QDialog):
         footer_layout.setSpacing(12)
 
         self.lbl_total_entradas = QLabel("Total Entradas: $0.00")
-        self.lbl_total_entradas.setStyleSheet("color: #16A34A; font-size: 13px; font-weight: 600;")
+        self.lbl_total_entradas.setStyleSheet(
+            "color: #16A34A; font-size: 13px; font-weight: 600;"
+        )
         footer_layout.addWidget(self.lbl_total_entradas)
 
         self.lbl_total_salidas = QLabel("Total Salidas: $0.00")
-        self.lbl_total_salidas.setStyleSheet("color: #DC2626; font-size: 13px; font-weight: 600;")
+        self.lbl_total_salidas.setStyleSheet(
+            "color: #DC2626; font-size: 13px; font-weight: 600;"
+        )
         footer_layout.addWidget(self.lbl_total_salidas)
 
         self.lbl_total_entradas_bs = QLabel("Total Entradas BS: 0.00")
-        self.lbl_total_entradas_bs.setStyleSheet("color: #16A34A; font-size: 13px; font-weight: 600;")
+        self.lbl_total_entradas_bs.setStyleSheet(
+            "color: #16A34A; font-size: 13px; font-weight: 600;"
+        )
         footer_layout.addWidget(self.lbl_total_entradas_bs)
 
         self.lbl_total_salidas_bs = QLabel("Total Salidas BS: 0.00")
-        self.lbl_total_salidas_bs.setStyleSheet("color: #DC2626; font-size: 13px; font-weight: 600;")
+        self.lbl_total_salidas_bs.setStyleSheet(
+            "color: #DC2626; font-size: 13px; font-weight: 600;"
+        )
         footer_layout.addWidget(self.lbl_total_salidas_bs)
 
         footer_layout.addStretch()
@@ -166,7 +184,9 @@ class MovimientosCuentaDialog(QDialog):
     def _cargar_movimientos(self):
         """Carga los movimientos de la cuenta bancaria."""
         self._movimientos = BancoMovimientoService.listar(
-            self.session, id_cuenta=self.cuenta.id_cuenta, id_usuario=self.usuario.id_usuario
+            self.session,
+            id_cuenta=self.cuenta.id_cuenta,
+            id_usuario=self.usuario.id_usuario,
         )
         self._actualizar_tabla()
         self._calcular_totales()
@@ -178,7 +198,11 @@ class MovimientosCuentaDialog(QDialog):
             self.table.insertRow(row)
 
             # Fecha
-            fecha_str = movimiento.fecha_movimiento.strftime("%d/%m/%Y %H:%M") if movimiento.fecha_movimiento else "N/A"
+            fecha_str = (
+                movimiento.fecha_movimiento.strftime("%d/%m/%Y %H:%M")
+                if movimiento.fecha_movimiento
+                else "N/A"
+            )
             self.table.setItem(row, 0, QTableWidgetItem(fecha_str))
 
             # Tipo
@@ -190,21 +214,35 @@ class MovimientosCuentaDialog(QDialog):
             self.table.setItem(row, 1, tipo_item)
 
             # Monto
-            monto_str = f"${float(movimiento.monto_movimiento):,.2f}" if movimiento.monto_movimiento else "$0.00"
+            monto_str = (
+                f"${float(movimiento.monto_movimiento):,.2f}"
+                if movimiento.monto_movimiento
+                else "$0.00"
+            )
             item_monto = QTableWidgetItem(monto_str)
-            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_monto.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.table.setItem(row, 2, item_monto)
 
             # Monto BS
             monto_bs = 0.0
             if movimiento.monto_bolivares:
                 monto_bs = float(movimiento.monto_bolivares)
-            elif movimiento.monto_movimiento and movimiento.tasa_cambio and movimiento.tasa_cambio > 0:
-                monto_bs = float(movimiento.monto_movimiento) * float(movimiento.tasa_cambio)
+            elif (
+                movimiento.monto_movimiento
+                and movimiento.tasa_cambio
+                and movimiento.tasa_cambio > 0
+            ):
+                monto_bs = float(movimiento.monto_movimiento) * float(
+                    movimiento.tasa_cambio
+                )
 
             monto_bs_str = f"{monto_bs:,.2f}" if monto_bs > 0 else "0.00"
             item_monto_bs = QTableWidgetItem(monto_bs_str)
-            item_monto_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_monto_bs.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.table.setItem(row, 3, item_monto_bs)
 
             # Tasa
@@ -213,7 +251,9 @@ class MovimientosCuentaDialog(QDialog):
             else:
                 tasa_str = "N/A"
             item_tasa = QTableWidgetItem(tasa_str)
-            item_tasa.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_tasa.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.table.setItem(row, 4, item_tasa)
 
             # Origen (Cliente, Proveedor, Comisión, Manual, Otro)
@@ -227,10 +267,14 @@ class MovimientosCuentaDialog(QDialog):
             self.table.setItem(row, 5, QTableWidgetItem(origen))
 
             # Referencia
-            self.table.setItem(row, 6, QTableWidgetItem(movimiento.referencia_movimiento or "N/A"))
+            self.table.setItem(
+                row, 6, QTableWidgetItem(movimiento.referencia_movimiento or "N/A")
+            )
 
             # Descripción
-            self.table.setItem(row, 7, QTableWidgetItem(movimiento.descripcion_movimiento or "N/A"))
+            self.table.setItem(
+                row, 7, QTableWidgetItem(movimiento.descripcion_movimiento or "N/A")
+            )
 
             # Usuario
             nombre_usuario = movimiento.creador.nombre if movimiento.creador else "N/A"
@@ -265,8 +309,14 @@ class MovimientosCuentaDialog(QDialog):
             monto_bs = 0.0
             if movimiento.monto_bolivares:
                 monto_bs = float(movimiento.monto_bolivares)
-            elif movimiento.monto_movimiento and movimiento.tasa_cambio and movimiento.tasa_cambio > 0:
-                monto_bs = float(movimiento.monto_movimiento) * float(movimiento.tasa_cambio)
+            elif (
+                movimiento.monto_movimiento
+                and movimiento.tasa_cambio
+                and movimiento.tasa_cambio > 0
+            ):
+                monto_bs = float(movimiento.monto_movimiento) * float(
+                    movimiento.tasa_cambio
+                )
 
             if movimiento.tipo_movimiento == "abono":
                 total_entradas_bs += monto_bs
@@ -275,5 +325,7 @@ class MovimientosCuentaDialog(QDialog):
 
         self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
         self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
-        self.lbl_total_entradas_bs.setText(f"Total Entradas BS: {total_entradas_bs:,.2f}")
+        self.lbl_total_entradas_bs.setText(
+            f"Total Entradas BS: {total_entradas_bs:,.2f}"
+        )
         self.lbl_total_salidas_bs.setText(f"Total Salidas BS: {total_salidas_bs:,.2f}")

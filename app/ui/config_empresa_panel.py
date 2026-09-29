@@ -119,7 +119,9 @@ class ConfigEmpresaPanel(QWidget):
         logo_btn_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         lbl_logo_hint = QLabel("Formatos soportados: PNG, JPG")
-        lbl_logo_hint.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; border: none; background: transparent;")
+        lbl_logo_hint.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; border: none; background: transparent;"
+        )
 
         btn_seleccionar_logo = QPushButton("Seleccionar Logo")
         btn_seleccionar_logo.setStyleSheet(BUTTON_SECONDARY_QSS)
@@ -167,9 +169,7 @@ class ConfigEmpresaPanel(QWidget):
         self.direccion_input = _crear_input("Dirección principal")
         self.telefono_input = _crear_input("Ej: +58 412 1234567")
 
-        lbl_style = (
-            f"font-weight: bold; color: {COLOR_TEXT_DARK}; font-size: 14px; border: none; background: transparent;"
-        )
+        lbl_style = f"font-weight: bold; color: {COLOR_TEXT_DARK}; font-size: 14px; border: none; background: transparent;"
 
         lbl_rif = QLabel("RF Empresa:")
         lbl_rif.setStyleSheet(lbl_style)
@@ -184,7 +184,9 @@ class ConfigEmpresaPanel(QWidget):
         lbl_telefono.setStyleSheet(lbl_style)
 
         self.footer_input = QTextEdit()
-        self.footer_input.setPlaceholderText("Texto libre al pie de cada factura (ej. datos bancarios, garantía)")
+        self.footer_input.setPlaceholderText(
+            "Texto libre al pie de cada factura (ej. datos bancarios, garantía)"
+        )
         self.footer_input.setMaximumHeight(70)
         self.footer_input.setStyleSheet(f"""
             QTextEdit {{
@@ -216,9 +218,13 @@ class ConfigEmpresaPanel(QWidget):
         iva_layout.setSpacing(12)
 
         self.iva_activo_check = QCheckBox("Aplicar IVA en las facturas")
-        self.iva_activo_check.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 14px; background: transparent;")
+        self.iva_activo_check.setStyleSheet(
+            f"color: {COLOR_TEXT_DARK}; font-size: 14px; background: transparent;"
+        )
 
-        self.iva_porcentaje_input = NumericLineEdit(NumericFieldType.PERCENTAGE, suffix=" %")
+        self.iva_porcentaje_input = NumericLineEdit(
+            NumericFieldType.PERCENTAGE, suffix=" %"
+        )
         self.iva_porcentaje_input.set_value(Decimal("16.00"))
         self.iva_porcentaje_input.setFixedWidth(110)
         self.iva_porcentaje_input.setMinimumHeight(38)
@@ -351,12 +357,16 @@ class ConfigEmpresaPanel(QWidget):
         self.impresora_combo.clear()
         self.impresora_combo.addItem("Ninguna (no imprimir automáticamente)")
 
-        nombres_disponibles = [p.printerName() for p in QPrinterInfo.availablePrinters()]
+        nombres_disponibles = [
+            p.printerName() for p in QPrinterInfo.availablePrinters()
+        ]
         for nombre in nombres_disponibles:
             self.impresora_combo.addItem(nombre, nombre)
 
         if seleccionada and seleccionada not in nombres_disponibles:
-            self.impresora_combo.addItem(f"{seleccionada} (no disponible)", seleccionada)
+            self.impresora_combo.addItem(
+                f"{seleccionada} (no disponible)", seleccionada
+            )
 
         idx = self.impresora_combo.findData(seleccionada)
         self.impresora_combo.setCurrentIndex(idx if idx >= 0 else 0)
@@ -365,7 +375,9 @@ class ConfigEmpresaPanel(QWidget):
     def cargar_datos(self) -> None:
         session = self.session_factory()
         try:
-            config = EmpresaService.obtener_configuracion(session, self.usuario.id_usuario)
+            config = EmpresaService.obtener_configuracion(
+                session, self.usuario.id_usuario
+            )
             if config:
                 self.rif_input.setText(config.rif_empresa or "")
                 self.nombre_input.setText(config.razon_social_empresa or "")
@@ -391,7 +403,9 @@ class ConfigEmpresaPanel(QWidget):
             session.close()
 
     def seleccionar_logo(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Logo", "", "Images (*.png *.jpg *.jpeg)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar Logo", "", "Images (*.png *.jpg *.jpeg)"
+        )
         if not file_path:
             return
 
@@ -401,7 +415,9 @@ class ConfigEmpresaPanel(QWidget):
 
             # Validar tamaño (opcional, por ej 2MB max)
             if len(img_data) > 2 * 1024 * 1024:
-                MessageBox.warning(self, "Error", "La imagen es muy pesada. Máximo 2MB.")
+                MessageBox.warning(
+                    self, "Error", "La imagen es muy pesada. Máximo 2MB."
+                )
                 return
 
             # Validar que sea una imagen decodificable ANTES de asignarla a self.logo_bytes
@@ -410,14 +426,20 @@ class ConfigEmpresaPanel(QWidget):
             # _mostrar_logo() solo aborta el *preview* si QImage.fromData() falla, sin
             # impedir el guardado (hallazgo de auditoria, 2026-09-01).
             if QImage.fromData(QByteArray(img_data)).isNull():
-                MessageBox.warning(self, "Archivo inválido", "El archivo seleccionado no es una imagen válida.")
+                MessageBox.warning(
+                    self,
+                    "Archivo inválido",
+                    "El archivo seleccionado no es una imagen válida.",
+                )
                 return
 
             self.logo_bytes = img_data
             self._mostrar_logo(img_data)
         except Exception:
             logger.exception("Fallo al cargar el archivo de logo '%s'", file_path)
-            MessageBox.warning(self, "Error al cargar logo", "No se pudo leer el archivo seleccionado.")
+            MessageBox.warning(
+                self, "Error al cargar logo", "No se pudo leer el archivo seleccionado."
+            )
 
     def borrar_logo(self) -> None:
         self.logo_bytes = None
@@ -429,7 +451,10 @@ class ConfigEmpresaPanel(QWidget):
         img = QImage.fromData(ba)
         if not img.isNull():
             pix = QPixmap.fromImage(img).scaled(
-                120, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+                120,
+                120,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
             self.lbl_logo_preview.setPixmap(pix)
             self.lbl_logo_preview.setText("")
@@ -450,7 +475,9 @@ class ConfigEmpresaPanel(QWidget):
                 impresora_predeterminada=self.impresora_combo.currentData(),
                 modificado_por=self.usuario.id_usuario,
             )
-            MessageBox.information(self, "Éxito", "Configuración guardada correctamente.")
+            MessageBox.information(
+                self, "Éxito", "Configuración guardada correctamente."
+            )
 
             # Actualizamos también en la ventana principal (sidebar)
             main_window = self.window()
@@ -462,10 +489,18 @@ class ConfigEmpresaPanel(QWidget):
 
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar la configuración de empresa.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para editar la configuración de empresa.",
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al guardar la configuración de empresa")
-            MessageBox.critical(self, "Error", "No se pudo guardar la configuración. Intente nuevamente.")
+            MessageBox.critical(
+                self,
+                "Error",
+                "No se pudo guardar la configuración. Intente nuevamente.",
+            )
         finally:
             session.close()

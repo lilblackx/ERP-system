@@ -36,7 +36,9 @@ class CuentaBloqueadaError(Exception):
 
     def __init__(self, bloqueado_desde: datetime):
         self.bloqueado_desde = bloqueado_desde
-        super().__init__("Cuenta bloqueada por intentos fallidos. Solicite un codigo de desbloqueo a su correo.")
+        super().__init__(
+            "Cuenta bloqueada por intentos fallidos. Solicite un codigo de desbloqueo a su correo."
+        )
 
 
 def hash_password(plain: str) -> str:
@@ -59,7 +61,9 @@ def validar_password_policy(password: str) -> None:
     if len(password) < PASSWORD_MIN_LENGTH:
         faltantes.append(f"minimo {PASSWORD_MIN_LENGTH} caracteres")
     if len(password.encode("utf-8")) > PASSWORD_MAX_BYTES:
-        faltantes.append(f"maximo {PASSWORD_MAX_BYTES} bytes (bcrypt no admite claves mas largas)")
+        faltantes.append(
+            f"maximo {PASSWORD_MAX_BYTES} bytes (bcrypt no admite claves mas largas)"
+        )
     if not re.search(r"[A-Z]", password):
         faltantes.append("una mayuscula")
     if not re.search(r"[a-z]", password):
@@ -70,7 +74,11 @@ def validar_password_policy(password: str) -> None:
         faltantes.append("un caracter especial")
 
     if faltantes:
-        raise ValueError("La clave no cumple la politica de seguridad, falta: " + ", ".join(faltantes) + ".")
+        raise ValueError(
+            "La clave no cumple la politica de seguridad, falta: "
+            + ", ".join(faltantes)
+            + "."
+        )
 
 
 def authenticate(
@@ -106,7 +114,11 @@ def authenticate(
 
     if usuario.clave and verify_password(clave, usuario.clave):
         usuario.intentos_fallidos = 0
-        logger.info("Login exitoso: usuario='%s' accion=%s", usuario.nombre_usuario, accion_exito)
+        logger.info(
+            "Login exitoso: usuario='%s' accion=%s",
+            usuario.nombre_usuario,
+            accion_exito,
+        )
         AuditoriaService.registrar_evento(
             session,
             id_usuario=usuario.id_usuario,
@@ -121,7 +133,9 @@ def authenticate(
     if usuario.intentos_fallidos >= MAX_INTENTOS_FALLIDOS:
         usuario.bloqueado_desde = datetime.now()
         logger.warning(
-            "Cuenta '%s' bloqueada tras %d intentos fallidos", usuario.nombre_usuario, usuario.intentos_fallidos
+            "Cuenta '%s' bloqueada tras %d intentos fallidos",
+            usuario.nombre_usuario,
+            usuario.intentos_fallidos,
         )
     else:
         logger.warning(

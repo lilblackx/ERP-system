@@ -30,7 +30,9 @@ def _validar_requeridos(datos: dict) -> None:
         raise ValueError("longitud es requerida")
 
 
-def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | None = None) -> None:
+def _validar_unico(
+    session: Session, campo: str, valor: str, excluir_id: int | None = None
+) -> None:
     query = session.query(Cliente).filter(getattr(Cliente, campo) == valor)
     if excluir_id is not None:
         query = query.filter(Cliente.id_cliente != excluir_id)
@@ -77,7 +79,9 @@ def list_clientes(
     `por_pagina=LIMITE_CATALOGO` y leen `resultado["items"]`, mismo patron que
     ProductoService.buscar()."""
     require_permiso(session, id_usuario, "clientes", "ver")
-    query = session.query(Cliente).options(joinedload(Cliente.vendedor), joinedload(Cliente.categoria))
+    query = session.query(Cliente).options(
+        joinedload(Cliente.vendedor), joinedload(Cliente.categoria)
+    )
     if texto_busqueda:
         # Barra de busqueda unica del listado (ClientesPanel): matchea CUALQUIERA de los
         # datos que se muestran en pantalla -- nombre, identificacion, codigo, email o
@@ -106,7 +110,12 @@ def list_clientes(
 
     total = query.count()
     clientes = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-    return {"items": clientes, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+    return {
+        "items": clientes,
+        "total": total,
+        "pagina": pagina,
+        "por_pagina": por_pagina,
+    }
 
 
 def create_cliente(session: Session, **datos) -> Cliente:
@@ -125,12 +134,17 @@ def create_cliente(session: Session, **datos) -> Cliente:
         id_usuario=cliente.creado_por,
         accion="CREAR_CLIENTE",
         modulo="CLIENTES",
-        detalle={"id_cliente": cliente.id_cliente, "nombre_razon_social": cliente.nombre_razon_social},
+        detalle={
+            "id_cliente": cliente.id_cliente,
+            "nombre_razon_social": cliente.nombre_razon_social,
+        },
     )
     return cliente
 
 
-def update_cliente(session: Session, id_cliente: int, id_usuario: int | None = None, **datos) -> Cliente:
+def update_cliente(
+    session: Session, id_cliente: int, id_usuario: int | None = None, **datos
+) -> Cliente:
     require_permiso(session, id_usuario, "clientes", "editar")
     cliente = session.get(Cliente, id_cliente)
     if cliente is None:
@@ -153,7 +167,12 @@ def update_cliente(session: Session, id_cliente: int, id_usuario: int | None = N
 
     nueva_identificacion = datos.get("identificacion_cliente")
     if nueva_identificacion and nueva_identificacion != cliente.identificacion_cliente:
-        _validar_unico(session, "identificacion_cliente", nueva_identificacion, excluir_id=id_cliente)
+        _validar_unico(
+            session,
+            "identificacion_cliente",
+            nueva_identificacion,
+            excluir_id=id_cliente,
+        )
 
     nueva_latitud = datos["latitud"] if "latitud" in datos else cliente.latitud
     nueva_longitud = datos["longitud"] if "longitud" in datos else cliente.longitud
@@ -180,7 +199,9 @@ def update_cliente(session: Session, id_cliente: int, id_usuario: int | None = N
 # despues, asi que la politica es no permitir el DELETE nunca. Usar
 # cambiar_estado_cliente(..., "INACTIVO") para retirarlo de circulacion preservando el
 # historial. Decision de producto 2026-08-22 (hallazgo de auditoria del mismo dia).
-def delete_cliente(session: Session, id_cliente: int, id_usuario: int | None = None) -> None:
+def delete_cliente(
+    session: Session, id_cliente: int, id_usuario: int | None = None
+) -> None:
     require_permiso(session, id_usuario, "clientes", "eliminar")
     raise ValueError(
         "No se puede eliminar un cliente para proteger la integridad de los datos. "
@@ -212,7 +233,9 @@ def cambiar_estado_cliente(
     return cliente
 
 
-def listar_clientes_por_ruta(session: Session, id_ruta: int, id_usuario: int | None = None) -> list[Cliente]:
+def listar_clientes_por_ruta(
+    session: Session, id_ruta: int, id_usuario: int | None = None
+) -> list[Cliente]:
     """Clientes geolocalizados cuyo vendedor pertenece a la ruta dada -- para pintarlos
     junto al punto de la ruta en el mapa general (app/ui/mapa_rutas_panel.py). El vinculo
     es indirecto (Cliente -> Vendedor -> Ruta): un cliente no se asigna a una ruta

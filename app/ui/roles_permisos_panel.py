@@ -83,7 +83,9 @@ class RolesPermisosPanel(QWidget):
     def _make_card_roles(self) -> QWidget:
         card = QWidget()
         card.setFixedWidth(260)
-        card.setStyleSheet(f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 10px;")
+        card.setStyleSheet(
+            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 10px;"
+        )
         aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
@@ -133,7 +135,9 @@ class RolesPermisosPanel(QWidget):
 
     def _make_card_matriz(self) -> QWidget:
         card = QWidget()
-        card.setStyleSheet(f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 10px;")
+        card.setStyleSheet(
+            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 10px;"
+        )
         aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 12, 16, 14)
@@ -160,7 +164,9 @@ class RolesPermisosPanel(QWidget):
             "cualquier chequeo de permisos, tildar/destildar acá no cambiaría nada."
         )
         self.lbl_aviso_admin.setWordWrap(True)
-        self.lbl_aviso_admin.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; border: none;")
+        self.lbl_aviso_admin.setStyleSheet(
+            f"font-size: 12px; color: {COLOR_TEXT_MUTED}; border: none;"
+        )
         self.lbl_aviso_admin.hide()
         layout.addWidget(self.lbl_aviso_admin)
 
@@ -174,7 +180,9 @@ class RolesPermisosPanel(QWidget):
         self._matriz_layout = QVBoxLayout(self._matriz_content)
         self._matriz_layout.setContentsMargins(0, 4, 0, 0)
         self._matriz_layout.setSpacing(10)
-        self._matriz_layout.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        self._matriz_layout.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        )
 
         scroll.setWidget(self._matriz_content)
         layout.addWidget(scroll, stretch=1)
@@ -202,7 +210,11 @@ class RolesPermisosPanel(QWidget):
                 self._rol_seleccionado_id = None
                 self._render_matriz([], None)
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar roles y permisos.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar roles y permisos.",
+            )
         except Exception:
             logger.exception("Fallo al cargar la lista de roles")
             MessageBox.critical(self, "Error", "No se pudo cargar la lista de roles.")
@@ -223,12 +235,17 @@ class RolesPermisosPanel(QWidget):
         nombre = nombre.strip().upper()
         if not ok or not nombre:
             return
-        descripcion, _ok_desc = QInputDialog.getText(self, "Nuevo rol", "Descripción (opcional):")
+        descripcion, _ok_desc = QInputDialog.getText(
+            self, "Nuevo rol", "Descripción (opcional):"
+        )
 
         session = self.session_factory()
         try:
             RolService.crear_rol(
-                session, nombre=nombre, descripcion=descripcion.strip() or None, id_usuario=self.usuario.id_usuario
+                session,
+                nombre=nombre,
+                descripcion=descripcion.strip() or None,
+                id_usuario=self.usuario.id_usuario,
             )
             self._cargar_roles()
         except ValueError as exc:
@@ -236,7 +253,9 @@ class RolesPermisosPanel(QWidget):
             MessageBox.warning(self, "No se pudo crear el rol", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear roles.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para crear roles."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear el rol")
@@ -247,25 +266,33 @@ class RolesPermisosPanel(QWidget):
     def editar_rol(self) -> None:
         item = self.lista_roles.currentItem()
         if item is None:
-            MessageBox.information(self, "Selección requerida", "Selecciona un rol de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona un rol de la lista."
+            )
             return
         id_rol = item.data(Qt.ItemDataRole.UserRole)
 
-        nombre, ok = QInputDialog.getText(self, "Editar rol", "Nombre del rol:", text=item.text())
+        nombre, ok = QInputDialog.getText(
+            self, "Editar rol", "Nombre del rol:", text=item.text()
+        )
         nombre = nombre.strip().upper()
         if not ok or not nombre:
             return
 
         session = self.session_factory()
         try:
-            RolService.actualizar_rol(session, id_rol, id_usuario=self.usuario.id_usuario, nombre=nombre)
+            RolService.actualizar_rol(
+                session, id_rol, id_usuario=self.usuario.id_usuario, nombre=nombre
+            )
             self._cargar_roles()
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "No se pudo editar el rol", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar roles.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para editar roles."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar el rol %s", id_rol)
@@ -276,12 +303,16 @@ class RolesPermisosPanel(QWidget):
     def eliminar_rol(self) -> None:
         item = self.lista_roles.currentItem()
         if item is None:
-            MessageBox.information(self, "Selección requerida", "Selecciona un rol de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona un rol de la lista."
+            )
             return
         id_rol = item.data(Qt.ItemDataRole.UserRole)
         nombre = item.text()
 
-        respuesta = MessageBox.question(self, "Confirmar", f"¿Eliminar el rol '{nombre}'? No se puede deshacer.")
+        respuesta = MessageBox.question(
+            self, "Confirmar", f"¿Eliminar el rol '{nombre}'? No se puede deshacer."
+        )
         if respuesta != QMessageBox.StandardButton.Yes:
             return
 
@@ -295,7 +326,9 @@ class RolesPermisosPanel(QWidget):
             MessageBox.warning(self, "No se pudo eliminar el rol", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para eliminar roles.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para eliminar roles."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al eliminar el rol %s", id_rol)
@@ -308,13 +341,21 @@ class RolesPermisosPanel(QWidget):
     def _cargar_matriz(self, id_rol: int, nombre_rol: str) -> None:
         session = self.session_factory()
         try:
-            matriz = PermisoService.obtener_matriz_rol(session, id_rol, id_usuario=self.usuario.id_usuario)
+            matriz = PermisoService.obtener_matriz_rol(
+                session, id_rol, id_usuario=self.usuario.id_usuario
+            )
             self._render_matriz(matriz, nombre_rol)
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la matriz de permisos.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar la matriz de permisos.",
+            )
         except Exception:
             logger.exception("Fallo al cargar la matriz de permisos del rol %s", id_rol)
-            MessageBox.critical(self, "Error", "No se pudo cargar la matriz de permisos.")
+            MessageBox.critical(
+                self, "Error", "No se pudo cargar la matriz de permisos."
+            )
         finally:
             session.close()
 
@@ -329,7 +370,9 @@ class RolesPermisosPanel(QWidget):
     def _render_matriz(self, matriz: list[dict], nombre_rol: str | None) -> None:
         self._limpiar_matriz()
         es_admin = nombre_rol == "ADMIN"
-        self.lbl_titulo_matriz.setText(f"Permisos de {nombre_rol}" if nombre_rol else "Seleccione un rol")
+        self.lbl_titulo_matriz.setText(
+            f"Permisos de {nombre_rol}" if nombre_rol else "Seleccione un rol"
+        )
         self.lbl_aviso_admin.setVisible(es_admin)
         self.btn_guardar_matriz.setEnabled(bool(matriz) and not es_admin)
 
@@ -345,7 +388,9 @@ class RolesPermisosPanel(QWidget):
             bloque_layout.setSpacing(4)
 
             lbl_recurso = QLabel(recurso.replace("_", " ").capitalize())
-            lbl_recurso.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK}; border: none;")
+            lbl_recurso.setStyleSheet(
+                f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK}; border: none;"
+            )
             bloque_layout.addWidget(lbl_recurso)
 
             # FlowLayout en vez de una fila de ancho fijo (QGridLayout): un recurso como
@@ -376,23 +421,43 @@ class RolesPermisosPanel(QWidget):
     def guardar_matriz(self) -> None:
         if self._rol_seleccionado_id is None:
             return
-        ids_marcados = [id_permiso for id_permiso, chk in self._checkboxes.items() if chk.isChecked()]
+        ids_marcados = [
+            id_permiso
+            for id_permiso, chk in self._checkboxes.items()
+            if chk.isChecked()
+        ]
 
         session = self.session_factory()
         try:
             PermisoService.establecer_permisos_rol(
-                session, self._rol_seleccionado_id, ids_marcados, id_usuario=self.usuario.id_usuario
+                session,
+                self._rol_seleccionado_id,
+                ids_marcados,
+                id_usuario=self.usuario.id_usuario,
             )
-            MessageBox.information(self, "Permisos guardados", "La matriz de permisos se actualizó correctamente.")
+            MessageBox.information(
+                self,
+                "Permisos guardados",
+                "La matriz de permisos se actualizó correctamente.",
+            )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "No se pudo guardar", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar la matriz de permisos.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para editar la matriz de permisos.",
+            )
         except Exception:
             session.rollback()
-            logger.exception("Fallo al guardar la matriz de permisos del rol %s", self._rol_seleccionado_id)
-            MessageBox.critical(self, "Error", "No se pudo guardar la matriz de permisos.")
+            logger.exception(
+                "Fallo al guardar la matriz de permisos del rol %s",
+                self._rol_seleccionado_id,
+            )
+            MessageBox.critical(
+                self, "Error", "No se pudo guardar la matriz de permisos."
+            )
         finally:
             session.close()

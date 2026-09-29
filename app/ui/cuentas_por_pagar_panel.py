@@ -194,7 +194,9 @@ class PagoProveedorDialog(QDialog):
         self.setWindowTitle("Pagar a Proveedor")
         self.setFixedSize(420, 550)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
         self._build_ui()
         self._cargar_origenes()
         self._cargar_tasas()
@@ -207,8 +209,12 @@ class PagoProveedorDialog(QDialog):
         root.setSpacing(12)
 
         proveedor = self.cuenta.compra.proveedor if self.cuenta.compra else None
-        lbl_titulo = QLabel(f"Pagar a {proveedor.nombre_razon_social if proveedor else 'proveedor'}")
-        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo = QLabel(
+            f"Pagar a {proveedor.nombre_razon_social if proveedor else 'proveedor'}"
+        )
+        lbl_titulo.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         root.addWidget(lbl_titulo)
 
         card = QWidget()
@@ -223,7 +229,9 @@ class PagoProveedorDialog(QDialog):
         if self.tasa_bcv:
             texto_saldo += f"  (Bs {float(saldo_pendiente) * self.tasa_bcv:,.2f})"
         lbl_saldo = QLabel(texto_saldo)
-        lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
+        lbl_saldo.setStyleSheet(
+            f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};"
+        )
         layout.addWidget(lbl_saldo)
 
         lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
@@ -239,7 +247,10 @@ class PagoProveedorDialog(QDialog):
         lbl_monto = QLabel(f"Monto (USD) {ASTERISCO_REQUERIDO}")
         lbl_monto.setProperty("class", "FormLabel")
         self.monto_input = NumericLineEdit(
-            NumericFieldType.AMOUNT, min_value=Decimal("0.01"), max_value=saldo_pendiente, prefix="$ "
+            NumericFieldType.AMOUNT,
+            min_value=Decimal("0.01"),
+            max_value=saldo_pendiente,
+            prefix="$ ",
         )
         self.monto_input.set_value(saldo_pendiente)
         self.monto_input.setFixedHeight(32)
@@ -260,7 +271,9 @@ class PagoProveedorDialog(QDialog):
         col_bolivares = QVBoxLayout()
         lbl_bolivares = QLabel("Monto (Bs)")
         lbl_bolivares.setProperty("class", "FormLabel")
-        self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
+        self.bolivares_input = NumericLineEdit(
+            NumericFieldType.AMOUNT, max_value=Decimal("999999999999")
+        )
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
         col_bolivares.addWidget(lbl_bolivares)
@@ -337,12 +350,18 @@ class PagoProveedorDialog(QDialog):
             cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cajas = []
-        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        self._cajas_abiertas = [
+            c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None
+        ]
         try:
-            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
+            cuentas = BancoService.listar_cuentas(
+                self.session, id_usuario=self.id_usuario
+            )
         except PermisoDenegadoError:
             cuentas = []
-        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
+        self._cuentas_activas = [
+            c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"
+        ]
 
     def _cargar_tasas(self) -> None:
         """Carga las tasas actuales (BCV, paralelo y COP) en el combo."""
@@ -367,7 +386,9 @@ class PagoProveedorDialog(QDialog):
             if tasa_registro.tasa_dolar_bcv:
                 tasa_bcv = _as_decimal(tasa_registro.tasa_dolar_bcv)
                 etiqueta_bcv = f"BCV: {float(tasa_bcv):,.2f}"
-                self.tasa_combo.addItem(etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv)))
+                self.tasa_combo.addItem(
+                    etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv))
+                )
             # Agregar tasa paralelo
             if tasa_registro.tasa_dolar_paralelo:
                 tasa_paralelo = _as_decimal(tasa_registro.tasa_dolar_paralelo)
@@ -380,7 +401,9 @@ class PagoProveedorDialog(QDialog):
             if tasa_registro.tasa_cop:
                 tasa_cop = _as_decimal(tasa_registro.tasa_cop)
                 etiqueta_cop = f"COP: {float(tasa_cop):,.2f}"
-                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop)))
+                self.tasa_combo.addItem(
+                    etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop))
+                )
 
         self.tasa_combo.blockSignals(False)
 
@@ -406,7 +429,10 @@ class PagoProveedorDialog(QDialog):
             else:
                 self.origen_combo.setEnabled(True)
                 for caja in self._cajas_abiertas:
-                    self.origen_combo.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", ("caja", caja.id_caja))
+                    self.origen_combo.addItem(
+                        caja.nombre_caja or f"Caja {caja.id_caja}",
+                        ("caja", caja.id_caja),
+                    )
         else:
             if not self._cuentas_activas:
                 self.origen_combo.addItem("Sin cuentas bancarias activas")
@@ -414,9 +440,12 @@ class PagoProveedorDialog(QDialog):
             else:
                 self.origen_combo.setEnabled(True)
                 for cuenta in self._cuentas_activas:
-                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
+                    nombre_banco = (
+                        cuenta.banco.nombre_banco if cuenta.banco else "Banco"
+                    )
                     self.origen_combo.addItem(
-                        f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}", ("banco", cuenta.id_cuenta)
+                        f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
+                        ("banco", cuenta.id_cuenta),
                     )
         self.origen_combo.blockSignals(False)
 
@@ -460,7 +489,11 @@ class PagoProveedorDialog(QDialog):
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
         if origen is None:
-            MessageBox.warning(self, "Origen requerido", "No hay ninguna caja/cuenta disponible para este método.")
+            MessageBox.warning(
+                self,
+                "Origen requerido",
+                "No hay ninguna caja/cuenta disponible para este método.",
+            )
             return
         tipo_origen, id_origen = origen
 
@@ -500,7 +533,9 @@ class PagoProveedorDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar pagos.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para aplicar pagos."
+            )
             return
         except Exception:
             self.session.rollback()
@@ -554,7 +589,9 @@ class CuentasPorPagarPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Cuentas por Pagar")
-        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -601,7 +638,8 @@ class CuentasPorPagarPanel(QWidget):
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar por proveedor o RIF…")
         self.buscar_input.addAction(
-            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
         )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
@@ -614,7 +652,9 @@ class CuentasPorPagarPanel(QWidget):
         self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
         self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
-        self.btn_exportar = BotonExportar(on_excel=self._exportar_excel, on_pdf=self._exportar_pdf)
+        self.btn_exportar = BotonExportar(
+            on_excel=self._exportar_excel, on_pdf=self._exportar_pdf
+        )
 
         h.addWidget(self.buscar_input)
         h.addStretch()
@@ -662,7 +702,9 @@ class CuentasPorPagarPanel(QWidget):
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        tabla.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
         tabla.setColumnHidden(0, True)
@@ -685,7 +727,9 @@ class CuentasPorPagarPanel(QWidget):
         self.btn_anterior.clicked.connect(self._pagina_anterior)
 
         self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setIcon(
+            qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK)
+        )
         self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.clicked.connect(self._pagina_siguiente)
@@ -730,7 +774,9 @@ class CuentasPorPagarPanel(QWidget):
         """Tasa BCV vigente, solo para mostrar el equivalente en Bs -- nunca bloquea el
         panel. Mismo patron que factura_form_dialog.py::_cargar_tasa_vigente()."""
         try:
-            tasa = TasaService.obtener_tasa_actual(session, id_usuario=self.usuario.id_usuario)
+            tasa = TasaService.obtener_tasa_actual(
+                session, id_usuario=self.usuario.id_usuario
+            )
         except PermisoDenegadoError:
             self.lbl_tasa.setVisible(False)
             return None
@@ -766,16 +812,24 @@ class CuentasPorPagarPanel(QWidget):
                     if self.texto_busqueda:
                         nombre = proveedor.nombre_razon_social if proveedor else ""
                         # Construir RIF completo desde id_legal e identificacion_proveedor
-                        if proveedor and proveedor.id_legal and proveedor.identificacion_proveedor:
+                        if (
+                            proveedor
+                            and proveedor.id_legal
+                            and proveedor.identificacion_proveedor
+                        ):
                             rif = f"{proveedor.id_legal}-{proveedor.identificacion_proveedor}"
                         else:
-                            rif = proveedor.identificacion_proveedor if proveedor else ""
+                            rif = (
+                                proveedor.identificacion_proveedor if proveedor else ""
+                            )
                         # Buscar en nombre, RIF completo, identificación sola, o id_legal
                         if (
                             self.texto_busqueda.lower() not in nombre.lower()
                             and self.texto_busqueda.lower() not in rif.lower()
-                            and self.texto_busqueda.lower() not in (proveedor.identificacion_proveedor or "").lower()
-                            and self.texto_busqueda.lower() not in (proveedor.id_legal or "").lower()
+                            and self.texto_busqueda.lower()
+                            not in (proveedor.identificacion_proveedor or "").lower()
+                            and self.texto_busqueda.lower()
+                            not in (proveedor.id_legal or "").lower()
                         ):
                             continue
 
@@ -790,10 +844,18 @@ class CuentasPorPagarPanel(QWidget):
 
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cuentas por pagar.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar cuentas por pagar.",
+            )
         except Exception:
             logger.exception("Fallo al cargar el listado de cuentas por pagar")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de cuentas por pagar.")
+            MessageBox.critical(
+                self,
+                "Error de conexión",
+                "No se pudo cargar el listado de cuentas por pagar.",
+            )
         finally:
             session.close()
 
@@ -805,19 +867,35 @@ class CuentasPorPagarPanel(QWidget):
         for fila, cuenta in enumerate(cuentas):
             compra = cuenta.compra
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(cuenta.id_cuenta)))
-            self.tabla.setItem(fila, 1, QTableWidgetItem(compra.numero_compra if compra else ""))
             self.tabla.setItem(
-                fila, 2, QTableWidgetItem(compra.proveedor.nombre_razon_social if compra and compra.proveedor else "")
+                fila, 1, QTableWidgetItem(compra.numero_compra if compra else "")
+            )
+            self.tabla.setItem(
+                fila,
+                2,
+                QTableWidgetItem(
+                    compra.proveedor.nombre_razon_social
+                    if compra and compra.proveedor
+                    else ""
+                ),
             )
             saldo_pendiente = _as_decimal(cuenta.saldo_pendiente)
             item_saldo = QTableWidgetItem(f"${float(saldo_pendiente):,.2f}")
-            item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_saldo.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 3, item_saldo)
 
             # Fecha de factura (fecha_emision)
-            fecha_factura = cuenta.fecha_emision.strftime("%d/%m/%Y") if cuenta.fecha_emision else "Sin definir"
+            fecha_factura = (
+                cuenta.fecha_emision.strftime("%d/%m/%Y")
+                if cuenta.fecha_emision
+                else "Sin definir"
+            )
             item_fecha_factura = QTableWidgetItem(fecha_factura)
-            item_fecha_factura.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            item_fecha_factura.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 4, item_fecha_factura)
 
             # Días transcurridos desde la fecha de factura
@@ -826,13 +904,21 @@ class CuentasPorPagarPanel(QWidget):
                 dias_hoy = (date.today() - cuenta.fecha_emision).days
                 dias_transcurridos = str(dias_hoy)
             item_dias = QTableWidgetItem(dias_transcurridos)
-            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            item_dias.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 5, item_dias)
 
-            vencimiento = cuenta.fecha_vencimiento.strftime("%d/%m/%Y") if cuenta.fecha_vencimiento else "Sin definir"
+            vencimiento = (
+                cuenta.fecha_vencimiento.strftime("%d/%m/%Y")
+                if cuenta.fecha_vencimiento
+                else "Sin definir"
+            )
             self.tabla.setItem(fila, 6, QTableWidgetItem(vencimiento))
             color = COLORES_ESTADO_CXP.get(cuenta.estado, COLOR_TEXT_MUTED)
-            self.tabla.setCellWidget(fila, 7, EstadoBadge(cuenta.estado.capitalize(), color))
+            self.tabla.setCellWidget(
+                fila, 7, EstadoBadge(cuenta.estado.capitalize(), color)
+            )
 
             # Botón de acción: Exportar ODC
             id_oc = compra.oc.id_oc if compra and compra.oc else None
@@ -845,7 +931,9 @@ class CuentasPorPagarPanel(QWidget):
             btn_odc.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_odc.setEnabled(id_oc is not None)  # Deshabilitar si no hay ODC asociada
             btn_odc.setToolTip("Exportar ODC a PDF")
-            btn_odc.clicked.connect(lambda checked, id_oc=id_oc: self._exportar_odc_pdf(id_oc))
+            btn_odc.clicked.connect(
+                lambda checked, id_oc=id_oc: self._exportar_odc_pdf(id_oc)
+            )
 
             widget_acciones = QWidget()
             layout_acciones = QHBoxLayout(widget_acciones)
@@ -869,7 +957,11 @@ class CuentasPorPagarPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(self, "Selección requerida", "Selecciona una cuenta por pagar de la lista.")
+            MessageBox.information(
+                self,
+                "Selección requerida",
+                "Selecciona una cuenta por pagar de la lista.",
+            )
             return None
         item = self.tabla.item(filas[0].row(), 0)
         return int(item.text()) if item is not None else None
@@ -884,62 +976,100 @@ class CuentasPorPagarPanel(QWidget):
             if cuenta is None:
                 return
             if cuenta.estado == "pagada":
-                MessageBox.information(self, "Ya pagada", "Esta cuenta por pagar ya está saldada.")
+                MessageBox.information(
+                    self, "Ya pagada", "Esta cuenta por pagar ya está saldada."
+                )
                 return
             dialogo = PagoProveedorDialog(
-                session, self.usuario.id_usuario, cuenta, tasa_bcv=self._tasa_bcv, parent=self
+                session,
+                self.usuario.id_usuario,
+                cuenta,
+                tasa_bcv=self._tasa_bcv,
+                parent=self,
             )
             if dialogo.exec() and dialogo.pago_creado is not None:
                 self.cargar_cuentas()
-                MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
+                MessageBox.information(
+                    self, "Pago registrado", "El pago se registró con éxito."
+                )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar pagos.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para aplicar pagos."
+            )
         finally:
             session.close()
 
     def _imprimir_factura_compra(self, id_compra: int | None) -> None:
         """Muestra el detalle de la factura de compra en un diálogo."""
         if id_compra is None:
-            MessageBox.warning(self, "Sin compra", "No hay una compra asociada a esta cuenta por pagar.")
+            MessageBox.warning(
+                self,
+                "Sin compra",
+                "No hay una compra asociada a esta cuenta por pagar.",
+            )
             return
         session = self.session_factory()
         try:
-            dialogo = CompraDetalleDialog(session, id_compra, id_usuario=self.usuario.id_usuario, parent=self)
+            dialogo = CompraDetalleDialog(
+                session, id_compra, id_usuario=self.usuario.id_usuario, parent=self
+            )
             dialogo.exec()
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver detalles de compras.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para ver detalles de compras."
+            )
         except Exception:
             logger.exception("Fallo al abrir detalle de compra")
-            MessageBox.critical(self, "Error", "No se pudo abrir el detalle de la compra.")
+            MessageBox.critical(
+                self, "Error", "No se pudo abrir el detalle de la compra."
+            )
         finally:
             session.close()
 
     def _exportar_odc_pdf(self, id_oc: int | None) -> None:
         """Exporta la orden de compra a PDF."""
         if id_oc is None:
-            MessageBox.warning(self, "Sin ODC", "No hay una orden de compra asociada a esta cuenta por pagar.")
+            MessageBox.warning(
+                self,
+                "Sin ODC",
+                "No hay una orden de compra asociada a esta cuenta por pagar.",
+            )
             return
 
         session = self.session_factory()
         try:
-            datos_oc = CompraOCService.obtener_oc(session, id_oc, id_usuario=self.usuario.id_usuario)
+            datos_oc = CompraOCService.obtener_oc(
+                session, id_oc, id_usuario=self.usuario.id_usuario
+            )
             oc = datos_oc["oc"]
             detalles = datos_oc["detalles"]
 
             # Generar nombre de archivo
             nombre_archivo = f"ODC_{oc.numero_oc}.pdf"
-            ruta, _ = QFileDialog.getSaveFileName(self, "Exportar ODC a PDF", nombre_archivo, "PDF (*.pdf)")
+            ruta, _ = QFileDialog.getSaveFileName(
+                self, "Exportar ODC a PDF", nombre_archivo, "PDF (*.pdf)"
+            )
             if not ruta:
                 return
 
             # Preparar datos para exportación
             config_empresa = EmpresaService.obtener_datos_documento(session)
-            encabezados = ["Producto", "Cantidad Solicitada", "Cantidad Pendiente", "Precio Unitario", "Total"]
+            encabezados = [
+                "Producto",
+                "Cantidad Solicitada",
+                "Cantidad Pendiente",
+                "Precio Unitario",
+                "Total",
+            ]
             filas = []
             total_oc = 0.0
 
             for detalle in detalles:
-                producto = detalle.producto.nombre_producto if detalle.producto else "Producto eliminado"
+                producto = (
+                    detalle.producto.nombre_producto
+                    if detalle.producto
+                    else "Producto eliminado"
+                )
                 cantidad_solicitada = float(detalle.cantidad_solicitada)
                 cantidad_pendiente = float(detalle.cantidad_pendiente)
                 precio = float(detalle.precio_unitario)
@@ -982,15 +1112,23 @@ class CuentasPorPagarPanel(QWidget):
                 total_label=total_label,
             )
 
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
 
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver detalles de órdenes de compra.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para ver detalles de órdenes de compra.",
+            )
         except ValueError as e:
             MessageBox.warning(self, "Error", str(e))
         except Exception:
             logger.exception("Fallo al exportar ODC a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar la orden de compra a PDF.")
+            MessageBox.critical(
+                self, "Error", "No se pudo exportar la orden de compra a PDF."
+            )
         finally:
             session.close()
 
@@ -1003,13 +1141,23 @@ class CuentasPorPagarPanel(QWidget):
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
 
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar a Excel", "cuentas_por_pagar.xlsx", "Excel (*.xlsx)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar a Excel", "cuentas_por_pagar.xlsx", "Excel (*.xlsx)"
+        )
         if not ruta:
             return
 
         try:
             config_empresa = self._obtener_config_empresa()
-            encabezados = ["Compra", "Proveedor", "Saldo Pendiente", "Fecha Factura", "Días", "Vencimiento", "Estado"]
+            encabezados = [
+                "Compra",
+                "Proveedor",
+                "Saldo Pendiente",
+                "Fecha Factura",
+                "Días",
+                "Vencimiento",
+                "Estado",
+            ]
 
             # Calcular total del saldo pendiente
             total_saldo = 0.0
@@ -1034,7 +1182,9 @@ class CuentasPorPagarPanel(QWidget):
                 total_row=total_row,
                 total_label=total_label,
             )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
         except Exception:
             logger.exception("Fallo al exportar a Excel")
             MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
@@ -1046,13 +1196,23 @@ class CuentasPorPagarPanel(QWidget):
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
 
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar a PDF", "cuentas_por_pagar.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar a PDF", "cuentas_por_pagar.pdf", "PDF (*.pdf)"
+        )
         if not ruta:
             return
 
         try:
             config_empresa = self._obtener_config_empresa()
-            encabezados = ["Compra", "Proveedor", "Saldo Pendiente", "Fecha Factura", "Días", "Vencimiento", "Estado"]
+            encabezados = [
+                "Compra",
+                "Proveedor",
+                "Saldo Pendiente",
+                "Fecha Factura",
+                "Días",
+                "Vencimiento",
+                "Estado",
+            ]
             filtros = self._obtener_filtros_para_exportar()
             col_widths = [1.5, 2.5, 1.5, 1.2, 0.8, 1.2, 1.0]
 
@@ -1081,7 +1241,9 @@ class CuentasPorPagarPanel(QWidget):
                 total_row=total_row,
                 total_label=total_label,
             )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
         except Exception:
             logger.exception("Fallo al exportar a PDF")
             MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")

@@ -14,7 +14,8 @@ _cargar_origenes()/_cargar_tasas() ya manejan tanto PermisoDenegadoError (id_usu
 cae ahi, ver require_permiso en app/services/permisos.py) como cualquier excepcion de la
 consulta de tasas, pero *no* validan el tipo de lo que devuelve `session.query(...).first()`
 -- con un MagicMock() liso eso devuelve otro MagicMock "verdadero" que revienta el
-formateo de tasas (`f"{...:,.2f}"`), asi que hay que fijar ese `.first()` a None a mano."""
+formateo de tasas (`f"{...:,.2f}"`), asi que hay que fijar ese `.first()` a None a mano.
+"""
 
 from decimal import Decimal
 from types import SimpleNamespace
@@ -47,8 +48,16 @@ def _crear_sesion() -> MagicMock:
 
 
 def _crear_cuenta(saldo=Decimal("1250.75")) -> SimpleNamespace:
-    factura = SimpleNamespace(numero_factura="F-001", cliente=SimpleNamespace(nombre_razon_social="Cliente Uno"))
-    return SimpleNamespace(id_cuenta_por_cobrar=1, factura=factura, saldo_pendiente=saldo, saldo_favor=Decimal("0.00"))
+    factura = SimpleNamespace(
+        numero_factura="F-001",
+        cliente=SimpleNamespace(nombre_razon_social="Cliente Uno"),
+    )
+    return SimpleNamespace(
+        id_cuenta_por_cobrar=1,
+        factura=factura,
+        saldo_pendiente=saldo,
+        saldo_favor=Decimal("0.00"),
+    )
 
 
 def test_monto_input_arranca_en_saldo_pendiente(qtbot):
@@ -90,7 +99,8 @@ def _mostrar_campos_bolivares(dialogo, qtbot) -> None:
 
     # Wait for the bolivares fields to be visible and enabled
     qtbot.waitUntil(
-        lambda: dialogo.bolivares_input is not None and dialogo.bolivares_input.isEnabled(),
+        lambda: dialogo.bolivares_input is not None
+        and dialogo.bolivares_input.isEnabled(),
         timeout=15000,
     )
     qtbot.wait(50)  # Small delay to ensure UI is ready
@@ -114,7 +124,8 @@ def test_bolivares_input_arranca_en_cero_y_admite_rango_amplio(qtbot):
 
     # Wait for the widget to be fully initialized and enabled
     qtbot.waitUntil(
-        lambda: dialogo.bolivares_input is not None and dialogo.bolivares_input.isEnabled(),
+        lambda: dialogo.bolivares_input is not None
+        and dialogo.bolivares_input.isEnabled(),
         timeout=15000,
     )
     qtbot.wait(50)  # Small delay to ensure UI is ready
@@ -170,7 +181,11 @@ def test_validar_y_aceptar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     qtbot.addWidget(dialogo)
     dialogo.show()
     qtbot.waitExposed(dialogo, timeout=15000)
-    dialogo._cajas_abiertas = [SimpleNamespace(id_caja=1, nombre_caja="Caja 1", fecha_apertura=1, fecha_cierre=None)]
+    dialogo._cajas_abiertas = [
+        SimpleNamespace(
+            id_caja=1, nombre_caja="Caja 1", fecha_apertura=1, fecha_cierre=None
+        )
+    ]
     dialogo._toggle_origen()
     dialogo.origen_combo.setCurrentIndex(0)
 

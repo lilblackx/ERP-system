@@ -4,7 +4,13 @@ from decimal import Decimal
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import Caja, CuentaPorCobrar, CuentaPorPagar, FacturaVenta, Inventario
+from app.db.models import (
+    Caja,
+    CuentaPorCobrar,
+    CuentaPorPagar,
+    FacturaVenta,
+    Inventario,
+)
 from app.services.permisos import require_permiso
 
 CUENTA_ABIERTA = ("pendiente", "parcial", "vencida")
@@ -17,7 +23,9 @@ def _rango_dia(dia: date) -> tuple[datetime, datetime]:
 
 class DashboardService:
     @staticmethod
-    def get_panel_general_data(session: Session, dias_vencimiento: int = 30, id_usuario: int | None = None) -> dict:
+    def get_panel_general_data(
+        session: Session, dias_vencimiento: int = 30, id_usuario: int | None = None
+    ) -> dict:
         require_permiso(session, id_usuario, "dashboard", "ver")
         hoy = date.today()
         ayer = hoy - timedelta(days=1)
@@ -27,11 +35,15 @@ class DashboardService:
             "ventas_hoy": DashboardService._kpi_ventas_hoy(session, hoy, ayer),
             "por_cobrar": DashboardService._kpi_por_cobrar(session, hoy),
             "por_pagar": DashboardService._kpi_por_pagar(session, hoy),
-            "productos_alerta": DashboardService._kpi_productos_alerta(session, limite_vencimiento),
+            "productos_alerta": DashboardService._kpi_productos_alerta(
+                session, limite_vencimiento
+            ),
             "grafico_semanal": DashboardService._grafico_semanal(session, hoy),
             "cajas_activas": DashboardService._cajas_activas(session, hoy),
             "facturas_recientes": DashboardService._facturas_recientes(session),
-            "inventario_alerta": DashboardService._inventario_alerta(session, limite_vencimiento),
+            "inventario_alerta": DashboardService._inventario_alerta(
+                session, limite_vencimiento
+            ),
         }
 
     @staticmethod
@@ -45,8 +57,14 @@ class DashboardService:
         (un rol con 'dashboard'/'ver' pero sin acceso a Inventario no deberia perder el
         panel general por esto)."""
         return or_(
-            and_(Inventario.cantidad_minima > 0, Inventario.cantidad_unidad < Inventario.cantidad_minima),
-            and_(Inventario.fecha_vencimiento.isnot(None), Inventario.fecha_vencimiento <= limite_vencimiento),
+            and_(
+                Inventario.cantidad_minima > 0,
+                Inventario.cantidad_unidad < Inventario.cantidad_minima,
+            ),
+            and_(
+                Inventario.fecha_vencimiento.isnot(None),
+                Inventario.fecha_vencimiento <= limite_vencimiento,
+            ),
         )
 
     @staticmethod
@@ -130,7 +148,13 @@ class DashboardService:
     @staticmethod
     def _grafico_semanal(session: Session, hoy: date) -> list[dict]:
         dias = [hoy - timedelta(days=offset) for offset in range(6, -1, -1)]
-        return [{"fecha": dia, "monto": DashboardService._total_ventas_del_dia(session, dia)} for dia in dias]
+        return [
+            {
+                "fecha": dia,
+                "monto": DashboardService._total_ventas_del_dia(session, dia),
+            }
+            for dia in dias
+        ]
 
     @staticmethod
     def _cajas_activas(session: Session, hoy: date) -> list[dict]:
@@ -169,7 +193,9 @@ class DashboardService:
         return [
             {
                 "numero_factura": factura.numero_factura,
-                "cliente": factura.cliente.nombre_razon_social if factura.cliente else None,
+                "cliente": (
+                    factura.cliente.nombre_razon_social if factura.cliente else None
+                ),
                 "total_venta": factura.total_venta,
                 "estado_factura": factura.estado_factura,
             }
@@ -177,7 +203,9 @@ class DashboardService:
         ]
 
     @staticmethod
-    def _inventario_alerta(session: Session, limite_vencimiento: date, limite: int = 5) -> list[dict]:
+    def _inventario_alerta(
+        session: Session, limite_vencimiento: date, limite: int = 5
+    ) -> list[dict]:
         productos = (
             session.query(Inventario)
             .options(joinedload(Inventario.categoria))
@@ -197,13 +225,16 @@ class DashboardService:
                 and producto.cantidad_unidad < producto.cantidad_minima
             )
             proximo_vencer = bool(
-                producto.fecha_vencimiento is not None and producto.fecha_vencimiento <= limite_vencimiento
+                producto.fecha_vencimiento is not None
+                and producto.fecha_vencimiento <= limite_vencimiento
             )
             resultado.append(
                 {
                     "cod_producto": producto.cod_producto,
                     "nombre_producto": producto.nombre_producto,
-                    "categoria": producto.categoria.nombre if producto.categoria else None,
+                    "categoria": (
+                        producto.categoria.nombre if producto.categoria else None
+                    ),
                     "cantidad_unidad": producto.cantidad_unidad,
                     "fecha_vencimiento": producto.fecha_vencimiento,
                     "bajo_stock": bajo_stock,

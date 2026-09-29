@@ -58,7 +58,11 @@ from pathlib import Path
 
 import qtawesome as qta
 from PySide6.QtCore import QStringListModel, Qt, QTimer, QUrl, QUrlQuery, Signal
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEnginePermission, QWebEngineSettings
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEnginePermission,
+    QWebEngineSettings,
+)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QCompleter,
@@ -267,7 +271,9 @@ class _MapaPage(QWebEnginePage):
         # en si (ya local) funcionaba perfecto: diagnosticado 2026-09-01 con un test
         # standalone que mostro los controles de Leaflet pintando bien pero las tiles en
         # blanco/gris.
-        self.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        self.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True
+        )
         # Nada en esta pagina pide permisos de navegador hoy (la geolocalizacion precisa
         # se resuelve nativamente en Python, no via navigator.geolocation -- ver
         # geo_windows.py); se deniega cualquier solicitud por defecto como resguardo.
@@ -276,7 +282,9 @@ class _MapaPage(QWebEnginePage):
     def _on_permission_requested(self, permission: QWebEnginePermission) -> None:
         permission.deny()
 
-    def acceptNavigationRequest(self, url: QUrl | str, tipo, es_frame_principal: bool) -> bool:  # noqa: N802 (override de Qt)
+    def acceptNavigationRequest(
+        self, url: QUrl | str, tipo, es_frame_principal: bool
+    ) -> bool:  # noqa: N802 (override de Qt)
         # Ensure url is a QUrl object (handle both QUrl and str from base class signature)
         url_obj = QUrl(url) if isinstance(url, str) else url
         if url_obj.scheme() == "mapaclick":
@@ -474,10 +482,14 @@ class MapaWidget(QWidget):
         # fijo recortaba el texto. Icono real (qtawesome, via setIcon) en vez de un "📍"
         # suelto en el string del boton -- ver GUIA_ESTILO_UI.md 3.1.
         self.btn_ubicacion_precisa = QPushButton(" Mi ubicación")
-        self.btn_ubicacion_precisa.setIcon(qta.icon("fa5s.map-marker-alt", color=COLOR_PRIMARY))
+        self.btn_ubicacion_precisa.setIcon(
+            qta.icon("fa5s.map-marker-alt", color=COLOR_PRIMARY)
+        )
         self.btn_ubicacion_precisa.setFixedHeight(32)
         self.btn_ubicacion_precisa.setMinimumWidth(120)
-        self.btn_ubicacion_precisa.setToolTip("Usar mi ubicación actual (GPS/WiFi del dispositivo)")
+        self.btn_ubicacion_precisa.setToolTip(
+            "Usar mi ubicación actual (GPS/WiFi del dispositivo)"
+        )
         self.btn_ubicacion_precisa.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_ubicacion_precisa.clicked.connect(self._usar_ubicacion_precisa)
 
@@ -496,7 +508,9 @@ class MapaWidget(QWidget):
         # substring localmente podria ocultar resultados validos.
         self._resultados_busqueda: list[dict] = []
         self.completer = QCompleter(self)
-        self.completer.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        self.completer.setCompletionMode(
+            QCompleter.CompletionMode.UnfilteredPopupCompletion
+        )
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.completer.activated.connect(self._on_sugerencia_seleccionada)
         self.busqueda_input.setCompleter(self.completer)
@@ -540,14 +554,20 @@ class MapaWidget(QWidget):
         self.btn_buscar.setEnabled(False)
         self._worker_busqueda = HttpWorker(functools.partial(buscar_lugares, texto))
         self._worker_busqueda.resultado.connect(
-            functools.partial(self._on_resultados_busqueda, aplicar_primero=aplicar_primero)
+            functools.partial(
+                self._on_resultados_busqueda, aplicar_primero=aplicar_primero
+            )
         )
         self._worker_busqueda.start()
 
-    def _on_resultados_busqueda(self, resultados: list[dict], aplicar_primero: bool) -> None:
+    def _on_resultados_busqueda(
+        self, resultados: list[dict], aplicar_primero: bool
+    ) -> None:
         self.btn_buscar.setEnabled(True)
         self._resultados_busqueda = resultados
-        self.completer.setModel(QStringListModel([r["nombre"] for r in resultados], self.completer))
+        self.completer.setModel(
+            QStringListModel([r["nombre"] for r in resultados], self.completer)
+        )
         if not resultados:
             return
 
@@ -608,7 +628,11 @@ class MapaWidget(QWidget):
         self.btn_ubicacion_precisa.setEnabled(True)
         error = resultado.get("error")
         if error:
-            logger.info("MapaWidget: geolocalización precisa falló (%s) - resultado completo: %s", error, resultado)
+            logger.info(
+                "MapaWidget: geolocalización precisa falló (%s) - resultado completo: %s",
+                error,
+                resultado,
+            )
             textos_error = {
                 "denied": "Ubicación denegada. Habilítala en Configuración de Windows > Privacidad > Ubicación.",
                 "timeout": "No se pudo obtener tu ubicación a tiempo. Intenta de nuevo.",
@@ -617,16 +641,24 @@ class MapaWidget(QWidget):
                     "Verifica que el servicio de ubicación de Windows esté activo."
                 ),
             }
-            self._mostrar_estado_temporal(textos_error.get(error, textos_error["unavailable"]), color="#B45309")
+            self._mostrar_estado_temporal(
+                textos_error.get(error, textos_error["unavailable"]), color="#B45309"
+            )
             return
 
-        lat, lng, precision_m = resultado["lat"], resultado["lng"], resultado["accuracy"]
+        lat, lng, precision_m = (
+            resultado["lat"],
+            resultado["lng"],
+            resultado["accuracy"],
+        )
         # setEnabled(True) ya ocurrio arriba; _on_click_js es el mismo camino que un click
         # real en el mapa (dibuja el marcador o agrega un vertice de zona segun el modo,
         # ver su docstring) -- asi el resultado de "Mi ubicacion" se comporta igual que si
         # el usuario hubiera clickeado ahi mismo.
         self._on_click_js(lat, lng)
-        self._mostrar_estado_temporal(f"Ubicación fijada (precisión: ±{precision_m:,.0f} m).", color="#15803D")
+        self._mostrar_estado_temporal(
+            f"Ubicación fijada (precisión: ±{precision_m:,.0f} m).", color="#15803D"
+        )
 
     def _mostrar_estado_temporal(self, texto: str, color: str = "#B45309") -> None:
         self.lbl_estado.setStyleSheet(f"color: {color}; font-size: 11px;")
@@ -651,7 +683,9 @@ class MapaWidget(QWidget):
         self.view.setVisible(ok)
         self.status_container.setVisible(not ok)
         if not ok:
-            self.status_label.setText("No se pudo cargar el mapa. Verifica la conexión a internet e intenta de nuevo.")
+            self.status_label.setText(
+                "No se pudo cargar el mapa. Verifica la conexión a internet e intenta de nuevo."
+            )
             self.btn_reintentar.setVisible(True)
             return
         if self._pendientes:
@@ -663,7 +697,11 @@ class MapaWidget(QWidget):
         # Si el subproceso QtWebEngineProcess.exe muere (crash, bloqueado por antivirus,
         # falla de GPU irrecuperable) loadFinished() puede no llegar a dispararse nunca --
         # esta señal es la unica forma de enterarse de que el mapa quedo colgado.
-        logger.error("MapaWidget: el proceso de renderizado terminó (status=%s, exit_code=%s)", status, exit_code)
+        logger.error(
+            "MapaWidget: el proceso de renderizado terminó (status=%s, exit_code=%s)",
+            status,
+            exit_code,
+        )
         self._cargado = False
         self.view.setVisible(False)
         self.status_label.setText("El mapa dejó de responder.")
@@ -730,6 +768,8 @@ class MapaWidget(QWidget):
         """Modo solo-lectura (mapa general de rutas): pinta muchos clientes de una vez."""
         partes = ["limpiarMarcadores();"]
         for lat, lng, etiqueta in clientes:
-            partes.append(f"agregarMarcadorCliente({lat}, {lng}, {json.dumps(etiqueta)});")
+            partes.append(
+                f"agregarMarcadorCliente({lat}, {lng}, {json.dumps(etiqueta)});"
+            )
         partes.append("ajustarVista();")
         self._ejecutar(" ".join(partes))

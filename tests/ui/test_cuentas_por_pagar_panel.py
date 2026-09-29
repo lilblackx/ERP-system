@@ -32,7 +32,9 @@ def _escribir_y_perder_foco(qtbot, campo, texto):
 
 
 def _crear_cuenta(saldo=Decimal("850.00")) -> SimpleNamespace:
-    compra = SimpleNamespace(proveedor=SimpleNamespace(nombre_razon_social="Proveedor Uno"))
+    compra = SimpleNamespace(
+        proveedor=SimpleNamespace(nombre_razon_social="Proveedor Uno")
+    )
     return SimpleNamespace(id_cuenta=1, compra=compra, saldo_pendiente=saldo)
 
 
@@ -63,7 +65,11 @@ def test_validar_y_aceptar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     qtbot.addWidget(dialogo)
     _escribir_y_perder_foco(qtbot, dialogo.monto_input, "123,45")
 
-    dialogo._cajas_abiertas = [SimpleNamespace(id_caja=1, nombre_caja="Caja 1", fecha_apertura=1, fecha_cierre=None)]
+    dialogo._cajas_abiertas = [
+        SimpleNamespace(
+            id_caja=1, nombre_caja="Caja 1", fecha_apertura=1, fecha_cierre=None
+        )
+    ]
     dialogo._toggle_origen()
     dialogo.origen_combo.setCurrentIndex(0)
 

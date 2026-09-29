@@ -104,7 +104,8 @@ class RutasPanel(QWidget):
         self.buscar_input = QLineEdit()
         self.buscar_input.setPlaceholderText("Buscar ruta…")
         self.buscar_input.addAction(
-            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
         )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
@@ -124,7 +125,9 @@ class RutasPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addWidget(self.estado_combo)
-        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        h.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
         h.addWidget(self.btn_nuevo)
         return w
 
@@ -146,9 +149,15 @@ class RutasPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.Fixed
+        )
         self.tabla.setColumnWidth(3, 110)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
@@ -175,7 +184,9 @@ class RutasPanel(QWidget):
         self.btn_anterior.clicked.connect(self._pagina_anterior)
 
         self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setIcon(
+            qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK)
+        )
         self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.clicked.connect(self._pagina_siguiente)
@@ -237,10 +248,14 @@ class RutasPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar rutas.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para consultar rutas."
+            )
         except Exception:
             logger.exception("Fallo al cargar la lista de rutas")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de rutas.")
+            MessageBox.critical(
+                self, "Error de conexión", "No se pudo cargar la lista de rutas."
+            )
         finally:
             session.close()
 
@@ -253,7 +268,9 @@ class RutasPanel(QWidget):
             self.tabla.setItem(fila, 2, QTableWidgetItem(r.descripcion_ruta or ""))
 
             estado_ruta = r.estado_ruta or "ACTIVO"
-            color_estado = COLOR_SUCCESS if estado_ruta.upper() == "ACTIVO" else COLOR_DANGER
+            color_estado = (
+                COLOR_SUCCESS if estado_ruta.upper() == "ACTIVO" else COLOR_DANGER
+            )
             badge = EstadoBadge(estado_ruta.capitalize(), color_estado)
             self.tabla.setCellWidget(fila, 3, badge)
 
@@ -269,7 +286,9 @@ class RutasPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(self, "Selección requerida", "Selecciona una ruta de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona una ruta de la lista."
+            )
             return None
         return int(self.tabla.item(filas[0].row(), 0).text())
 
@@ -284,13 +303,17 @@ class RutasPanel(QWidget):
                 self.cargar_rutas()
         except IntegrityError:
             session.rollback()
-            MessageBox.warning(self, "Dato duplicado", "Ya existe una ruta con ese nombre.")
+            MessageBox.warning(
+                self, "Dato duplicado", "Ya existe una ruta con ese nombre."
+            )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear rutas.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para crear rutas."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al crear ruta")
@@ -305,24 +328,37 @@ class RutasPanel(QWidget):
 
         session = self.session_factory()
         try:
-            ruta = RutaService.obtener(session, id_ruta, id_usuario=self.usuario.id_usuario)
+            ruta = RutaService.obtener(
+                session, id_ruta, id_usuario=self.usuario.id_usuario
+            )
             dialogo = RutaFormDialog(ruta, parent=self)
             if dialogo.exec():
-                RutaService.actualizar(session, id_ruta, id_usuario=self.usuario.id_usuario, **dialogo.get_data())
+                RutaService.actualizar(
+                    session,
+                    id_ruta,
+                    id_usuario=self.usuario.id_usuario,
+                    **dialogo.get_data(),
+                )
                 self.cargar_rutas()
         except IntegrityError:
             session.rollback()
-            MessageBox.warning(self, "Dato duplicado", "Ya existe una ruta con ese nombre.")
+            MessageBox.warning(
+                self, "Dato duplicado", "Ya existe una ruta con ese nombre."
+            )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar rutas.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para editar rutas."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar ruta")
-            MessageBox.critical(self, "Error", "No se pudo guardar los cambios de la ruta.")
+            MessageBox.critical(
+                self, "Error", "No se pudo guardar los cambios de la ruta."
+            )
         finally:
             session.close()
 
@@ -333,24 +369,36 @@ class RutasPanel(QWidget):
 
         session = self.session_factory()
         try:
-            ruta = RutaService.obtener(session, id_ruta, id_usuario=self.usuario.id_usuario)
+            ruta = RutaService.obtener(
+                session, id_ruta, id_usuario=self.usuario.id_usuario
+            )
             estado_actual = ruta.estado_ruta or "ACTIVO"
             nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
 
             respuesta = MessageBox.question(
-                self, "Confirmar", f"¿Cambiar el estado de la ruta '{ruta.nombre_ruta}' a {nuevo_estado}?"
+                self,
+                "Confirmar",
+                f"¿Cambiar el estado de la ruta '{ruta.nombre_ruta}' a {nuevo_estado}?",
             )
             if respuesta != QMessageBox.StandardButton.Yes:
                 return
 
-            RutaService.cambiar_estado(session, id_ruta, nuevo_estado, id_usuario=self.usuario.id_usuario)
+            RutaService.cambiar_estado(
+                session, id_ruta, nuevo_estado, id_usuario=self.usuario.id_usuario
+            )
             self.cargar_rutas()
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para cambiar el estado de rutas.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para cambiar el estado de rutas.",
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al cambiar el estado de la ruta %s", id_ruta)
-            MessageBox.critical(self, "Error", "No se pudo cambiar el estado de la ruta.")
+            MessageBox.critical(
+                self, "Error", "No se pudo cambiar el estado de la ruta."
+            )
         finally:
             session.close()

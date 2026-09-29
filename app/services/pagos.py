@@ -18,7 +18,12 @@ from app.db.models import (
     PagoProveedor,
 )
 from app.services.auditoria import AuditoriaService
-from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
+from app.services.db_utils import (
+    _es_deadlock,
+    _es_lock_timeout,
+    aplicar_lock_timeout,
+    traducir_error_trigger,
+)
 from app.services.permisos import require_permiso
 from app.utils.decimal_utils import to_decimal
 
@@ -56,7 +61,9 @@ class PagoService:
         directos (registrar_pago_cobro) siguen viendo el mismo commit-por-llamada de
         siempre."""
         if (id_cuenta_bancaria is None) == (id_caja is None):
-            raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
+            raise ValueError(
+                "Indique exactamente un origen del pago: cuenta bancaria o caja"
+            )
 
         monto = to_decimal(monto)
         if monto <= 0:
@@ -80,14 +87,18 @@ class PagoService:
         if cuenta is None:
             raise ValueError("Cuenta por cobrar no encontrada")
         if monto > cuenta.saldo_pendiente:
-            raise ValueError(f"El monto {monto} excede el saldo pendiente {cuenta.saldo_pendiente}")
+            raise ValueError(
+                f"El monto {monto} excede el saldo pendiente {cuenta.saldo_pendiente}"
+            )
 
         if id_cuenta_bancaria is not None:
             cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
             if cuenta_bancaria is None:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
-                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+                raise ValueError(
+                    f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva"
+                )
 
         if id_caja is not None:
             # Mismo criterio que CajaService.registrar_movimiento_manual: un pago en
@@ -96,7 +107,9 @@ class PagoService:
             if caja is None:
                 raise ValueError("Caja no encontrada")
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+                raise ValueError(
+                    f"La caja '{caja.nombre_caja}' no tiene un turno abierto"
+                )
 
         # Reloj de la app (Python), no el del trigger (GETDATE()): CajaService.abrir_caja/
         # cerrar_caja tambien usan datetime.now() para fecha_apertura/fecha_cierre, y
@@ -114,8 +127,14 @@ class PagoService:
             metodo_pago=metodo_pago,
             moneda=moneda,
             monto=monto,
-            monto_moneda_origen=to_decimal(monto_moneda_origen) if monto_moneda_origen is not None else None,
-            monto_bolivares=to_decimal(monto_bolivares) if monto_bolivares is not None else None,
+            monto_moneda_origen=(
+                to_decimal(monto_moneda_origen)
+                if monto_moneda_origen is not None
+                else None
+            ),
+            monto_bolivares=(
+                to_decimal(monto_bolivares) if monto_bolivares is not None else None
+            ),
             tasa_cambio=to_decimal(tasa_cambio) if tasa_cambio is not None else None,
             referencia=referencia,
             fecha_pago=fecha_pago,
@@ -129,7 +148,9 @@ class PagoService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
+                ) from e
             raise ValueError(traducir_error_trigger(e)) from e
         return pago
 
@@ -168,7 +189,9 @@ class PagoService:
             id_usuario=id_usuario,
         )
         cuenta = session.get(CuentaPorCobrar, id_cuenta_por_cobrar)
-        assert cuenta is not None  # ya validada por _aplicar_pago_cobro, no puede ser None aca
+        assert (
+            cuenta is not None
+        )  # ya validada por _aplicar_pago_cobro, no puede ser None aca
         try:
             session.commit()
         except Exception as e:
@@ -220,7 +243,9 @@ class PagoService:
     ) -> PagoProveedor:
         require_permiso(session, id_usuario, "pagos", "crear")
         if (id_cuenta_bancaria is None) == (id_caja is None):
-            raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
+            raise ValueError(
+                "Indique exactamente un origen del pago: cuenta bancaria o caja"
+            )
 
         monto = to_decimal(monto)
         if monto <= 0:
@@ -240,14 +265,18 @@ class PagoService:
         if cuenta is None:
             raise ValueError("Cuenta por pagar no encontrada")
         if monto > cuenta.saldo_pendiente:
-            raise ValueError(f"El monto {monto} excede el saldo pendiente {cuenta.saldo_pendiente}")
+            raise ValueError(
+                f"El monto {monto} excede el saldo pendiente {cuenta.saldo_pendiente}"
+            )
 
         if id_cuenta_bancaria is not None:
             cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
             if cuenta_bancaria is None:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
-                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+                raise ValueError(
+                    f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva"
+                )
 
         if id_caja is not None:
             # Mismo lock que registrar_compra -- serializa dos pagos concurrentes contra
@@ -261,7 +290,9 @@ class PagoService:
             if caja is None:
                 raise ValueError("Caja no encontrada")
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+                raise ValueError(
+                    f"La caja '{caja.nombre_caja}' no tiene un turno abierto"
+                )
 
         # Ver el comentario equivalente en registrar_pago_cobro (C12).
         if fecha_pago is None:
@@ -274,7 +305,9 @@ class PagoService:
             id_tasa=id_tasa,
             metodo_pago=metodo_pago,
             monto=monto,
-            monto_bolivares=to_decimal(monto_bolivares) if monto_bolivares is not None else None,
+            monto_bolivares=(
+                to_decimal(monto_bolivares) if monto_bolivares is not None else None
+            ),
             tasa_cambio=to_decimal(tasa_cambio) if tasa_cambio is not None else None,
             referencia=referencia,
             fecha_pago=fecha_pago,
@@ -288,7 +321,9 @@ class PagoService:
             if _es_deadlock(e):
                 raise
             if _es_lock_timeout(e):
-                raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
+                raise ValueError(
+                    "La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo."
+                ) from e
             raise ValueError(traducir_error_trigger(e)) from e
         session.refresh(pago)
         session.refresh(cuenta)
@@ -353,7 +388,9 @@ class PagoService:
         es el primero en necesitar mostrarlas en una pantalla, ver auditoria de Compras/
         Proveedores previa a este trabajo)."""
         require_permiso(session, id_usuario, "pagos", "ver")
-        query = session.query(CuentaPorPagar).join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
+        query = session.query(CuentaPorPagar).join(
+            Compra, Compra.id_compra == CuentaPorPagar.id_compra
+        )
         if id_proveedor:
             query = query.filter(Compra.id_proveedor == id_proveedor)
         if estado:
@@ -361,9 +398,17 @@ class PagoService:
 
         total = query.count()
         cuentas = (
-            query.order_by(CuentaPorPagar.fecha_vencimiento).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+            query.order_by(CuentaPorPagar.fecha_vencimiento)
+            .offset((pagina - 1) * por_pagina)
+            .limit(por_pagina)
+            .all()
         )
-        return {"items": cuentas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        return {
+            "items": cuentas,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
     def listar_cuentas_por_cobrar(
@@ -411,14 +456,20 @@ class PagoService:
         elif estado in ("pendiente", "parcial"):
             query = query.filter(
                 CuentaPorCobrar.estado == estado,
-                or_(CuentaPorCobrar.fecha_vencimiento.is_(None), CuentaPorCobrar.fecha_vencimiento >= hoy),
+                or_(
+                    CuentaPorCobrar.fecha_vencimiento.is_(None),
+                    CuentaPorCobrar.fecha_vencimiento >= hoy,
+                ),
             )
         elif estado:
             query = query.filter(CuentaPorCobrar.estado == estado)
 
         total = query.count()
         cuentas = (
-            query.order_by(CuentaPorCobrar.fecha_vencimiento).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+            query.order_by(CuentaPorCobrar.fecha_vencimiento)
+            .offset((pagina - 1) * por_pagina)
+            .limit(por_pagina)
+            .all()
         )
 
         # estado_visual: atributo Python plano (no mapeado), mismo criterio que
@@ -433,7 +484,12 @@ class PagoService:
                 else cuenta.estado
             )
 
-        return {"items": cuentas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        return {
+            "items": cuentas,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
     def aplicar_abono_general_cliente(
@@ -488,7 +544,9 @@ class PagoService:
             raise ValueError("La tasa de cambio debe ser mayor a cero")
 
         if (id_cuenta_bancaria is None) == (id_caja is None):
-            raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
+            raise ValueError(
+                "Indique exactamente un origen del pago: cuenta bancaria o caja"
+            )
 
         # Validar origen del pago
         if id_cuenta_bancaria is not None:
@@ -496,21 +554,27 @@ class PagoService:
             if cuenta_bancaria is None:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
-                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' está inactiva")
+                raise ValueError(
+                    f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' está inactiva"
+                )
 
         if id_caja is not None:
             caja = session.get(Caja, id_caja)
             if caja is None:
                 raise ValueError("Caja no encontrada")
             if caja.fecha_apertura is None or caja.fecha_cierre is not None:
-                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+                raise ValueError(
+                    f"La caja '{caja.nombre_caja}' no tiene un turno abierto"
+                )
 
         # Obtener todas las cuentas por cobrar pendientes del cliente
         # Ordenadas por fecha de emisión de la factura (FIFO)
         try:
             cuentas_pendientes = (
                 session.query(CuentaPorCobrar)
-                .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+                .join(
+                    FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura
+                )
                 .filter(
                     FacturaVenta.id_cliente_factura == id_cliente,
                     FacturaVenta.condicion_pago == "credito",
@@ -520,7 +584,9 @@ class PagoService:
                 .order_by(FacturaVenta.fecha_emision.asc())
                 .all()
             )
-            logger.info(f"Cuentas pendientes encontradas para cliente {id_cliente}: {len(cuentas_pendientes)}")
+            logger.info(
+                f"Cuentas pendientes encontradas para cliente {id_cliente}: {len(cuentas_pendientes)}"
+            )
         except Exception as e:
             logger.error(f"Error al obtener cuentas pendientes: {e}")
             raise ValueError(f"Error al obtener cuentas pendientes: {str(e)}") from e
@@ -557,8 +623,12 @@ class PagoService:
                 monto_aplicar = min(monto_restante, saldo_pendiente)
 
                 # Calcular equivalentes en Bs
-                monto_aplicado_bs = (monto_aplicar * tasa_cambio).quantize(Decimal("0.01"))
-                restante_despues = (monto_restante - monto_aplicar).quantize(Decimal("0.01"))
+                monto_aplicado_bs = (monto_aplicar * tasa_cambio).quantize(
+                    Decimal("0.01")
+                )
+                restante_despues = (monto_restante - monto_aplicar).quantize(
+                    Decimal("0.01")
+                )
                 restante_bs = (restante_despues * tasa_cambio).quantize(Decimal("0.01"))
 
                 # Generar descripción de auditoría con formato exacto esperado por tests
@@ -601,7 +671,9 @@ class PagoService:
                 if cuenta.factura:
                     observaciones_actuales = cuenta.factura.observaciones_factura or ""
                     separador = " | " if observaciones_actuales else ""
-                    nueva_observacion = f"{observaciones_actuales}{separador}{descripcion_auditoria}"
+                    nueva_observacion = (
+                        f"{observaciones_actuales}{separador}{descripcion_auditoria}"
+                    )
 
                     # Truncar a 255 caracteres si es necesario
                     if len(nueva_observacion) > 255:
@@ -612,7 +684,9 @@ class PagoService:
                     {
                         "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
                         "id_factura": cuenta.id_factura,
-                        "numero_factura": cuenta.factura.numero_factura if cuenta.factura else "N/A",
+                        "numero_factura": (
+                            cuenta.factura.numero_factura if cuenta.factura else "N/A"
+                        ),
                         "monto_aplicado": monto_aplicar,
                         "monto_aplicado_bs": monto_aplicado_bs,
                         "saldo_restante_factura": cuenta.saldo_pendiente,
@@ -654,7 +728,9 @@ class PagoService:
                             nota_credito_id,
                         )
                 except Exception as e:
-                    logger.warning("No se pudo crear nota de crédito por sobreabono: %s", e)
+                    logger.warning(
+                        "No se pudo crear nota de crédito por sobreabono: %s", e
+                    )
                     # No fallar toda la transacción si falla la nota de crédito
 
             # Commit de la transacción
@@ -721,7 +797,8 @@ class PagoService:
     ) -> dict:
         """Lista cuentas por cobrar agrupadas por cliente con el saldo total pendiente.
         Retorna una fila por cliente con la suma de todos los saldos pendientes de sus facturas.
-        También incluye clientes que solo tienen saldo a favor (notas de crédito disponibles)."""
+        También incluye clientes que solo tienen saldo a favor (notas de crédito disponibles).
+        """
         require_permiso(session, id_usuario, "pagos", "ver")
         hoy = date.today()
 
@@ -745,7 +822,10 @@ class PagoService:
         elif estado in ("pendiente", "parcial"):
             query = query.filter(
                 CuentaPorCobrar.estado == estado,
-                or_(CuentaPorCobrar.fecha_vencimiento.is_(None), CuentaPorCobrar.fecha_vencimiento >= hoy),
+                or_(
+                    CuentaPorCobrar.fecha_vencimiento.is_(None),
+                    CuentaPorCobrar.fecha_vencimiento >= hoy,
+                ),
             )
         elif estado:
             query = query.filter(CuentaPorCobrar.estado == estado)
@@ -793,28 +873,54 @@ class PagoService:
                         saldo_favor_actual = Decimal("0.00")
 
                     if cuenta_saldo_favor and cuenta_saldo_favor > saldo_favor_actual:
-                        clientes_deuda[id_cliente_key]["saldo_favor"] = cuenta_saldo_favor
+                        clientes_deuda[id_cliente_key][
+                            "saldo_favor"
+                        ] = cuenta_saldo_favor
                 except Exception:
                     pass
 
                 # Calcular fecha de vencimiento más antigua
                 if cuenta.fecha_vencimiento:
-                    if clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"] is None:
-                        clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"] = cuenta.fecha_vencimiento
+                    if (
+                        clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"]
+                        is None
+                    ):
+                        clientes_deuda[id_cliente_key][
+                            "fecha_vencimiento_mas_antigua"
+                        ] = cuenta.fecha_vencimiento
                     else:
-                        clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"] = min(
-                            clientes_deuda[id_cliente_key]["fecha_vencimiento_mas_antigua"],
+                        clientes_deuda[id_cliente_key][
+                            "fecha_vencimiento_mas_antigua"
+                        ] = min(
+                            clientes_deuda[id_cliente_key][
+                                "fecha_vencimiento_mas_antigua"
+                            ],
                             cuenta.fecha_vencimiento,
                         )
 
                 # Calcular fecha de emisión más antigua para facturas pendientes
-                if cuenta.estado in ("pendiente", "parcial") and cuenta.factura and cuenta.factura.fecha_emision:
+                if (
+                    cuenta.estado in ("pendiente", "parcial")
+                    and cuenta.factura
+                    and cuenta.factura.fecha_emision
+                ):
                     fecha_emision = cuenta.factura.fecha_emision.date()
-                    if clientes_deuda[id_cliente_key]["fecha_emision_mas_antigua_pendiente"] is None:
-                        clientes_deuda[id_cliente_key]["fecha_emision_mas_antigua_pendiente"] = fecha_emision
+                    if (
+                        clientes_deuda[id_cliente_key][
+                            "fecha_emision_mas_antigua_pendiente"
+                        ]
+                        is None
+                    ):
+                        clientes_deuda[id_cliente_key][
+                            "fecha_emision_mas_antigua_pendiente"
+                        ] = fecha_emision
                     else:
-                        clientes_deuda[id_cliente_key]["fecha_emision_mas_antigua_pendiente"] = min(
-                            clientes_deuda[id_cliente_key]["fecha_emision_mas_antigua_pendiente"],
+                        clientes_deuda[id_cliente_key][
+                            "fecha_emision_mas_antigua_pendiente"
+                        ] = min(
+                            clientes_deuda[id_cliente_key][
+                                "fecha_emision_mas_antigua_pendiente"
+                            ],
                             fecha_emision,
                         )
 

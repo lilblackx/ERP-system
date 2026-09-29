@@ -141,7 +141,9 @@ class CajaAperturaDialog(QDialog):
         self.setWindowTitle("Abrir Turno de Caja")
         self.setFixedWidth(420)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._build_ui()
 
@@ -153,7 +155,9 @@ class CajaAperturaDialog(QDialog):
         header = QHBoxLayout()
         header.setSpacing(12)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon("fa5s.cash-register", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
+        icon_lbl.setPixmap(
+            qta.icon("fa5s.cash-register", color=COLOR_PRIMARY).pixmap(QSize(20, 20))
+        )
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -163,7 +167,9 @@ class CajaAperturaDialog(QDialog):
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
         lbl_titulo = QLabel("Abrir Turno de Caja")
-        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         self.lbl_subtitulo = QLabel("Identifíquese para poder facturar.")
         self.lbl_subtitulo.setWordWrap(True)
         self.lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
@@ -262,7 +268,9 @@ class CajaAperturaDialog(QDialog):
         nombre_usuario = self.usuario_input.text().strip()
         clave = self.clave_input.text()
         if not nombre_usuario or not clave:
-            MessageBox.warning(self, "Credenciales requeridas", "Ingrese usuario y clave.")
+            MessageBox.warning(
+                self, "Credenciales requeridas", "Ingrese usuario y clave."
+            )
             return
 
         try:
@@ -278,30 +286,46 @@ class CajaAperturaDialog(QDialog):
             return
 
         if usuario is None:
-            MessageBox.warning(self, "Credenciales inválidas", "Usuario o clave incorrectos.")
-            return
-
-        try:
-            cajas = CajaService.listar_cajas(self.session, id_usuario=usuario.id_usuario)
-        except PermisoDenegadoError:
             MessageBox.warning(
-                self, "Sin permiso", f"'{usuario.nombre_usuario}' no tiene permiso para abrir turnos de caja."
+                self, "Credenciales inválidas", "Usuario o clave incorrectos."
             )
             return
 
-        cajas_cerradas = [c for c in cajas if c.fecha_apertura is None or c.fecha_cierre is not None]
+        try:
+            cajas = CajaService.listar_cajas(
+                self.session, id_usuario=usuario.id_usuario
+            )
+        except PermisoDenegadoError:
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                f"'{usuario.nombre_usuario}' no tiene permiso para abrir turnos de caja.",
+            )
+            return
+
+        cajas_cerradas = [
+            c for c in cajas if c.fecha_apertura is None or c.fecha_cierre is not None
+        ]
         if not cajas_cerradas:
-            MessageBox.warning(self, "Sin cajas disponibles", "No hay ninguna caja disponible para abrir.")
+            MessageBox.warning(
+                self,
+                "Sin cajas disponibles",
+                "No hay ninguna caja disponible para abrir.",
+            )
             return
 
         self.usuario_autenticado = usuario
         self._verificado = True
         self.usuario_input.setEnabled(False)
         self.clave_input.setEnabled(False)
-        self.lbl_subtitulo.setText(f"Identificado como {usuario.nombre_usuario}. Elija la caja a abrir.")
+        self.lbl_subtitulo.setText(
+            f"Identificado como {usuario.nombre_usuario}. Elija la caja a abrir."
+        )
         self.caja_combo.clear()
         for caja in cajas_cerradas:
-            self.caja_combo.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", caja.id_caja)
+            self.caja_combo.addItem(
+                caja.nombre_caja or f"Caja {caja.id_caja}", caja.id_caja
+            )
         self.card_apertura.show()
         self.btn_principal.setText("Abrir Turno")
         self.btn_principal.setIcon(qta.icon("fa5s.unlock", color="#FFFFFF"))
@@ -316,7 +340,9 @@ class CajaAperturaDialog(QDialog):
     def _abrir(self) -> None:
         id_caja = self.caja_combo.currentData()
         if id_caja is None:
-            MessageBox.warning(self, "Caja requerida", "Seleccione una caja para abrir su turno.")
+            MessageBox.warning(
+                self, "Caja requerida", "Seleccione una caja para abrir su turno."
+            )
             return
         try:
             self.caja_abierta = CajaService.abrir_caja(

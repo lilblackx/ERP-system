@@ -113,7 +113,9 @@ QPushButton#BtnSecondary:hover {{
 
 
 class SolicitarCodigoDialog(QDialog):
-    def __init__(self, session_factory, tipo: str, nombre_usuario: str = "", parent=None):
+    def __init__(
+        self, session_factory, tipo: str, nombre_usuario: str = "", parent=None
+    ):
         super().__init__(parent)
         self.session_factory = session_factory
         self.tipo = tipo
@@ -122,7 +124,9 @@ class SolicitarCodigoDialog(QDialog):
         self.setWindowTitle(_TITULOS[tipo])
         self.setMinimumWidth(420)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 16, 20, 16)
@@ -143,7 +147,9 @@ class SolicitarCodigoDialog(QDialog):
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
         lbl_titulo = QLabel(self.windowTitle())
-        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         lbl_subtitulo = QLabel(_SUBTITULOS[tipo])
         lbl_subtitulo.setWordWrap(True)
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
@@ -196,12 +202,22 @@ class SolicitarCodigoDialog(QDialog):
         session = self.session_factory()
         try:
             if self.tipo == TIPO_DESBLOQUEO:
-                mensaje = RecuperacionAccesoService.solicitar_codigo_desbloqueo(session, nombre_usuario)
+                mensaje = RecuperacionAccesoService.solicitar_codigo_desbloqueo(
+                    session, nombre_usuario
+                )
             else:
-                mensaje = RecuperacionAccesoService.solicitar_codigo_recuperacion(session, nombre_usuario)
+                mensaje = RecuperacionAccesoService.solicitar_codigo_recuperacion(
+                    session, nombre_usuario
+                )
         except Exception:
-            logger.exception("Fallo al solicitar codigo (%s) para '%s'", self.tipo, nombre_usuario)
-            MessageBox.critical(self, "Error", "No se pudo enviar el codigo. Intente nuevamente mas tarde.")
+            logger.exception(
+                "Fallo al solicitar codigo (%s) para '%s'", self.tipo, nombre_usuario
+            )
+            MessageBox.critical(
+                self,
+                "Error",
+                "No se pudo enviar el codigo. Intente nuevamente mas tarde.",
+            )
             return
         finally:
             session.close()
@@ -263,7 +279,9 @@ class SolicitarCodigoDialog(QDialog):
         btn_atras.setObjectName("BtnSecondary")
         btn_atras.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_atras.clicked.connect(lambda: self.stack.setCurrentIndex(0))
-        etiqueta_confirmar = "Cambiar clave" if self.tipo == TIPO_RECUPERAR_CLAVE else "Desbloquear"
+        etiqueta_confirmar = (
+            "Cambiar clave" if self.tipo == TIPO_RECUPERAR_CLAVE else "Desbloquear"
+        )
         btn_verificar = QPushButton(etiqueta_confirmar)
         btn_verificar.setIcon(qta.icon("fa5s.check", color="#FFFFFF"))
         btn_verificar.setObjectName("BtnPrimary")
@@ -290,21 +308,33 @@ class SolicitarCodigoDialog(QDialog):
         session = self.session_factory()
         try:
             if self.tipo == TIPO_DESBLOQUEO:
-                RecuperacionAccesoService.verificar_codigo_desbloqueo(session, self._nombre_usuario_confirmado, codigo)
-                MessageBox.information(self, "Listo", "Cuenta desbloqueada. Ya puede iniciar sesion.")
+                RecuperacionAccesoService.verificar_codigo_desbloqueo(
+                    session, self._nombre_usuario_confirmado, codigo
+                )
+                MessageBox.information(
+                    self, "Listo", "Cuenta desbloqueada. Ya puede iniciar sesion."
+                )
             else:
                 RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(
                     session, self._nombre_usuario_confirmado, codigo, nueva_clave
                 )
-                MessageBox.information(self, "Listo", "Clave actualizada. Ya puede iniciar sesion.")
+                MessageBox.information(
+                    self, "Listo", "Clave actualizada. Ya puede iniciar sesion."
+                )
         except ValueError as exc:
             # Mensajes ya pensados para el usuario final (codigo invalido/vencido,
             # politica de clave) -- no son un str(exc) tecnico, mismo criterio que C3.
             MessageBox.warning(self, "Error", str(exc))
             return
         except Exception:
-            logger.exception("Fallo al verificar codigo (%s) para '%s'", self.tipo, self._nombre_usuario_confirmado)
-            MessageBox.critical(self, "Error", "Ocurrio un error inesperado. Intente nuevamente.")
+            logger.exception(
+                "Fallo al verificar codigo (%s) para '%s'",
+                self.tipo,
+                self._nombre_usuario_confirmado,
+            )
+            MessageBox.critical(
+                self, "Error", "Ocurrio un error inesperado. Intente nuevamente."
+            )
             return
         finally:
             session.close()

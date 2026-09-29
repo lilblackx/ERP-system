@@ -10,7 +10,13 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import CompraOC, CompraOCDetalle, CompraOCEnmienda, Inventario, Proveedor
+from app.db.models import (
+    CompraOC,
+    CompraOCDetalle,
+    CompraOCEnmienda,
+    Inventario,
+    Proveedor,
+)
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
 
@@ -37,9 +43,15 @@ def _validar_items_oc(items: list[dict]) -> None:
     for item in items:
         if not item.get("id_producto"):
             raise ValueError("Cada item requiere id_producto")
-        if not item.get("cantidad_solicitada") or Decimal(str(item["cantidad_solicitada"])) <= 0:
+        if (
+            not item.get("cantidad_solicitada")
+            or Decimal(str(item["cantidad_solicitada"])) <= 0
+        ):
             raise ValueError("Cada item requiere una cantidad_solicitada mayor a cero")
-        if not item.get("precio_unitario") or Decimal(str(item["precio_unitario"])) <= 0:
+        if (
+            not item.get("precio_unitario")
+            or Decimal(str(item["precio_unitario"])) <= 0
+        ):
             raise ValueError("Cada item requiere un precio_unitario mayor a cero")
 
 
@@ -60,18 +72,28 @@ class CompraOCService:
         if proveedor is None:
             raise ValueError("Proveedor no encontrado")
         if proveedor.estado_proveedor != "ACTIVO":
-            raise ValueError(f"El proveedor '{proveedor.nombre_razon_social}' esta inactivo")
+            raise ValueError(
+                f"El proveedor '{proveedor.nombre_razon_social}' esta inactivo"
+            )
 
         for id_producto in {item["id_producto"] for item in items}:
             producto = session.get(Inventario, id_producto)
             if producto is None:
                 raise ValueError(f"Producto {id_producto} no encontrado")
             if producto.estado_producto != "ACTIVO":
-                raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo")
+                raise ValueError(
+                    f"El producto '{producto.nombre_producto}' esta inactivo"
+                )
 
-        cantidad_total = sum(Decimal(str(item["cantidad_solicitada"])) for item in items)
+        cantidad_total = sum(
+            Decimal(str(item["cantidad_solicitada"])) for item in items
+        )
         total_oc = sum(
-            (Decimal(str(item["cantidad_solicitada"])) * Decimal(str(item["precio_unitario"])) for item in items),
+            (
+                Decimal(str(item["cantidad_solicitada"]))
+                * Decimal(str(item["precio_unitario"]))
+                for item in items
+            ),
             Decimal("0.00"),
         )
 
@@ -109,14 +131,22 @@ class CompraOCService:
         session.refresh(oc)
 
         logger.info(
-            "OC %s creada: proveedor=%s total=%s usuario=%s", oc.numero_oc, id_proveedor, oc.total_oc, id_usuario
+            "OC %s creada: proveedor=%s total=%s usuario=%s",
+            oc.numero_oc,
+            id_proveedor,
+            oc.total_oc,
+            id_usuario,
         )
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
             accion="CREAR_OC",
             modulo="COMPRAS",
-            detalle={"numero_oc": oc.numero_oc, "id_proveedor": id_proveedor, "total_oc": str(oc.total_oc)},
+            detalle={
+                "numero_oc": oc.numero_oc,
+                "id_proveedor": id_proveedor,
+                "total_oc": str(oc.total_oc),
+            },
         )
         return oc
 
@@ -153,20 +183,34 @@ class CompraOCService:
             raise ValueError("No se puede enmendar una orden de compra anulada")
 
         if tipo_cambio == "CANTIDAD" and cantidad_nueva is None:
-            raise ValueError("cantidad_nueva es requerida para una enmienda de tipo CANTIDAD")
+            raise ValueError(
+                "cantidad_nueva es requerida para una enmienda de tipo CANTIDAD"
+            )
         if tipo_cambio == "PRECIO" and precio_nuevo is None:
-            raise ValueError("precio_nuevo es requerido para una enmienda de tipo PRECIO")
+            raise ValueError(
+                "precio_nuevo es requerido para una enmienda de tipo PRECIO"
+            )
         if tipo_cambio == "FECHA" and fecha_entrega_nueva is None:
-            raise ValueError("fecha_entrega_nueva es requerida para una enmienda de tipo FECHA")
+            raise ValueError(
+                "fecha_entrega_nueva es requerida para una enmienda de tipo FECHA"
+            )
 
         enmienda = CompraOCEnmienda(
             id_oc=id_oc,
             numero_enmienda=_generar_numero_enmienda(session),
             tipo_cambio=tipo_cambio,
-            cantidad_anterior=oc.cantidad_solicitada if tipo_cambio == "CANTIDAD" else None,
-            cantidad_nueva=Decimal(str(cantidad_nueva)) if cantidad_nueva is not None else None,
-            precio_nuevo=Decimal(str(precio_nuevo)) if precio_nuevo is not None else None,
-            fecha_entrega_anterior=oc.fecha_estimada_entrega if tipo_cambio == "FECHA" else None,
+            cantidad_anterior=(
+                oc.cantidad_solicitada if tipo_cambio == "CANTIDAD" else None
+            ),
+            cantidad_nueva=(
+                Decimal(str(cantidad_nueva)) if cantidad_nueva is not None else None
+            ),
+            precio_nuevo=(
+                Decimal(str(precio_nuevo)) if precio_nuevo is not None else None
+            ),
+            fecha_entrega_anterior=(
+                oc.fecha_estimada_entrega if tipo_cambio == "FECHA" else None
+            ),
             fecha_entrega_nueva=fecha_entrega_nueva,
             motivo=motivo,
             observaciones=observaciones,
@@ -188,7 +232,11 @@ class CompraOCService:
             id_usuario=id_usuario,
             accion="CREAR_ENMIENDA_OC",
             modulo="COMPRAS",
-            detalle={"numero_enmienda": enmienda.numero_enmienda, "id_oc": id_oc, "tipo_cambio": tipo_cambio},
+            detalle={
+                "numero_enmienda": enmienda.numero_enmienda,
+                "id_oc": id_oc,
+                "tipo_cambio": tipo_cambio,
+            },
         )
         return enmienda
 
@@ -200,7 +248,8 @@ class CompraOCService:
         a proposito -- solo ADMIN (que bypassa la matriz, ver require_permiso()) puede
         autorizar enmiendas hoy. Sigue sin distinguir solicitante/autorizador a nivel de
         permisos (como si hacen descuentos/creditos/vueltos_bancarios via
-        AutorizacionDialog) -- se deja para cuando este flujo tenga su propia pantalla."""
+        AutorizacionDialog) -- se deja para cuando este flujo tenga su propia pantalla.
+        """
         require_permiso(session, id_usuario, "compras", "autorizar_enmienda_oc")
         # WITH (UPDLOCK, ROWLOCK): sin esto, dos autorizaciones concurrentes de la MISMA
         # enmienda pueden ambas leer estado_enmienda='PENDIENTE' antes de que la primera
@@ -210,7 +259,9 @@ class CompraOCService:
         enmienda = session.execute(
             select(CompraOCEnmienda)
             .where(CompraOCEnmienda.id_enmienda == id_enmienda)
-            .with_hint(CompraOCEnmienda, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            .with_hint(
+                CompraOCEnmienda, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
+            )
         ).scalar_one_or_none()
         if enmienda is None:
             raise ValueError("Enmienda no encontrada")
@@ -226,13 +277,21 @@ class CompraOCService:
         session.commit()
         session.refresh(enmienda)
 
-        logger.info("Enmienda %s %s por usuario=%s", enmienda.numero_enmienda, enmienda.estado_enmienda, id_usuario)
+        logger.info(
+            "Enmienda %s %s por usuario=%s",
+            enmienda.numero_enmienda,
+            enmienda.estado_enmienda,
+            id_usuario,
+        )
         AuditoriaService.registrar_evento(
             session,
             id_usuario=id_usuario,
             accion="AUTORIZAR_ENMIENDA_OC",
             modulo="COMPRAS",
-            detalle={"numero_enmienda": enmienda.numero_enmienda, "estado_enmienda": enmienda.estado_enmienda},
+            detalle={
+                "numero_enmienda": enmienda.numero_enmienda,
+                "estado_enmienda": enmienda.estado_enmienda,
+            },
         )
         return enmienda
 
@@ -248,16 +307,31 @@ class CompraOCService:
         """Necesario para la pestana 'Ordenes de Compra' de app/ui/compras.py -- ningun
         paso anterior agrego un metodo de lectura (paso 3 solo tenia escritura)."""
         require_permiso(session, id_usuario, "compras", "ver")
-        query = session.query(CompraOC).join(Proveedor, Proveedor.id_proveedor == CompraOC.id_proveedor)
+        query = session.query(CompraOC).join(
+            Proveedor, Proveedor.id_proveedor == CompraOC.id_proveedor
+        )
         if texto_busqueda:
             like = f"%{texto_busqueda}%"
-            query = query.filter(CompraOC.numero_oc.ilike(like) | Proveedor.nombre_razon_social.ilike(like))
+            query = query.filter(
+                CompraOC.numero_oc.ilike(like)
+                | Proveedor.nombre_razon_social.ilike(like)
+            )
         if estado:
             query = query.filter(CompraOC.estado == estado)
 
         total = query.count()
-        ocs = query.order_by(CompraOC.fecha_oc.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {"items": ocs, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        ocs = (
+            query.order_by(CompraOC.fecha_oc.desc())
+            .offset((pagina - 1) * por_pagina)
+            .limit(por_pagina)
+            .all()
+        )
+        return {
+            "items": ocs,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
     def obtener_oc(session: Session, id_oc: int, id_usuario: int | None = None) -> dict:
@@ -265,5 +339,7 @@ class CompraOCService:
         oc = session.get(CompraOC, id_oc)
         if oc is None:
             raise ValueError("Orden de compra no encontrada")
-        detalles = session.query(CompraOCDetalle).filter(CompraOCDetalle.id_oc == id_oc).all()
+        detalles = (
+            session.query(CompraOCDetalle).filter(CompraOCDetalle.id_oc == id_oc).all()
+        )
         return {"oc": oc, "detalles": detalles}

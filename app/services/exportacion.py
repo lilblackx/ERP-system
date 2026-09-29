@@ -29,7 +29,14 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    Image,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 from app.db.models import ConfiguracionEmpresa
 
@@ -80,7 +87,10 @@ def exportar_excel(
 
     if config_empresa is not None:
         lineas_empresa = (
-            (config_empresa.razon_social_empresa, Font(bold=True, size=13, color="0D47A1")),
+            (
+                config_empresa.razon_social_empresa,
+                Font(bold=True, size=13, color="0D47A1"),
+            ),
             (config_empresa.rif_empresa, Font(size=10, color="64748B")),
             (config_empresa.direccion_empresa, Font(size=10, color="64748B")),
             (config_empresa.telefono_empresa, Font(size=10, color="64748B")),
@@ -89,7 +99,9 @@ def exportar_excel(
         for indice, (valor, fuente) in enumerate(lineas_empresa):
             if not valor:
                 continue
-            celda = hoja.cell(row=fila_actual, column=1, value=_neutralizar_formula(valor))
+            celda = hoja.cell(
+                row=fila_actual, column=1, value=_neutralizar_formula(valor)
+            )
             celda.font = fuente
             if indice == 0:
                 # mas alto que el resto -- separa visualmente la razon social del RIF que
@@ -105,17 +117,26 @@ def exportar_excel(
         celda_titulo.font = Font(bold=True, size=14)
         celda_titulo.alignment = Alignment(horizontal="center")
         if ancho_tabla > 1:
-            hoja.merge_cells(start_row=fila_actual, start_column=1, end_row=fila_actual, end_column=ancho_tabla)
+            hoja.merge_cells(
+                start_row=fila_actual,
+                start_column=1,
+                end_row=fila_actual,
+                end_column=ancho_tabla,
+            )
         fila_actual += 2  # fila en blanco despues del titulo
 
     for col_idx, encabezado in enumerate(encabezados, start=1):
-        hoja.cell(row=fila_actual, column=col_idx, value=encabezado).font = Font(bold=True)
+        hoja.cell(row=fila_actual, column=col_idx, value=encabezado).font = Font(
+            bold=True
+        )
     fila_actual += 1
 
     cantidad_filas = 0
     for fila in filas:
         for col_idx, valor in enumerate(fila, start=1):
-            hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
+            hoja.cell(
+                row=fila_actual, column=col_idx, value=_neutralizar_formula(valor)
+            )
         fila_actual += 1
         cantidad_filas += 1
 
@@ -128,7 +149,9 @@ def exportar_excel(
             total_row = total_row_con_label
 
         for col_idx, valor in enumerate(total_row, start=1):
-            celda = hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
+            celda = hoja.cell(
+                row=fila_actual, column=col_idx, value=_neutralizar_formula(valor)
+            )
             # Aplicar formato negrita a la fila de totales
             celda.font = Font(bold=True)
             # Si es la columna de saldo (índice 2 en cuentas por pagar), aplicar color
@@ -157,7 +180,9 @@ def _imagen_logo_pdf(logo_bytes: bytes, dimension_max: float = 55) -> Image | No
     return Image(BytesIO(logo_bytes), width=ancho_px * escala, height=alto_px * escala)
 
 
-def _bloque_empresa_pdf(config_empresa: ConfiguracionEmpresa, styles) -> Table | Paragraph | None:
+def _bloque_empresa_pdf(
+    config_empresa: ConfiguracionEmpresa, styles
+) -> Table | Paragraph | None:
     estilo_nombre = ParagraphStyle(
         "EmpresaNombre",
         parent=styles["Normal"],
@@ -166,23 +191,36 @@ def _bloque_empresa_pdf(config_empresa: ConfiguracionEmpresa, styles) -> Table |
         textColor=_COLOR_PRIMARIO,
         spaceAfter=5,
     )
-    estilo_dato = ParagraphStyle("EmpresaDato", parent=styles["Normal"], fontSize=9, textColor=_COLOR_MUTED)
+    estilo_dato = ParagraphStyle(
+        "EmpresaDato", parent=styles["Normal"], fontSize=9, textColor=_COLOR_MUTED
+    )
 
     lineas: list[Paragraph] = []
     if config_empresa.razon_social_empresa:
         lineas.append(Paragraph(config_empresa.razon_social_empresa, estilo_nombre))
-    for valor in (config_empresa.rif_empresa, config_empresa.direccion_empresa, config_empresa.telefono_empresa):
+    for valor in (
+        config_empresa.rif_empresa,
+        config_empresa.direccion_empresa,
+        config_empresa.telefono_empresa,
+    ):
         if valor:
             lineas.append(Paragraph(valor, estilo_dato))
     if not lineas:
         return None
 
-    logo = _imagen_logo_pdf(config_empresa.logotipo_empresa) if config_empresa.logotipo_empresa else None
+    logo = (
+        _imagen_logo_pdf(config_empresa.logotipo_empresa)
+        if config_empresa.logotipo_empresa
+        else None
+    )
     if logo is None:
         return (
             lineas[0]
             if len(lineas) == 1
-            else Table([[linea] for linea in lineas], style=[("LEFTPADDING", (0, 0), (-1, -1), 0)])
+            else Table(
+                [[linea] for linea in lineas],
+                style=[("LEFTPADDING", (0, 0), (-1, -1), 0)],
+            )
         )
 
     fila = Table([[logo, lineas]], colWidths=[65, None])
@@ -321,7 +359,12 @@ def exportar_pdf(
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
             ("FONTSIZE", (0, 1), (-1, -1), 8),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("WORDWRAP", (0, 0), (-1, -1), "CJK"),  # Permite mejor ajuste de texto largo
+            (
+                "WORDWRAP",
+                (0, 0),
+                (-1, -1),
+                "CJK",
+            ),  # Permite mejor ajuste de texto largo
         ]
     )
 
@@ -343,7 +386,9 @@ def exportar_pdf(
     if col_widths:
         # Normalizar anchos para que sumen el ancho disponible
         total_ancho = sum(col_widths)
-        col_widths_normalizados = [w * ancho_disponible / total_ancho for w in col_widths]
+        col_widths_normalizados = [
+            w * ancho_disponible / total_ancho for w in col_widths
+        ]
         table = Table(data, colWidths=col_widths_normalizados)
     else:
         ancho_columna = ancho_disponible / len(encabezados)

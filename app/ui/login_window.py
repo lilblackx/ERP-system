@@ -53,12 +53,16 @@ class LoginWindow(QDialog):
             if config and config.razon_social_empresa:
                 empresa = config.razon_social_empresa
         except Exception:
-            logger.exception("No se pudo cargar el nombre de la empresa para la pantalla de login")
+            logger.exception(
+                "No se pudo cargar el nombre de la empresa para la pantalla de login"
+            )
         finally:
             session.close()
 
         # Eliminar márgenes del QDialog base
-        self.setStyleSheet(f"QDialog {{ background-color: {COLOR_CARD_BG}; font-family: '{FONT_FAMILY}', Arial; }}")
+        self.setStyleSheet(
+            f"QDialog {{ background-color: {COLOR_CARD_BG}; font-family: '{FONT_FAMILY}', Arial; }}"
+        )
 
         self._build_ui(empresa)
 
@@ -88,11 +92,15 @@ class LoginWindow(QDialog):
 
         lbl_hola = QLabel("Hola, Bienvenido")
         lbl_hola.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_hola.setStyleSheet("color: white; font-size: 32px; font-weight: bold; background: transparent;")
+        lbl_hola.setStyleSheet(
+            "color: white; font-size: 32px; font-weight: bold; background: transparent;"
+        )
 
         lbl_empresa = QLabel(empresa_nombre)
         lbl_empresa.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_empresa.setStyleSheet("color: white; font-size: 24px; font-weight: normal; background: transparent;")
+        lbl_empresa.setStyleSheet(
+            "color: white; font-size: 24px; font-weight: normal; background: transparent;"
+        )
         lbl_empresa.setWordWrap(True)
 
         left_layout.addStretch()
@@ -116,7 +124,9 @@ class LoginWindow(QDialog):
 
         lbl_titulo = QLabel("Iniciar Sesion")
         lbl_titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_titulo.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 36px; font-weight: bold;")
+        lbl_titulo.setStyleSheet(
+            f"color: {COLOR_TEXT_DARK}; font-size: 36px; font-weight: bold;"
+        )
         right_layout.addWidget(lbl_titulo)
         right_layout.addSpacing(20)
 
@@ -129,7 +139,9 @@ class LoginWindow(QDialog):
         user_layout = QHBoxLayout()
         user_layout.addWidget(self.usuario_input)
         lbl_user_icon = QLabel()
-        lbl_user_icon.setPixmap(qta.icon("fa5s.user", color=COLOR_TEXT_MUTED).pixmap(18, 18))
+        lbl_user_icon.setPixmap(
+            qta.icon("fa5s.user", color=COLOR_TEXT_MUTED).pixmap(18, 18)
+        )
         lbl_user_icon.setStyleSheet("background: transparent;")
         user_layout.addWidget(lbl_user_icon)
         right_layout.addLayout(user_layout)
@@ -145,7 +157,9 @@ class LoginWindow(QDialog):
         pass_layout = QHBoxLayout()
         pass_layout.addWidget(self.clave_input)
         lbl_pass_icon = QLabel()
-        lbl_pass_icon.setPixmap(qta.icon("fa5s.lock", color=COLOR_TEXT_MUTED).pixmap(18, 18))
+        lbl_pass_icon.setPixmap(
+            qta.icon("fa5s.lock", color=COLOR_TEXT_MUTED).pixmap(18, 18)
+        )
         lbl_pass_icon.setStyleSheet("background: transparent;")
         pass_layout.addWidget(lbl_pass_icon)
         right_layout.addLayout(pass_layout)
@@ -154,7 +168,9 @@ class LoginWindow(QDialog):
         lbl_olvidaste = QLabel("¿Olvidaste tu contraseña?")
         lbl_olvidaste.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_olvidaste.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        lbl_olvidaste.setStyleSheet(f"color: {COLOR_PRIMARY}; font-size: 13px; text-decoration: underline;")
+        lbl_olvidaste.setStyleSheet(
+            f"color: {COLOR_PRIMARY}; font-size: 13px; text-decoration: underline;"
+        )
         lbl_olvidaste.mousePressEvent = lambda event: self._abrir_recuperar_clave()
         right_layout.addWidget(lbl_olvidaste)
 
@@ -219,7 +235,9 @@ class LoginWindow(QDialog):
 
     def _mostrar_mensaje(self, texto: str, icono: str | None = None) -> None:
         if icono:
-            self.icon_mensaje.setPixmap(qta.icon(icono, color=COLOR_DANGER).pixmap(QSize(12, 12)))
+            self.icon_mensaje.setPixmap(
+                qta.icon(icono, color=COLOR_DANGER).pixmap(QSize(12, 12))
+            )
         else:
             self.icon_mensaje.clear()
         self.mensaje_texto.setText(texto)
@@ -230,7 +248,9 @@ class LoginWindow(QDialog):
         self._mostrar_mensaje("")
 
         if not nombre_usuario or not clave:
-            self._mostrar_mensaje("Ingrese usuario y contraseña", "fa5s.exclamation-triangle")
+            self._mostrar_mensaje(
+                "Ingrese usuario y contraseña", "fa5s.exclamation-triangle"
+            )
             return
 
         self.btn_login.setText("Verificando…")
@@ -240,15 +260,23 @@ class LoginWindow(QDialog):
         try:
             usuario = authenticate(session, nombre_usuario, clave)
         except CuentaBloqueadaError:
-            self._mostrar_mensaje("Cuenta bloqueada por intentos fallidos", "fa5s.exclamation-triangle")
+            self._mostrar_mensaje(
+                "Cuenta bloqueada por intentos fallidos", "fa5s.exclamation-triangle"
+            )
             self.clave_input.clear()
             self.clave_input.setFocus()
-            dialogo = SolicitarCodigoDialog(SessionLocal, TIPO_DESBLOQUEO, nombre_usuario, parent=self)
+            dialogo = SolicitarCodigoDialog(
+                SessionLocal, TIPO_DESBLOQUEO, nombre_usuario, parent=self
+            )
             dialogo.exec()
             return
         except Exception:
             logger.exception("Fallo al autenticar al usuario '%s'", nombre_usuario)
-            MessageBox.critical(self, "Error de conexión", "No se pudo conectar con el servidor. Intente nuevamente.")
+            MessageBox.critical(
+                self,
+                "Error de conexión",
+                "No se pudo conectar con el servidor. Intente nuevamente.",
+            )
             return
         finally:
             session.close()
@@ -256,7 +284,9 @@ class LoginWindow(QDialog):
             self.btn_login.setEnabled(True)
 
         if usuario is None:
-            self._mostrar_mensaje("Usuario o contraseña incorrectos", "fa5s.times-circle")
+            self._mostrar_mensaje(
+                "Usuario o contraseña incorrectos", "fa5s.times-circle"
+            )
             self.clave_input.clear()
             self.clave_input.setFocus()
             return
@@ -266,5 +296,7 @@ class LoginWindow(QDialog):
 
     def _abrir_recuperar_clave(self) -> None:
         nombre_usuario = self.usuario_input.text().strip()
-        dialogo = SolicitarCodigoDialog(SessionLocal, TIPO_RECUPERAR_CLAVE, nombre_usuario, parent=self)
+        dialogo = SolicitarCodigoDialog(
+            SessionLocal, TIPO_RECUPERAR_CLAVE, nombre_usuario, parent=self
+        )
         dialogo.exec()

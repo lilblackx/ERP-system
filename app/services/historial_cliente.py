@@ -5,13 +5,21 @@ from typing import Literal, TypedDict
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import CuentaBancaria, CuentaPorCobrar, FacturaVenta, NotaCreditoCliente, PagoCobro
+from app.db.models import (
+    CuentaBancaria,
+    CuentaPorCobrar,
+    FacturaVenta,
+    NotaCreditoCliente,
+    PagoCobro,
+)
 
 
 class HistorialItem(TypedDict):
     """Representa un item del historial del cliente."""
 
-    tipo_transaccion: Literal["factura", "pago", "nota_credito", "devolucion_nota_credito"]
+    tipo_transaccion: Literal[
+        "factura", "pago", "nota_credito", "devolucion_nota_credito"
+    ]
     id_cuenta: int | None
     id_factura: int | None
     id_pago: int | None
@@ -57,7 +65,10 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
     # Obtener todos los pagos del cliente a través de sus cuentas por cobrar
     pagos = (
         session.query(PagoCobro)
-        .join(CuentaPorCobrar, PagoCobro.id_cuenta_por_cobrar == CuentaPorCobrar.id_cuenta_por_cobrar)
+        .join(
+            CuentaPorCobrar,
+            PagoCobro.id_cuenta_por_cobrar == CuentaPorCobrar.id_cuenta_por_cobrar,
+        )
         .join(FacturaVenta, CuentaPorCobrar.id_factura == FacturaVenta.id_factura)
         .filter(FacturaVenta.id_cliente_factura == id_cliente)
         .options(
@@ -100,9 +111,21 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
     historial: list[HistorialItem] = []
 
     for factura in facturas:
-        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
-        fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d %H:%M") if factura.fecha_emision else ""
-        fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
+        cxc = (
+            session.query(CuentaPorCobrar)
+            .filter(CuentaPorCobrar.id_factura == factura.id_factura)
+            .first()
+        )
+        fecha_emision_str = (
+            factura.fecha_emision.strftime("%Y-%m-%d %H:%M")
+            if factura.fecha_emision
+            else ""
+        )
+        fecha_vencimiento_str = (
+            factura.fecha_vencimiento.strftime("%Y-%m-%d")
+            if factura.fecha_vencimiento
+            else None
+        )
 
         # Agregar la factura
         item_factura: HistorialItem = {
@@ -129,29 +152,45 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         # Agregar los pagos de esta factura
         if factura.id_factura in pagos_por_factura:
             for pago in pagos_por_factura[factura.id_factura]:
-                fecha_pago_str = pago.fecha_pago.strftime("%Y-%m-%d %H:%M") if pago.fecha_pago else ""
+                fecha_pago_str = (
+                    pago.fecha_pago.strftime("%Y-%m-%d %H:%M")
+                    if pago.fecha_pago
+                    else ""
+                )
                 cxc_pago = pago.cuenta_por_cobrar
 
                 # Construir observaciones con bolivares, tasa y banco
                 observaciones = ""
 
                 # Agregar bolivares y tasa si es transferencia
-                if pago.metodo_pago == "transferencia" and pago.monto_moneda_origen and pago.tasa:
+                if (
+                    pago.metodo_pago == "transferencia"
+                    and pago.monto_moneda_origen
+                    and pago.tasa
+                ):
                     # Determinar qué tasa se usó comparando con los campos del registro
                     tasa_usada = None
                     tipo_tasa = ""
 
-                    if pago.tasa.tasa_dolar_bcv and pago.monto / pago.monto_moneda_origen == float(
+                    if (
                         pago.tasa.tasa_dolar_bcv
+                        and pago.monto / pago.monto_moneda_origen
+                        == float(pago.tasa.tasa_dolar_bcv)
                     ):
                         tasa_usada = pago.tasa.tasa_dolar_bcv
                         tipo_tasa = "BCV"
-                    elif pago.tasa.tasa_dolar_paralelo and pago.monto / pago.monto_moneda_origen == float(
+                    elif (
                         pago.tasa.tasa_dolar_paralelo
+                        and pago.monto / pago.monto_moneda_origen
+                        == float(pago.tasa.tasa_dolar_paralelo)
                     ):
                         tasa_usada = pago.tasa.tasa_dolar_paralelo
                         tipo_tasa = "Paralelo"
-                    elif pago.tasa.tasa_cop and pago.monto / pago.monto_moneda_origen == float(pago.tasa.tasa_cop):
+                    elif (
+                        pago.tasa.tasa_cop
+                        and pago.monto / pago.monto_moneda_origen
+                        == float(pago.tasa.tasa_cop)
+                    ):
                         tasa_usada = pago.tasa.tasa_cop
                         tipo_tasa = "COP"
 
@@ -160,9 +199,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     else:
                         # Fallback: mostrar BCV si no se puede determinar
                         if pago.tasa.tasa_dolar_bcv:
-                            observaciones = (
-                                f"Bs({pago.monto_moneda_origen:,.2f}) - BCV: {pago.tasa.tasa_dolar_bcv:,.2f}"
-                            )
+                            observaciones = f"Bs({pago.monto_moneda_origen:,.2f}) - BCV: {pago.tasa.tasa_dolar_bcv:,.2f}"
                         else:
                             observaciones = f"Bs({pago.monto_moneda_origen:,.2f})"
 
@@ -193,13 +230,19 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     "metodo_pago": pago.metodo_pago,
                     "monto_vuelto": Decimal("0.00"),
                     "metodo_vuelto": None,
-                    "saldo_corrido": Decimal("0.00"),  # No aplica para pagos individuales
+                    "saldo_corrido": Decimal(
+                        "0.00"
+                    ),  # No aplica para pagos individuales
                 }
                 historial.append(item_pago)
 
     # Agregar notas de crédito disponibles como saldo a favor
     for nota in notas_credito:
-        fecha_creacion_str = nota.fecha_creacion.strftime("%Y-%m-%d %H:%M") if nota.fecha_creacion else ""
+        fecha_creacion_str = (
+            nota.fecha_creacion.strftime("%Y-%m-%d %H:%M")
+            if nota.fecha_creacion
+            else ""
+        )
 
         item_nota: HistorialItem = {
             "tipo_transaccion": "nota_credito",
@@ -224,7 +267,11 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
 
     # Agregar notas de crédito devueltas
     for nota in notas_devueltas:
-        fecha_creacion_str = nota.fecha_creacion.strftime("%Y-%m-%d %H:%M") if nota.fecha_creacion else ""
+        fecha_creacion_str = (
+            nota.fecha_creacion.strftime("%Y-%m-%d %H:%M")
+            if nota.fecha_creacion
+            else ""
+        )
 
         item_devolucion: HistorialItem = {
             "tipo_transaccion": "devolucion_nota_credito",
@@ -235,7 +282,8 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "numero_factura": nota.numero_nota_credito or "",
             "fecha": fecha_creacion_str,
             "fecha_vencimiento": None,
-            "monto": nota.monto - nota.saldo_disponible,  # Monto devuelto (monto original - saldo restante)
+            "monto": nota.monto
+            - nota.saldo_disponible,  # Monto devuelto (monto original - saldo restante)
             "estado_factura": nota.estado,
             "condicion_pago": None,
             "dias_credito": None,
@@ -271,7 +319,9 @@ def obtener_saldo_total_pendiente(session: Session, id_cliente: int) -> Decimal:
         .all()
     )
 
-    return sum((saldo[0] for saldo in total), Decimal("0")) if total else Decimal("0.00")
+    return (
+        sum((saldo[0] for saldo in total), Decimal("0")) if total else Decimal("0.00")
+    )
 
 
 def obtener_saldo_total_positivo(session: Session, id_cliente: int) -> Decimal:
@@ -294,4 +344,6 @@ def obtener_saldo_total_positivo(session: Session, id_cliente: int) -> Decimal:
         .all()
     )
 
-    return sum((saldo[0] for saldo in total), Decimal("0")) if total else Decimal("0.00")
+    return (
+        sum((saldo[0] for saldo in total), Decimal("0")) if total else Decimal("0.00")
+    )

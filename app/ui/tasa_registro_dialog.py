@@ -1,7 +1,8 @@
 """Dialogo minimo para registrar la tasa de cambio del dia -- mismo patron que
 caja_apertura_dialog.py (tarjeta unica + footer). A diferencia de otros formularios de
 alta, TasaService no tiene actualizar/eliminar: cada registro es un snapshot historico
-inmutable (ver app/services/tasas.py), asi que este dialogo tampoco tiene modo edicion."""
+inmutable (ver app/services/tasas.py), asi que este dialogo tampoco tiene modo edicion.
+"""
 
 from decimal import Decimal
 
@@ -96,7 +97,9 @@ class TasaRegistroDialog(QDialog):
         self.setWindowTitle("Registrar Tasa del Día")
         self.setFixedSize(420, 380)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._build_ui()
 
@@ -108,7 +111,9 @@ class TasaRegistroDialog(QDialog):
         header = QHBoxLayout()
         header.setSpacing(12)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
+        icon_lbl.setPixmap(
+            qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(QSize(20, 20))
+        )
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -118,8 +123,12 @@ class TasaRegistroDialog(QDialog):
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
         lbl_titulo = QLabel("Registrar Tasa del Día")
-        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
-        lbl_subtitulo = QLabel("Queda como un registro histórico nuevo, no reemplaza el anterior.")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
+        lbl_subtitulo = QLabel(
+            "Queda como un registro histórico nuevo, no reemplaza el anterior."
+        )
         lbl_subtitulo.setWordWrap(True)
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         titulos.addWidget(lbl_titulo)
@@ -137,7 +146,11 @@ class TasaRegistroDialog(QDialog):
 
         lbl_bcv = QLabel(f"Tasa BCV (Bs./USD) {ASTERISCO_REQUERIDO}")
         lbl_bcv.setProperty("class", "FormLabel")
-        self.bcv_input = NumericLineEdit(NumericFieldType.RATE, min_value=Decimal("0"), max_value=Decimal("9999999.99"))
+        self.bcv_input = NumericLineEdit(
+            NumericFieldType.RATE,
+            min_value=Decimal("0"),
+            max_value=Decimal("9999999.99"),
+        )
         self.bcv_input.setFixedHeight(32)
         layout.addWidget(lbl_bcv)
         layout.addWidget(self.bcv_input)
@@ -145,7 +158,9 @@ class TasaRegistroDialog(QDialog):
         lbl_paralelo = QLabel("Dólar paralelo (Bs./USD)")
         lbl_paralelo.setProperty("class", "FormLabel")
         self.paralelo_input = NumericLineEdit(
-            NumericFieldType.RATE, min_value=Decimal("0"), max_value=Decimal("9999999.99")
+            NumericFieldType.RATE,
+            min_value=Decimal("0"),
+            max_value=Decimal("9999999.99"),
         )
         self.paralelo_input.setFixedHeight(32)
         layout.addWidget(lbl_paralelo)
@@ -154,7 +169,9 @@ class TasaRegistroDialog(QDialog):
         lbl_cop = QLabel("Peso colombiano (COP/USD)")
         lbl_cop.setProperty("class", "FormLabel")
         self.cop_input = NumericLineEdit(
-            NumericFieldType.RATE, min_value=Decimal("0"), max_value=Decimal("99999999.99")
+            NumericFieldType.RATE,
+            min_value=Decimal("0"),
+            max_value=Decimal("99999999.99"),
         )
         self.cop_input.setFixedHeight(32)
         layout.addWidget(lbl_cop)
@@ -189,7 +206,11 @@ class TasaRegistroDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if self.bcv_input.get_value() <= 0:
-            MessageBox.warning(self, "Dato requerido", "La tasa BCV es obligatoria y debe ser mayor a cero.")
+            MessageBox.warning(
+                self,
+                "Dato requerido",
+                "La tasa BCV es obligatoria y debe ser mayor a cero.",
+            )
             self.bcv_input.setFocus()
             return
         self.accept()

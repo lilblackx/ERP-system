@@ -45,7 +45,9 @@ def _escribir_y_perder_foco(qtbot, campo, texto):
     campo.clearFocus()
 
 
-def _detalle_oc(id_detalle=1, cantidad_pendiente=Decimal("50.1234"), nombre="Producto Uno"):
+def _detalle_oc(
+    id_detalle=1, cantidad_pendiente=Decimal("50.1234"), nombre="Producto Uno"
+):
     return SimpleNamespace(
         id_detalle=id_detalle,
         cantidad_pendiente=cantidad_pendiente,
@@ -59,8 +61,16 @@ def _detalle_oc(id_detalle=1, cantidad_pendiente=Decimal("50.1234"), nombre="Pro
 
 
 def _crear_orden_compra_dialogo(qtbot, monkeypatch, productos=None):
-    monkeypatch.setattr(compras_mod.ProveedorService, "listar", staticmethod(lambda *a, **k: {"items": []}))
-    monkeypatch.setattr(compras_mod.ProductoService, "buscar", staticmethod(lambda *a, **k: {"items": productos or []}))
+    monkeypatch.setattr(
+        compras_mod.ProveedorService,
+        "listar",
+        staticmethod(lambda *a, **k: {"items": []}),
+    )
+    monkeypatch.setattr(
+        compras_mod.ProductoService,
+        "buscar",
+        staticmethod(lambda *a, **k: {"items": productos or []}),
+    )
     dialogo = OrdenCompraFormDialog(MagicMock(), id_usuario=1)
     qtbot.addWidget(dialogo)
     return dialogo
@@ -90,7 +100,11 @@ def test_orden_compra_cantidad_y_precio_no_admiten_cero(qtbot, monkeypatch):
 
 def test_orden_compra_agregar_item_conserva_precision_decimal(qtbot, monkeypatch):
     producto = SimpleNamespace(
-        id_producto=1, cod_producto="P1", nombre_producto="Producto Uno", costo_producto=None, estado_producto="ACTIVO"
+        id_producto=1,
+        cod_producto="P1",
+        nombre_producto="Producto Uno",
+        costo_producto=None,
+        estado_producto="ACTIVO",
     )
     dialogo = _crear_orden_compra_dialogo(qtbot, monkeypatch, productos=[producto])
     indice = dialogo.producto_combo.findData(1)
@@ -105,9 +119,15 @@ def test_orden_compra_agregar_item_conserva_precision_decimal(qtbot, monkeypatch
     assert dialogo.items[0]["precio"] == Decimal("10.1234")
 
 
-def test_orden_compra_crear_oc_recibe_items_con_precision_de_4_decimales(qtbot, monkeypatch):
+def test_orden_compra_crear_oc_recibe_items_con_precision_de_4_decimales(
+    qtbot, monkeypatch
+):
     producto = SimpleNamespace(
-        id_producto=1, cod_producto="P1", nombre_producto="Producto Uno", costo_producto=None, estado_producto="ACTIVO"
+        id_producto=1,
+        cod_producto="P1",
+        nombre_producto="Producto Uno",
+        costo_producto=None,
+        estado_producto="ACTIVO",
     )
     dialogo = _crear_orden_compra_dialogo(qtbot, monkeypatch, productos=[producto])
     dialogo.proveedor_combo.addItem("Proveedor Test", 9)
@@ -124,7 +144,9 @@ def test_orden_compra_crear_oc_recibe_items_con_precision_de_4_decimales(qtbot, 
         llamada["items"] = items
         return SimpleNamespace(id_oc=1)
 
-    monkeypatch.setattr(compras_mod.CompraOCService, "crear_oc", staticmethod(_crear_oc_fake))
+    monkeypatch.setattr(
+        compras_mod.CompraOCService, "crear_oc", staticmethod(_crear_oc_fake)
+    )
     dialogo._validar_y_aceptar()
 
     assert llamada["items"][0]["cantidad_solicitada"] == Decimal("2.5")
@@ -137,7 +159,9 @@ def test_orden_compra_crear_oc_recibe_items_con_precision_de_4_decimales(qtbot, 
 
 
 def _crear_enmienda_dialogo(qtbot, cantidad_solicitada=Decimal("100.0000")):
-    oc = SimpleNamespace(id_oc=1, numero_oc="OC-001", cantidad_solicitada=cantidad_solicitada)
+    oc = SimpleNamespace(
+        id_oc=1, numero_oc="OC-001", cantidad_solicitada=cantidad_solicitada
+    )
     dialogo = EnmiendaOCDialog(MagicMock(), id_usuario=1, oc=oc)
     qtbot.addWidget(dialogo)
     return dialogo, oc
@@ -170,8 +194,16 @@ def test_enmienda_crear_enmienda_recibe_decimal_de_4_cifras(qtbot, monkeypatch):
         llamada.update(kwargs)
         return SimpleNamespace(id_enmienda=1)
 
-    monkeypatch.setattr(compras_mod.CompraOCService, "crear_enmienda", staticmethod(_crear_enmienda_fake))
-    monkeypatch.setattr(compras_mod.UsuarioService, "verificar_permiso", staticmethod(lambda *a, **k: False))
+    monkeypatch.setattr(
+        compras_mod.CompraOCService,
+        "crear_enmienda",
+        staticmethod(_crear_enmienda_fake),
+    )
+    monkeypatch.setattr(
+        compras_mod.UsuarioService,
+        "verificar_permiso",
+        staticmethod(lambda *a, **k: False),
+    )
     dialogo._validar_y_aceptar()
 
     assert llamada["precio_nuevo"] == Decimal("77.4321")
@@ -185,7 +217,11 @@ def test_enmienda_crear_enmienda_recibe_decimal_de_4_cifras(qtbot, monkeypatch):
 
 def _crear_recepcion_dialogo(qtbot, monkeypatch, detalles=None):
     detalles = detalles if detalles is not None else [_detalle_oc()]
-    monkeypatch.setattr(compras_mod.CompraOCService, "obtener_oc", staticmethod(lambda *a, **k: {"detalles": detalles}))
+    monkeypatch.setattr(
+        compras_mod.CompraOCService,
+        "obtener_oc",
+        staticmethod(lambda *a, **k: {"detalles": detalles}),
+    )
     oc = SimpleNamespace(id_oc=1, numero_oc="OC-001")
     dialogo = NotaRecepcionFormDialog(MagicMock(), id_usuario=1, oc=oc)
     qtbot.addWidget(dialogo)
@@ -194,7 +230,9 @@ def _crear_recepcion_dialogo(qtbot, monkeypatch, detalles=None):
 
 def test_recepcion_spin_recibida_tope_es_cantidad_pendiente(qtbot, monkeypatch):
     dialogo = _crear_recepcion_dialogo(
-        qtbot, monkeypatch, detalles=[_detalle_oc(cantidad_pendiente=Decimal("50.1234"))]
+        qtbot,
+        monkeypatch,
+        detalles=[_detalle_oc(cantidad_pendiente=Decimal("50.1234"))],
     )
     spin = dialogo._spins_recibida[0]
     assert spin.max_value == Decimal("50.1234")
@@ -212,7 +250,9 @@ def test_recepcion_spin_rechazada_arranca_topeado_en_cero(qtbot, monkeypatch):
 
 def test_recepcion_subir_recibida_sube_el_tope_de_rechazada(qtbot, monkeypatch):
     dialogo = _crear_recepcion_dialogo(
-        qtbot, monkeypatch, detalles=[_detalle_oc(cantidad_pendiente=Decimal("50.1234"))]
+        qtbot,
+        monkeypatch,
+        detalles=[_detalle_oc(cantidad_pendiente=Decimal("50.1234"))],
     )
     spin_recibida = dialogo._spins_recibida[0]
     spin_rechazada = dialogo._spins_rechazada[0]
@@ -221,9 +261,13 @@ def test_recepcion_subir_recibida_sube_el_tope_de_rechazada(qtbot, monkeypatch):
     assert spin_rechazada.max_value == Decimal("20.5")
 
 
-def test_recepcion_bajar_recibida_reclama_el_valor_de_rechazada_si_excede(qtbot, monkeypatch):
+def test_recepcion_bajar_recibida_reclama_el_valor_de_rechazada_si_excede(
+    qtbot, monkeypatch
+):
     dialogo = _crear_recepcion_dialogo(
-        qtbot, monkeypatch, detalles=[_detalle_oc(cantidad_pendiente=Decimal("50.1234"))]
+        qtbot,
+        monkeypatch,
+        detalles=[_detalle_oc(cantidad_pendiente=Decimal("50.1234"))],
     )
     spin_recibida = dialogo._spins_recibida[0]
     spin_rechazada = dialogo._spins_rechazada[0]
@@ -240,7 +284,9 @@ def test_recepcion_bajar_recibida_reclama_el_valor_de_rechazada_si_excede(qtbot,
 
 def test_recepcion_validar_y_aceptar_envia_decimales_de_4_cifras(qtbot, monkeypatch):
     dialogo = _crear_recepcion_dialogo(
-        qtbot, monkeypatch, detalles=[_detalle_oc(cantidad_pendiente=Decimal("50.1234"))]
+        qtbot,
+        monkeypatch,
+        detalles=[_detalle_oc(cantidad_pendiente=Decimal("50.1234"))],
     )
     _escribir_y_perder_foco(qtbot, dialogo._spins_recibida[0], "40,5")
     _escribir_y_perder_foco(qtbot, dialogo._spins_rechazada[0], "5,25")
@@ -251,7 +297,11 @@ def test_recepcion_validar_y_aceptar_envia_decimales_de_4_cifras(qtbot, monkeypa
         llamada.update(kwargs)
         return SimpleNamespace(id_nr=1)
 
-    monkeypatch.setattr(compras_mod.NotaRecepcionService, "crear_nota_recepcion", staticmethod(_crear_nr_fake))
+    monkeypatch.setattr(
+        compras_mod.NotaRecepcionService,
+        "crear_nota_recepcion",
+        staticmethod(_crear_nr_fake),
+    )
     dialogo._validar_y_aceptar()
 
     item = llamada["items"][0]
@@ -277,7 +327,9 @@ def _crear_devolucion_dialogo(qtbot, monkeypatch, disponible=Decimal("50.1234"))
         staticmethod(lambda *a, **k: {"detalles": [detalle]}),
     )
     session = MagicMock()
-    session.query.return_value.join.return_value.filter.return_value.all.return_value = []
+    session.query.return_value.join.return_value.filter.return_value.all.return_value = (
+        []
+    )
     nr = SimpleNamespace(id_nr=1, numero_nr="NR-001")
     dialogo = NotaDevolucionFormDialog(session, id_usuario=1, nr=nr)
     qtbot.addWidget(dialogo)
@@ -285,7 +337,9 @@ def _crear_devolucion_dialogo(qtbot, monkeypatch, disponible=Decimal("50.1234"))
 
 
 def test_devolucion_spin_tope_es_disponible_con_4_decimales(qtbot, monkeypatch):
-    dialogo = _crear_devolucion_dialogo(qtbot, monkeypatch, disponible=Decimal("50.1234"))
+    dialogo = _crear_devolucion_dialogo(
+        qtbot, monkeypatch, disponible=Decimal("50.1234")
+    )
     spin = dialogo._spins[0]
     assert spin.max_value == Decimal("50.1234")
     assert spin.decimals == 4
@@ -294,7 +348,9 @@ def test_devolucion_spin_tope_es_disponible_con_4_decimales(qtbot, monkeypatch):
 
 
 def test_devolucion_validar_y_aceptar_envia_decimal_de_4_cifras(qtbot, monkeypatch):
-    dialogo = _crear_devolucion_dialogo(qtbot, monkeypatch, disponible=Decimal("50.1234"))
+    dialogo = _crear_devolucion_dialogo(
+        qtbot, monkeypatch, disponible=Decimal("50.1234")
+    )
     _escribir_y_perder_foco(qtbot, dialogo._spins[0], "12,3456")
 
     llamada = {}
@@ -303,7 +359,11 @@ def test_devolucion_validar_y_aceptar_envia_decimal_de_4_cifras(qtbot, monkeypat
         llamada.update(kwargs)
         return SimpleNamespace(id_devolucion=1)
 
-    monkeypatch.setattr(compras_mod.NotaRecepcionService, "crear_nota_devolucion", staticmethod(_crear_devolucion_fake))
+    monkeypatch.setattr(
+        compras_mod.NotaRecepcionService,
+        "crear_nota_devolucion",
+        staticmethod(_crear_devolucion_fake),
+    )
     dialogo._validar_y_aceptar()
 
     assert llamada["items"][0]["cantidad_devuelta"] == Decimal("12.3456")
@@ -315,7 +375,9 @@ def test_devolucion_validar_y_aceptar_envia_decimal_de_4_cifras(qtbot, monkeypat
 # =============================================================================
 
 
-def _crear_compra_desde_oc_dialogo(qtbot, monkeypatch, disponible=Decimal("10.50"), precio_unitario=Decimal("5.00")):
+def _crear_compra_desde_oc_dialogo(
+    qtbot, monkeypatch, disponible=Decimal("10.50"), precio_unitario=Decimal("5.00")
+):
     detalle = SimpleNamespace(
         id_detalle=1,
         cantidad_recibida=disponible,
@@ -324,7 +386,9 @@ def _crear_compra_desde_oc_dialogo(qtbot, monkeypatch, disponible=Decimal("10.50
         producto=SimpleNamespace(nombre_producto="Producto Uno"),
     )
     monkeypatch.setattr(
-        compras_mod.CompraOCService, "obtener_oc", staticmethod(lambda *a, **k: {"detalles": [detalle]})
+        compras_mod.CompraOCService,
+        "obtener_oc",
+        staticmethod(lambda *a, **k: {"detalles": [detalle]}),
     )
     oc = SimpleNamespace(id_oc=1, numero_oc="OC-001")
     dialogo = CompraDesdeOCFormDialog(MagicMock(), id_usuario=1, oc=oc)
@@ -339,14 +403,18 @@ def test_compra_desde_oc_spin_decimals_es_2_no_4(qtbot, monkeypatch):
 
 
 def test_compra_desde_oc_spin_arranca_en_el_disponible(qtbot, monkeypatch):
-    dialogo = _crear_compra_desde_oc_dialogo(qtbot, monkeypatch, disponible=Decimal("10.50"))
+    dialogo = _crear_compra_desde_oc_dialogo(
+        qtbot, monkeypatch, disponible=Decimal("10.50")
+    )
     spin = dialogo._spins[0]
     assert spin.get_value() == Decimal("10.50")
     assert spin.max_value == Decimal("10.50")
 
 
 def test_compra_desde_oc_validar_y_aceptar_envia_decimal(qtbot, monkeypatch):
-    dialogo = _crear_compra_desde_oc_dialogo(qtbot, monkeypatch, disponible=Decimal("10.50"))
+    dialogo = _crear_compra_desde_oc_dialogo(
+        qtbot, monkeypatch, disponible=Decimal("10.50")
+    )
     dialogo.condicion_combo.setCurrentIndex(dialogo.condicion_combo.findData("credito"))
 
     llamada = {}
@@ -355,7 +423,11 @@ def test_compra_desde_oc_validar_y_aceptar_envia_decimal(qtbot, monkeypatch):
         llamada.update(kwargs)
         return SimpleNamespace(id_compra=1)
 
-    monkeypatch.setattr(compras_mod.CompraService, "crear_compra_desde_oc", staticmethod(_crear_compra_fake))
+    monkeypatch.setattr(
+        compras_mod.CompraService,
+        "crear_compra_desde_oc",
+        staticmethod(_crear_compra_fake),
+    )
     dialogo._validar_y_aceptar()
 
     assert llamada["items"][0]["cantidad"] == Decimal("10.50")

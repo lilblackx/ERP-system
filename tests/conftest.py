@@ -142,7 +142,8 @@ def test_engine():
     _ensure_test_database_exists()
     _run_schema_script()
     engine = create_engine(
-        "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(_odbc_connect_str(TEST_DB_NAME)),
+        "mssql+pyodbc:///?odbc_connect="
+        + urllib.parse.quote_plus(_odbc_connect_str(TEST_DB_NAME)),
         fast_executemany=True,
         pool_size=5,
         max_overflow=0,
@@ -157,10 +158,16 @@ def test_engine():
 @pytest.fixture()
 def db_session(test_engine):
     with test_engine.connect() as connection:
-        connection.execute(text("EXEC sp_msforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL'"))
+        connection.execute(
+            text("EXEC sp_msforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL'")
+        )
         for tabla in TABLES_DELETE_ORDER:
             connection.execute(text(f"DELETE FROM dbo.{tabla}"))
-        connection.execute(text("EXEC sp_msforeachtable 'ALTER TABLE ? WITH CHECK CHECK CONSTRAINT ALL'"))
+        connection.execute(
+            text(
+                "EXEC sp_msforeachtable 'ALTER TABLE ? WITH CHECK CHECK CONSTRAINT ALL'"
+            )
+        )
         connection.commit()
 
     session_factory = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)

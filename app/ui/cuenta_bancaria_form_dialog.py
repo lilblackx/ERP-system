@@ -131,14 +131,20 @@ QPushButton#BtnSecondary:hover {{
 class CuentaBancariaFormDialog(QDialog):
     """Diálogo de creación/edición de cuentas bancarias."""
 
-    def __init__(self, session: Session, cuenta: CuentaBancaria | None = None, parent=None):
+    def __init__(
+        self, session: Session, cuenta: CuentaBancaria | None = None, parent=None
+    ):
         super().__init__(parent)
         self.session = session
         self.cuenta = cuenta
-        self.setWindowTitle("Editar Cuenta Bancaria" if cuenta else "Nueva Cuenta Bancaria")
+        self.setWindowTitle(
+            "Editar Cuenta Bancaria" if cuenta else "Nueva Cuenta Bancaria"
+        )
         self.setFixedWidth(800)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._build_ui()
         self._cargar_bancos()
@@ -159,7 +165,9 @@ class CuentaBancariaFormDialog(QDialog):
 
         icon_lbl = QLabel()
         fa_icon_name = "fa5s.university" if self.cuenta else "fa5s.plus-circle"
-        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
+        icon_lbl.setPixmap(
+            qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22))
+        )
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -171,11 +179,17 @@ class CuentaBancariaFormDialog(QDialog):
         titles_layout.setSpacing(1)
         titles_layout.setContentsMargins(0, 0, 0, 0)
 
-        titulo_text = "Editar Cuenta Bancaria" if self.cuenta else "Nueva Cuenta Bancaria"
+        titulo_text = (
+            "Editar Cuenta Bancaria" if self.cuenta else "Nueva Cuenta Bancaria"
+        )
         lbl_titulo = QLabel(titulo_text)
-        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
-        lbl_subtitulo = QLabel("Complete los datos requeridos para registrar la cuenta bancaria.")
+        lbl_subtitulo = QLabel(
+            "Complete los datos requeridos para registrar la cuenta bancaria."
+        )
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
 
         titles_layout.addWidget(lbl_titulo)
@@ -247,7 +261,9 @@ class CuentaBancariaFormDialog(QDialog):
         # por la misma razón que el saldo USD.
         self.lbl_saldo_bs = QLabel("Saldo Inicial BS")
         self.lbl_saldo_bs.setProperty("class", "FormLabel")
-        self.saldo_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=False, decimals=2)
+        self.saldo_bs_input = NumericLineEdit(
+            NumericFieldType.AMOUNT, allow_negative=False, decimals=2
+        )
         self.saldo_bs_input.setFixedHeight(36)
         grid.addWidget(self.lbl_saldo_bs, 6, 1)
         grid.addWidget(self.saldo_bs_input, 7, 1)
@@ -324,10 +340,17 @@ class CuentaBancariaFormDialog(QDialog):
 
     def _cargar_bancos(self):
         """Carga la lista de bancos activos en el combo."""
-        bancos = self.session.query(Banco).filter(Banco.estado_banco == "ACTIVO").order_by(Banco.nombre_banco).all()
+        bancos = (
+            self.session.query(Banco)
+            .filter(Banco.estado_banco == "ACTIVO")
+            .order_by(Banco.nombre_banco)
+            .all()
+        )
         self.banco_combo.clear()
         for banco in bancos:
-            self.banco_combo.addItem(f"{banco.nombre_banco} ({banco.codigo_banco})", banco.id_banco)
+            self.banco_combo.addItem(
+                f"{banco.nombre_banco} ({banco.codigo_banco})", banco.id_banco
+            )
 
     def _precargar(self, cuenta: CuentaBancaria):
         self.numero_input.setText(cuenta.numero_cuenta or "")
@@ -335,7 +358,9 @@ class CuentaBancariaFormDialog(QDialog):
         self.identificacion_input.setText(cuenta.identificacion_titular or "")
         self.saldo_input.set_value(cuenta.saldo_total_banco or 0)
         self.saldo_input.setEnabled(False)
-        self.saldo_input.setToolTip("El saldo se actualiza registrando movimientos bancarios, no editando este campo.")
+        self.saldo_input.setToolTip(
+            "El saldo se actualiza registrando movimientos bancarios, no editando este campo."
+        )
         self.lbl_saldo.setText("Saldo Actual USD (solo lectura)")
 
         self.saldo_bs_input.set_value(cuenta.saldo_total_banco_bs or 0)
@@ -364,7 +389,11 @@ class CuentaBancariaFormDialog(QDialog):
             self.fecha_creacion_label.setText("Fecha de creación: N/A")
 
         if cuenta.creador:
-            nombre_creador = cuenta.creador.nombre or cuenta.creador.nombre_usuario or f"ID {cuenta.creado_por}"
+            nombre_creador = (
+                cuenta.creador.nombre
+                or cuenta.creador.nombre_usuario
+                or f"ID {cuenta.creado_por}"
+            )
             self.creado_por_label.setText(f"Creado por: {nombre_creador}")
         else:
             self.creado_por_label.setText("Creado por: N/A")
@@ -375,15 +404,21 @@ class CuentaBancariaFormDialog(QDialog):
             self.banco_combo.setFocus()
             return
         if not self.numero_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "El número de cuenta es obligatorio.")
+            MessageBox.warning(
+                self, "Dato requerido", "El número de cuenta es obligatorio."
+            )
             self.numero_input.setFocus()
             return
         if not self.nombre_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "El nombre del titular es obligatorio.")
+            MessageBox.warning(
+                self, "Dato requerido", "El nombre del titular es obligatorio."
+            )
             self.nombre_input.setFocus()
             return
         if not self.identificacion_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "La identificación del titular es obligatoria.")
+            MessageBox.warning(
+                self, "Dato requerido", "La identificación del titular es obligatoria."
+            )
             self.identificacion_input.setFocus()
             return
         self.accept()

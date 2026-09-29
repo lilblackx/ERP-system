@@ -4,7 +4,9 @@ from app.db.session import engine
 
 session = engine.connect()
 try:
-    result = session.execute(text("SELECT COUNT(*) as total FROM cuentas_por_cobrar_bcv"))
+    result = session.execute(
+        text("SELECT COUNT(*) as total FROM cuentas_por_cobrar_bcv")
+    )
     print(f"Total cuentas BCV: {result.scalar()}")
 
     query = (

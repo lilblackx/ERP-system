@@ -20,14 +20,22 @@ from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
 from app.db.models import ConfiguracionEmpresa, FacturaDetalle, FacturaVenta
 from app.ui.pago_linea_dialog import METODOS_PAGO
-from app.ui.styles import COLOR_BORDER, COLOR_DANGER, COLOR_PRIMARY, COLOR_TEXT_DARK, COLOR_TEXT_MUTED
+from app.ui.styles import (
+    COLOR_BORDER,
+    COLOR_DANGER,
+    COLOR_PRIMARY,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_MUTED,
+)
 
 # Etiquetas de metodo de pago (venta) -- "mixto" es el sentinel que VentaService.
 # obtener_factura() usa cuando hubo mas de una forma de pago con metodo distinto (ver
 # tambien factura_detalle_dialog.py/facturacion_panel.py, mismo criterio). Metodo de
 # VUELTO es un catalogo aparte (efectivo/pago_movil/transferencia, ver METODOS_VUELTO en
 # factura_form_dialog.py) -- duplicado aca a proposito, 3 valores fijos.
-_ETIQUETAS_METODO_PAGO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO} | {"mixto": "Mixto"}
+_ETIQUETAS_METODO_PAGO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO} | {
+    "mixto": "Mixto"
+}
 _ETIQUETAS_METODO_VUELTO = {
     "efectivo": "Efectivo",
     "pago_movil": "Pago Móvil",
@@ -162,7 +170,9 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     direccion = config_empresa.direccion_empresa if config_empresa else None
     telefono = config_empresa.telefono_empresa if config_empresa else None
     pie_pagina = config_empresa.pie_pagina_empresa if config_empresa else None
-    logo_tag = _logo_img_tag(config_empresa.logotipo_empresa if config_empresa else None)
+    logo_tag = _logo_img_tag(
+        config_empresa.logotipo_empresa if config_empresa else None
+    )
 
     condicion = "Contado" if factura.condicion_pago == "contado" else "Crédito"
     fecha = factura.fecha_emision.strftime("%d/%m/%Y") if factura.fecha_emision else ""
@@ -178,10 +188,10 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     metodo_pago_row = ""
     if factura.condicion_pago == "contado":
         metodo_pago = datos.get("metodo_pago")
-        etiqueta_metodo_pago = _ETIQUETAS_METODO_PAGO.get(metodo_pago, metodo_pago or "—")
-        metodo_pago_row = (
-            f"<tr><td {_INFO_LBL}>Método de Pago:</td><td {_INFO_VAL}>{_esc(etiqueta_metodo_pago)}</td></tr>"
+        etiqueta_metodo_pago = _ETIQUETAS_METODO_PAGO.get(
+            metodo_pago, metodo_pago or "—"
         )
+        metodo_pago_row = f"<tr><td {_INFO_LBL}>Método de Pago:</td><td {_INFO_VAL}>{_esc(etiqueta_metodo_pago)}</td></tr>"
 
     # Vuelto (cambio) entregado -- solo monto+metodo, igual criterio que el motivo/
     # autorizador de descuento (ver comentario mas abajo): la referencia bancaria y quien
@@ -189,7 +199,9 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     # cliente.
     vuelto_row = ""
     if factura.monto_vuelto and float(factura.monto_vuelto) > 0:
-        etiqueta_metodo_vuelto = _ETIQUETAS_METODO_VUELTO.get(factura.metodo_vuelto, factura.metodo_vuelto)
+        etiqueta_metodo_vuelto = _ETIQUETAS_METODO_VUELTO.get(
+            factura.metodo_vuelto, factura.metodo_vuelto
+        )
         vuelto_row = (
             f"<tr><td {_INFO_LBL}>Vuelto Entregado:</td>"
             f"<td {_INFO_VAL}>{_money(float(factura.monto_vuelto))} ({_esc(etiqueta_metodo_vuelto)})</td></tr>"
@@ -207,15 +219,11 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
     watermark = ""
     if factura.estado_factura == "ANULADA":
-        watermark = (
-            f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** NOTA DE ENTREGA ANULADA ***</p>"
-        )
+        watermark = f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** NOTA DE ENTREGA ANULADA ***</p>"
 
     observaciones_html = ""
     if factura.observaciones_factura:
-        observaciones_html = (
-            f"<p style='color:{_MUTED};'><b>Observaciones:</b> {_esc(factura.observaciones_factura)}</p>"
-        )
+        observaciones_html = f"<p style='color:{_MUTED};'><b>Observaciones:</b> {_esc(factura.observaciones_factura)}</p>"
 
     pie_html = ""
     if pie_pagina:
@@ -233,12 +241,16 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
         f'<div style="color:{_MUTED};font-size:9pt;{_MB}">{_esc(telefono) or ""}</div>'
     )
 
-    codigo_cliente = (cliente.codigo_cliente if cliente else None) or (f"{cliente.id_cliente:06d}" if cliente else "—")
+    codigo_cliente = (cliente.codigo_cliente if cliente else None) or (
+        f"{cliente.id_cliente:06d}" if cliente else "—"
+    )
     nombre_cliente = cliente.nombre_razon_social if cliente else "—"
     if cliente and cliente.id_legal and cliente.identificacion_cliente:
         identificacion_cliente = f"{cliente.id_legal}-{cliente.identificacion_cliente}"
     else:
-        identificacion_cliente = cliente.id_legal or cliente.identificacion_cliente if cliente else "—"
+        identificacion_cliente = (
+            cliente.id_legal or cliente.identificacion_cliente if cliente else "—"
+        )
     telefono_cliente = (cliente.telefono if cliente else None) or "—"
     email_cliente = (cliente.email if cliente else None) or "—"
     direccion_cliente = (cliente.direccion if cliente else None) or "—"
@@ -313,7 +325,9 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     """
 
 
-def _documento(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> QTextDocument:
+def _documento(
+    datos: dict, config_empresa: ConfiguracionEmpresa | None
+) -> QTextDocument:
     documento = QTextDocument()
     documento.setHtml(_armar_html(datos, config_empresa))
     return documento
@@ -324,7 +338,9 @@ def _configurar_pagina(impresora: QPrinter) -> None:
     impresora.setPageMargins(QMarginsF(2, 2, 2, 2), QPageLayout.Unit.Millimeter)
 
 
-def generar_pdf_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, ruta_destino: str) -> None:
+def generar_pdf_factura(
+    datos: dict, config_empresa: ConfiguracionEmpresa | None, ruta_destino: str
+) -> None:
     """Escribe la factura como PDF directo en ruta_destino (elegida por el caller, ver
     patron ya usado en exportar_excel/app/services/exportacion.py -- se pide el destino
     ANTES de generar, se escribe directo ahi)."""
@@ -336,7 +352,9 @@ def generar_pdf_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None
     _documento(datos, config_empresa).print_(impresora)
 
 
-def imprimir_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, nombre_impresora: str) -> None:
+def imprimir_factura(
+    datos: dict, config_empresa: ConfiguracionEmpresa | None, nombre_impresora: str
+) -> None:
     """Envia la factura digital directo a una impresora instalada en el sistema (por
     nombre, via QPrinterInfo) en vez de guardarla en un archivo -- usada para el
     auto-print al emitir factura (ver FacturacionPanel.nueva_factura). Si el usuario
@@ -350,7 +368,9 @@ def imprimir_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, n
     quedo commiteada en la base antes de llegar aca."""
     info = QPrinterInfo.printerInfo(nombre_impresora)
     if info.isNull():
-        raise ValueError(f"La impresora configurada '{nombre_impresora}' ya no está disponible en este equipo.")
+        raise ValueError(
+            f"La impresora configurada '{nombre_impresora}' ya no está disponible en este equipo."
+        )
 
     impresora = QPrinter(info, QPrinter.PrinterMode.HighResolution)
     _configurar_pagina(impresora)

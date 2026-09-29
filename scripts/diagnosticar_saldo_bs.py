@@ -57,13 +57,17 @@ def diagnosticar_saldo_bs():
                 ORDER BY fecha_movimiento DESC
             """)
 
-            movimientos = conn.execute(query_movimientos, {"id_cuenta": id_cuenta}).fetchall()
+            movimientos = conn.execute(
+                query_movimientos, {"id_cuenta": id_cuenta}
+            ).fetchall()
 
             saldo_bs_calculado = Decimal("0.00")
 
             if movimientos:
                 print(f"\nMovimientos en BS ({len(movimientos)} registros):")
-                print(f"{'Fecha':<20} {'Tipo':<10} {'Monto USD':<15} {'Monto BS':<20} {'Tasa':<10} {'Descripción'}")
+                print(
+                    f"{'Fecha':<20} {'Tipo':<10} {'Monto USD':<15} {'Monto BS':<20} {'Tasa':<10} {'Descripción'}"
+                )
                 print("-" * 100)
 
                 for mov in movimientos:
@@ -92,7 +96,9 @@ def diagnosticar_saldo_bs():
                 print(f"Diferencia: {saldo_bs_calculado - (saldo_bs_actual or 0):,.2f}")
 
                 if abs(saldo_bs_calculado - (saldo_bs_actual or 0)) > 0.01:
-                    print("⚠️  HAY DIFERENCIA - El saldo BS en la base de datos no coincide con los movimientos")
+                    print(
+                        "⚠️  HAY DIFERENCIA - El saldo BS en la base de datos no coincide con los movimientos"
+                    )
                 else:
                     print("✓ Saldo BS correcto")
             else:

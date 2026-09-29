@@ -57,7 +57,9 @@ COLS_VISIBLES = ["FECHA", "TASA BCV", "DÓLAR PARALELO", "BRECHA"]
 
 
 def _filas_tasas_query(session, limite, id_usuario) -> list[list]:
-    historico = TasaService.obtener_historico_tasas(session, limite=limite, id_usuario=id_usuario)
+    historico = TasaService.obtener_historico_tasas(
+        session, limite=limite, id_usuario=id_usuario
+    )
     return [
         [
             t["fecha"].strftime("%d/%m/%Y %H:%M"),
@@ -69,7 +71,9 @@ def _filas_tasas_query(session, limite, id_usuario) -> list[list]:
     ]
 
 
-def _tarea_exportar_tasas_excel(session, ruta: str, limite, id_usuario) -> tuple[str, int]:
+def _tarea_exportar_tasas_excel(
+    session, ruta: str, limite, id_usuario
+) -> tuple[str, int]:
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el historico
     completo de tasas a un archivo (openpyxl) es lo bastante lento como para congelar
     la ventana si se hace en el hilo de GUI."""
@@ -78,13 +82,19 @@ def _tarea_exportar_tasas_excel(session, ruta: str, limite, id_usuario) -> tuple
     return ruta, len(filas)
 
 
-def _tarea_exportar_tasas_pdf(session, ruta: str, limite, id_usuario) -> tuple[str, int]:
+def _tarea_exportar_tasas_pdf(
+    session, ruta: str, limite, id_usuario
+) -> tuple[str, int]:
     filas = _filas_tasas_query(session, limite, id_usuario)
     exportar_pdf(ruta, "Histórico de Tasas de Cambio", COLS_VISIBLES, filas)
     return ruta, len(filas)
 
 
-OPCIONES_RANGO = [("Últimos 30 días", 30), ("Últimos 60 días", 60), ("Últimos 90 días", 90)]
+OPCIONES_RANGO = [
+    ("Últimos 30 días", 30),
+    ("Últimos 60 días", 60),
+    ("Últimos 90 días", 90),
+]
 
 
 class TasasPanel(QWidget):
@@ -134,7 +144,9 @@ class TasasPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Tasas de Cambio")
-        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
         h.addWidget(lbl)
         h.addStretch()
@@ -156,7 +168,9 @@ class TasasPanel(QWidget):
         icon_lbl.setPixmap(qta.icon(icono, color=COLOR_TEXT_MUTED).pixmap(14, 14))
         icon_lbl.setStyleSheet("background: transparent;")
         lbl_titulo = QLabel(titulo)
-        lbl_titulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;"
+        )
         fila_titulo.addWidget(icon_lbl)
         fila_titulo.addWidget(lbl_titulo)
         fila_titulo.addStretch()
@@ -197,9 +211,15 @@ class TasasPanel(QWidget):
         h.setContentsMargins(20, 16, 20, 16)
         h.setSpacing(24)
 
-        self.bloque_bcv = self._make_bloque_tasa("Tasa BCV (Bs./USD)", "fa5s.university")
-        self.bloque_paralelo = self._make_bloque_tasa("Dólar Paralelo (Bs./USD)", "fa5s.exchange-alt")
-        self.bloque_cop = self._make_bloque_tasa("Peso Colombiano (COP/USD)", "fa5s.coins")
+        self.bloque_bcv = self._make_bloque_tasa(
+            "Tasa BCV (Bs./USD)", "fa5s.university"
+        )
+        self.bloque_paralelo = self._make_bloque_tasa(
+            "Dólar Paralelo (Bs./USD)", "fa5s.exchange-alt"
+        )
+        self.bloque_cop = self._make_bloque_tasa(
+            "Peso Colombiano (COP/USD)", "fa5s.coins"
+        )
 
         h.addWidget(self.bloque_bcv["widget"])
         h.addWidget(self._separador())
@@ -209,7 +229,9 @@ class TasasPanel(QWidget):
         h.addStretch()
 
         self.lbl_actualizado = QLabel("Sin tasas registradas todavía")
-        self.lbl_actualizado.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
+        self.lbl_actualizado.setStyleSheet(
+            f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;"
+        )
         h.addWidget(self.lbl_actualizado)
         return card
 
@@ -235,11 +257,15 @@ class TasasPanel(QWidget):
         self.btn_registrar.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_registrar.clicked.connect(self.registrar_tasa)
 
-        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_tasas, on_pdf=self.exportar_pdf_tasas)
+        self.btn_exportar = BotonExportar(
+            on_excel=self.exportar_excel_tasas, on_pdf=self.exportar_pdf_tasas
+        )
 
         h.addWidget(lbl_rango)
         h.addWidget(self.rango_combo)
-        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        h.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
         h.addWidget(self.btn_registrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -263,7 +289,9 @@ class TasasPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(45)
@@ -274,18 +302,26 @@ class TasasPanel(QWidget):
     def cargar_datos(self) -> None:
         session = self.session_factory()
         try:
-            actual = TasaService.obtener_tasa_actual(session, id_usuario=self.usuario.id_usuario)
+            actual = TasaService.obtener_tasa_actual(
+                session, id_usuario=self.usuario.id_usuario
+            )
             historico = TasaService.obtener_historico_tasas(
-                session, limite=self.rango_combo.currentData(), id_usuario=self.usuario.id_usuario
+                session,
+                limite=self.rango_combo.currentData(),
+                id_usuario=self.usuario.id_usuario,
             )
             self._tasa_actual = actual
             self._mostrar_tasa_actual(actual)
             self._poblar_tabla(historico)
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar tasas de cambio.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para consultar tasas de cambio."
+            )
         except Exception:
             logger.exception("Fallo al cargar las tasas de cambio")
-            MessageBox.critical(self, "Error de conexión", "No se pudieron cargar las tasas de cambio.")
+            MessageBox.critical(
+                self, "Error de conexión", "No se pudieron cargar las tasas de cambio."
+            )
         finally:
             session.close()
 
@@ -299,7 +335,9 @@ class TasasPanel(QWidget):
             color, icono = COLOR_DANGER, "▼"
         else:
             color, icono = COLOR_TEXT_MUTED, ""
-        lbl.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {color}; background: transparent;")
+        lbl.setStyleSheet(
+            f"font-size: 12px; font-weight: bold; color: {color}; background: transparent;"
+        )
         lbl.setText(f"{icono} {abs(porcentaje):.1f}% vs. ayer".strip())
 
     def _mostrar_tasa_actual(self, actual: dict | None) -> None:
@@ -314,8 +352,12 @@ class TasasPanel(QWidget):
         self._set_delta(self.bloque_bcv["delta"], actual.get("porcentaje_vs_ayer_bcv"))
 
         if actual.get("tasa_paralelo") is not None:
-            self.bloque_paralelo["valor"].setText(f"Bs. {float(actual['tasa_paralelo']):,.2f}")
-            self._set_delta(self.bloque_paralelo["delta"], actual.get("porcentaje_vs_ayer_paralelo"))
+            self.bloque_paralelo["valor"].setText(
+                f"Bs. {float(actual['tasa_paralelo']):,.2f}"
+            )
+            self._set_delta(
+                self.bloque_paralelo["delta"], actual.get("porcentaje_vs_ayer_paralelo")
+            )
         else:
             self.bloque_paralelo["valor"].setText("—")
             self.bloque_paralelo["delta"].setText("")
@@ -327,26 +369,46 @@ class TasasPanel(QWidget):
         self.bloque_cop["delta"].setText("")
 
         fecha = actual["fecha_tasa"]
-        self.lbl_actualizado.setText(f"Vigente desde el {fecha.strftime('%d/%m/%Y %H:%M')}")
+        self.lbl_actualizado.setText(
+            f"Vigente desde el {fecha.strftime('%d/%m/%Y %H:%M')}"
+        )
 
     def _poblar_tabla(self, historico: list[dict]) -> None:
-        filas = list(reversed(historico))  # el servicio devuelve ascendente; la tabla, mas reciente primero
+        filas = list(
+            reversed(historico)
+        )  # el servicio devuelve ascendente; la tabla, mas reciente primero
         self.tabla.setRowCount(len(filas))
         for fila, t in enumerate(filas):
-            self.tabla.setItem(fila, 0, QTableWidgetItem(t["fecha"].strftime("%d/%m/%Y %H:%M")))
+            self.tabla.setItem(
+                fila, 0, QTableWidgetItem(t["fecha"].strftime("%d/%m/%Y %H:%M"))
+            )
 
             item_bcv = QTableWidgetItem(f"Bs. {float(t['tasa_bcv']):,.2f}")
-            item_bcv.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_bcv.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 1, item_bcv)
 
-            texto_paralelo = f"Bs. {float(t['tasa_paralelo']):,.2f}" if t["tasa_paralelo"] is not None else "—"
+            texto_paralelo = (
+                f"Bs. {float(t['tasa_paralelo']):,.2f}"
+                if t["tasa_paralelo"] is not None
+                else "—"
+            )
             item_paralelo = QTableWidgetItem(texto_paralelo)
-            item_paralelo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_paralelo.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 2, item_paralelo)
 
-            texto_brecha = f"{t['brecha_porcentual']:.1f}%" if t["brecha_porcentual"] is not None else "—"
+            texto_brecha = (
+                f"{t['brecha_porcentual']:.1f}%"
+                if t["brecha_porcentual"] is not None
+                else "—"
+            )
             item_brecha = QTableWidgetItem(texto_brecha)
-            item_brecha.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_brecha.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 3, item_brecha)
 
         self.tabla.setColumnWidth(0, 160)
@@ -365,7 +427,11 @@ class TasasPanel(QWidget):
             return []
 
         saltos = []
-        for campo, etiqueta in (("tasa_bcv", "BCV"), ("tasa_paralelo", "Paralelo"), ("tasa_cop", "COP")):
+        for campo, etiqueta in (
+            ("tasa_bcv", "BCV"),
+            ("tasa_paralelo", "Paralelo"),
+            ("tasa_cop", "COP"),
+        ):
             anterior = self._tasa_actual.get(campo)
             nuevo = datos.get(campo)
             if not anterior or nuevo is None:
@@ -382,7 +448,9 @@ class TasasPanel(QWidget):
         respuesta = MessageBox.question(
             self,
             "Cambio brusco detectado",
-            "La tasa nueva difiere mucho de la última registrada (" + ", ".join(saltos) + "). "
+            "La tasa nueva difiere mucho de la última registrada ("
+            + ", ".join(saltos)
+            + "). "
             "¿Revisaste que no sea un error de tipeo? Esto afecta de inmediato todas las "
             "conversiones de VES/COP en Facturación y Compras.",
         )
@@ -399,20 +467,28 @@ class TasasPanel(QWidget):
 
         session = self.session_factory()
         try:
-            TasaService.registrar_tasa(session, **datos, creado_por=self.usuario.id_usuario)
+            TasaService.registrar_tasa(
+                session, **datos, creado_por=self.usuario.id_usuario
+            )
             self.cargar_datos()
             self.tasa_registrada.emit()
-            MessageBox.information(self, "Tasa registrada", "La tasa del día se registró con éxito.")
+            MessageBox.information(
+                self, "Tasa registrada", "La tasa del día se registró con éxito."
+            )
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "No se pudo registrar la tasa", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar tasas de cambio.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para registrar tasas de cambio."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al registrar la tasa de cambio")
-            MessageBox.critical(self, "Error", "No se pudo registrar la tasa de cambio.")
+            MessageBox.critical(
+                self, "Error", "No se pudo registrar la tasa de cambio."
+            )
         finally:
             session.close()
 
@@ -425,30 +501,46 @@ class TasasPanel(QWidget):
         }
 
     def exportar_excel_tasas(self) -> None:
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+        if (
+            getattr(self, "_worker_export", None) is not None
+            and self._worker_export.isRunning()
+        ):
             return
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar tasas", "tasas.xlsx", "Excel (*.xlsx)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar tasas", "tasas.xlsx", "Excel (*.xlsx)"
+        )
         if not ruta:
             return
 
         self.btn_exportar.setEnabled(False)
         self._worker_export = QueryWorker(
-            self.session_factory, _tarea_exportar_tasas_excel, ruta=ruta, **self._filtros_actuales_exportar()
+            self.session_factory,
+            _tarea_exportar_tasas_excel,
+            ruta=ruta,
+            **self._filtros_actuales_exportar(),
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)
         self._worker_export.error.connect(self._on_exportar_error)
         self._worker_export.start()
 
     def exportar_pdf_tasas(self) -> None:
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+        if (
+            getattr(self, "_worker_export", None) is not None
+            and self._worker_export.isRunning()
+        ):
             return
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar tasas", "tasas.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar tasas", "tasas.pdf", "PDF (*.pdf)"
+        )
         if not ruta:
             return
 
         self.btn_exportar.setEnabled(False)
         self._worker_export = QueryWorker(
-            self.session_factory, _tarea_exportar_tasas_pdf, ruta=ruta, **self._filtros_actuales_exportar()
+            self.session_factory,
+            _tarea_exportar_tasas_pdf,
+            ruta=ruta,
+            **self._filtros_actuales_exportar(),
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)
         self._worker_export.error.connect(self._on_exportar_error)
@@ -457,7 +549,9 @@ class TasasPanel(QWidget):
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
         self.btn_exportar.setEnabled(True)
         ruta, cantidad = resultado
-        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} tasas a:\n{ruta}")
+        MessageBox.information(
+            self, "Exportación completa", f"Se exportaron {cantidad} tasas a:\n{ruta}"
+        )
 
     def _on_exportar_error(self, mensaje: str) -> None:
         self.btn_exportar.setEnabled(True)

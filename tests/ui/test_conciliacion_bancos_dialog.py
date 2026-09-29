@@ -12,7 +12,10 @@ retorne temprano sin tocar la sesion)."""
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from app.ui.conciliacion_bancos_dialog import ConciliacionBancosDialog, MovimientoManualDialog
+from app.ui.conciliacion_bancos_dialog import (
+    ConciliacionBancosDialog,
+    MovimientoManualDialog,
+)
 
 
 def _dar_foco(qtbot, campo):
@@ -30,7 +33,9 @@ def _escribir_y_perder_foco(qtbot, campo, texto):
 
 def _session_sin_cuentas() -> MagicMock:
     session = MagicMock()
-    session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = []
+    session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = (
+        []
+    )
     return session
 
 

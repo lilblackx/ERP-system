@@ -45,7 +45,13 @@ def _crear_cxc_real(session, saldo: Decimal):
         id_usuario=admin.id_usuario,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="credito",
-        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": str(saldo)}],
+        items=[
+            {
+                "id_producto": producto.id_producto,
+                "cantidad": 1,
+                "precio_unitario": str(saldo),
+            }
+        ],
     )
     cxc = session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
     return cxc, cliente, admin
@@ -132,7 +138,9 @@ def test_crear_cuenta_cobrar_otro_cliente_inexistente(db_session):
 def test_registrar_abono_sin_usuario_autorizado_falla(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
+    )
 
     with pytest.raises(PermisoDenegadoError):
         OtrosMovimientosService.registrar_abono_otro(
@@ -144,14 +152,19 @@ def test_registrar_abono_sin_origen(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     with pytest.raises(ValueError, match="exactamente un origen"):
         OtrosMovimientosService.registrar_abono_otro(
-            db_session, cuenta.id_cuenta, monto=Decimal("10.00"), id_usuario=admin.id_usuario
+            db_session,
+            cuenta.id_cuenta,
+            monto=Decimal("10.00"),
+            id_usuario=admin.id_usuario,
         )
 
 
 def test_registrar_abono_dos_origenes(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
+    )
     banco = crear_cuenta_bancaria(db_session)
 
     with pytest.raises(ValueError, match="exactamente un origen"):
@@ -168,47 +181,75 @@ def test_registrar_abono_dos_origenes(db_session):
 def test_registrar_abono_monto_invalido(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
+    )
 
     with pytest.raises(ValueError, match="mayor a cero"):
         OtrosMovimientosService.registrar_abono_otro(
-            db_session, cuenta.id_cuenta, monto=Decimal("0.00"), id_caja=caja.id_caja, id_usuario=admin.id_usuario
+            db_session,
+            cuenta.id_cuenta,
+            monto=Decimal("0.00"),
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
         )
 
 
 def test_registrar_abono_cuenta_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
+    )
 
     with pytest.raises(ValueError, match="no encontrada"):
         OtrosMovimientosService.registrar_abono_otro(
-            db_session, 999999, monto=Decimal("10.00"), id_caja=caja.id_caja, id_usuario=admin.id_usuario
+            db_session,
+            999999,
+            monto=Decimal("10.00"),
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
         )
 
 
 def test_registrar_abono_cuenta_ya_pagada(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session, monto=Decimal("50.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
+    )
     OtrosMovimientosService.registrar_abono_otro(
-        db_session, cuenta.id_cuenta, monto=Decimal("50.00"), id_caja=caja.id_caja, id_usuario=admin.id_usuario
+        db_session,
+        cuenta.id_cuenta,
+        monto=Decimal("50.00"),
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
     )
 
     with pytest.raises(ValueError, match="ya esta pagada"):
         OtrosMovimientosService.registrar_abono_otro(
-            db_session, cuenta.id_cuenta, monto=Decimal("1.00"), id_caja=caja.id_caja, id_usuario=admin.id_usuario
+            db_session,
+            cuenta.id_cuenta,
+            monto=Decimal("1.00"),
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
         )
 
 
 def test_registrar_abono_excede_saldo(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session, monto=Decimal("50.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
+    )
 
     with pytest.raises(ValueError, match="excede el saldo pendiente"):
         OtrosMovimientosService.registrar_abono_otro(
-            db_session, cuenta.id_cuenta, monto=Decimal("100.00"), id_caja=caja.id_caja, id_usuario=admin.id_usuario
+            db_session,
+            cuenta.id_cuenta,
+            monto=Decimal("100.00"),
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -216,7 +257,11 @@ def test_registrar_abono_cuenta_bancaria_inexistente(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     with pytest.raises(ValueError, match="Cuenta bancaria no encontrada"):
         OtrosMovimientosService.registrar_abono_otro(
-            db_session, cuenta.id_cuenta, monto=Decimal("10.00"), id_cuenta_bancaria=999999, id_usuario=admin.id_usuario
+            db_session,
+            cuenta.id_cuenta,
+            monto=Decimal("10.00"),
+            id_cuenta_bancaria=999999,
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -237,7 +282,11 @@ def test_registrar_abono_caja_inexistente(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session)
     with pytest.raises(ValueError, match="Caja no encontrada"):
         OtrosMovimientosService.registrar_abono_otro(
-            db_session, cuenta.id_cuenta, monto=Decimal("10.00"), id_caja=999999, id_usuario=admin.id_usuario
+            db_session,
+            cuenta.id_cuenta,
+            monto=Decimal("10.00"),
+            id_caja=999999,
+            id_usuario=admin.id_usuario,
         )
 
 
@@ -246,17 +295,27 @@ def test_registrar_abono_caja_sin_turno_abierto(db_session):
     caja = crear_caja(db_session)
     with pytest.raises(ValueError, match="no tiene un turno abierto"):
         OtrosMovimientosService.registrar_abono_otro(
-            db_session, cuenta.id_cuenta, monto=Decimal("10.00"), id_caja=caja.id_caja, id_usuario=admin.id_usuario
+            db_session,
+            cuenta.id_cuenta,
+            monto=Decimal("10.00"),
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
         )
 
 
 def test_registrar_abono_parcial_por_caja(db_session):
     cuenta, _cliente, admin = _crear_cxc_otro(db_session, monto=Decimal("100.00"))
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
+    )
 
     actualizada = OtrosMovimientosService.registrar_abono_otro(
-        db_session, cuenta.id_cuenta, monto=Decimal("40.00"), id_caja=caja.id_caja, id_usuario=admin.id_usuario
+        db_session,
+        cuenta.id_cuenta,
+        monto=Decimal("40.00"),
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
     )
 
     assert actualizada.saldo_pendiente == Decimal("60.00")
@@ -281,7 +340,9 @@ def test_registrar_abono_completo_por_banco(db_session):
     assert actualizada.saldo_pendiente == Decimal("0.00")
     assert actualizada.estado == "pagada"
 
-    movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=banco.id_cuenta).one()
+    movimiento = (
+        db_session.query(BancoMovimiento).filter_by(id_cuenta=banco.id_cuenta).one()
+    )
     assert movimiento.tipo_movimiento == "abono"
 
 
@@ -291,7 +352,9 @@ def test_registrar_abono_completo_por_banco(db_session):
 def test_listar_cuentas_cobrar_otro_estado_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="estado invalido"):
-        OtrosMovimientosService.listar_cuentas_cobrar_otro(db_session, estado="no_existe", id_usuario=admin.id_usuario)
+        OtrosMovimientosService.listar_cuentas_cobrar_otro(
+            db_session, estado="no_existe", id_usuario=admin.id_usuario
+        )
 
 
 def test_listar_cuentas_cobrar_otro_sin_usuario_autorizado_falla(db_session):
@@ -302,11 +365,19 @@ def test_listar_cuentas_cobrar_otro_sin_usuario_autorizado_falla(db_session):
 def test_listar_cuentas_cobrar_otro_filtra_por_estado(db_session):
     cliente = crear_cliente(db_session)
     _crear_cxc_otro(db_session, monto=Decimal("50.00"), cliente=cliente)
-    otra, _cliente2, admin = _crear_cxc_otro(db_session, monto=Decimal("30.00"), cliente=cliente)
+    otra, _cliente2, admin = _crear_cxc_otro(
+        db_session, monto=Decimal("30.00"), cliente=cliente
+    )
     caja = crear_caja(db_session)
-    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    CajaService.abrir_caja(
+        db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0
+    )
     OtrosMovimientosService.registrar_abono_otro(
-        db_session, otra.id_cuenta, monto=Decimal("30.00"), id_caja=caja.id_caja, id_usuario=admin.id_usuario
+        db_session,
+        otra.id_cuenta,
+        monto=Decimal("30.00"),
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
     )
 
     pendientes = OtrosMovimientosService.listar_cuentas_cobrar_otro(
@@ -341,7 +412,10 @@ def test_crear_partida_no_conciliada(db_session):
     banco = crear_cuenta_bancaria(db_session)
 
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("200.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("200.00"),
+        creado_por=admin.id_usuario,
     )
 
     assert partida.id_cuenta is not None
@@ -362,7 +436,10 @@ def test_crear_partida_no_conciliada_monto_invalido(db_session):
     banco = crear_cuenta_bancaria(db_session)
     with pytest.raises(ValueError, match="monto debe ser mayor a cero"):
         OtrosMovimientosService.crear_partida_no_conciliada(
-            db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("0.00"), creado_por=admin.id_usuario
+            db_session,
+            id_cuenta_bancaria=banco.id_cuenta,
+            monto=Decimal("0.00"),
+            creado_por=admin.id_usuario,
         )
 
 
@@ -370,7 +447,10 @@ def test_crear_partida_no_conciliada_cuenta_bancaria_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     with pytest.raises(ValueError, match="Cuenta bancaria no encontrada"):
         OtrosMovimientosService.crear_partida_no_conciliada(
-            db_session, id_cuenta_bancaria=999999, monto=Decimal("200.00"), creado_por=admin.id_usuario
+            db_session,
+            id_cuenta_bancaria=999999,
+            monto=Decimal("200.00"),
+            creado_por=admin.id_usuario,
         )
 
 
@@ -379,7 +459,10 @@ def test_crear_partida_no_conciliada_cuenta_bancaria_inactiva_falla(db_session):
     banco = crear_cuenta_bancaria(db_session, estado_cuenta="INACTIVO")
     with pytest.raises(ValueError, match="inactiva"):
         OtrosMovimientosService.crear_partida_no_conciliada(
-            db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("200.00"), creado_por=admin.id_usuario
+            db_session,
+            id_cuenta_bancaria=banco.id_cuenta,
+            monto=Decimal("200.00"),
+            creado_por=admin.id_usuario,
         )
 
 
@@ -403,7 +486,10 @@ def test_conciliar_partida_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
@@ -422,7 +508,10 @@ def test_conciliar_partida_monto_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
@@ -454,7 +543,10 @@ def test_conciliar_partida_excede_saldo_partida(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("50.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("50.00"),
+        creado_por=admin.id_usuario,
     )
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
@@ -473,7 +565,10 @@ def test_conciliar_partida_cliente_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
     cxc, _cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
@@ -492,7 +587,10 @@ def test_conciliar_partida_cliente_inactivo_falla(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
     cliente_inactivo = crear_cliente(db_session, estado_cliente="INACTIVO")
     cxc, _cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
@@ -512,7 +610,10 @@ def test_conciliar_partida_cxc_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
     cliente = crear_cliente(db_session)
 
@@ -531,7 +632,10 @@ def test_conciliar_partida_cxc_no_pertenece_al_cliente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
     cxc, _dueno_real, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
     otro_cliente = crear_cliente(db_session)
@@ -551,7 +655,10 @@ def test_conciliar_partida_excede_saldo_factura(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("500.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("500.00"),
+        creado_por=admin.id_usuario,
     )
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("50.00"))
 
@@ -570,7 +677,10 @@ def test_conciliar_partida_ya_atribuida_a_otro_cliente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
     cxc1, cliente1, _admin2 = _crear_cxc_real(db_session, Decimal("50.00"))
     OtrosMovimientosService.conciliar_partida(
@@ -598,7 +708,10 @@ def test_conciliar_partida_exitosa_no_duplica_movimiento_bancario(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("80.00"))
 
@@ -643,7 +756,10 @@ def test_listar_partidas_no_conciliadas_filtra_por_estado(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session, id_cuenta_bancaria=banco.id_cuenta, monto=Decimal("100.00"), creado_por=admin.id_usuario
+        db_session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=Decimal("100.00"),
+        creado_por=admin.id_usuario,
     )
 
     pendientes = OtrosMovimientosService.listar_partidas_no_conciliadas(
@@ -666,5 +782,7 @@ def test_listar_partidas_no_conciliadas_filtra_por_estado(db_session):
 def test_check_saldo_pendiente_rechaza_negativo_en_cuenta_cobrar_otro(db_session):
     cuenta, _cliente, _admin = _crear_cxc_otro(db_session, monto=Decimal("100.00"))
     cuenta.saldo_pendiente = Decimal("-1.00")
-    with pytest.raises(IntegrityError, match="CK_cuentas_por_cobrar_otros_saldo_no_negativo"):
+    with pytest.raises(
+        IntegrityError, match="CK_cuentas_por_cobrar_otros_saldo_no_negativo"
+    ):
         db_session.commit()

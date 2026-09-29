@@ -47,15 +47,23 @@ def obtener_ubicacion_precisa_windows() -> dict:
     `{"error": "denied" | "timeout" | "unavailable"}`. Nunca lanza -- ver criterio general
     de este tipo de funciones en geo_http.py."""
     if sys.platform != "win32":
-        logger.warning("Geolocalizacion precisa no disponible: plataforma %s no es Windows", sys.platform)
+        logger.warning(
+            "Geolocalizacion precisa no disponible: plataforma %s no es Windows",
+            sys.platform,
+        )
         return {"error": "unavailable"}
     try:
-        from winrt.windows.devices.geolocation import GeolocationAccessStatus, Geolocator, PositionAccuracy
+        from winrt.windows.devices.geolocation import (
+            GeolocationAccessStatus,
+            Geolocator,
+            PositionAccuracy,
+        )
 
         logger.info("winrt-Windows.Devices.Geolocation importado exitosamente")
     except ImportError as e:
         logger.warning(
-            "winrt-Windows.Devices.Geolocation no esta instalado -- geolocalizacion precisa no disponible: %s", e
+            "winrt-Windows.Devices.Geolocation no esta instalado -- geolocalizacion precisa no disponible: %s",
+            e,
         )
         return {"error": "unavailable"}
 
@@ -73,10 +81,15 @@ def obtener_ubicacion_precisa_windows() -> dict:
         geolocator = Geolocator()
         geolocator.desired_accuracy = PositionAccuracy.HIGH
         try:
-            posicion = await asyncio.wait_for(geolocator.get_geoposition_async(), timeout=_TIMEOUT_SEGUNDOS)
+            posicion = await asyncio.wait_for(
+                geolocator.get_geoposition_async(), timeout=_TIMEOUT_SEGUNDOS
+            )
             logger.info("Geolocator get_geoposition_async exitoso")
         except TimeoutError:
-            logger.warning("Geolocator get_geoposition_async timeout despues de %s segundos", _TIMEOUT_SEGUNDOS)
+            logger.warning(
+                "Geolocator get_geoposition_async timeout despues de %s segundos",
+                _TIMEOUT_SEGUNDOS,
+            )
             return {"error": "timeout"}
         except Exception as e:
             logger.exception("Geolocator.get_geoposition_async() fallo: %s", e)

@@ -30,7 +30,9 @@ def test_obtener_ubicacion_dispositivo_ok():
 
 
 def test_obtener_ubicacion_dispositivo_success_false_devuelve_none():
-    with patch("urllib.request.urlopen", return_value=_mock_response({"success": False})):
+    with patch(
+        "urllib.request.urlopen", return_value=_mock_response({"success": False})
+    ):
         assert geo_http.obtener_ubicacion_dispositivo() is None
 
 

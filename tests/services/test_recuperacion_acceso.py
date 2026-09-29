@@ -5,7 +5,10 @@ import pytest
 from app.db.models import CodigoVerificacion
 from app.services import recuperacion_acceso as ra
 from app.services.auth import MAX_INTENTOS_FALLIDOS, authenticate, hash_password
-from app.services.recuperacion_acceso import MAX_INTENTOS_VERIFICACION, RecuperacionAccesoService
+from app.services.recuperacion_acceso import (
+    MAX_INTENTOS_VERIFICACION,
+    RecuperacionAccesoService,
+)
 from tests.factories import crear_usuario
 
 
@@ -26,7 +29,14 @@ def codigos_capturados(monkeypatch):
     enviados = []
 
     def _fake_enviar(destinatario, asunto, cuerpo, cuerpo_html=None):
-        enviados.append({"destinatario": destinatario, "asunto": asunto, "cuerpo": cuerpo, "cuerpo_html": cuerpo_html})
+        enviados.append(
+            {
+                "destinatario": destinatario,
+                "asunto": asunto,
+                "cuerpo": cuerpo,
+                "cuerpo_html": cuerpo_html,
+            }
+        )
 
     monkeypatch.setattr(ra, "enviar_correo", _fake_enviar)
     return enviados
@@ -54,7 +64,9 @@ def test_solicitar_codigo_desbloqueo_envia_correo(db_session, codigos_capturados
     assert codigos_capturados[0]["destinatario"] == "jperez@example.com"
 
 
-def test_solicitar_codigo_incluye_version_html_corporativa(db_session, codigos_capturados):
+def test_solicitar_codigo_incluye_version_html_corporativa(
+    db_session, codigos_capturados
+):
     """El correo de codigo ahora manda una version HTML ademas del texto plano (pedido del
     usuario: que se vea corporativo/formal en vez de texto crudo, 2026-08-28) -- este test
     protege contra que ese HTML se rompa o desincronice del codigo real en un refactor
@@ -71,7 +83,9 @@ def test_solicitar_codigo_incluye_version_html_corporativa(db_session, codigos_c
     assert codigo in enviado["cuerpo_html"]
 
 
-def test_solicitar_codigo_html_usa_nombre_de_empresa_configurado(db_session, codigos_capturados):
+def test_solicitar_codigo_html_usa_nombre_de_empresa_configurado(
+    db_session, codigos_capturados
+):
     from app.db.models import ConfiguracionEmpresa
 
     db_session.add(ConfiguracionEmpresa(razon_social_empresa="Distribuidora DJ, C.A."))
@@ -83,8 +97,12 @@ def test_solicitar_codigo_html_usa_nombre_de_empresa_configurado(db_session, cod
     assert "Distribuidora DJ, C.A." in codigos_capturados[0]["cuerpo_html"]
 
 
-def test_solicitar_codigo_usuario_inexistente_no_envia_y_responde_generico(db_session, codigos_capturados):
-    mensaje = RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "no_existe")
+def test_solicitar_codigo_usuario_inexistente_no_envia_y_responde_generico(
+    db_session, codigos_capturados
+):
+    mensaje = RecuperacionAccesoService.solicitar_codigo_desbloqueo(
+        db_session, "no_existe"
+    )
 
     assert codigos_capturados == []
     assert "correo" in mensaje.lower()
@@ -104,13 +122,19 @@ def test_solicitar_codigo_en_cooldown_no_reenvia(db_session, codigos_capturados)
     _crear_usuario_con_email(db_session)
     RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
 
-    mensaje = RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+    mensaje = RecuperacionAccesoService.solicitar_codigo_desbloqueo(
+        db_session, "jperez"
+    )
 
     assert len(codigos_capturados) == 1
-    assert "correo" in mensaje.lower()  # misma respuesta generica, no delata el cooldown
+    assert (
+        "correo" in mensaje.lower()
+    )  # misma respuesta generica, no delata el cooldown
 
 
-def test_solicitar_codigo_despues_del_cooldown_si_reenvia(db_session, codigos_capturados):
+def test_solicitar_codigo_despues_del_cooldown_si_reenvia(
+    db_session, codigos_capturados
+):
     _crear_usuario_con_email(db_session)
     RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
     codigo_previo = db_session.query(CodigoVerificacion).one()
@@ -136,7 +160,9 @@ def test_solicitar_codigo_cooldown_es_por_tipo(db_session, codigos_capturados):
 # --- verificar_codigo_desbloqueo ------------------------------------------------------
 
 
-def test_verificar_codigo_desbloqueo_correcto_desbloquea(db_session, codigos_capturados):
+def test_verificar_codigo_desbloqueo_correcto_desbloquea(
+    db_session, codigos_capturados
+):
     usuario = _crear_usuario_con_email(db_session)
     _bloquear_usuario(db_session)
     db_session.refresh(usuario)
@@ -169,7 +195,9 @@ def test_verificar_codigo_incorrecto_no_desbloquea(db_session, codigos_capturado
     RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
 
     with pytest.raises(ValueError):
-        RecuperacionAccesoService.verificar_codigo_desbloqueo(db_session, "jperez", "000000")
+        RecuperacionAccesoService.verificar_codigo_desbloqueo(
+            db_session, "jperez", "000000"
+        )
 
     db_session.refresh(usuario)
     assert usuario.bloqueado_desde is not None
@@ -182,10 +210,14 @@ def test_verificar_codigo_agota_intentos_e_invalida(db_session, codigos_capturad
 
     for _ in range(MAX_INTENTOS_VERIFICACION):
         with pytest.raises(ValueError):
-            RecuperacionAccesoService.verificar_codigo_desbloqueo(db_session, "jperez", "000000")
+            RecuperacionAccesoService.verificar_codigo_desbloqueo(
+                db_session, "jperez", "000000"
+            )
 
     with pytest.raises(ValueError):
-        RecuperacionAccesoService.verificar_codigo_desbloqueo(db_session, "jperez", codigo_real)
+        RecuperacionAccesoService.verificar_codigo_desbloqueo(
+            db_session, "jperez", codigo_real
+        )
 
 
 def test_verificar_codigo_expirado_falla(db_session, codigos_capturados):
@@ -193,19 +225,27 @@ def test_verificar_codigo_expirado_falla(db_session, codigos_capturados):
     RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
     codigo = _extraer_codigo(codigos_capturados[0]["cuerpo"])
 
-    registro = db_session.query(CodigoVerificacion).order_by(CodigoVerificacion.id_codigo.desc()).first()
+    registro = (
+        db_session.query(CodigoVerificacion)
+        .order_by(CodigoVerificacion.id_codigo.desc())
+        .first()
+    )
     registro.fecha_expiracion = datetime.now() - timedelta(minutes=1)
     db_session.commit()
 
     with pytest.raises(ValueError):
-        RecuperacionAccesoService.verificar_codigo_desbloqueo(db_session, "jperez", codigo)
+        RecuperacionAccesoService.verificar_codigo_desbloqueo(
+            db_session, "jperez", codigo
+        )
 
 
 def test_verificar_codigo_sin_solicitud_previa_falla(db_session):
     _crear_usuario_con_email(db_session)
 
     with pytest.raises(ValueError):
-        RecuperacionAccesoService.verificar_codigo_desbloqueo(db_session, "jperez", "123456")
+        RecuperacionAccesoService.verificar_codigo_desbloqueo(
+            db_session, "jperez", "123456"
+        )
 
 
 # --- solicitar_codigo_recuperacion / verificar_codigo_y_cambiar_clave -----------------
@@ -217,7 +257,9 @@ def test_recuperar_clave_flujo_completo(db_session, codigos_capturados):
     RecuperacionAccesoService.solicitar_codigo_recuperacion(db_session, "jperez")
     codigo = _extraer_codigo(codigos_capturados[0]["cuerpo"])
 
-    RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(db_session, "jperez", codigo, "NuevaClave123!")
+    RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(
+        db_session, "jperez", codigo, "NuevaClave123!"
+    )
 
     db_session.refresh(usuario)
     assert authenticate(db_session, "jperez", "NuevaClave123!") is not None
@@ -225,16 +267,22 @@ def test_recuperar_clave_flujo_completo(db_session, codigos_capturados):
     assert usuario.intentos_fallidos == 0
 
 
-def test_recuperar_clave_rechaza_clave_debil_sin_quemar_el_codigo(db_session, codigos_capturados):
+def test_recuperar_clave_rechaza_clave_debil_sin_quemar_el_codigo(
+    db_session, codigos_capturados
+):
     _crear_usuario_con_email(db_session)
     RecuperacionAccesoService.solicitar_codigo_recuperacion(db_session, "jperez")
     codigo = _extraer_codigo(codigos_capturados[0]["cuerpo"])
 
     with pytest.raises(ValueError, match="politica de seguridad"):
-        RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(db_session, "jperez", codigo, "debil")
+        RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(
+            db_session, "jperez", codigo, "debil"
+        )
 
     # El codigo sigue vigente: rechazar la clave no debe quemarlo.
-    RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(db_session, "jperez", codigo, "NuevaClave123!")
+    RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(
+        db_session, "jperez", codigo, "NuevaClave123!"
+    )
     assert authenticate(db_session, "jperez", "NuevaClave123!") is not None
 
 
@@ -246,13 +294,17 @@ def test_recuperar_clave_desbloquea_cuenta_bloqueada(db_session, codigos_captura
 
     RecuperacionAccesoService.solicitar_codigo_recuperacion(db_session, "jperez")
     codigo = _extraer_codigo(codigos_capturados[0]["cuerpo"])
-    RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(db_session, "jperez", codigo, "NuevaClave123!")
+    RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(
+        db_session, "jperez", codigo, "NuevaClave123!"
+    )
 
     db_session.refresh(usuario)
     assert usuario.bloqueado_desde is None
 
 
-def test_recuperar_clave_codigo_de_desbloqueo_no_sirve_para_cambiar_clave(db_session, codigos_capturados):
+def test_recuperar_clave_codigo_de_desbloqueo_no_sirve_para_cambiar_clave(
+    db_session, codigos_capturados
+):
     """Los dos tipos de codigo son independientes: uno de DESBLOQUEO no debe poder
     usarse en el flujo de RECUPERAR_CLAVE ni viceversa."""
     _crear_usuario_con_email(db_session)

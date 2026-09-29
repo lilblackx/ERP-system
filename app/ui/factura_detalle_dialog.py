@@ -141,12 +141,16 @@ class FacturaDetalleDialog(QDialog):
             alto_pagos_vuelto = 70 + 40 * len(self.pagos)
         if self.factura.monto_vuelto > 0:
             alto_pagos_vuelto += 40
-        hay_nota_disponible = self.nota_credito is not None and self.nota_credito.saldo_disponible > 0
+        hay_nota_disponible = (
+            self.nota_credito is not None and self.nota_credito.saldo_disponible > 0
+        )
         alto = 580 + alto_pagos_vuelto + (70 if hay_nota_disponible else 0)
         self.resize(720, alto)
         self.setMinimumSize(720, alto)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._build_ui()
 
@@ -173,7 +177,9 @@ class FacturaDetalleDialog(QDialog):
         h.setSpacing(12)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon("fa5s.file-invoice", color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
+        icon_lbl.setPixmap(
+            qta.icon("fa5s.file-invoice", color=COLOR_PRIMARY).pixmap(QSize(22, 22))
+        )
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -186,7 +192,9 @@ class FacturaDetalleDialog(QDialog):
         titulos.setContentsMargins(0, 0, 0, 0)
 
         lbl_titulo = QLabel(f"Factura {self.factura.numero_factura}")
-        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         lbl_subtitulo = QLabel("Detalle de la venta")
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         titulos.addWidget(lbl_titulo)
@@ -238,7 +246,9 @@ class FacturaDetalleDialog(QDialog):
         titulo_row = QHBoxLayout()
         titulo_row.setSpacing(6)
         icono_titulo = QLabel()
-        icono_titulo.setPixmap(qta.icon("fa5s.info-circle", color=COLOR_PRIMARY).pixmap(QSize(12, 12)))
+        icono_titulo.setPixmap(
+            qta.icon("fa5s.info-circle", color=COLOR_PRIMARY).pixmap(QSize(12, 12))
+        )
         titulo = QLabel("DATOS DE LA FACTURA")
         titulo.setProperty("class", "SectionTitle")
         titulo_row.addWidget(icono_titulo)
@@ -254,9 +264,15 @@ class FacturaDetalleDialog(QDialog):
 
         cliente = self.factura.cliente
         vendedor = self.factura.vendedor
-        fecha = self.factura.fecha_emision.strftime("%d/%m/%Y %H:%M") if self.factura.fecha_emision else "—"
+        fecha = (
+            self.factura.fecha_emision.strftime("%d/%m/%Y %H:%M")
+            if self.factura.fecha_emision
+            else "—"
+        )
         vencimiento = (
-            self.factura.fecha_vencimiento.strftime("%d/%m/%Y") if self.factura.fecha_vencimiento else "Sin definir"
+            self.factura.fecha_vencimiento.strftime("%d/%m/%Y")
+            if self.factura.fecha_vencimiento
+            else "Sin definir"
         )
         condicion = "Contado" if self.factura.condicion_pago == "contado" else "Crédito"
         tasa = self.factura.tasa
@@ -271,7 +287,9 @@ class FacturaDetalleDialog(QDialog):
         elif self.metodo_pago == "mixto":
             metodo_pago_texto = "Mixto (ver desglose abajo)"
         elif self.metodo_pago:
-            metodo_pago_texto = _ETIQUETAS_METODO.get(self.metodo_pago, self.metodo_pago)
+            metodo_pago_texto = _ETIQUETAS_METODO.get(
+                self.metodo_pago, self.metodo_pago
+            )
         else:
             metodo_pago_texto = "—"
 
@@ -282,7 +300,10 @@ class FacturaDetalleDialog(QDialog):
             ("Condición de pago", condicion),
             ("Método de pago", metodo_pago_texto),
             ("Vendedor", vendedor.nombre_vendedor if vendedor else "Sin vendedor"),
-            ("Vencimiento", vencimiento if self.factura.condicion_pago == "credito" else "N/A"),
+            (
+                "Vencimiento",
+                vencimiento if self.factura.condicion_pago == "credito" else "N/A",
+            ),
             ("Tasa BCV aplicada", tasa_texto),
             ("Observaciones", self.factura.observaciones_factura or "—"),
         ]
@@ -313,7 +334,9 @@ class FacturaDetalleDialog(QDialog):
         titulo_row = QHBoxLayout()
         titulo_row.setSpacing(6)
         icono_titulo = QLabel()
-        icono_titulo.setPixmap(qta.icon("fa5s.money-bill-wave", color=COLOR_PRIMARY).pixmap(QSize(12, 12)))
+        icono_titulo.setPixmap(
+            qta.icon("fa5s.money-bill-wave", color=COLOR_PRIMARY).pixmap(QSize(12, 12))
+        )
         titulo = QLabel("FORMAS DE PAGO")
         titulo.setProperty("class", "SectionTitle")
         titulo_row.addWidget(icono_titulo)
@@ -325,7 +348,12 @@ class FacturaDetalleDialog(QDialog):
             tabla = QTableWidget(len(self.pagos), 3)
             tabla.setHorizontalHeaderLabels(["Método", "Moneda", "Monto"])
             alinear_encabezados(
-                tabla, {0: Qt.AlignmentFlag.AlignLeft, 1: Qt.AlignmentFlag.AlignLeft, 2: Qt.AlignmentFlag.AlignRight}
+                tabla,
+                {
+                    0: Qt.AlignmentFlag.AlignLeft,
+                    1: Qt.AlignmentFlag.AlignLeft,
+                    2: Qt.AlignmentFlag.AlignRight,
+                },
             )
             tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
             tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -333,14 +361,30 @@ class FacturaDetalleDialog(QDialog):
             tabla.setShowGrid(False)
             tabla.verticalHeader().setVisible(False)
             tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            tabla.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch
+            )
             tabla.setStyleSheet(TABLE_QSS)
             aplicar_sombra(tabla)
             for fila, pago in enumerate(self.pagos):
-                tabla.setItem(fila, 0, QTableWidgetItem(_ETIQUETAS_METODO.get(pago.metodo_pago, pago.metodo_pago)))
-                tabla.setItem(fila, 1, QTableWidgetItem(_ETIQUETAS_MONEDA.get(pago.moneda, pago.moneda)))
-                item_monto = QTableWidgetItem(f"{float(pago.monto_moneda_origen or pago.monto):,.2f}")
-                item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                tabla.setItem(
+                    fila,
+                    0,
+                    QTableWidgetItem(
+                        _ETIQUETAS_METODO.get(pago.metodo_pago, pago.metodo_pago)
+                    ),
+                )
+                tabla.setItem(
+                    fila,
+                    1,
+                    QTableWidgetItem(_ETIQUETAS_MONEDA.get(pago.moneda, pago.moneda)),
+                )
+                item_monto = QTableWidgetItem(
+                    f"{float(pago.monto_moneda_origen or pago.monto):,.2f}"
+                )
+                item_monto.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 tabla.setItem(fila, 2, item_monto)
             # Alto exacto medido DESPUES de poblar filas/estilo -- un estimado a mano
             # (header/fila con un numero fijo de px) subestimaba el alto real del QSS
@@ -349,11 +393,15 @@ class FacturaDetalleDialog(QDialog):
             # datos apenas visible, un pixel de alto (reportado por el usuario: "el grid
             # de formas de pago no se ve bien").
             alto_filas = sum(tabla.rowHeight(fila) for fila in range(tabla.rowCount()))
-            tabla.setFixedHeight(tabla.horizontalHeader().sizeHint().height() + alto_filas + 2)
+            tabla.setFixedHeight(
+                tabla.horizontalHeader().sizeHint().height() + alto_filas + 2
+            )
             layout.addWidget(tabla)
 
         if self.factura.monto_vuelto > 0:
-            metodo_vuelto_texto = _ETIQUETAS_METODO_VUELTO.get(self.factura.metodo_vuelto, self.factura.metodo_vuelto)
+            metodo_vuelto_texto = _ETIQUETAS_METODO_VUELTO.get(
+                self.factura.metodo_vuelto, self.factura.metodo_vuelto
+            )
             texto_vuelto = f"Vuelto entregado: ${float(self.factura.monto_vuelto):,.2f} · {metodo_vuelto_texto}"
             if self.factura.metodo_vuelto != "efectivo":
                 autorizador = self.factura.autorizador_vuelto
@@ -361,7 +409,9 @@ class FacturaDetalleDialog(QDialog):
                 texto_vuelto += f" · Ref. {self.factura.referencia_vuelto or '—'} · Autorizó: {nombre_autorizador}"
             lbl_vuelto = QLabel(texto_vuelto)
             lbl_vuelto.setWordWrap(True)
-            lbl_vuelto.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_PRIMARY}; padding-top: 4px;")
+            lbl_vuelto.setStyleSheet(
+                f"font-size: 12px; font-weight: 600; color: {COLOR_PRIMARY}; padding-top: 4px;"
+            )
             layout.addWidget(lbl_vuelto)
 
         return card
@@ -384,18 +434,24 @@ class FacturaDetalleDialog(QDialog):
         layout.setSpacing(10)
 
         icono = QLabel()
-        icono.setPixmap(qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY).pixmap(QSize(16, 16)))
+        icono.setPixmap(
+            qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY).pixmap(QSize(16, 16))
+        )
         layout.addWidget(icono)
 
         self.lbl_nota_credito = QLabel(
             f"Esta factura generó la nota de crédito {self.nota_credito.numero_nota_credito} — "
             f"disponible ${float(self.nota_credito.saldo_disponible):,.2f}"
         )
-        self.lbl_nota_credito.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
+        self.lbl_nota_credito.setStyleSheet(
+            f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};"
+        )
         layout.addWidget(self.lbl_nota_credito, stretch=1)
 
         self.btn_devolver_nota = QPushButton("Devolver esta nota")
-        self.btn_devolver_nota.setIcon(qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY))
+        self.btn_devolver_nota.setIcon(
+            qta.icon("fa5s.hand-holding-usd", color=COLOR_PRIMARY)
+        )
         self.btn_devolver_nota.setObjectName("BtnSecondary")
         self.btn_devolver_nota.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_devolver_nota.setAutoDefault(False)
@@ -405,8 +461,13 @@ class FacturaDetalleDialog(QDialog):
         return card
 
     def _devolver_nota_credito(self) -> None:
-        dialogo = DevolverNotaCreditoDialog(self.session, self.id_usuario, [self.nota_credito], parent=self)
-        if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.nota_actualizada is None:
+        dialogo = DevolverNotaCreditoDialog(
+            self.session, self.id_usuario, [self.nota_credito], parent=self
+        )
+        if (
+            dialogo.exec() != QDialog.DialogCode.Accepted
+            or dialogo.nota_actualizada is None
+        ):
             return
 
         self.nota_credito = dialogo.nota_actualizada
@@ -420,7 +481,9 @@ class FacturaDetalleDialog(QDialog):
                 f"Esta factura generó la nota de crédito {self.nota_credito.numero_nota_credito} — "
                 f"disponible ${float(self.nota_credito.saldo_disponible):,.2f}"
             )
-        MessageBox.information(self, "Nota de crédito devuelta", "La devolución se registró con éxito.")
+        MessageBox.information(
+            self, "Nota de crédito devuelta", "La devolución se registró con éxito."
+        )
 
     def _make_tabla_items(self) -> QTableWidget:
         columnas = ["Producto", "Cantidad", "Precio Unitario", "Subtotal"]
@@ -446,7 +509,11 @@ class FacturaDetalleDialog(QDialog):
         aplicar_sombra(tabla)
 
         for fila, detalle in enumerate(self.detalles):
-            nombre = detalle.producto.nombre_producto if detalle.producto else "Producto eliminado"
+            nombre = (
+                detalle.producto.nombre_producto
+                if detalle.producto
+                else "Producto eliminado"
+            )
             cantidad = float(detalle.cantidad_producto)
             precio = float(detalle.precio_unitario)
             subtotal = cantidad * precio
@@ -456,13 +523,19 @@ class FacturaDetalleDialog(QDialog):
                 item_nombre.setToolTip(detalle.observaciones_item)
             tabla.setItem(fila, 0, item_nombre)
             item_cant = QTableWidgetItem(f"{cantidad:,.2f}")
-            item_cant.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_cant.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             tabla.setItem(fila, 1, item_cant)
             item_precio = QTableWidgetItem(f"${precio:,.2f}")
-            item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_precio.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             tabla.setItem(fila, 2, item_precio)
             item_subtotal = QTableWidgetItem(f"${subtotal:,.2f}")
-            item_subtotal.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_subtotal.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             tabla.setItem(fila, 3, item_subtotal)
 
         return tabla
@@ -484,7 +557,9 @@ class FacturaDetalleDialog(QDialog):
         if descuento > 0:
             resumen_partes.append(f"Descuento: -${descuento:,.2f}")
         if self.factura.iva_aplicado:
-            resumen_partes.append(f"IVA ({float(self.factura.porcentaje_iva_aplicado):g}%): ${monto_iva:,.2f}")
+            resumen_partes.append(
+                f"IVA ({float(self.factura.porcentaje_iva_aplicado):g}%): ${monto_iva:,.2f}"
+            )
 
         col_totales = QVBoxLayout()
         col_totales.setSpacing(1)
@@ -492,7 +567,9 @@ class FacturaDetalleDialog(QDialog):
         lbl_resumen.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         col_totales.addWidget(lbl_resumen)
         lbl_total = QLabel(f"Total a pagar: ${total_a_pagar:,.2f}")
-        lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_total.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         col_totales.addWidget(lbl_total)
 
         btn_exportar = QPushButton("Exportar PDF")
@@ -528,24 +605,39 @@ class FacturaDetalleDialog(QDialog):
 
     def exportar_pdf(self) -> None:
         ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar factura", f"{self.factura.numero_factura}.pdf", "PDF (*.pdf)"
+            self,
+            "Exportar factura",
+            f"{self.factura.numero_factura}.pdf",
+            "PDF (*.pdf)",
         )
         if not ruta:
             return
 
         try:
-            config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario)
+            config_empresa = EmpresaService.obtener_configuracion(
+                self.session, id_usuario=self.id_usuario
+            )
             generar_pdf_factura(self.datos, config_empresa, ruta)
-            MessageBox.information(self, "Exportación completa", f"Factura exportada a:\n{ruta}")
+            MessageBox.information(
+                self, "Exportación completa", f"Factura exportada a:\n{ruta}"
+            )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la configuración de empresa.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar la configuración de empresa.",
+            )
         except Exception:
-            logger.exception("Fallo al exportar la factura %s a PDF", self.factura.numero_factura)
+            logger.exception(
+                "Fallo al exportar la factura %s a PDF", self.factura.numero_factura
+            )
             MessageBox.critical(self, "Error", "No se pudo exportar la factura a PDF.")
 
     def imprimir(self) -> None:
         try:
-            config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario)
+            config_empresa = EmpresaService.obtener_configuracion(
+                self.session, id_usuario=self.id_usuario
+            )
             if not config_empresa or not config_empresa.impresora_predeterminada:
                 MessageBox.warning(
                     self,
@@ -554,16 +646,24 @@ class FacturaDetalleDialog(QDialog):
                 )
                 return
 
-            imprimir_factura(self.datos, config_empresa, config_empresa.impresora_predeterminada)
+            imprimir_factura(
+                self.datos, config_empresa, config_empresa.impresora_predeterminada
+            )
             MessageBox.information(
                 self,
                 "Impresión enviada",
                 f"Factura enviada a: {config_empresa.impresora_predeterminada}",
             )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la configuración de empresa.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar la configuración de empresa.",
+            )
         except ValueError as e:
             MessageBox.warning(self, "Impresora no disponible", str(e))
         except Exception:
-            logger.exception("Fallo al imprimir la factura %s", self.factura.numero_factura)
+            logger.exception(
+                "Fallo al imprimir la factura %s", self.factura.numero_factura
+            )
             MessageBox.critical(self, "Error", "No se pudo imprimir la factura.")

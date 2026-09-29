@@ -63,7 +63,9 @@ QLabel.FieldValue {{
 class NotaRecepcionDetalleDialog(QDialog):
     """Dialogo de solo lectura para ver el detalle completo de una nota de recepcion."""
 
-    def __init__(self, session: Session, id_nr: int, id_usuario: int | None = None, parent=None):
+    def __init__(
+        self, session: Session, id_nr: int, id_usuario: int | None = None, parent=None
+    ):
         super().__init__(parent)
         self.session = session
         self.id_nr = id_nr
@@ -80,11 +82,17 @@ class NotaRecepcionDetalleDialog(QDialog):
             )
             self.nr = resultado["nota"]
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver detalles de recepciones.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para ver detalles de recepciones.",
+            )
             self.reject()
         except Exception:
             logger.exception("Fallo al cargar nota de recepcion")
-            MessageBox.critical(self, "Error", "No se pudo cargar la nota de recepcion.")
+            MessageBox.critical(
+                self, "Error", "No se pudo cargar la nota de recepcion."
+            )
             self.reject()
 
     def _build_ui(self) -> None:
@@ -94,7 +102,9 @@ class NotaRecepcionDetalleDialog(QDialog):
         self.setWindowTitle(f"Detalle Recepción — {self.nr.numero_nr}")
         self.resize(900, 700)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 16, 20, 16)
@@ -107,7 +117,9 @@ class NotaRecepcionDetalleDialog(QDialog):
         header_layout.setContentsMargins(0, 0, 0, 0)
 
         lbl_titulo = QLabel(f"Detalle Recepción — {self.nr.numero_nr}")
-        lbl_titulo.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         header_layout.addWidget(lbl_titulo)
         header_layout.addStretch()
 
@@ -130,15 +142,23 @@ class NotaRecepcionDetalleDialog(QDialog):
 
         row = 0
         info_layout.addWidget(QLabel("Orden de Compra:"), row, 0)
-        info_layout.addWidget(QLabel(self.nr.oc.numero_oc if self.nr.oc else ""), row, 1)
+        info_layout.addWidget(
+            QLabel(self.nr.oc.numero_oc if self.nr.oc else ""), row, 1
+        )
         info_layout.addWidget(QLabel("Fecha Recepción:"), row, 2)
-        fecha_str = self.nr.fecha_recepcion.strftime("%d/%m/%Y %H:%M") if self.nr.fecha_recepcion else ""
+        fecha_str = (
+            self.nr.fecha_recepcion.strftime("%d/%m/%Y %H:%M")
+            if self.nr.fecha_recepcion
+            else ""
+        )
         info_layout.addWidget(QLabel(fecha_str), row, 3)
 
         row += 1
         info_layout.addWidget(QLabel("Proveedor:"), row, 0)
         proveedor = self.nr.oc.proveedor if self.nr.oc else None
-        info_layout.addWidget(QLabel(proveedor.nombre_razon_social if proveedor else ""), row, 1)
+        info_layout.addWidget(
+            QLabel(proveedor.nombre_razon_social if proveedor else ""), row, 1
+        )
         info_layout.addWidget(QLabel("Usuario:"), row, 2)
         usuario = self.nr.usuario_recepcion if self.nr.usuario_recepcion else None
         info_layout.addWidget(QLabel(usuario.nombre if usuario else ""), row, 3)
@@ -152,7 +172,9 @@ class NotaRecepcionDetalleDialog(QDialog):
 
         # Tabla de detalles
         lbl_detalles = QLabel("Productos Recibidos")
-        lbl_detalles.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_detalles.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         root.addWidget(lbl_detalles)
 
         self.tabla = self._crear_tabla_detalle()
@@ -170,7 +192,14 @@ class NotaRecepcionDetalleDialog(QDialog):
         self._poblar_tabla_detalle()
 
     def _crear_tabla_detalle(self) -> QTableWidget:
-        columnas = ["Producto", "Cant. Solicitada", "Cant. Recibida", "Cant. Rechazada", "Precio Unitario", "Total"]
+        columnas = [
+            "Producto",
+            "Cant. Solicitada",
+            "Cant. Recibida",
+            "Cant. Rechazada",
+            "Precio Unitario",
+            "Total",
+        ]
         tabla = QTableWidget(0, len(columnas))
         tabla.setHorizontalHeaderLabels(columnas)
         tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -208,27 +237,41 @@ class NotaRecepcionDetalleDialog(QDialog):
 
         for fila, detalle in enumerate(detalles):
             producto = detalle.producto if detalle.producto else None
-            self.tabla.setItem(fila, 0, QTableWidgetItem(producto.nombre_producto if producto else ""))
+            self.tabla.setItem(
+                fila, 0, QTableWidgetItem(producto.nombre_producto if producto else "")
+            )
 
             # Cantidad solicitada desde el detalle de la OC
             oc_detalle = detalle.oc_detalle if detalle.oc_detalle else None
             cantidad_solicitada = oc_detalle.cantidad_solicitada if oc_detalle else 0
             item_solicitada = QTableWidgetItem(f"{float(cantidad_solicitada):,.2f}")
-            item_solicitada.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_solicitada.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 1, item_solicitada)
 
             item_recibida = QTableWidgetItem(f"{float(detalle.cantidad_recibida):,.2f}")
-            item_recibida.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_recibida.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 2, item_recibida)
 
-            item_rechazada = QTableWidgetItem(f"{float(detalle.cantidad_rechazada):,.2f}")
-            item_rechazada.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_rechazada = QTableWidgetItem(
+                f"{float(detalle.cantidad_rechazada):,.2f}"
+            )
+            item_rechazada.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 3, item_rechazada)
 
             item_precio = QTableWidgetItem(f"${float(detalle.precio_unitario):,.4f}")
-            item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_precio.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 4, item_precio)
 
             item_total = QTableWidgetItem(f"${float(detalle.total_linea):,.2f}")
-            item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_total.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 5, item_total)

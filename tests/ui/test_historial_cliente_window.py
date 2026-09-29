@@ -14,20 +14,32 @@ def _crear_ventana(qtbot, monkeypatch):
     # SINCRONICA (no diferida via QTimer) -- hace falta mockear sus 3 dependencias para
     # que la construccion no dependa de que una sesion MagicMock se comporte como una real.
     monkeypatch.setattr(hcw, "obtener_historial_cliente", lambda *a, **k: [])
-    monkeypatch.setattr(hcw, "obtener_saldo_total_pendiente", lambda *a, **k: Decimal("0.00"))
-    monkeypatch.setattr(hcw.NotaCreditoService, "listar_notas_credito_cliente", staticmethod(lambda *a, **k: []))
+    monkeypatch.setattr(
+        hcw, "obtener_saldo_total_pendiente", lambda *a, **k: Decimal("0.00")
+    )
+    monkeypatch.setattr(
+        hcw.NotaCreditoService,
+        "listar_notas_credito_cliente",
+        staticmethod(lambda *a, **k: []),
+    )
     monkeypatch.setattr(hcw.MessageBox, "critical", lambda *a, **k: None)
     monkeypatch.setattr(hcw.MessageBox, "warning", lambda *a, **k: None)
     cliente = SimpleNamespace(nombre_razon_social="Cliente de Prueba")
-    ventana = hcw.HistorialClienteWindow(MagicMock(), id_cliente=1, cliente=cliente, id_usuario=1)
+    ventana = hcw.HistorialClienteWindow(
+        MagicMock(), id_cliente=1, cliente=cliente, id_usuario=1
+    )
     qtbot.addWidget(ventana)
     return ventana
 
 
-def test_ver_detalle_factura_bloquea_reentrada_pero_no_queda_trabado(qtbot, monkeypatch):
+def test_ver_detalle_factura_bloquea_reentrada_pero_no_queda_trabado(
+    qtbot, monkeypatch
+):
     ventana = _crear_ventana(qtbot, monkeypatch)
     ventana._fila_seleccionada_id_factura = lambda: 1
-    monkeypatch.setattr(hcw.VentaService, "obtener_factura", staticmethod(lambda *a, **k: {}))
+    monkeypatch.setattr(
+        hcw.VentaService, "obtener_factura", staticmethod(lambda *a, **k: {})
+    )
 
     llamadas_sesion = []
 

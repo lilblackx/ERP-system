@@ -23,7 +23,12 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.models import Usuario
-from app.ui.styles import COLOR_PRIMARY_DARK, COLOR_SIDEBAR_ACTIVE, COLOR_SIDEBAR_BG, COLOR_WHITE
+from app.ui.styles import (
+    COLOR_PRIMARY_DARK,
+    COLOR_SIDEBAR_ACTIVE,
+    COLOR_SIDEBAR_BG,
+    COLOR_WHITE,
+)
 
 # ── Constantes de tamaño ────────────────────────────────────────────────────
 SIDEBAR_EXPANDED = 230  # px cuando está abierto
@@ -112,7 +117,11 @@ ICONOS_MODULO: dict[str, str] = {
 # ── Paleta forzada (evita que Qt anule el color de fondo) ──────────────────
 def _paleta_azul() -> QPalette:
     p = QPalette()
-    for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Base, QPalette.ColorRole.AlternateBase):
+    for role in (
+        QPalette.ColorRole.Window,
+        QPalette.ColorRole.Base,
+        QPalette.ColorRole.AlternateBase,
+    ):
         p.setColor(role, QColor(COLOR_SIDEBAR_BG))
     p.setColor(QPalette.ColorRole.WindowText, QColor("#FFFFFF"))
     p.setColor(QPalette.ColorRole.ButtonText, QColor("#FFFFFF"))
@@ -330,7 +339,9 @@ class Sidebar(QWidget):
         h.setSpacing(8)
 
         self.btn_toggle = QPushButton()
-        self.btn_toggle.setIcon(qta.icon("fa5s.chevron-left", color=QColor(255, 255, 255, 204)))
+        self.btn_toggle.setIcon(
+            qta.icon("fa5s.chevron-left", color=QColor(255, 255, 255, 204))
+        )
         self.btn_toggle.setObjectName("ToggleBtn")
         self.btn_toggle.setFixedSize(30, 30)
         self.btn_toggle.setFlat(True)
@@ -348,7 +359,9 @@ class Sidebar(QWidget):
 
         self._col_empresa = QWidget()
         self._col_empresa.setObjectName("SidebarColEmpresa")
-        self._col_empresa.setStyleSheet("QWidget#SidebarColEmpresa { background: transparent; border: none; }")
+        self._col_empresa.setStyleSheet(
+            "QWidget#SidebarColEmpresa { background: transparent; border: none; }"
+        )
         col = QVBoxLayout(self._col_empresa)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
@@ -359,13 +372,17 @@ class Sidebar(QWidget):
             "background: transparent; border: none; color: {COLOR_WHITE}; font-size: 14px;"
             " font-weight: bold; letter-spacing: 1px;"
         )
-        self._lbl_empresa.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._lbl_empresa.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
 
         self._lbl_subtitulo_header = QLabel("Sistema de gestión")
         self._lbl_subtitulo_header.setStyleSheet(
             "color: rgba(255,255,255,0.55); font-size: 10px; background: transparent; border: none;"
         )
-        self._lbl_subtitulo_header.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._lbl_subtitulo_header.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
 
         col.addWidget(self._lbl_empresa)
         col.addWidget(self._lbl_subtitulo_header)
@@ -413,7 +430,9 @@ class Sidebar(QWidget):
                 # antes de la primera seccion visible (queda huerfano arriba de todo).
                 separador_seccion = QLabel()
                 separador_seccion.setFixedHeight(1)
-                separador_seccion.setStyleSheet("background-color: rgba(255,255,255,0.08);")
+                separador_seccion.setStyleSheet(
+                    "background-color: rgba(255,255,255,0.08);"
+                )
                 self._lbl_secciones.append(separador_seccion)
                 self._nav_layout.addWidget(separador_seccion)
                 self._nav_layout.addSpacing(4)
@@ -430,7 +449,9 @@ class Sidebar(QWidget):
                 self._botones[clave] = btn
                 self._nav_layout.addWidget(btn)
 
-        self._nav_layout.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        self._nav_layout.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        )
         scroll.setWidget(content)
         return scroll
 
@@ -445,7 +466,11 @@ class Sidebar(QWidget):
         h.setContentsMargins(14, 8, 14, 8)
         h.setSpacing(10)
 
-        nombre = (self._usuario.nombre or self._usuario.nombre_usuario) if self._usuario else "Usuario"
+        nombre = (
+            (self._usuario.nombre or self._usuario.nombre_usuario)
+            if self._usuario
+            else "Usuario"
+        )
         rol = self._usuario.rol.nombre if self._usuario and self._usuario.rol else "—"
         iniciales = "".join(p[0].upper() for p in nombre.split()[:2]) or "U"
 
@@ -459,7 +484,9 @@ class Sidebar(QWidget):
 
         self._footer_info = QWidget()
         self._footer_info.setObjectName("SidebarFooterInfo")
-        self._footer_info.setStyleSheet("QWidget#SidebarFooterInfo { background: transparent; border: none; }")
+        self._footer_info.setStyleSheet(
+            "QWidget#SidebarFooterInfo { background: transparent; border: none; }"
+        )
         v = QVBoxLayout(self._footer_info)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -469,7 +496,9 @@ class Sidebar(QWidget):
             "color: {COLOR_WHITE}; font-size: 12px; font-weight: bold; background: transparent; border: none;"
         )
         lbl_rol = QLabel(rol)
-        lbl_rol.setStyleSheet("color: rgba(255,255,255,0.60); font-size: 10px; background: transparent; border: none;")
+        lbl_rol.setStyleSheet(
+            "color: rgba(255,255,255,0.60); font-size: 10px; background: transparent; border: none;"
+        )
 
         v.addWidget(lbl_nombre)
         v.addWidget(lbl_rol)
@@ -505,7 +534,9 @@ class Sidebar(QWidget):
             lbl.setVisible(False)
         self._lbl_avatar.setVisible(False)
         self._footer_info.setVisible(False)
-        self.btn_toggle.setIcon(qta.icon("fa5s.chevron-right", color=QColor(255, 255, 255, 204)))
+        self.btn_toggle.setIcon(
+            qta.icon("fa5s.chevron-right", color=QColor(255, 255, 255, 204))
+        )
         self.btn_toggle.setToolTip("Expandir menu")
 
         for btn in self._botones.values():
@@ -522,7 +553,9 @@ class Sidebar(QWidget):
             lbl.setVisible(True)
         self._lbl_avatar.setVisible(True)
         self._footer_info.setVisible(True)
-        self.btn_toggle.setIcon(qta.icon("fa5s.chevron-left", color=QColor(255, 255, 255, 204)))
+        self.btn_toggle.setIcon(
+            qta.icon("fa5s.chevron-left", color=QColor(255, 255, 255, 204))
+        )
         self.btn_toggle.setToolTip("Colapsar menu")
 
         for btn in self._botones.values():

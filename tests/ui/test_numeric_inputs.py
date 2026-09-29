@@ -7,7 +7,8 @@ show()+waitExposed() y un qtbot.waitUntil() despues de setFocus() son necesarios
 QT_QPA_PLATFORM=offscreen (CI, ver .github/workflows/tests.yml) el foco logico de Qt
 (QApplication.focusWidget) recien se resuelve al procesar el event loop, no de forma
 sincronica dentro de la misma llamada a setFocus() -- sin esperarlo, clearFocus()
-despues no dispara editingFinished y los asserts de valor ven el campo todavia en None."""
+despues no dispara editingFinished y los asserts de valor ven el campo todavia en None.
+"""
 
 from decimal import Decimal
 
@@ -93,7 +94,9 @@ def test_campo_vacio_sin_allow_empty_se_normaliza_a_cero(qtbot):
 def test_validador_rechaza_letras(qtbot):
     campo = NumericLineEdit(NumericFieldType.AMOUNT)
     qtbot.addWidget(campo)
-    _dar_foco(qtbot, campo)  # selecciona el "0,00" inicial -- letras rechazadas lo dejan intacto
+    _dar_foco(
+        qtbot, campo
+    )  # selecciona el "0,00" inicial -- letras rechazadas lo dejan intacto
     qtbot.keyClicks(campo, "abc")
     assert campo.text() == "0,00"
 

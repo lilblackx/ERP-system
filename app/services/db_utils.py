@@ -78,7 +78,10 @@ def reintentar_en_deadlock(func: Callable[[], T], max_intentos: int = 3) -> T:
             ultimo_error = exc
             espera = (0.1 * (2**intento)) + random.uniform(0, 0.05)
             logger.warning(
-                "Deadlock detectado (intento %s/%s), reintentando en %.2fs", intento + 1, max_intentos, espera
+                "Deadlock detectado (intento %s/%s), reintentando en %.2fs",
+                intento + 1,
+                max_intentos,
+                espera,
             )
             time.sleep(espera)
     raise ultimo_error  # pragma: no cover -- inalcanzable, el loop siempre retorna o lanza

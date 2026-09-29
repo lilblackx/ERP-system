@@ -67,7 +67,17 @@ from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
-COLS_VISIBLES = ["ID", "N° FACTURA", "CLIENTE", "VENDEDOR", "FECHA", "CONDICIÓN", "MÉTODO PAGO", "TOTAL", "ESTADO"]
+COLS_VISIBLES = [
+    "ID",
+    "N° FACTURA",
+    "CLIENTE",
+    "VENDEDOR",
+    "FECHA",
+    "CONDICIÓN",
+    "MÉTODO PAGO",
+    "TOTAL",
+    "ESTADO",
+]
 COL_ID_INTERNO = 0  # oculto
 POR_PAGINA = 20
 
@@ -80,24 +90,37 @@ def _etiqueta_metodo_pago(valor: str | None) -> str:
     return "Mixto" if valor == "mixto" else (valor or "—")
 
 
-def _tarea_imprimir_factura(session, id_factura: int, id_usuario: int | None) -> str | None:
+def _tarea_imprimir_factura(
+    session, id_factura: int, id_usuario: int | None
+) -> str | None:
     """Corre en un QThread aparte (QueryWorker), no en el hilo de GUI: enviar un
     trabajo a un driver de impresora real via QPrinter.print_() puede tardar varios
     cientos de ms (a veces mas en el primer trabajo de la sesion, mientras el driver
     inicializa), y hacerlo de forma sincrona justo despues de "Facturar" era lo que
     hacia sentir lento todo el flujo -- la ventana quedaba bloqueada hasta que el
     spooler aceptaba el documento. Devuelve el nombre de la impresora usada, o None si
-    no hay ninguna configurada (no es un error, ver FacturacionPanel._disparar_impresion_automatica)."""
-    config_empresa = EmpresaService.obtener_configuracion(session, id_usuario=id_usuario)
+    no hay ninguna configurada (no es un error, ver FacturacionPanel._disparar_impresion_automatica).
+    """
+    config_empresa = EmpresaService.obtener_configuracion(
+        session, id_usuario=id_usuario
+    )
     if not config_empresa or not config_empresa.impresora_predeterminada:
         return None
-    datos_factura = VentaService.obtener_factura(session, id_factura, id_usuario=id_usuario)
-    imprimir_factura(datos_factura, config_empresa, config_empresa.impresora_predeterminada)
+    datos_factura = VentaService.obtener_factura(
+        session, id_factura, id_usuario=id_usuario
+    )
+    imprimir_factura(
+        datos_factura, config_empresa, config_empresa.impresora_predeterminada
+    )
     return config_empresa.impresora_predeterminada
 
 
 def _filas_facturas_query(
-    session, texto_busqueda: str | None, estado: str | None, condicion_pago: str | None, id_usuario: int | None
+    session,
+    texto_busqueda: str | None,
+    estado: str | None,
+    condicion_pago: str | None,
+    id_usuario: int | None,
 ) -> list[list]:
     # Paginado en chunks (en vez de por_pagina=1_000_000 de una sola vez): reduce el
     # pico de memoria -- cada página se convierte a listas simples y se descarta el
@@ -127,7 +150,11 @@ def _filas_facturas_query(
                 f.vendedor.nombre_vendedor if f.vendedor else None,
                 f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
                 "Contado" if f.condicion_pago == "contado" else "Crédito",
-                "N/A" if f.condicion_pago != "contado" else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None)),
+                (
+                    "N/A"
+                    if f.condicion_pago != "contado"
+                    else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None))
+                ),
                 float(f.total_venta),
                 f.estado_visual,
             ]
@@ -150,7 +177,9 @@ def _tarea_exportar_facturas_excel(
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar potencialmente
     miles de facturas a un archivo (openpyxl) es lo bastante lento como para congelar
     la ventana si se hace en el hilo de GUI."""
-    filas = _filas_facturas_query(session, texto_busqueda, estado, condicion_pago, id_usuario)
+    filas = _filas_facturas_query(
+        session, texto_busqueda, estado, condicion_pago, id_usuario
+    )
     exportar_excel(ruta, COLS_VISIBLES, filas)
     return ruta, len(filas)
 
@@ -163,7 +192,9 @@ def _tarea_exportar_facturas_pdf(
     condicion_pago: str | None,
     id_usuario: int | None,
 ) -> tuple[str, int]:
-    filas = _filas_facturas_query(session, texto_busqueda, estado, condicion_pago, id_usuario)
+    filas = _filas_facturas_query(
+        session, texto_busqueda, estado, condicion_pago, id_usuario
+    )
     exportar_pdf(ruta, "Facturas de Venta", COLS_VISIBLES, filas)
     return ruta, len(filas)
 
@@ -240,7 +271,9 @@ class FacturacionPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Facturación de Ventas")
-        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -272,9 +305,12 @@ class FacturacionPanel(QWidget):
         # separadas (N° factura / cliente) que se combinaban con AND, obligando a saber
         # en cual escribir cada dato.
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText("Buscar por N° de factura, cliente o vendedor…")
+        self.buscar_input.setPlaceholderText(
+            "Buscar por N° de factura, cliente o vendedor…"
+        )
         self.buscar_input.addAction(
-            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
         )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
@@ -304,10 +340,14 @@ class FacturacionPanel(QWidget):
         self.btn_nueva_factura.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_nueva_factura.clicked.connect(self.nueva_factura)
 
-        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_facturas, on_pdf=self.exportar_pdf_facturas)
+        self.btn_exportar = BotonExportar(
+            on_excel=self.exportar_excel_facturas, on_pdf=self.exportar_pdf_facturas
+        )
 
         h.addWidget(self.buscar_input)
-        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        h.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
         h.addWidget(self.btn_nueva_factura)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
@@ -336,10 +376,18 @@ class FacturacionPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            7, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            8, QHeaderView.ResizeMode.Fixed
+        )
         self.tabla.setColumnWidth(8, 110)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
@@ -364,7 +412,9 @@ class FacturacionPanel(QWidget):
         self.btn_anterior.clicked.connect(self._pagina_anterior)
 
         self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setIcon(
+            qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK)
+        )
         self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.clicked.connect(self._pagina_siguiente)
@@ -426,10 +476,14 @@ class FacturacionPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para consultar facturas."
+            )
         except Exception:
             logger.exception("Fallo al cargar el listado de facturas")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de facturas.")
+            MessageBox.critical(
+                self, "Error de conexión", "No se pudo cargar el listado de facturas."
+            )
         finally:
             session.close()
 
@@ -439,8 +493,16 @@ class FacturacionPanel(QWidget):
         for fila, f in enumerate(facturas):
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(f.id_factura)))
             self.tabla.setItem(fila, 1, QTableWidgetItem(f.numero_factura))
-            self.tabla.setItem(fila, 2, QTableWidgetItem(f.cliente.nombre_razon_social if f.cliente else ""))
-            self.tabla.setItem(fila, 3, QTableWidgetItem(f.vendedor.nombre_vendedor if f.vendedor else ""))
+            self.tabla.setItem(
+                fila,
+                2,
+                QTableWidgetItem(f.cliente.nombre_razon_social if f.cliente else ""),
+            )
+            self.tabla.setItem(
+                fila,
+                3,
+                QTableWidgetItem(f.vendedor.nombre_vendedor if f.vendedor else ""),
+            )
 
             fecha = f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else ""
             self.tabla.setItem(fila, 4, QTableWidgetItem(fecha))
@@ -450,14 +512,20 @@ class FacturacionPanel(QWidget):
 
             # Método de pago
             metodo_pago = (
-                "N/A" if f.condicion_pago != "contado" else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None))
+                "N/A"
+                if f.condicion_pago != "contado"
+                else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None))
             )
             item_metodo = QTableWidgetItem(metodo_pago)
-            item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            item_metodo.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 6, item_metodo)
 
             item_total = QTableWidgetItem(f"${float(f.total_venta):,.2f}")
-            item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_total.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla.setItem(fila, 7, item_total)
 
             estado_visual = getattr(f, "estado_visual", "EMITIDA") or "EMITIDA"
@@ -477,11 +545,15 @@ class FacturacionPanel(QWidget):
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona una factura de la lista."
+            )
             return None
         item = self.tabla.item(filas[0].row(), 0)
         if item is None:
-            MessageBox.warning(self, "Error", "No se pudo obtener el ID de la factura seleccionada.")
+            MessageBox.warning(
+                self, "Error", "No se pudo obtener el ID de la factura seleccionada."
+            )
             return None
         return int(item.text())
 
@@ -490,16 +562,22 @@ class FacturacionPanel(QWidget):
     def _cajas_con_turno_abierto(self) -> list[Caja]:
         session = self.session_factory()
         try:
-            cajas = CajaService.listar_cajas(session, id_usuario=self.usuario.id_usuario)
+            cajas = CajaService.listar_cajas(
+                session, id_usuario=self.usuario.id_usuario
+            )
         except PermisoDenegadoError:
             cajas = []
         finally:
             session.close()
-        return [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        return [
+            c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None
+        ]
 
     def _actualizar_estado_caja(self, caja: Caja | None) -> None:
         if caja is not None:
-            self.lbl_caja_estado.setText(f"Caja abierta: {caja.nombre_caja or caja.id_caja}")
+            self.lbl_caja_estado.setText(
+                f"Caja abierta: {caja.nombre_caja or caja.id_caja}"
+            )
             self.lbl_caja_estado.setStyleSheet(
                 f"color: {COLOR_SUCCESS}; font-size: 13px; background-color: #DCFCE7;"
                 " border-radius: 10px; padding: 3px 10px;"
@@ -525,7 +603,10 @@ class FacturacionPanel(QWidget):
                 session = self.session_factory()
                 try:
                     dialogo = CajaAperturaDialog(session, parent=self)
-                    if dialogo.exec() == QDialog.DialogCode.Accepted and dialogo.caja_abierta is not None:
+                    if (
+                        dialogo.exec() == QDialog.DialogCode.Accepted
+                        and dialogo.caja_abierta is not None
+                    ):
                         abiertas = self._cajas_con_turno_abierto()
                 finally:
                     session.close()
@@ -537,7 +618,9 @@ class FacturacionPanel(QWidget):
     def nueva_factura(self) -> None:
         if not self._verificar_caja_abierta(ofrecer_apertura=True):
             MessageBox.information(
-                self, "Caja requerida", "Debe abrir el turno de una caja para poder emitir facturas."
+                self,
+                "Caja requerida",
+                "Debe abrir el turno de una caja para poder emitir facturas.",
             )
             return
 
@@ -559,9 +642,15 @@ class FacturacionPanel(QWidget):
                 # La impresion se dispara en segundo plano (no bloquea este mensaje ni
                 # el resto de la UI) -- ver _disparar_impresion_automatica.
                 self._disparar_impresion_automatica(factura.id_factura)
-                MessageBox.information(self, "Factura emitida", f"Factura {factura.numero_factura} emitida con éxito.")
+                MessageBox.information(
+                    self,
+                    "Factura emitida",
+                    f"Factura {factura.numero_factura} emitida con éxito.",
+                )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para emitir facturas."
+            )
         except Exception:
             logger.exception("Fallo al procesar la emision de la factura")
             # Solo mostrar error si la factura no fue emitida exitosamente
@@ -579,10 +668,16 @@ class FacturacionPanel(QWidget):
         riesgo que DashboardPanel/TasaTicker, ver app/ui/workers.py); la factura ya
         quedo guardada y se puede exportar/imprimir manualmente desde el detalle."""
         if getattr(self, "_worker", None) is not None and self._worker.isRunning():
-            logger.warning("Se omitio la impresion automatica de la factura %s: ya hay otra en curso", id_factura)
+            logger.warning(
+                "Se omitio la impresion automatica de la factura %s: ya hay otra en curso",
+                id_factura,
+            )
             return
         self._worker = QueryWorker(
-            self.session_factory, _tarea_imprimir_factura, id_factura=id_factura, id_usuario=self.usuario.id_usuario
+            self.session_factory,
+            _tarea_imprimir_factura,
+            id_factura=id_factura,
+            id_usuario=self.usuario.id_usuario,
         )
         self._worker.resultado.connect(self._on_impresion_automatica_ok)
         self._worker.error.connect(self._on_impresion_automatica_error)
@@ -590,7 +685,9 @@ class FacturacionPanel(QWidget):
 
     def _on_impresion_automatica_ok(self, nombre_impresora: str | None) -> None:
         if nombre_impresora:
-            logger.info("Factura enviada automaticamente a la impresora '%s'", nombre_impresora)
+            logger.info(
+                "Factura enviada automaticamente a la impresora '%s'", nombre_impresora
+            )
 
     def _on_impresion_automatica_error(self, mensaje: str) -> None:
         logger.warning("Fallo la impresion automatica de la factura: %s", mensaje)
@@ -611,16 +708,26 @@ class FacturacionPanel(QWidget):
 
         session = self.session_factory()
         try:
-            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.usuario.id_usuario)
-            dialogo = FacturaDetalleDialog(datos, session, self.usuario.id_usuario, parent=self)
+            datos = VentaService.obtener_factura(
+                session, id_factura, id_usuario=self.usuario.id_usuario
+            )
+            dialogo = FacturaDetalleDialog(
+                datos, session, self.usuario.id_usuario, parent=self
+            )
             dialogo.exec()
         except ValueError as exc:
             MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para ver el detalle de facturas.",
+            )
         except Exception:
             logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
-            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+            MessageBox.critical(
+                self, "Error", "No se pudo cargar el detalle de la factura."
+            )
         finally:
             session.close()
             self._abriendo_dialogo = False
@@ -630,13 +737,17 @@ class FacturacionPanel(QWidget):
         if id_factura is None:
             return
 
-        motivo, ok = QInputDialog.getText(self, "Anular factura", "Motivo de la anulación:")
+        motivo, ok = QInputDialog.getText(
+            self, "Anular factura", "Motivo de la anulación:"
+        )
         motivo = motivo.strip()
         if not ok or not motivo:
             return
 
         respuesta = MessageBox.question(
-            self, "Confirmar", "¿Anular esta factura? Se repondrá el stock vendido y no se puede deshacer."
+            self,
+            "Confirmar",
+            "¿Anular esta factura? Se repondrá el stock vendido y no se puede deshacer.",
         )
         if respuesta != QMessageBox.StandardButton.Yes:
             return
@@ -654,7 +765,9 @@ class FacturacionPanel(QWidget):
             MessageBox.warning(self, "No se pudo anular la factura", str(exc))
         except PermisoDenegadoError:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para anular facturas.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para anular facturas."
+            )
         except Exception:
             session.rollback()
             logger.exception("Fallo al anular la factura %s", id_factura)
@@ -677,7 +790,11 @@ class FacturacionPanel(QWidget):
         solo evita la navegacion, no salta ningun paso ni ninguna validacion."""
         session = self.session_factory()
         try:
-            nota = session.query(NotaCreditoCliente).filter(NotaCreditoCliente.id_factura_origen == id_factura).first()
+            nota = (
+                session.query(NotaCreditoCliente)
+                .filter(NotaCreditoCliente.id_factura_origen == id_factura)
+                .first()
+            )
             if nota is None or nota.saldo_disponible <= 0:
                 return
 
@@ -690,10 +807,15 @@ class FacturacionPanel(QWidget):
             if respuesta != QMessageBox.StandardButton.Yes:
                 return
 
-            dialogo = DevolverNotaCreditoDialog(session, self.usuario.id_usuario, [nota], parent=self)
+            dialogo = DevolverNotaCreditoDialog(
+                session, self.usuario.id_usuario, [nota], parent=self
+            )
             dialogo.exec()
         except Exception:
-            logger.exception("Fallo al ofrecer la devolucion de la nota de credito de la factura %s", id_factura)
+            logger.exception(
+                "Fallo al ofrecer la devolucion de la nota de credito de la factura %s",
+                id_factura,
+            )
         finally:
             session.close()
 
@@ -708,32 +830,48 @@ class FacturacionPanel(QWidget):
     def exportar_excel_facturas(self) -> None:
         # Mismo guard que reportes_panel.py: reasignar self._worker_export a un QThread
         # nuevo mientras el viejo sigue corriendo lo destruye a mitad de ejecucion.
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+        if (
+            getattr(self, "_worker_export", None) is not None
+            and self._worker_export.isRunning()
+        ):
             return
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal.
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar facturas", "facturas.xlsx", "Excel (*.xlsx)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar facturas", "facturas.xlsx", "Excel (*.xlsx)"
+        )
         if not ruta:
             return
 
         self.btn_exportar.setEnabled(False)
         self._worker_export = QueryWorker(
-            self.session_factory, _tarea_exportar_facturas_excel, ruta=ruta, **self._filtros_actuales_exportar()
+            self.session_factory,
+            _tarea_exportar_facturas_excel,
+            ruta=ruta,
+            **self._filtros_actuales_exportar(),
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)
         self._worker_export.error.connect(self._on_exportar_error)
         self._worker_export.start()
 
     def exportar_pdf_facturas(self) -> None:
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+        if (
+            getattr(self, "_worker_export", None) is not None
+            and self._worker_export.isRunning()
+        ):
             return
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar facturas", "facturas.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar facturas", "facturas.pdf", "PDF (*.pdf)"
+        )
         if not ruta:
             return
 
         self.btn_exportar.setEnabled(False)
         self._worker_export = QueryWorker(
-            self.session_factory, _tarea_exportar_facturas_pdf, ruta=ruta, **self._filtros_actuales_exportar()
+            self.session_factory,
+            _tarea_exportar_facturas_pdf,
+            ruta=ruta,
+            **self._filtros_actuales_exportar(),
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)
         self._worker_export.error.connect(self._on_exportar_error)
@@ -742,9 +880,15 @@ class FacturacionPanel(QWidget):
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
         self.btn_exportar.setEnabled(True)
         ruta, cantidad = resultado
-        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} facturas a:\n{ruta}")
+        MessageBox.information(
+            self,
+            "Exportación completa",
+            f"Se exportaron {cantidad} facturas a:\n{ruta}",
+        )
 
     def _on_exportar_error(self, mensaje: str) -> None:
         self.btn_exportar.setEnabled(True)
         logger.error("Fallo al exportar el listado de facturas: %s", mensaje)
-        MessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")
+        MessageBox.critical(
+            self, "Error", "No se pudo exportar el listado de facturas."
+        )

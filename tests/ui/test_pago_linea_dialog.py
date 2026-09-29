@@ -14,7 +14,12 @@ from PySide6.QtCore import Qt
 
 from app.ui.pago_linea_dialog import PagoLineaDialog
 
-_CAJA_ABIERTA = SimpleNamespace(id_caja=1, nombre_caja="Caja Principal", fecha_apertura="2026-01-01", fecha_cierre=None)
+_CAJA_ABIERTA = SimpleNamespace(
+    id_caja=1,
+    nombre_caja="Caja Principal",
+    fecha_apertura="2026-01-01",
+    fecha_cierre=None,
+)
 
 
 def _dar_foco(qtbot, campo):
@@ -32,7 +37,10 @@ def _escribir_y_perder_foco(qtbot, campo, texto):
 
 def _crear_dialogo(qtbot, monto_sugerido=None):
     with (
-        patch("app.ui.pago_linea_dialog.CajaService.listar_cajas", return_value=[_CAJA_ABIERTA]),
+        patch(
+            "app.ui.pago_linea_dialog.CajaService.listar_cajas",
+            return_value=[_CAJA_ABIERTA],
+        ),
         patch("app.ui.pago_linea_dialog.BancoService.listar_cuentas", return_value=[]),
     ):
         dialogo = PagoLineaDialog(None, id_usuario=1, monto_sugerido=monto_sugerido)

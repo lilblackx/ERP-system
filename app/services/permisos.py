@@ -13,7 +13,9 @@ class PermisoDenegadoError(PermissionError):
     distinto a un dato invalido, y los llamadores pueden distinguirlos."""
 
 
-def require_permiso(session: Session, id_usuario: int | None, recurso: str, accion: str) -> None:
+def require_permiso(
+    session: Session, id_usuario: int | None, recurso: str, accion: str
+) -> None:
     """Punto de entrada de autorizacion para el resto de los servicios.
 
     id_usuario=None (actor desconocido) se trata como NO autorizado -- no como "confiar
@@ -40,16 +42,24 @@ def require_permiso(session: Session, id_usuario: int | None, recurso: str, acci
 
     usuario = session.get(Usuario, id_usuario)
     if usuario is None:
-        raise PermisoDenegadoError(f"Accion no autorizada: usuario {id_usuario} no encontrado")
+        raise PermisoDenegadoError(
+            f"Accion no autorizada: usuario {id_usuario} no encontrado"
+        )
 
     if usuario.estado != "ACTIVO":
-        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta inactivo")
+        raise PermisoDenegadoError(
+            f"El usuario '{usuario.nombre_usuario}' esta inactivo"
+        )
 
     if usuario.bloqueado_desde is not None:
-        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
+        raise PermisoDenegadoError(
+            f"El usuario '{usuario.nombre_usuario}' esta bloqueado"
+        )
 
     if usuario.id_rol is None:
-        raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' no tiene rol asignado")
+        raise PermisoDenegadoError(
+            f"El usuario '{usuario.nombre_usuario}' no tiene rol asignado"
+        )
 
     rol = session.get(Rol, usuario.id_rol)
     if rol is not None and rol.nombre == "ADMIN":
@@ -58,7 +68,11 @@ def require_permiso(session: Session, id_usuario: int | None, recurso: str, acci
     tiene_permiso = (
         session.query(RolPermiso)
         .join(Permiso, Permiso.id_permiso == RolPermiso.id_permiso)
-        .filter(RolPermiso.id_rol == usuario.id_rol, Permiso.recurso == recurso, Permiso.accion == accion)
+        .filter(
+            RolPermiso.id_rol == usuario.id_rol,
+            Permiso.recurso == recurso,
+            Permiso.accion == accion,
+        )
         .first()
         is not None
     )
@@ -75,12 +89,16 @@ class RolService:
         return session.query(Rol).order_by(Rol.nombre).all()
 
     @staticmethod
-    def obtener_rol(session: Session, id_rol: int, id_usuario: int | None = None) -> Rol | None:
+    def obtener_rol(
+        session: Session, id_rol: int, id_usuario: int | None = None
+    ) -> Rol | None:
         require_permiso(session, id_usuario, "permisos", "ver")
         return session.get(Rol, id_rol)
 
     @staticmethod
-    def _validar_nombre_unico(session: Session, nombre: str, excluir_id: int | None = None) -> None:
+    def _validar_nombre_unico(
+        session: Session, nombre: str, excluir_id: int | None = None
+    ) -> None:
         query = session.query(Rol).filter(Rol.nombre == nombre)
         if excluir_id is not None:
             query = query.filter(Rol.id_rol != excluir_id)
@@ -88,7 +106,12 @@ class RolService:
             raise ValueError(f"Ya existe un rol con nombre '{nombre}'")
 
     @staticmethod
-    def crear_rol(session: Session, nombre: str, descripcion: str | None = None, id_usuario: int | None = None) -> Rol:
+    def crear_rol(
+        session: Session,
+        nombre: str,
+        descripcion: str | None = None,
+        id_usuario: int | None = None,
+    ) -> Rol:
         require_permiso(session, id_usuario, "permisos", "crear")
         if not nombre:
             raise ValueError("nombre es requerido")
@@ -109,7 +132,9 @@ class RolService:
         return rol
 
     @staticmethod
-    def actualizar_rol(session: Session, id_rol: int, id_usuario: int | None = None, **datos) -> Rol:
+    def actualizar_rol(
+        session: Session, id_rol: int, id_usuario: int | None = None, **datos
+    ) -> Rol:
         require_permiso(session, id_usuario, "permisos", "editar")
         rol = session.get(Rol, id_rol)
         if rol is None:
@@ -142,7 +167,9 @@ class RolService:
         return rol
 
     @staticmethod
-    def eliminar_rol(session: Session, id_rol: int, id_usuario: int | None = None) -> None:
+    def eliminar_rol(
+        session: Session, id_rol: int, id_usuario: int | None = None
+    ) -> None:
         require_permiso(session, id_usuario, "permisos", "eliminar")
         rol = session.get(Rol, id_rol)
         if rol is None:
@@ -153,24 +180,34 @@ class RolService:
             # require_permiso() usa para el bypass de superusuario.
             raise ValueError("El rol ADMIN no se puede eliminar")
 
-        usuarios_con_rol = session.query(Usuario).filter(Usuario.id_rol == id_rol).count()
+        usuarios_con_rol = (
+            session.query(Usuario).filter(Usuario.id_rol == id_rol).count()
+        )
         if usuarios_con_rol > 0:
             # FK_usuarios_id_rol es ON DELETE SET NULL: sin este check, borrar el rol
             # no fallaria mudo dejaria a esos usuarios sin rol (y sin permisos).
-            raise ValueError(f"No se puede eliminar: hay {usuarios_con_rol} usuario(s) con este rol")
+            raise ValueError(
+                f"No se puede eliminar: hay {usuarios_con_rol} usuario(s) con este rol"
+            )
 
         detalle = {"id_rol": rol.id_rol, "nombre": rol.nombre}
         session.delete(rol)
         session.commit()
 
         AuditoriaService.registrar_evento(
-            session, id_usuario=id_usuario, accion="ELIMINAR_ROL", modulo="PERMISOS", detalle=detalle
+            session,
+            id_usuario=id_usuario,
+            accion="ELIMINAR_ROL",
+            modulo="PERMISOS",
+            detalle=detalle,
         )
 
 
 class PermisoService:
     @staticmethod
-    def listar_permisos(session: Session, recurso: str | None = None, id_usuario: int | None = None) -> list[Permiso]:
+    def listar_permisos(
+        session: Session, recurso: str | None = None, id_usuario: int | None = None
+    ) -> list[Permiso]:
         require_permiso(session, id_usuario, "permisos", "ver")
         query = session.query(Permiso)
         if recurso:
@@ -178,16 +215,21 @@ class PermisoService:
         return query.order_by(Permiso.recurso, Permiso.accion).all()
 
     @staticmethod
-    def obtener_matriz_rol(session: Session, id_rol: int, id_usuario: int | None = None) -> list[dict]:
+    def obtener_matriz_rol(
+        session: Session, id_rol: int, id_usuario: int | None = None
+    ) -> list[dict]:
         """Catalogo completo de permisos con un flag 'asignado' por cada uno, listo para
-        pintar un checkbox-grid en la UI (una fila por permiso, marcado si el rol lo tiene)."""
+        pintar un checkbox-grid en la UI (una fila por permiso, marcado si el rol lo tiene).
+        """
         require_permiso(session, id_usuario, "permisos", "ver")
         if session.get(Rol, id_rol) is None:
             raise ValueError("Rol no encontrado")
 
         asignados = {
             id_permiso
-            for (id_permiso,) in session.query(RolPermiso.id_permiso).filter(RolPermiso.id_rol == id_rol).all()
+            for (id_permiso,) in session.query(RolPermiso.id_permiso)
+            .filter(RolPermiso.id_rol == id_rol)
+            .all()
         }
         permisos = PermisoService.listar_permisos(session, id_usuario=id_usuario)
         return [
@@ -202,7 +244,9 @@ class PermisoService:
         ]
 
     @staticmethod
-    def asignar_permiso(session: Session, id_rol: int, id_permiso: int, id_usuario: int | None = None) -> RolPermiso:
+    def asignar_permiso(
+        session: Session, id_rol: int, id_permiso: int, id_usuario: int | None = None
+    ) -> RolPermiso:
         require_permiso(session, id_usuario, "permisos", "editar")
         if session.get(Rol, id_rol) is None:
             raise ValueError("Rol no encontrado")
@@ -227,7 +271,9 @@ class PermisoService:
         return rol_permiso
 
     @staticmethod
-    def revocar_permiso(session: Session, id_rol: int, id_permiso: int, id_usuario: int | None = None) -> None:
+    def revocar_permiso(
+        session: Session, id_rol: int, id_permiso: int, id_usuario: int | None = None
+    ) -> None:
         require_permiso(session, id_usuario, "permisos", "editar")
         rol_permiso = session.get(RolPermiso, (id_rol, id_permiso))
         if rol_permiso is None:
@@ -246,7 +292,10 @@ class PermisoService:
 
     @staticmethod
     def establecer_permisos_rol(
-        session: Session, id_rol: int, ids_permisos: list[int], id_usuario: int | None = None
+        session: Session,
+        id_rol: int,
+        ids_permisos: list[int],
+        id_usuario: int | None = None,
     ) -> list[RolPermiso]:
         """Reemplaza de una vez el conjunto completo de permisos de un rol: pensado para
         guardar un checkbox-grid completo en una sola llamada en vez de un
@@ -269,16 +318,18 @@ class PermisoService:
 
         actuales = {
             id_permiso
-            for (id_permiso,) in session.query(RolPermiso.id_permiso).filter(RolPermiso.id_rol == id_rol).all()
+            for (id_permiso,) in session.query(RolPermiso.id_permiso)
+            .filter(RolPermiso.id_rol == id_rol)
+            .all()
         }
 
         a_quitar = actuales - ids_deseados
         a_agregar = ids_deseados - actuales
 
         if a_quitar:
-            session.query(RolPermiso).filter(RolPermiso.id_rol == id_rol, RolPermiso.id_permiso.in_(a_quitar)).delete(
-                synchronize_session=False
-            )
+            session.query(RolPermiso).filter(
+                RolPermiso.id_rol == id_rol, RolPermiso.id_permiso.in_(a_quitar)
+            ).delete(synchronize_session=False)
         for id_permiso in a_agregar:
             session.add(RolPermiso(id_rol=id_rol, id_permiso=id_permiso))
 
@@ -289,6 +340,10 @@ class PermisoService:
             id_usuario=id_usuario,
             accion="ACTUALIZAR_MATRIZ_PERMISOS",
             modulo="PERMISOS",
-            detalle={"id_rol": id_rol, "agregados": sorted(a_agregar), "quitados": sorted(a_quitar)},
+            detalle={
+                "id_rol": id_rol,
+                "agregados": sorted(a_agregar),
+                "quitados": sorted(a_quitar),
+            },
         )
         return session.query(RolPermiso).filter(RolPermiso.id_rol == id_rol).all()

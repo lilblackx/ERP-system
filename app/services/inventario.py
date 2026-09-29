@@ -26,15 +26,21 @@ def _escapar_like(texto: str) -> str:
 
 class ProductoService:
     @staticmethod
-    def _validar_codigo_unico(session: Session, cod_producto: str, excluir_id: int | None = None) -> None:
-        query = session.query(Inventario).filter(Inventario.cod_producto == cod_producto)
+    def _validar_codigo_unico(
+        session: Session, cod_producto: str, excluir_id: int | None = None
+    ) -> None:
+        query = session.query(Inventario).filter(
+            Inventario.cod_producto == cod_producto
+        )
         if excluir_id is not None:
             query = query.filter(Inventario.id_producto != excluir_id)
         if query.first() is not None:
             raise ValueError(f"El codigo de producto '{cod_producto}' ya esta en uso")
 
     @staticmethod
-    def obtener(session: Session, id_producto: int, id_usuario: int | None = None) -> Inventario | None:
+    def obtener(
+        session: Session, id_producto: int, id_usuario: int | None = None
+    ) -> Inventario | None:
         require_permiso(session, id_usuario, "inventario", "ver")
         return session.get(Inventario, id_producto)
 
@@ -59,12 +65,17 @@ class ProductoService:
             id_usuario=producto.creado_por,
             accion="CREAR_PRODUCTO",
             modulo="INVENTARIO",
-            detalle={"id_producto": producto.id_producto, "cod_producto": producto.cod_producto},
+            detalle={
+                "id_producto": producto.id_producto,
+                "cod_producto": producto.cod_producto,
+            },
         )
         return producto
 
     @staticmethod
-    def actualizar(session: Session, id_producto: int, id_usuario: int | None = None, **datos) -> Inventario:
+    def actualizar(
+        session: Session, id_producto: int, id_usuario: int | None = None, **datos
+    ) -> Inventario:
         require_permiso(session, id_usuario, "inventario", "editar")
         producto = session.get(Inventario, id_producto)
         if producto is None:
@@ -75,7 +86,9 @@ class ProductoService:
             raise ValueError("id_categoria es requerido")
         nuevo_codigo = datos.get("cod_producto")
         if nuevo_codigo and nuevo_codigo != producto.cod_producto:
-            ProductoService._validar_codigo_unico(session, nuevo_codigo, excluir_id=id_producto)
+            ProductoService._validar_codigo_unico(
+                session, nuevo_codigo, excluir_id=id_producto
+            )
 
         # Capturar todos los valores anteriores antes de la actualización
         campos_auditoria = [
@@ -111,18 +124,28 @@ class ProductoService:
                 if valor_anterior != valor_nuevo:
                     cambio = {
                         "campo": campo,
-                        "valor_anterior": str(valor_anterior) if valor_anterior is not None else "None",
-                        "valor_nuevo": str(valor_nuevo) if valor_nuevo is not None else "None",
+                        "valor_anterior": (
+                            str(valor_anterior)
+                            if valor_anterior is not None
+                            else "None"
+                        ),
+                        "valor_nuevo": (
+                            str(valor_nuevo) if valor_nuevo is not None else "None"
+                        ),
                     }
                     cambios_relevantes.append(cambio)
 
                     # Movimientos de stock
                     if campo in ["cantidad_unidad", "cantidad_caja"]:
                         try:
-                            valor_anterior_num = float(valor_anterior) if valor_anterior else 0
+                            valor_anterior_num = (
+                                float(valor_anterior) if valor_anterior else 0
+                            )
                             valor_nuevo_num = float(valor_nuevo) if valor_nuevo else 0
                             diferencia = valor_nuevo_num - valor_anterior_num
-                            tipo_movimiento = "AUMENTO" if diferencia > 0 else "DISMINUCIÓN"
+                            tipo_movimiento = (
+                                "AUMENTO" if diferencia > 0 else "DISMINUCIÓN"
+                            )
 
                             cambios_stock.append(
                                 {
@@ -141,15 +164,27 @@ class ProductoService:
                         cambios_descripcion.append(
                             {
                                 "campo": campo,
-                                "valor_anterior": str(valor_anterior) if valor_anterior else "Sin descripción",
-                                "valor_nuevo": str(valor_nuevo) if valor_nuevo else "Sin descripción",
+                                "valor_anterior": (
+                                    str(valor_anterior)
+                                    if valor_anterior
+                                    else "Sin descripción"
+                                ),
+                                "valor_nuevo": (
+                                    str(valor_nuevo)
+                                    if valor_nuevo
+                                    else "Sin descripción"
+                                ),
                             }
                         )
 
                     # Cambios de nombre
                     elif campo == "nombre_producto":
                         cambios_nombre.append(
-                            {"campo": campo, "valor_anterior": str(valor_anterior), "valor_nuevo": str(valor_nuevo)}
+                            {
+                                "campo": campo,
+                                "valor_anterior": str(valor_anterior),
+                                "valor_nuevo": str(valor_nuevo),
+                            }
                         )
 
         # Registrar eventos específicos solo si hay cambios
@@ -216,7 +251,9 @@ class ProductoService:
     # cambiar_estado(..., "INACTIVO") para retirarlo de circulacion preservando el
     # historial. Decision de producto 2026-08-22 (hallazgo de auditoria del mismo dia).
     @staticmethod
-    def eliminar(session: Session, id_producto: int, id_usuario: int | None = None) -> None:
+    def eliminar(
+        session: Session, id_producto: int, id_usuario: int | None = None
+    ) -> None:
         require_permiso(session, id_usuario, "inventario", "eliminar")
         raise ValueError(
             "No se puede eliminar un producto para proteger la integridad de los datos. "
@@ -225,7 +262,10 @@ class ProductoService:
 
     @staticmethod
     def cambiar_estado(
-        session: Session, id_producto: int, nuevo_estado: str, id_usuario: int | None = None
+        session: Session,
+        id_producto: int,
+        nuevo_estado: str,
+        id_usuario: int | None = None,
     ) -> Inventario:
         require_permiso(session, id_usuario, "inventario", "eliminar")
         if nuevo_estado not in ESTADOS_VALIDOS:
@@ -272,20 +312,37 @@ class ProductoService:
         if texto:
             like = f"%{_escapar_like(texto)}%"
             query = query.filter(
-                Inventario.cod_producto.ilike(like, escape="\\") | Inventario.nombre_producto.ilike(like, escape="\\")
+                Inventario.cod_producto.ilike(like, escape="\\")
+                | Inventario.nombre_producto.ilike(like, escape="\\")
             )
         if codigo:
-            query = query.filter(Inventario.cod_producto.ilike(f"%{_escapar_like(codigo)}%", escape="\\"))
+            query = query.filter(
+                Inventario.cod_producto.ilike(f"%{_escapar_like(codigo)}%", escape="\\")
+            )
         if nombre:
-            query = query.filter(Inventario.nombre_producto.ilike(f"%{_escapar_like(nombre)}%", escape="\\"))
+            query = query.filter(
+                Inventario.nombre_producto.ilike(
+                    f"%{_escapar_like(nombre)}%", escape="\\"
+                )
+            )
         if id_categoria:
             query = query.filter(Inventario.id_categoria == id_categoria)
         if solo_con_stock:
             query = query.filter(Inventario.cantidad_unidad > 0)
 
         total = query.count()
-        productos = query.order_by(Inventario.nombre_producto).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {"items": productos, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        productos = (
+            query.order_by(Inventario.nombre_producto)
+            .offset((pagina - 1) * por_pagina)
+            .limit(por_pagina)
+            .all()
+        )
+        return {
+            "items": productos,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
     def obtener_alertas_stock(
@@ -352,7 +409,9 @@ class PrecioService:
         if producto is None:
             raise ValueError("Producto no encontrado")
         if producto.estado_producto != "ACTIVO":
-            raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo, no se puede modificar su precio")
+            raise ValueError(
+                f"El producto '{producto.nombre_producto}' esta inactivo, no se puede modificar su precio"
+            )
 
         precio_1 = to_decimal(precio_1)
         precio_2 = to_decimal(precio_2) if precio_2 is not None else Decimal("0.00")
@@ -418,20 +477,44 @@ class PrecioService:
         cambios_precio = {}
         if es_nuevo:
             # Nuevo precio (creación) - registrar todos los valores
-            cambios_precio["precio_1"] = {"anterior": None, "nuevo": str(precio.precio_1)}
-            cambios_precio["precio_2"] = {"anterior": None, "nuevo": str(precio.precio_2)}
-            cambios_precio["precio_3"] = {"anterior": None, "nuevo": str(precio.precio_3)}
-            cambios_precio["margen"] = {"anterior": None, "nuevo": str(precio.porcentaje_ganancia)}
+            cambios_precio["precio_1"] = {
+                "anterior": None,
+                "nuevo": str(precio.precio_1),
+            }
+            cambios_precio["precio_2"] = {
+                "anterior": None,
+                "nuevo": str(precio.precio_2),
+            }
+            cambios_precio["precio_3"] = {
+                "anterior": None,
+                "nuevo": str(precio.precio_3),
+            }
+            cambios_precio["margen"] = {
+                "anterior": None,
+                "nuevo": str(precio.porcentaje_ganancia),
+            }
         else:
             # Actualización - registrar solo lo que cambió
             if precio_anterior is not None and precio_anterior != precio_1:
-                cambios_precio["precio_1"] = {"anterior": str(precio_anterior), "nuevo": str(precio.precio_1)}
+                cambios_precio["precio_1"] = {
+                    "anterior": str(precio_anterior),
+                    "nuevo": str(precio.precio_1),
+                }
             if precio_2_anterior is not None and precio_2_anterior != precio_2:
-                cambios_precio["precio_2"] = {"anterior": str(precio_2_anterior), "nuevo": str(precio.precio_2)}
+                cambios_precio["precio_2"] = {
+                    "anterior": str(precio_2_anterior),
+                    "nuevo": str(precio.precio_2),
+                }
             if precio_3_anterior is not None and precio_3_anterior != precio_3:
-                cambios_precio["precio_3"] = {"anterior": str(precio_3_anterior), "nuevo": str(precio.precio_3)}
+                cambios_precio["precio_3"] = {
+                    "anterior": str(precio_3_anterior),
+                    "nuevo": str(precio.precio_3),
+                }
             if margen_anterior != margen:
-                cambios_precio["margen"] = {"anterior": str(margen_anterior), "nuevo": str(precio.porcentaje_ganancia)}
+                cambios_precio["margen"] = {
+                    "anterior": str(margen_anterior),
+                    "nuevo": str(precio.porcentaje_ganancia),
+                }
 
         if cambios_precio:
             detalle = {
@@ -450,11 +533,17 @@ class PrecioService:
         return precio
 
     @staticmethod
-    def obtener_precio(session: Session, id_producto: int, id_usuario: int | None = None) -> ProductoPrecio | None:
+    def obtener_precio(
+        session: Session, id_producto: int, id_usuario: int | None = None
+    ) -> ProductoPrecio | None:
         """Reemplaza el listar_precios() de antes de C14 -- a lo sumo 1 fila por producto
         ahora (ver TIPO_PRECIO_UNICO)."""
         require_permiso(session, id_usuario, "inventario", "ver")
-        return session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).first()
+        return (
+            session.query(ProductoPrecio)
+            .filter(ProductoPrecio.id_producto == id_producto)
+            .first()
+        )
 
     @staticmethod
     def establecer_precio_simple(
@@ -463,16 +552,29 @@ class PrecioService:
         """Método simple para compatibilidad con código existente - solo actualiza precio_1."""
         precio = PrecioService.obtener_precio(session, id_producto, id_usuario)
         if precio:
-            precio_2_float = float(precio.precio_2) if precio.precio_2 is not None else None
-            precio_3_float = float(precio.precio_3) if precio.precio_3 is not None else None
+            precio_2_float = (
+                float(precio.precio_2) if precio.precio_2 is not None else None
+            )
+            precio_3_float = (
+                float(precio.precio_3) if precio.precio_3 is not None else None
+            )
             return PrecioService.establecer_precio(
-                session, id_producto, precio_venta, precio_2_float, precio_3_float, id_usuario
+                session,
+                id_producto,
+                precio_venta,
+                precio_2_float,
+                precio_3_float,
+                id_usuario,
             )
         else:
-            return PrecioService.establecer_precio(session, id_producto, precio_venta, None, None, id_usuario)
+            return PrecioService.establecer_precio(
+                session, id_producto, precio_venta, None, None, id_usuario
+            )
 
     @staticmethod
-    def eliminar_precio(session: Session, id_producto_precio: int, id_usuario: int | None = None) -> None:
+    def eliminar_precio(
+        session: Session, id_producto_precio: int, id_usuario: int | None = None
+    ) -> None:
         require_permiso(session, id_usuario, "inventario", "eliminar")
         precio = session.get(ProductoPrecio, id_producto_precio)
         if precio is None:
@@ -482,5 +584,9 @@ class PrecioService:
         session.commit()
 
         AuditoriaService.registrar_evento(
-            session, id_usuario=id_usuario, accion="ELIMINAR_PRECIO", modulo="INVENTARIO", detalle=detalle
+            session,
+            id_usuario=id_usuario,
+            accion="ELIMINAR_PRECIO",
+            modulo="INVENTARIO",
+            detalle=detalle,
         )

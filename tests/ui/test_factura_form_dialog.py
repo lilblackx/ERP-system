@@ -29,13 +29,31 @@ from tests.factories import (
 
 def _mock_servicios(monkeypatch, productos=None):
     monkeypatch.setattr(ffd, "list_clientes", lambda *a, **k: {"items": []})
-    monkeypatch.setattr(ffd.VendedorService, "listar", staticmethod(lambda *a, **k: {"items": []}))
-    monkeypatch.setattr(ffd.ProductoService, "buscar", staticmethod(lambda *a, **k: {"items": productos or []}))
-    monkeypatch.setattr(ffd.PrecioService, "obtener_precio", staticmethod(lambda *a, **k: None))
-    monkeypatch.setattr(ffd.TasaService, "obtener_tasa_actual", staticmethod(lambda *a, **k: None))
-    monkeypatch.setattr(ffd.EmpresaService, "obtener_iva_vigente", staticmethod(lambda *a: (False, Decimal("0"))))
-    monkeypatch.setattr(ffd.CajaService, "listar_cajas", staticmethod(lambda *a, **k: []))
-    monkeypatch.setattr(ffd.BancoService, "listar_cuentas", staticmethod(lambda *a, **k: []))
+    monkeypatch.setattr(
+        ffd.VendedorService, "listar", staticmethod(lambda *a, **k: {"items": []})
+    )
+    monkeypatch.setattr(
+        ffd.ProductoService,
+        "buscar",
+        staticmethod(lambda *a, **k: {"items": productos or []}),
+    )
+    monkeypatch.setattr(
+        ffd.PrecioService, "obtener_precio", staticmethod(lambda *a, **k: None)
+    )
+    monkeypatch.setattr(
+        ffd.TasaService, "obtener_tasa_actual", staticmethod(lambda *a, **k: None)
+    )
+    monkeypatch.setattr(
+        ffd.EmpresaService,
+        "obtener_iva_vigente",
+        staticmethod(lambda *a: (False, Decimal("0"))),
+    )
+    monkeypatch.setattr(
+        ffd.CajaService, "listar_cajas", staticmethod(lambda *a, **k: [])
+    )
+    monkeypatch.setattr(
+        ffd.BancoService, "listar_cuentas", staticmethod(lambda *a, **k: [])
+    )
 
 
 def _crear_dialogo(qtbot, monkeypatch, productos=None):
@@ -230,7 +248,11 @@ def _cliente_fake(id_cliente: int, nombre: str) -> SimpleNamespace:
 
 def test_cliente_combo_no_preselecciona_ningun_cliente(qtbot, monkeypatch):
     _mock_servicios(monkeypatch)
-    monkeypatch.setattr(ffd, "list_clientes", lambda *a, **k: {"items": [_cliente_fake(1, "Cliente Prueba")]})
+    monkeypatch.setattr(
+        ffd,
+        "list_clientes",
+        lambda *a, **k: {"items": [_cliente_fake(1, "Cliente Prueba")]},
+    )
     session = MagicMock()
     session.get.return_value = None
     dialogo = ffd.FacturaFormDialog(session, id_usuario=1)
@@ -241,7 +263,9 @@ def test_cliente_combo_no_preselecciona_ningun_cliente(qtbot, monkeypatch):
     assert dialogo.cliente_combo.currentData() is None
 
 
-def test_abrir_nuevo_cliente_lo_deja_seleccionado_sin_perder_la_factura(qtbot, monkeypatch):
+def test_abrir_nuevo_cliente_lo_deja_seleccionado_sin_perder_la_factura(
+    qtbot, monkeypatch
+):
     _mock_servicios(monkeypatch)
     monkeypatch.setattr(ffd, "list_clientes", lambda *a, **k: {"items": []})
     session = MagicMock()
@@ -268,7 +292,9 @@ def test_abrir_nuevo_cliente_lo_deja_seleccionado_sin_perder_la_factura(qtbot, m
     monkeypatch.setattr(
         ffd,
         "list_clientes",
-        lambda session, texto, **k: {"items": [nuevo]} if texto == nuevo.nombre_razon_social else {"items": []},
+        lambda session, texto, **k: (
+            {"items": [nuevo]} if texto == nuevo.nombre_razon_social else {"items": []}
+        ),
     )
 
     dialogo._abrir_nuevo_cliente()
@@ -285,14 +311,20 @@ def test_filtrar_clientes_abre_el_desplegable_con_resultados(qtbot, monkeypatch)
     coincidencias (sin seleccionar ninguna) cuando el debounce de tipeo repuebla el
     combo."""
     _mock_servicios(monkeypatch)
-    monkeypatch.setattr(ffd, "list_clientes", lambda *a, **k: {"items": [_cliente_fake(1, "Cliente Prueba")]})
+    monkeypatch.setattr(
+        ffd,
+        "list_clientes",
+        lambda *a, **k: {"items": [_cliente_fake(1, "Cliente Prueba")]},
+    )
     session = MagicMock()
     session.get.return_value = None
     dialogo = ffd.FacturaFormDialog(session, id_usuario=1)
     qtbot.addWidget(dialogo)
 
     llamadas = []
-    monkeypatch.setattr(type(dialogo.cliente_combo), "showPopup", lambda self: llamadas.append(True))
+    monkeypatch.setattr(
+        type(dialogo.cliente_combo), "showPopup", lambda self: llamadas.append(True)
+    )
 
     dialogo.cliente_buscar_input.setText("prueba")
     qtbot.wait(ffd.DEBOUNCE_BUSQUEDA_MS + 50)
@@ -307,7 +339,11 @@ def test_enter_con_un_solo_resultado_lo_selecciona_y_avanza_foco(qtbot, monkeypa
     a la busqueda de producto restaura el flujo rapido sin mouse documentado en
     _on_cliente_buscar_return_pressed."""
     _mock_servicios(monkeypatch)
-    monkeypatch.setattr(ffd, "list_clientes", lambda *a, **k: {"items": [_cliente_fake(7, "Unico Cliente")]})
+    monkeypatch.setattr(
+        ffd,
+        "list_clientes",
+        lambda *a, **k: {"items": [_cliente_fake(7, "Unico Cliente")]},
+    )
     session = MagicMock()
     session.get.return_value = None
     dialogo = ffd.FacturaFormDialog(session, id_usuario=1)
@@ -322,12 +358,16 @@ def test_enter_con_un_solo_resultado_lo_selecciona_y_avanza_foco(qtbot, monkeypa
     assert dialogo.cliente_combo.currentData() == 7
 
 
-def test_enter_con_varios_resultados_abre_desplegable_sin_seleccionar(qtbot, monkeypatch):
+def test_enter_con_varios_resultados_abre_desplegable_sin_seleccionar(
+    qtbot, monkeypatch
+):
     _mock_servicios(monkeypatch)
     monkeypatch.setattr(
         ffd,
         "list_clientes",
-        lambda *a, **k: {"items": [_cliente_fake(1, "Cliente Uno"), _cliente_fake(2, "Cliente Dos")]},
+        lambda *a, **k: {
+            "items": [_cliente_fake(1, "Cliente Uno"), _cliente_fake(2, "Cliente Dos")]
+        },
     )
     session = MagicMock()
     session.get.return_value = None
@@ -335,7 +375,9 @@ def test_enter_con_varios_resultados_abre_desplegable_sin_seleccionar(qtbot, mon
     qtbot.addWidget(dialogo)
 
     llamadas = []
-    monkeypatch.setattr(type(dialogo.cliente_combo), "showPopup", lambda self: llamadas.append(True))
+    monkeypatch.setattr(
+        type(dialogo.cliente_combo), "showPopup", lambda self: llamadas.append(True)
+    )
 
     dialogo.cliente_buscar_input.setText("Cliente")
     dialogo._on_cliente_buscar_return_pressed()
@@ -384,7 +426,13 @@ def test_tarea_emitir_factura_ok_devuelve_factura(db_session):
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="contado",
         pagos=pago_contado(db_session),
-        items=[{"id_producto": producto.id_producto, "cantidad": 5, "precio_unitario": "20.00"}],
+        items=[
+            {
+                "id_producto": producto.id_producto,
+                "cantidad": 5,
+                "precio_unitario": "20.00",
+            }
+        ],
         fecha_vencimiento=None,
         observaciones=None,
         monto_descuento=Decimal("0.00"),
@@ -416,7 +464,13 @@ def test_tarea_emitir_factura_value_error_devuelve_mensaje_sin_lanzar(db_session
         id_cliente=cliente.id_cliente,
         id_vendedor=vendedor.id_vendedor,
         condicion_pago="otra",
-        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        items=[
+            {
+                "id_producto": producto.id_producto,
+                "cantidad": 1,
+                "precio_unitario": "20.00",
+            }
+        ],
     )
 
     assert resultado == {
@@ -437,7 +491,13 @@ def test_tarea_emitir_factura_sin_permiso_devuelve_mensaje_sin_lanzar(db_session
         id_vendedor=None,
         condicion_pago="contado",
         pagos=pago_contado(db_session),
-        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+        items=[
+            {
+                "id_producto": producto.id_producto,
+                "cantidad": 1,
+                "precio_unitario": "20.00",
+            }
+        ],
     )
 
     assert resultado == {
@@ -486,7 +546,9 @@ def test_reject_bloqueado_mientras_emite_factura(qtbot, monkeypatch):
 def test_close_event_bloqueado_mientras_emite_factura(qtbot, monkeypatch):
     dialogo = _crear_dialogo(qtbot, monkeypatch)
     llamadas = []
-    monkeypatch.setattr(ffd.QDialog, "closeEvent", lambda self, event: llamadas.append(event))
+    monkeypatch.setattr(
+        ffd.QDialog, "closeEvent", lambda self, event: llamadas.append(event)
+    )
     evento = MagicMock()
 
     dialogo._emitiendo_factura = True
@@ -514,16 +576,24 @@ def test_on_resultado_emitir_factura_ok_acepta_dialogo(qtbot, monkeypatch):
     assert dialogo.btn_emitir.isEnabled() is True
 
 
-def test_on_resultado_emitir_factura_fallo_muestra_mensaje_y_no_cierra(qtbot, monkeypatch):
+def test_on_resultado_emitir_factura_fallo_muestra_mensaje_y_no_cierra(
+    qtbot, monkeypatch
+):
     dialogo = _crear_dialogo(qtbot, monkeypatch)
     dialogo._iniciar_emision_ui()
     avisos = []
-    monkeypatch.setattr(ffd.MessageBox, "warning", lambda *a, **k: avisos.append((a, k)))
+    monkeypatch.setattr(
+        ffd.MessageBox, "warning", lambda *a, **k: avisos.append((a, k))
+    )
     aceptado = []
     monkeypatch.setattr(dialogo, "accept", lambda: aceptado.append(True))
 
     dialogo._on_resultado_emitir_factura(
-        {"ok": False, "titulo": "Sin permiso", "mensaje": "No tienes permiso para emitir facturas."}
+        {
+            "ok": False,
+            "titulo": "Sin permiso",
+            "mensaje": "No tienes permiso para emitir facturas.",
+        }
     )
 
     assert dialogo.factura_emitida is None
@@ -531,14 +601,19 @@ def test_on_resultado_emitir_factura_fallo_muestra_mensaje_y_no_cierra(qtbot, mo
     assert dialogo._emitiendo_factura is False
     assert dialogo.btn_emitir.isEnabled() is True
     assert len(avisos) == 1
-    assert avisos[0][0][1:] == ("Sin permiso", "No tienes permiso para emitir facturas.")
+    assert avisos[0][0][1:] == (
+        "Sin permiso",
+        "No tienes permiso para emitir facturas.",
+    )
 
 
 def test_on_error_emitir_factura_muestra_mensaje_generico(qtbot, monkeypatch):
     dialogo = _crear_dialogo(qtbot, monkeypatch)
     dialogo._iniciar_emision_ui()
     avisos = []
-    monkeypatch.setattr(ffd.MessageBox, "critical", lambda *a, **k: avisos.append((a, k)))
+    monkeypatch.setattr(
+        ffd.MessageBox, "critical", lambda *a, **k: avisos.append((a, k))
+    )
 
     dialogo._on_error_emitir_factura("TCP Provider: conexion perdida")
 

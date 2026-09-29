@@ -21,7 +21,12 @@ from sqlalchemy.orm import Session
 from app.db.models import Usuario
 from app.services.auth import PASSWORD_MAX_BYTES
 from app.services.permisos import PermisoDenegadoError, RolService
-from app.services.usuarios import APELLIDO_MAX, EMAIL_MAX, NOMBRE_MAX, NOMBRE_USUARIO_MAX
+from app.services.usuarios import (
+    APELLIDO_MAX,
+    EMAIL_MAX,
+    NOMBRE_MAX,
+    NOMBRE_USUARIO_MAX,
+)
 from app.services.vendedores import VendedorService
 from app.ui.message_box import MessageBox
 from app.ui.styles import (
@@ -137,14 +142,22 @@ class UsuarioFormDialog(QDialog):
     ("dejar en blanco para no cambiarla") al editar, mismo contrato que
     UsuarioService.editar_usuario(nueva_clave=...)."""
 
-    def __init__(self, session: Session, id_usuario_actor: int | None, usuario: Usuario | None = None, parent=None):
+    def __init__(
+        self,
+        session: Session,
+        id_usuario_actor: int | None,
+        usuario: Usuario | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.session = session
         self.id_usuario_actor = id_usuario_actor
         self.usuario = usuario
         self.setWindowTitle("Editar Usuario" if usuario else "Nuevo Usuario")
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._roles = []
         self._vendedores = []
@@ -177,7 +190,9 @@ class UsuarioFormDialog(QDialog):
 
         icon_lbl = QLabel()
         fa_icon_name = "fa5s.user-edit" if self.usuario else "fa5s.user-plus"
-        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
+        icon_lbl.setPixmap(
+            qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22))
+        )
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -191,9 +206,13 @@ class UsuarioFormDialog(QDialog):
 
         titulo_text = "Editar Usuario" if self.usuario else "Nuevo Usuario"
         lbl_titulo = QLabel(titulo_text)
-        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
-        lbl_subtitulo = QLabel("Cuenta de acceso al sistema y el rol que determina sus permisos.")
+        lbl_subtitulo = QLabel(
+            "Cuenta de acceso al sistema y el rol que determina sus permisos."
+        )
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
 
         titles_layout.addWidget(lbl_titulo)
@@ -255,16 +274,24 @@ class UsuarioFormDialog(QDialog):
         grid.addWidget(lbl_email, 4, 0, 1, 2)
         grid.addWidget(self.email_input, 5, 0, 1, 2)
 
-        lbl_hint_email = QLabel("A este correo se envían los códigos de desbloqueo y recuperación de clave.")
+        lbl_hint_email = QLabel(
+            "A este correo se envían los códigos de desbloqueo y recuperación de clave."
+        )
         lbl_hint_email.setProperty("class", "Hint")
         lbl_hint_email.setWordWrap(True)
         grid.addWidget(lbl_hint_email, 6, 0, 1, 2)
 
-        lbl_clave = QLabel("Clave {ASTERISCO_REQUERIDO}" if not self.usuario else "Nueva clave (opcional)")
+        lbl_clave = QLabel(
+            "Clave {ASTERISCO_REQUERIDO}"
+            if not self.usuario
+            else "Nueva clave (opcional)"
+        )
         lbl_clave.setProperty("class", "FormLabel")
         self.clave_input = QLineEdit()
         self.clave_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.clave_input.setPlaceholderText("Dejar en blanco para no cambiarla" if self.usuario else "")
+        self.clave_input.setPlaceholderText(
+            "Dejar en blanco para no cambiarla" if self.usuario else ""
+        )
         self.clave_input.setFixedHeight(32)
         # Tope por caracteres, no bytes -- bcrypt exige <=72 BYTES utf-8 (validar_password_
         # policy() en auth.py es la version exacta por bytes); esto es solo un techo
@@ -273,7 +300,9 @@ class UsuarioFormDialog(QDialog):
         grid.addWidget(lbl_clave, 7, 0, 1, 2)
         grid.addWidget(self.clave_input, 8, 0, 1, 2)
 
-        lbl_hint_clave = QLabel("Mínimo 8 caracteres, con mayúscula, minúscula, número y carácter especial.")
+        lbl_hint_clave = QLabel(
+            "Mínimo 8 caracteres, con mayúscula, minúscula, número y carácter especial."
+        )
         lbl_hint_clave.setProperty("class", "Hint")
         lbl_hint_clave.setWordWrap(True)
         grid.addWidget(lbl_hint_clave, 9, 0, 1, 2)
@@ -282,12 +311,18 @@ class UsuarioFormDialog(QDialog):
         # nadie conoce hasta el primer intento de login fallido (auditoria de hallazgos
         # medios, 2026-09-01) -- mismo campo que ya pide solicitar_codigo_dialog.py al
         # restablecer, ausente aca hasta ahora.
-        texto_lbl_confirmar = "Confirmar clave" if self.usuario else "Confirmar clave {ASTERISCO_REQUERIDO}"
+        texto_lbl_confirmar = (
+            "Confirmar clave"
+            if self.usuario
+            else "Confirmar clave {ASTERISCO_REQUERIDO}"
+        )
         lbl_confirmar_clave = QLabel(texto_lbl_confirmar)
         lbl_confirmar_clave.setProperty("class", "FormLabel")
         self.confirmar_clave_input = QLineEdit()
         self.confirmar_clave_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.confirmar_clave_input.setPlaceholderText("Repita la clave" if self.usuario else "")
+        self.confirmar_clave_input.setPlaceholderText(
+            "Repita la clave" if self.usuario else ""
+        )
         self.confirmar_clave_input.setFixedHeight(32)
         self.confirmar_clave_input.setMaxLength(PASSWORD_MAX_BYTES)
         grid.addWidget(lbl_confirmar_clave, 10, 0, 1, 2)
@@ -349,7 +384,9 @@ class UsuarioFormDialog(QDialog):
 
     def _cargar_combos(self) -> None:
         try:
-            self._roles = RolService.listar_roles(self.session, id_usuario=self.id_usuario_actor)
+            self._roles = RolService.listar_roles(
+                self.session, id_usuario=self.id_usuario_actor
+            )
         except PermisoDenegadoError:
             self._roles = []
         for rol in self._roles:
@@ -360,7 +397,10 @@ class UsuarioFormDialog(QDialog):
             # recorte de pagina (VendedorService.listar() pagina desde 2026-08-27, ver
             # auditoria Vendedores/Clientes).
             self._vendedores = VendedorService.listar(
-                self.session, id_usuario=self.id_usuario_actor, estado_vendedor="ACTIVO", por_pagina=1000
+                self.session,
+                id_usuario=self.id_usuario_actor,
+                estado_vendedor="ACTIVO",
+                por_pagina=1000,
             )["items"]
         except PermisoDenegadoError:
             self._vendedores = []
@@ -395,7 +435,9 @@ class UsuarioFormDialog(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         if not self.nombre_usuario_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "El nombre de usuario es obligatorio.")
+            MessageBox.warning(
+                self, "Dato requerido", "El nombre de usuario es obligatorio."
+            )
             self.nombre_usuario_input.setFocus()
             return
         if not self.email_input.text().strip():
@@ -411,11 +453,20 @@ class UsuarioFormDialog(QDialog):
             MessageBox.warning(self, "Dato requerido", "Selecciona un rol.")
             return
         if not self.usuario and not self.clave_input.text():
-            MessageBox.warning(self, "Dato requerido", "La clave es obligatoria para un usuario nuevo.")
+            MessageBox.warning(
+                self, "Dato requerido", "La clave es obligatoria para un usuario nuevo."
+            )
             self.clave_input.setFocus()
             return
-        if self.clave_input.text() and self.clave_input.text() != self.confirmar_clave_input.text():
-            MessageBox.warning(self, "Las claves no coinciden", "La clave y su confirmación deben ser iguales.")
+        if (
+            self.clave_input.text()
+            and self.clave_input.text() != self.confirmar_clave_input.text()
+        ):
+            MessageBox.warning(
+                self,
+                "Las claves no coinciden",
+                "La clave y su confirmación deben ser iguales.",
+            )
             self.confirmar_clave_input.setFocus()
             return
         self.accept()
@@ -430,7 +481,9 @@ class UsuarioFormDialog(QDialog):
             "apellido": self.apellido_input.text().strip() or None,
             "email": self.email_input.text().strip() or None,
             "id_rol": rol_id,
-            "id_vendedor_usuario": self.vendedor_combo.currentData() if es_vendedor else None,
+            "id_vendedor_usuario": (
+                self.vendedor_combo.currentData() if es_vendedor else None
+            ),
         }
 
     def get_clave(self) -> str | None:

@@ -23,7 +23,11 @@ def _nota(saldo="500.00"):
 
 
 def _factura(saldo="300.00"):
-    return {"numero_factura": "F-001", "id_factura": 10, "saldo_pendiente": Decimal(saldo)}
+    return {
+        "numero_factura": "F-001",
+        "id_factura": 10,
+        "saldo_pendiente": Decimal(saldo),
+    }
 
 
 def _dar_foco(qtbot, campo):
@@ -39,7 +43,10 @@ def _dar_foco(qtbot, campo):
 
 def test_monto_input_arranca_en_el_minimo_entre_nota_y_factura(qtbot):
     dialogo = AplicarNotaCreditoDialog(
-        MagicMock(), id_usuario=None, notas_disponibles=[_nota("500.00")], facturas_pendientes=[_factura("300.00")]
+        MagicMock(),
+        id_usuario=None,
+        notas_disponibles=[_nota("500.00")],
+        facturas_pendientes=[_factura("300.00")],
     )
     qtbot.addWidget(dialogo)
     assert dialogo.monto_input.text() == "300,00"
@@ -49,7 +56,10 @@ def test_monto_input_arranca_en_el_minimo_entre_nota_y_factura(qtbot):
 
 def test_monto_input_formatea_al_perder_foco(qtbot):
     dialogo = AplicarNotaCreditoDialog(
-        MagicMock(), id_usuario=None, notas_disponibles=[_nota("500.00")], facturas_pendientes=[_factura("300.00")]
+        MagicMock(),
+        id_usuario=None,
+        notas_disponibles=[_nota("500.00")],
+        facturas_pendientes=[_factura("300.00")],
     )
     qtbot.addWidget(dialogo)
     _dar_foco(qtbot, dialogo.monto_input)
@@ -61,7 +71,10 @@ def test_monto_input_formatea_al_perder_foco(qtbot):
 
 def test_confirmar_pasa_el_monto_tecleado_al_servicio(qtbot, monkeypatch):
     dialogo = AplicarNotaCreditoDialog(
-        MagicMock(), id_usuario=None, notas_disponibles=[_nota("500.00")], facturas_pendientes=[_factura("300.00")]
+        MagicMock(),
+        id_usuario=None,
+        notas_disponibles=[_nota("500.00")],
+        facturas_pendientes=[_factura("300.00")],
     )
     qtbot.addWidget(dialogo)
 
@@ -75,7 +88,9 @@ def test_confirmar_pasa_el_monto_tecleado_al_servicio(qtbot, monkeypatch):
         llamada.update(kwargs)
         return MagicMock()
 
-    monkeypatch.setattr(NotaCreditoService, "aplicar_nota_credito_cliente", staticmethod(fake_aplicar))
+    monkeypatch.setattr(
+        NotaCreditoService, "aplicar_nota_credito_cliente", staticmethod(fake_aplicar)
+    )
 
     dialogo._confirmar()
 

@@ -43,7 +43,9 @@ def probar_smtp():
     except smtplib.SMTPAuthenticationError as e:
         print(f"[ERROR] Error de autenticacion: {e}")
         print("  Verifica que SMTP_USER y SMTP_PASSWORD sean correctos")
-        print("  Para Gmail, usa una App Password de 16 caracteres (no la clave normal)")
+        print(
+            "  Para Gmail, usa una App Password de 16 caracteres (no la clave normal)"
+        )
     except smtplib.SMTPException as e:
         print(f"[ERROR] Error SMTP: {e}")
     except Exception as e:

@@ -170,7 +170,11 @@ def _formatear_valor_detalle(valor) -> str:
     if isinstance(valor, list):
         return ", ".join(str(v) for v in valor) if valor else "Ninguno"
     if isinstance(valor, dict):
-        partes = [f"{_etiqueta_campo(k)}: {_formatear_valor_detalle(v)}" for k, v in valor.items() if v is not None]
+        partes = [
+            f"{_etiqueta_campo(k)}: {_formatear_valor_detalle(v)}"
+            for k, v in valor.items()
+            if v is not None
+        ]
         return "; ".join(partes) if partes else "—"
     return str(valor)
 
@@ -368,7 +372,9 @@ class AuditoriaPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel("Auditoría")
-        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
 
         self.lbl_total = QLabel("Cargando…")
         self.lbl_total.setStyleSheet(
@@ -392,9 +398,12 @@ class AuditoriaPanel(QWidget):
         h.setSpacing(10)
 
         self.buscar_input = QLineEdit()
-        self.buscar_input.setPlaceholderText("Buscar por acción, módulo, usuario o detalle…")
+        self.buscar_input.setPlaceholderText(
+            "Buscar por acción, módulo, usuario o detalle…"
+        )
         self.buscar_input.addAction(
-            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT), QLineEdit.ActionPosition.LeadingPosition
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
         )
         self.buscar_input.setObjectName("SearchInput")
         self.buscar_input.setStyleSheet(SEARCH_QSS)
@@ -403,7 +412,9 @@ class AuditoriaPanel(QWidget):
         self.buscar_input.textChanged.connect(self._busqueda_dinamica)
 
         lbl_desde = QLabel("Desde:")
-        lbl_desde.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        lbl_desde.setStyleSheet(
+            f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;"
+        )
         self.fecha_desde_input = QDateEdit()
         self.fecha_desde_input.setCalendarPopup(True)
         self.fecha_desde_input.setDisplayFormat("dd/MM/yyyy")
@@ -413,7 +424,9 @@ class AuditoriaPanel(QWidget):
         _estilizar_fecha(self.fecha_desde_input)
 
         lbl_hasta = QLabel("Hasta:")
-        lbl_hasta.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        lbl_hasta.setStyleSheet(
+            f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;"
+        )
         self.fecha_hasta_input = QDateEdit()
         self.fecha_hasta_input.setCalendarPopup(True)
         self.fecha_hasta_input.setDisplayFormat("dd/MM/yyyy")
@@ -441,14 +454,18 @@ class AuditoriaPanel(QWidget):
         self.usuario_combo = QComboBox()
         self.usuario_combo.addItem("Todos los usuarios")
 
-        self.btn_filtrar = BotonFiltros([("Módulo", self.modulo_combo), ("Usuario", self.usuario_combo)])
+        self.btn_filtrar = BotonFiltros(
+            [("Módulo", self.modulo_combo), ("Usuario", self.usuario_combo)]
+        )
 
         h.addWidget(self.buscar_input)
         h.addWidget(lbl_desde)
         h.addWidget(self.fecha_desde_input)
         h.addWidget(lbl_hasta)
         h.addWidget(self.fecha_hasta_input)
-        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        h.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
         h.addWidget(self.btn_filtrar)
         return w
 
@@ -472,9 +489,15 @@ class AuditoriaPanel(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.tabla.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(44)
@@ -496,7 +519,9 @@ class AuditoriaPanel(QWidget):
         self.btn_anterior.clicked.connect(self._pagina_anterior)
 
         self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setIcon(
+            qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK)
+        )
         self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_siguiente.setFixedWidth(40)
         self.btn_siguiente.clicked.connect(self._pagina_siguiente)
@@ -556,10 +581,14 @@ class AuditoriaPanel(QWidget):
     def _cargar_usuarios_filtro(self) -> None:
         session = self.session_factory()
         try:
-            usuarios = UsuarioService.listar_usuarios(session, id_usuario=self.usuario.id_usuario)
+            usuarios = UsuarioService.listar_usuarios(
+                session, id_usuario=self.usuario.id_usuario
+            )
             for u in usuarios:
                 nombre = u["nombre_completo"] or u["nombre_usuario"]
-                self.usuario_combo.addItem(f"{nombre} ({u['nombre_usuario']})", u["id_usuario"])
+                self.usuario_combo.addItem(
+                    f"{nombre} ({u['nombre_usuario']})", u["id_usuario"]
+                )
         except PermisoDenegadoError:
             # El actor puede tener 'auditoria:ver' sin 'usuarios:ver' (roles distintos a
             # ADMIN, que si bypassa ambos) -- el filtro por usuario simplemente queda
@@ -573,8 +602,12 @@ class AuditoriaPanel(QWidget):
     def cargar_eventos(self) -> None:
         session = self.session_factory()
         try:
-            fecha_desde = datetime.combine(self.fecha_desde_input.date().toPython(), time.min)
-            fecha_hasta = datetime.combine(self.fecha_hasta_input.date().toPython(), time.max)
+            fecha_desde = datetime.combine(
+                self.fecha_desde_input.date().toPython(), time.min
+            )
+            fecha_hasta = datetime.combine(
+                self.fecha_hasta_input.date().toPython(), time.max
+            )
             resultado = AuditoriaService.consultar_auditoria(
                 session,
                 fecha_desde=fecha_desde,
@@ -588,10 +621,14 @@ class AuditoriaPanel(QWidget):
             )
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la auditoría.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para consultar la auditoría."
+            )
         except Exception:
             logger.exception("Fallo al cargar la bitácora de auditoría")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la bitácora de auditoría.")
+            MessageBox.critical(
+                self, "Error de conexión", "No se pudo cargar la bitácora de auditoría."
+            )
         finally:
             session.close()
 
@@ -600,13 +637,21 @@ class AuditoriaPanel(QWidget):
         self._eventos_pagina = eventos
         self.tabla.setRowCount(len(eventos))
         for fila, evento in enumerate(eventos):
-            fecha_texto = evento.fecha_evento.strftime("%d/%m/%Y %H:%M:%S") if evento.fecha_evento else "—"
-            usuario_texto = evento.usuario.nombre_usuario if evento.usuario else "Sistema"
+            fecha_texto = (
+                evento.fecha_evento.strftime("%d/%m/%Y %H:%M:%S")
+                if evento.fecha_evento
+                else "—"
+            )
+            usuario_texto = (
+                evento.usuario.nombre_usuario if evento.usuario else "Sistema"
+            )
             self.tabla.setItem(fila, 0, QTableWidgetItem(fecha_texto))
             self.tabla.setItem(fila, 1, QTableWidgetItem(usuario_texto))
             self.tabla.setItem(fila, 2, QTableWidgetItem(evento.modulo))
             self.tabla.setItem(fila, 3, QTableWidgetItem(evento.accion))
-            self.tabla.setItem(fila, 4, QTableWidgetItem(_resumir_detalle(evento.detalle)))
+            self.tabla.setItem(
+                fila, 4, QTableWidgetItem(_resumir_detalle(evento.detalle))
+            )
 
         total = resultado["total"]
         self.total_paginas = max(1, -(-total // POR_PAGINA))
@@ -620,14 +665,22 @@ class AuditoriaPanel(QWidget):
     def ver_detalle_seleccionado(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(self, "Selección requerida", "Selecciona un evento de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona un evento de la lista."
+            )
             return
         evento = self._eventos_pagina[filas[0].row()]
-        fecha_texto = evento.fecha_evento.strftime("%d/%m/%Y %H:%M:%S") if evento.fecha_evento else "—"
+        fecha_texto = (
+            evento.fecha_evento.strftime("%d/%m/%Y %H:%M:%S")
+            if evento.fecha_evento
+            else "—"
+        )
         usuario_texto = evento.usuario.nombre_usuario if evento.usuario else "Sistema"
         lineas_detalle = _formatear_detalle(evento.detalle)
         detalle_texto = (
-            "\n".join(f"• {linea}" for linea in lineas_detalle) if lineas_detalle else "Sin información adicional."
+            "\n".join(f"• {linea}" for linea in lineas_detalle)
+            if lineas_detalle
+            else "Sin información adicional."
         )
         cuerpo = (
             f"Fecha: {fecha_texto}\n"

@@ -44,7 +44,9 @@ def crear_categoria(session: Session, **overrides) -> Categoria:
     return categoria
 
 
-def crear_producto(session: Session, cantidad_unidad: Decimal | int = 100, **overrides) -> Inventario:
+def crear_producto(
+    session: Session, cantidad_unidad: Decimal | int = 100, **overrides
+) -> Inventario:
     categoria = overrides.pop("categoria", None) or crear_categoria(session)
     datos = {
         "id_categoria": categoria.id_categoria,
@@ -62,10 +64,14 @@ def crear_producto(session: Session, cantidad_unidad: Decimal | int = 100, **ove
 
 
 def crear_precio_producto(
-    session: Session, producto: Inventario, precio_venta: Decimal | int | str, **overrides
+    session: Session,
+    producto: Inventario,
+    precio_venta: Decimal | int | str,
+    **overrides,
 ) -> ProductoPrecio:
     """Inserta directo (sin pasar por PrecioService) el precio de lista de un producto --
-    tipo_precio fijo en 'UNICO' desde C14 (migrations/0011_consolidar_producto_precios.sql)."""
+    tipo_precio fijo en 'UNICO' desde C14 (migrations/0011_consolidar_producto_precios.sql).
+    """
     datos = {
         "id_producto": producto.id_producto,
         "tipo_precio": "UNICO",
@@ -81,7 +87,12 @@ def crear_precio_producto(
     return precio
 
 
-def crear_cliente(session: Session, limite_credito: Decimal | int = 0, dias_credito: int = 30, **overrides) -> Cliente:
+def crear_cliente(
+    session: Session,
+    limite_credito: Decimal | int = 0,
+    dias_credito: int = 30,
+    **overrides,
+) -> Cliente:
     """dias_credito default 30 (no 0, el default real de la columna): la mayoria de los
     tests de credito de la suite no les interesa este valor en si, solo necesitan un
     cliente que SI califique para credito (VentaService.emitir_factura exige
@@ -103,7 +114,9 @@ def crear_cliente(session: Session, limite_credito: Decimal | int = 0, dias_cred
     return cliente
 
 
-def crear_proveedor(session: Session, limite_credito: Decimal | int = 0, **overrides) -> Proveedor:
+def crear_proveedor(
+    session: Session, limite_credito: Decimal | int = 0, **overrides
+) -> Proveedor:
     datos = {
         "codigo_proveedor": _siguiente("PROV-"),
         "identificacion_proveedor": _siguiente("J-"),
@@ -119,7 +132,10 @@ def crear_proveedor(session: Session, limite_credito: Decimal | int = 0, **overr
 
 
 def crear_banco(session: Session, **overrides) -> Banco:
-    datos = {"nombre_banco": "Banco de prueba", "identificacion_banco": _siguiente("BCO-")}
+    datos = {
+        "nombre_banco": "Banco de prueba",
+        "identificacion_banco": _siguiente("BCO-"),
+    }
     datos.update(overrides)
     banco = Banco(**datos)
     session.add(banco)
@@ -128,7 +144,9 @@ def crear_banco(session: Session, **overrides) -> Banco:
     return banco
 
 
-def crear_cuenta_bancaria(session: Session, saldo_total_banco: Decimal | int = 0, **overrides) -> CuentaBancaria:
+def crear_cuenta_bancaria(
+    session: Session, saldo_total_banco: Decimal | int = 0, **overrides
+) -> CuentaBancaria:
     banco = overrides.pop("banco", None) or crear_banco(session)
     datos = {
         "id_banco": banco.id_banco,

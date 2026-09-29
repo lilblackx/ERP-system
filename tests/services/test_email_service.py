@@ -71,7 +71,9 @@ def test_enviar_correo_configurado_envia_via_smtp(monkeypatch):
     monkeypatch.setattr(config, "SMTP_USE_TLS", True)
     monkeypatch.setattr(email_service.smtplib, "SMTP", _FakeSMTP)
 
-    email_service.enviar_correo("destino@example.com", "Asunto de prueba", "Cuerpo de prueba")
+    email_service.enviar_correo(
+        "destino@example.com", "Asunto de prueba", "Cuerpo de prueba"
+    )
 
     assert len(_FakeSMTP.instancias) == 1
     servidor = _FakeSMTP.instancias[0]
@@ -123,12 +125,21 @@ def test_enviar_correo_con_cuerpo_html_arma_multipart_alternative(monkeypatch):
     monkeypatch.setattr(email_service.smtplib, "SMTP", _FakeSMTP)
 
     email_service.enviar_correo(
-        "destino@example.com", "Asunto", "Cuerpo plano", cuerpo_html="<html><body>Cuerpo HTML</body></html>"
+        "destino@example.com",
+        "Asunto",
+        "Cuerpo plano",
+        cuerpo_html="<html><body>Cuerpo HTML</body></html>",
     )
 
     mensaje = _FakeSMTP.instancias[0].mensaje_enviado
     assert mensaje.is_multipart()
     assert mensaje.get_content_type() == "multipart/alternative"
     partes = list(mensaje.iter_parts())
-    assert any(p.get_content_type() == "text/plain" and "Cuerpo plano" in p.get_content() for p in partes)
-    assert any(p.get_content_type() == "text/html" and "Cuerpo HTML" in p.get_content() for p in partes)
+    assert any(
+        p.get_content_type() == "text/plain" and "Cuerpo plano" in p.get_content()
+        for p in partes
+    )
+    assert any(
+        p.get_content_type() == "text/html" and "Cuerpo HTML" in p.get_content()
+        for p in partes
+    )

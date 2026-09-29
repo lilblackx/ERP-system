@@ -269,7 +269,9 @@ class OrdenCompraFormDialog(QDialog):
         self.resize(820, 620)
         self.setMinimumSize(760, 560)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
 
         self._build_ui()
         self._cargar_proveedores()
@@ -282,7 +284,9 @@ class OrdenCompraFormDialog(QDialog):
 
         header = QHBoxLayout()
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon("fa5s.file-signature", color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
+        icon_lbl.setPixmap(
+            qta.icon("fa5s.file-signature", color=COLOR_PRIMARY).pixmap(QSize(22, 22))
+        )
         icon_lbl.setStyleSheet(
             f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
             f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
@@ -292,8 +296,12 @@ class OrdenCompraFormDialog(QDialog):
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
         lbl_titulo = QLabel("Nueva Orden de Compra")
-        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
-        lbl_subtitulo = QLabel("Seleccione el proveedor y agregue los productos solicitados.")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
+        lbl_subtitulo = QLabel(
+            "Seleccione el proveedor y agregue los productos solicitados."
+        )
         lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
         titulos.addWidget(lbl_titulo)
         titulos.addWidget(lbl_subtitulo)
@@ -382,11 +390,15 @@ class OrdenCompraFormDialog(QDialog):
         self.producto_combo.currentIndexChanged.connect(self._on_producto_cambiado)
         # cantidad_solicitada/precio_unitario de compra_oc_detalle son Numeric(18,4) --
         # decimals=4, no el default de 2 (ver app/db/models.py CompraOCDetalle).
-        self.cantidad_input = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, min_value=Decimal("0.01"))
+        self.cantidad_input = NumericLineEdit(
+            NumericFieldType.QUANTITY, decimals=4, min_value=Decimal("0.01")
+        )
         self.cantidad_input.set_value(1)
         self.cantidad_input.setFixedHeight(32)
         self.cantidad_input.setFixedWidth(100)
-        self.precio_input = NumericLineEdit(NumericFieldType.AMOUNT, decimals=4, min_value=Decimal("0.01"), prefix="$ ")
+        self.precio_input = NumericLineEdit(
+            NumericFieldType.AMOUNT, decimals=4, min_value=Decimal("0.01"), prefix="$ "
+        )
         self.precio_input.setFixedHeight(32)
         self.precio_input.setFixedWidth(130)
         btn_agregar = QPushButton(" Agregar")
@@ -403,8 +415,12 @@ class OrdenCompraFormDialog(QDialog):
         fila_agregar.addWidget(btn_agregar)
         layout.addLayout(fila_agregar)
 
-        self.tabla_items = _tabla_lecturas(["Producto", "Cantidad", "Precio Unit.", "Subtotal", ""])
-        self.tabla_items.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.tabla_items = _tabla_lecturas(
+            ["Producto", "Cantidad", "Precio Unit.", "Subtotal", ""]
+        )
+        self.tabla_items.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.Fixed
+        )
         self.tabla_items.setColumnWidth(4, 70)
         alinear_encabezados(
             self.tabla_items,
@@ -421,7 +437,9 @@ class OrdenCompraFormDialog(QDialog):
         fila_total = QHBoxLayout()
         fila_total.addStretch()
         self.lbl_total = QLabel("Total: $0.00")
-        self.lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        self.lbl_total.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         fila_total.addWidget(self.lbl_total)
         layout.addLayout(fila_total)
         return card
@@ -477,7 +495,9 @@ class OrdenCompraFormDialog(QDialog):
             self._timer_prov = QTimer(self)
             self._timer_prov.setSingleShot(True)
             self._timer_prov.timeout.connect(
-                lambda: self._buscar_proveedores(self.proveedor_buscar_input.text().strip() or None)
+                lambda: self._buscar_proveedores(
+                    self.proveedor_buscar_input.text().strip() or None
+                )
             )
         self._timer_prov.start(DEBOUNCE_BUSQUEDA_MS)
 
@@ -486,15 +506,22 @@ class OrdenCompraFormDialog(QDialog):
 
     def _buscar_productos(self, texto: str | None) -> None:
         resultado = ProductoService.buscar(
-            self.session, texto=texto, por_pagina=LIMITE_CATALOGO, id_usuario=self.id_usuario
+            self.session,
+            texto=texto,
+            por_pagina=LIMITE_CATALOGO,
+            id_usuario=self.id_usuario,
         )
-        self._productos = [p for p in resultado["items"] if (p.estado_producto or "ACTIVO") == "ACTIVO"]
+        self._productos = [
+            p for p in resultado["items"] if (p.estado_producto or "ACTIVO") == "ACTIVO"
+        ]
         self.producto_combo.blockSignals(True)
         self.producto_combo.clear()
         if not self._productos:
             self.producto_combo.addItem("Sin resultados")
         for p in self._productos:
-            self.producto_combo.addItem(f"{p.cod_producto} - {p.nombre_producto}", p.id_producto)
+            self.producto_combo.addItem(
+                f"{p.cod_producto} - {p.nombre_producto}", p.id_producto
+            )
         self.producto_combo.blockSignals(False)
         self.producto_combo.setEnabled(bool(self._productos))
         self._on_producto_cambiado()
@@ -504,7 +531,9 @@ class OrdenCompraFormDialog(QDialog):
             self._timer_prod = QTimer(self)
             self._timer_prod.setSingleShot(True)
             self._timer_prod.timeout.connect(
-                lambda: self._buscar_productos(self.producto_buscar_input.text().strip() or None)
+                lambda: self._buscar_productos(
+                    self.producto_buscar_input.text().strip() or None
+                )
             )
         self._timer_prod.start(DEBOUNCE_BUSQUEDA_MS)
 
@@ -514,15 +543,21 @@ class OrdenCompraFormDialog(QDialog):
         if id_producto is None:
             self.precio_input.set_value(0)
             return
-        producto = next((p for p in self._productos if p.id_producto == id_producto), None)
-        self.precio_input.set_value(producto.costo_producto if producto and producto.costo_producto else 0)
+        producto = next(
+            (p for p in self._productos if p.id_producto == id_producto), None
+        )
+        self.precio_input.set_value(
+            producto.costo_producto if producto and producto.costo_producto else 0
+        )
 
     # ── Carrito ────────────────────────────────────────────────────────────
 
     def _agregar_item(self) -> None:
         id_producto = self.producto_combo.currentData()
         if id_producto is None:
-            MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
+            MessageBox.warning(
+                self, "Producto requerido", "Seleccione un producto para agregar."
+            )
             return
         # Se conservan como Decimal (no float) de aca en adelante: cantidad_solicitada/
         # precio_unitario de compra_oc_detalle son Numeric(18,4) y CompraOCService.crear_oc
@@ -530,15 +565,24 @@ class OrdenCompraFormDialog(QDialog):
         cantidad = self.cantidad_input.get_value()
         precio = self.precio_input.get_value()
         if cantidad <= 0 or precio <= 0:
-            MessageBox.warning(self, "Datos inválidos", "Cantidad y precio deben ser mayores a cero.")
+            MessageBox.warning(
+                self, "Datos inválidos", "Cantidad y precio deben ser mayores a cero."
+            )
             return
         nombre = self.producto_combo.currentText()
-        existente = next((it for it in self.items if it["id_producto"] == id_producto), None)
+        existente = next(
+            (it for it in self.items if it["id_producto"] == id_producto), None
+        )
         if existente is not None:
             existente["cantidad"] += cantidad
         else:
             self.items.append(
-                {"id_producto": id_producto, "nombre_producto": nombre, "cantidad": cantidad, "precio": precio}
+                {
+                    "id_producto": id_producto,
+                    "nombre_producto": nombre,
+                    "cantidad": cantidad,
+                    "precio": precio,
+                }
             )
         self._refrescar_tabla()
         self.producto_buscar_input.clear()
@@ -557,16 +601,22 @@ class OrdenCompraFormDialog(QDialog):
 
             cantidad = _as_decimal(item["cantidad"])
             item_cantidad = QTableWidgetItem(f"{float(cantidad):,.2f}")
-            item_cantidad.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_cantidad.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla_items.setItem(fila, 1, item_cantidad)
 
             precio = _as_decimal(item["precio"])
             item_precio = QTableWidgetItem(f"${float(precio):,.2f}")
-            item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_precio.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla_items.setItem(fila, 2, item_precio)
 
             item_subtotal = QTableWidgetItem(f"${float(subtotal):,.2f}")
-            item_subtotal.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_subtotal.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.tabla_items.setItem(fila, 3, item_subtotal)
             btn_quitar = QPushButton()
             btn_quitar.setObjectName("BtnQuitarIcono")
@@ -620,7 +670,9 @@ class OrdenCompraFormDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear órdenes de compra.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para crear órdenes de compra."
+            )
             return
         except Exception:
             self.session.rollback()
@@ -645,7 +697,9 @@ class EnmiendaOCDialog(QDialog):
     autorizarla en el momento -- mismo criterio que _ofrecer_devolver_nota_credito en
     facturacion_panel.py (seguimiento inmediato en vez de obligar a navegar aparte)."""
 
-    def __init__(self, session: Session, id_usuario: int | None, oc: CompraOC, parent=None):
+    def __init__(
+        self, session: Session, id_usuario: int | None, oc: CompraOC, parent=None
+    ):
         super().__init__(parent)
         self.session = session
         self.id_usuario = id_usuario
@@ -655,7 +709,9 @@ class EnmiendaOCDialog(QDialog):
         self.setWindowTitle(f"Enmendar ODC {oc.numero_oc}")
         self.setFixedSize(480, 480)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
         self._build_ui()
 
     def _make_card_info_tipos(self) -> QWidget:
@@ -686,7 +742,9 @@ class EnmiendaOCDialog(QDialog):
             fila = QHBoxLayout()
             fila.setSpacing(6)
             lbl_etiqueta = QLabel(etiqueta)
-            lbl_etiqueta.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {color};")
+            lbl_etiqueta.setStyleSheet(
+                f"font-size: 12px; font-weight: bold; color: {color};"
+            )
             lbl_etiqueta.setFixedWidth(55)
             lbl_texto = QLabel(texto)
             lbl_texto.setWordWrap(True)
@@ -700,7 +758,9 @@ class EnmiendaOCDialog(QDialog):
             "una sola linea a la cual aplicar el cambio de precio de forma automatica."
         )
         lbl_razon.setWordWrap(True)
-        lbl_razon.setStyleSheet(f"font-size: 11px; font-style: italic; color: {COLOR_TEXT_MUTED}; padding-top: 2px;")
+        lbl_razon.setStyleSheet(
+            f"font-size: 11px; font-style: italic; color: {COLOR_TEXT_MUTED}; padding-top: 2px;"
+        )
         layout.addWidget(lbl_razon)
 
         return card
@@ -711,7 +771,9 @@ class EnmiendaOCDialog(QDialog):
         root.setSpacing(12)
 
         lbl_titulo = QLabel(f"Enmendar ODC {self.oc.numero_oc}")
-        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         root.addWidget(lbl_titulo)
 
         root.addWidget(self._make_card_info_tipos())
@@ -737,7 +799,9 @@ class EnmiendaOCDialog(QDialog):
         self.lbl_cantidad = QLabel("Nueva Cantidad Solicitada (total de la ODC)")
         self.lbl_cantidad.setProperty("class", "FormLabel")
         # CompraOC.cantidad_solicitada es Numeric(18,4) -- decimals=4 (ver app/db/models.py).
-        self.cantidad_nueva_input = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, min_value=Decimal("0.01"))
+        self.cantidad_nueva_input = NumericLineEdit(
+            NumericFieldType.QUANTITY, decimals=4, min_value=Decimal("0.01")
+        )
         self.cantidad_nueva_input.set_value(self.oc.cantidad_solicitada)
         self.cantidad_nueva_input.setFixedHeight(32)
         layout.addWidget(self.lbl_cantidad)
@@ -767,7 +831,9 @@ class EnmiendaOCDialog(QDialog):
         lbl_motivo = QLabel(f"Motivo {ASTERISCO_REQUERIDO}")
         lbl_motivo.setProperty("class", "FormLabel")
         self.motivo_input = QLineEdit()
-        self.motivo_input.setPlaceholderText("Ej: acuerdo con el proveedor por retraso de despacho")
+        self.motivo_input.setPlaceholderText(
+            "Ej: acuerdo con el proveedor por retraso de despacho"
+        )
         self.motivo_input.setFixedHeight(32)
         layout.addWidget(lbl_motivo)
         layout.addWidget(self.motivo_input)
@@ -804,7 +870,9 @@ class EnmiendaOCDialog(QDialog):
     def _validar_y_aceptar(self) -> None:
         motivo = self.motivo_input.text().strip()
         if not motivo:
-            MessageBox.warning(self, "Motivo requerido", "Indique el motivo de la enmienda.")
+            MessageBox.warning(
+                self, "Motivo requerido", "Indique el motivo de la enmienda."
+            )
             return
         tipo = self.tipo_combo.currentData()
 
@@ -816,9 +884,19 @@ class EnmiendaOCDialog(QDialog):
                 id_oc=self.oc.id_oc,
                 tipo_cambio=tipo,
                 motivo=motivo,
-                cantidad_nueva=self.cantidad_nueva_input.get_value() if tipo == "CANTIDAD" else None,
-                precio_nuevo=self.precio_nuevo_input.get_value() if tipo == "PRECIO" else None,
-                fecha_entrega_nueva=self.fecha_nueva_input.date().toPython() if tipo == "FECHA" else None,
+                cantidad_nueva=(
+                    self.cantidad_nueva_input.get_value()
+                    if tipo == "CANTIDAD"
+                    else None
+                ),
+                precio_nuevo=(
+                    self.precio_nuevo_input.get_value() if tipo == "PRECIO" else None
+                ),
+                fecha_entrega_nueva=(
+                    self.fecha_nueva_input.date().toPython()
+                    if tipo == "FECHA"
+                    else None
+                ),
                 id_usuario=self.id_usuario,
             )
         except ValueError as exc:
@@ -827,7 +905,9 @@ class EnmiendaOCDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para proponer enmiendas.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para proponer enmiendas."
+            )
             return
         except Exception:
             self.session.rollback()
@@ -845,7 +925,9 @@ class EnmiendaOCDialog(QDialog):
             self.session, self.id_usuario, "compras", "autorizar_enmienda_oc"
         )
         if puede_autorizar:
-            respuesta = MessageBox.question(self, "Enmienda propuesta", "¿Autorizar esta enmienda ahora mismo?")
+            respuesta = MessageBox.question(
+                self, "Enmienda propuesta", "¿Autorizar esta enmienda ahora mismo?"
+            )
             if respuesta == QMessageBox.StandardButton.Yes:
                 try:
                     CompraOCService.autorizar_enmienda(
@@ -857,7 +939,11 @@ class EnmiendaOCDialog(QDialog):
                 except Exception:
                     self.session.rollback()
                     logger.exception("Fallo al autorizar enmienda recien creada")
-                    MessageBox.warning(self, "No se pudo autorizar", "La enmienda quedó pendiente, autorícela luego.")
+                    MessageBox.warning(
+                        self,
+                        "No se pudo autorizar",
+                        "La enmienda quedó pendiente, autorícela luego.",
+                    )
 
         self.accept()
 
@@ -873,19 +959,25 @@ class NotaRecepcionFormDialog(QDialog):
     cantidad a recibir (tope: lo pendiente) y cantidad rechazada (tope: lo que se va a
     recibir en esta misma linea)."""
 
-    def __init__(self, session: Session, id_usuario: int | None, oc: CompraOC, parent=None):
+    def __init__(
+        self, session: Session, id_usuario: int | None, oc: CompraOC, parent=None
+    ):
         super().__init__(parent)
         self.session = session
         self.id_usuario = id_usuario
         self.oc = oc
         self.nota_creada = None
         datos = CompraOCService.obtener_oc(session, oc.id_oc, id_usuario=id_usuario)
-        self.detalles_pendientes = [d for d in datos["detalles"] if d.cantidad_pendiente > 0]
+        self.detalles_pendientes = [
+            d for d in datos["detalles"] if d.cantidad_pendiente > 0
+        ]
 
         self.setWindowTitle(f"Nueva Recepción — ODC {oc.numero_oc}")
         self.resize(720, 560)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -894,13 +986,19 @@ class NotaRecepcionFormDialog(QDialog):
         root.setSpacing(12)
 
         lbl_titulo = QLabel(f"Nueva Recepción — ODC {self.oc.numero_oc}")
-        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         root.addWidget(lbl_titulo)
 
         if not self.detalles_pendientes:
-            root.addWidget(QLabel("Esta orden de compra no tiene lineas pendientes de recibir."))
+            root.addWidget(
+                QLabel("Esta orden de compra no tiene lineas pendientes de recibir.")
+            )
         else:
-            self.tabla = _tabla_lecturas(["Producto", "Pendiente", "Cant. a Recibir", "Cant. Rechazada"])
+            self.tabla = _tabla_lecturas(
+                ["Producto", "Pendiente", "Cant. a Recibir", "Cant. Rechazada"]
+            )
             alinear_encabezados(
                 self.tabla,
                 {
@@ -918,22 +1016,30 @@ class NotaRecepcionFormDialog(QDialog):
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
                 cantidad_pendiente = _as_decimal(detalle.cantidad_pendiente)
                 item_pendiente = QTableWidgetItem(f"{float(cantidad_pendiente):,.2f}")
-                item_pendiente.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_pendiente.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla.setItem(fila, 1, item_pendiente)
 
                 # cantidad_recibida/cantidad_rechazada de nota_recepcion_detalle son
                 # Numeric(18,4) -- decimals=4 (ver app/db/models.py).
                 spin_recibida = NumericLineEdit(
-                    NumericFieldType.QUANTITY, decimals=4, max_value=detalle.cantidad_pendiente
+                    NumericFieldType.QUANTITY,
+                    decimals=4,
+                    max_value=detalle.cantidad_pendiente,
                 )
                 spin_recibida.set_value(0)
-                spin_recibida.valueChanged.connect(lambda v, i=fila: self._on_recibida_cambiada(i, v))
+                spin_recibida.valueChanged.connect(
+                    lambda v, i=fila: self._on_recibida_cambiada(i, v)
+                )
                 self.tabla.setCellWidget(fila, 2, spin_recibida)
                 self._spins_recibida.append(spin_recibida)
 
                 # Tope inicial 0 (nada recibido todavia) -- _on_recibida_cambiada lo va
                 # subiendo a medida que se carga la cantidad a recibir de la misma fila.
-                spin_rechazada = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, max_value=Decimal("0"))
+                spin_rechazada = NumericLineEdit(
+                    NumericFieldType.QUANTITY, decimals=4, max_value=Decimal("0")
+                )
                 self.tabla.setCellWidget(fila, 3, spin_rechazada)
                 self._spins_rechazada.append(spin_rechazada)
 
@@ -988,7 +1094,11 @@ class NotaRecepcionFormDialog(QDialog):
                 }
             )
         if not items:
-            MessageBox.warning(self, "Nada que recibir", "Ingrese al menos una cantidad recibida mayor a cero.")
+            MessageBox.warning(
+                self,
+                "Nada que recibir",
+                "Ingrese al menos una cantidad recibida mayor a cero.",
+            )
             return
 
         self.btn_registrar.setEnabled(False)
@@ -1007,7 +1117,9 @@ class NotaRecepcionFormDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para recibir mercancía.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para recibir mercancía."
+            )
             return
         except Exception:
             self.session.rollback()
@@ -1037,7 +1149,9 @@ class NotaDevolucionFormDialog(QDialog):
         self.id_usuario = id_usuario
         self.nr = nr
         self.devolucion_creada = None
-        datos = NotaRecepcionService.obtener_nota_recepcion(session, nr.id_nr, id_usuario=id_usuario)
+        datos = NotaRecepcionService.obtener_nota_recepcion(
+            session, nr.id_nr, id_usuario=id_usuario
+        )
         self.lineas_disponibles = []
         for detalle in datos["detalles"]:
             ya_devuelto = (
@@ -1057,7 +1171,9 @@ class NotaDevolucionFormDialog(QDialog):
         self.setWindowTitle(f"Nota de Devolución — NR {nr.numero_nr}")
         self.resize(680, 520)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -1066,13 +1182,21 @@ class NotaDevolucionFormDialog(QDialog):
         root.setSpacing(12)
 
         lbl_titulo = QLabel(f"Nota de Devolución — NR {self.nr.numero_nr}")
-        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         root.addWidget(lbl_titulo)
 
         if not self.lineas_disponibles:
-            root.addWidget(QLabel("Esta recepción no tiene unidades rechazadas pendientes de devolver."))
+            root.addWidget(
+                QLabel(
+                    "Esta recepción no tiene unidades rechazadas pendientes de devolver."
+                )
+            )
         else:
-            self.tabla = _tabla_lecturas(["Producto", "Disponible para Devolver", "Cantidad a Devolver"])
+            self.tabla = _tabla_lecturas(
+                ["Producto", "Disponible para Devolver", "Cantidad a Devolver"]
+            )
             alinear_encabezados(
                 self.tabla,
                 {
@@ -1088,14 +1212,20 @@ class NotaDevolucionFormDialog(QDialog):
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
                 disponible_decimal = _as_decimal(disponible)
                 item_disponible = QTableWidgetItem(f"{float(disponible_decimal):,.2f}")
-                item_disponible.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_disponible.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla.setItem(fila, 1, item_disponible)
                 precio_unitario = _as_decimal(detalle.precio_unitario)
                 item_costo = QTableWidgetItem(f"${float(precio_unitario):,.2f}")
-                item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_costo.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla.setItem(fila, 2, item_costo)
                 # NotaDevolucionDetalle.cantidad_devuelta es Numeric(18,4).
-                spin = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, max_value=disponible)
+                spin = NumericLineEdit(
+                    NumericFieldType.QUANTITY, decimals=4, max_value=disponible
+                )
                 self.tabla.setCellWidget(fila, 2, spin)
                 self._spins.append(spin)
             root.addWidget(self.tabla, stretch=1)
@@ -1132,9 +1262,15 @@ class NotaDevolucionFormDialog(QDialog):
             cantidad = self._spins[fila].get_value()
             if cantidad <= 0:
                 continue
-            items.append({"id_producto": detalle.id_producto, "cantidad_devuelta": cantidad})
+            items.append(
+                {"id_producto": detalle.id_producto, "cantidad_devuelta": cantidad}
+            )
         if not items:
-            MessageBox.warning(self, "Nada que devolver", "Ingrese al menos una cantidad a devolver mayor a cero.")
+            MessageBox.warning(
+                self,
+                "Nada que devolver",
+                "Ingrese al menos una cantidad a devolver mayor a cero.",
+            )
             return
 
         self.btn_registrar.setEnabled(False)
@@ -1153,7 +1289,9 @@ class NotaDevolucionFormDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar devoluciones.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para registrar devoluciones."
+            )
             return
         except Exception:
             self.session.rollback()
@@ -1178,7 +1316,9 @@ class CompraDesdeOCFormDialog(QDialog):
     PagoLineaDialog igual que CompraService.registrar_compra (compras.py): un unico pago
     que debe cubrir el total exacto, sin vuelto."""
 
-    def __init__(self, session: Session, id_usuario: int | None, oc: CompraOC, parent=None):
+    def __init__(
+        self, session: Session, id_usuario: int | None, oc: CompraOC, parent=None
+    ):
         super().__init__(parent)
         self.session = session
         self.id_usuario = id_usuario
@@ -1195,7 +1335,9 @@ class CompraDesdeOCFormDialog(QDialog):
         self.setWindowTitle(f"Nueva Factura — ODC {oc.numero_oc}")
         self.resize(720, 640)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -1204,13 +1346,21 @@ class CompraDesdeOCFormDialog(QDialog):
         root.setSpacing(12)
 
         lbl_titulo = QLabel(f"Nueva Factura — ODC {self.oc.numero_oc}")
-        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         root.addWidget(lbl_titulo)
 
         if not self.lineas_disponibles:
-            root.addWidget(QLabel("Esta orden de compra no tiene mercancía recibida pendiente de facturar."))
+            root.addWidget(
+                QLabel(
+                    "Esta orden de compra no tiene mercancía recibida pendiente de facturar."
+                )
+            )
         else:
-            self.tabla = _tabla_lecturas(["Producto", "Disponible", "Costo Unit.", "Cant. a Facturar"])
+            self.tabla = _tabla_lecturas(
+                ["Producto", "Disponible", "Costo Unit.", "Cant. a Facturar"]
+            )
             alinear_encabezados(
                 self.tabla,
                 {
@@ -1227,11 +1377,15 @@ class CompraDesdeOCFormDialog(QDialog):
                 self.tabla.setItem(fila, 0, QTableWidgetItem(nombre))
                 disponible_decimal = _as_decimal(disponible)
                 item_disponible = QTableWidgetItem(f"{float(disponible_decimal):,.2f}")
-                item_disponible.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_disponible.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla.setItem(fila, 1, item_disponible)
                 precio_unitario = _as_decimal(detalle.precio_unitario)
                 item_costo = QTableWidgetItem(f"${float(precio_unitario):,.2f}")
-                item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_costo.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla.setItem(fila, 2, item_costo)
                 # Termina en CompraDetalle.cantidad_producto, que es Numeric(12,2) (no el
                 # Numeric(18,4) de compra_oc_detalle) -- decimals=2, el default de QUANTITY.
@@ -1258,7 +1412,9 @@ class CompraDesdeOCFormDialog(QDialog):
         col_total = QVBoxLayout()
         col_total.addWidget(QLabel(""))
         self.lbl_total = QLabel("Total: $0.00")
-        self.lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        self.lbl_total.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         col_total.addWidget(self.lbl_total)
         fila_condicion.addLayout(col_total, stretch=1)
         root.addLayout(fila_condicion)
@@ -1269,7 +1425,9 @@ class CompraDesdeOCFormDialog(QDialog):
         pago_layout = QHBoxLayout(self.card_pago)
         pago_layout.setContentsMargins(16, 12, 16, 12)
         self.lbl_pago_resumen = QLabel("Sin pago configurado.")
-        self.lbl_pago_resumen.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_MUTED};")
+        self.lbl_pago_resumen.setStyleSheet(
+            f"font-size: 13px; color: {COLOR_TEXT_MUTED};"
+        )
         pago_layout.addWidget(self.lbl_pago_resumen, stretch=1)
         btn_configurar_pago = QPushButton("Configurar pago")
         btn_configurar_pago.setObjectName("BtnAgregar")
@@ -1303,7 +1461,9 @@ class CompraDesdeOCFormDialog(QDialog):
             return 0.0
         return sum(
             float(spin.get_value()) * float(detalle.precio_unitario)
-            for spin, (detalle, _) in zip(self._spins, self.lineas_disponibles, strict=True)
+            for spin, (detalle, _) in zip(
+                self._spins, self.lineas_disponibles, strict=True
+            )
         )
 
     def _refrescar_total(self) -> None:
@@ -1318,26 +1478,49 @@ class CompraDesdeOCFormDialog(QDialog):
             self.lbl_pago_resumen.setText("Sin pago configurado.")
 
     def _configurar_pago(self) -> None:
-        dialogo = PagoLineaDialog(self.session, self.id_usuario, monto_sugerido=self._total_actual(), parent=self)
+        dialogo = PagoLineaDialog(
+            self.session,
+            self.id_usuario,
+            monto_sugerido=self._total_actual(),
+            parent=self,
+        )
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.pago = dialogo.get_data()
-            metodo = _ETIQUETAS_METODO.get(self.pago["metodo_pago"], self.pago["metodo_pago"])
+            metodo = _ETIQUETAS_METODO.get(
+                self.pago["metodo_pago"], self.pago["metodo_pago"]
+            )
             monto_origen = _as_decimal(self.pago["monto_moneda_origen"])
-            self.lbl_pago_resumen.setText(f"{metodo} · {self.pago['moneda']} {float(monto_origen):,.2f}")
-            self.lbl_pago_resumen.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
+            self.lbl_pago_resumen.setText(
+                f"{metodo} · {self.pago['moneda']} {float(monto_origen):,.2f}"
+            )
+            self.lbl_pago_resumen.setStyleSheet(
+                f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};"
+            )
 
     def _validar_y_aceptar(self) -> None:
         items = []
-        for spin, (detalle, _disponible) in zip(self._spins, self.lineas_disponibles, strict=True):
+        for spin, (detalle, _disponible) in zip(
+            self._spins, self.lineas_disponibles, strict=True
+        ):
             if spin.get_value() <= 0:
                 continue
-            items.append({"id_oc_detalle": detalle.id_detalle, "cantidad": spin.get_value()})
+            items.append(
+                {"id_oc_detalle": detalle.id_detalle, "cantidad": spin.get_value()}
+            )
         if not items:
-            MessageBox.warning(self, "Nada que facturar", "Ingrese al menos una cantidad a facturar mayor a cero.")
+            MessageBox.warning(
+                self,
+                "Nada que facturar",
+                "Ingrese al menos una cantidad a facturar mayor a cero.",
+            )
             return
         es_contado = self.condicion_combo.currentData() == "contado"
         if es_contado and self.pago is None:
-            MessageBox.warning(self, "Pago requerido", "Configure el pago de contado antes de registrar la factura.")
+            MessageBox.warning(
+                self,
+                "Pago requerido",
+                "Configure el pago de contado antes de registrar la factura.",
+            )
             return
 
         self.btn_registrar.setEnabled(False)
@@ -1357,7 +1540,9 @@ class CompraDesdeOCFormDialog(QDialog):
             return
         except PermisoDenegadoError:
             self.session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar compras.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para registrar compras."
+            )
             return
         except Exception:
             self.session.rollback()
@@ -1407,7 +1592,9 @@ class ComprasView(QWidget):
         root.setSpacing(16)
 
         lbl = QLabel("Compras")
-        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl.setStyleSheet(
+            f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};"
+        )
         root.addWidget(lbl)
 
         self.tabs = QTabWidget()
@@ -1420,7 +1607,9 @@ class ComprasView(QWidget):
 
         self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
 
-    def _make_toolbar(self, estados: list[tuple], on_filtro_cambiado, on_nuevo=None, texto_nuevo="") -> tuple:
+    def _make_toolbar(
+        self, estados: list[tuple], on_filtro_cambiado, on_nuevo=None, texto_nuevo=""
+    ) -> tuple:
         w = QWidget()
         w.setStyleSheet(
             f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
@@ -1443,7 +1632,9 @@ class ComprasView(QWidget):
         btn_filtrar = BotonFiltros([("Estado", estado_combo)])
 
         h.addWidget(buscar_input)
-        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        h.addSpacerItem(
+            QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
         btn_nuevo = None
         if on_nuevo is not None:
             btn_nuevo = QPushButton(texto_nuevo)
@@ -1465,14 +1656,18 @@ class ComprasView(QWidget):
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        tabla.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
         tabla.setColumnHidden(0, True)
         tabla.verticalHeader().setDefaultSectionSize(42)
         return tabla
 
-    def _make_footer(self, on_anterior, on_siguiente, botones_secundarios: list[QPushButton]) -> tuple:
+    def _make_footer(
+        self, on_anterior, on_siguiente, botones_secundarios: list[QPushButton]
+    ) -> tuple:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         h = QHBoxLayout(w)
@@ -1500,7 +1695,9 @@ class ComprasView(QWidget):
     def _fila_seleccionada_id(self, tabla: QTableWidget) -> int | None:
         filas = tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(self, "Selección requerida", "Selecciona una fila de la lista.")
+            MessageBox.information(
+                self, "Selección requerida", "Selecciona una fila de la lista."
+            )
             return None
         item = tabla.item(filas[0].row(), 0)
         return int(item.text()) if item is not None else None
@@ -1529,13 +1726,24 @@ class ComprasView(QWidget):
         )
 
         # Agregar botón de exportación a la toolbar
-        btn_exportar_oc = BotonExportar(on_excel=self._exportar_ocs_excel, on_pdf=self._exportar_ocs_pdf)
+        btn_exportar_oc = BotonExportar(
+            on_excel=self._exportar_ocs_excel, on_pdf=self._exportar_ocs_pdf
+        )
         toolbar.layout().addWidget(btn_exportar_oc)
 
         layout.addWidget(toolbar)
 
         self.tabla_oc = self._make_tabla(
-            ["ID", "N° ODC", "Proveedor", "Fecha", "Total Productos", "Cant. Rec.", "Total", "Estado"]
+            [
+                "ID",
+                "N° ODC",
+                "Proveedor",
+                "Fecha",
+                "Total Productos",
+                "Cant. Rec.",
+                "Total",
+                "Estado",
+            ]
         )
         alinear_encabezados(
             self.tabla_oc,
@@ -1560,8 +1768,12 @@ class ComprasView(QWidget):
         btn_enmendar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_enmendar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_enmendar.clicked.connect(self.enmendar_oc_seleccionada)
-        footer, self.lbl_pagina_oc, self.btn_oc_anterior, self.btn_oc_siguiente = self._make_footer(
-            lambda: self._pagina_anterior("oc"), lambda: self._pagina_siguiente("oc"), [btn_ver_detalle, btn_enmendar]
+        footer, self.lbl_pagina_oc, self.btn_oc_anterior, self.btn_oc_siguiente = (
+            self._make_footer(
+                lambda: self._pagina_anterior("oc"),
+                lambda: self._pagina_siguiente("oc"),
+                [btn_ver_detalle, btn_enmendar],
+            )
         )
         layout.addWidget(footer)
         return page
@@ -1587,47 +1799,83 @@ class ComprasView(QWidget):
                 self.tabla_oc.setItem(fila, 0, QTableWidgetItem(str(oc.id_oc)))
                 self.tabla_oc.setItem(fila, 1, QTableWidgetItem(oc.numero_oc))
                 self.tabla_oc.setItem(
-                    fila, 2, QTableWidgetItem(oc.proveedor.nombre_razon_social if oc.proveedor else "")
+                    fila,
+                    2,
+                    QTableWidgetItem(
+                        oc.proveedor.nombre_razon_social if oc.proveedor else ""
+                    ),
                 )
                 self.tabla_oc.setItem(
-                    fila, 3, QTableWidgetItem(oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else "")
+                    fila,
+                    3,
+                    QTableWidgetItem(
+                        oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else ""
+                    ),
                 )
                 cantidad_solicitada = _as_decimal(oc.cantidad_solicitada)
                 item_solicitada = QTableWidgetItem(f"{float(cantidad_solicitada):,.2f}")
-                item_solicitada.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_solicitada.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla_oc.setItem(fila, 4, item_solicitada)
 
                 cantidad_recibida = _as_decimal(oc.cantidad_recibida)
                 item_recibida = QTableWidgetItem(f"{float(cantidad_recibida):,.2f}")
-                item_recibida.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_recibida.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla_oc.setItem(fila, 5, item_recibida)
 
                 total_oc = _as_decimal(oc.total_oc)
                 item_total = QTableWidgetItem(f"${float(total_oc):,.2f}")
-                item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_total.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla_oc.setItem(fila, 6, item_total)
                 color = COLORES_ESTADO_OC.get(oc.estado, COLOR_TEXT_MUTED)
-                self.tabla_oc.setCellWidget(fila, 7, EstadoBadge(oc.estado.capitalize(), color))
+                self.tabla_oc.setCellWidget(
+                    fila, 7, EstadoBadge(oc.estado.capitalize(), color)
+                )
             self._actualizar_paginacion(
-                "oc", resultado["total"], self.lbl_pagina_oc, self.btn_oc_anterior, self.btn_oc_siguiente
+                "oc",
+                resultado["total"],
+                self.lbl_pagina_oc,
+                self.btn_oc_anterior,
+                self.btn_oc_siguiente,
             )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar órdenes de compra.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar órdenes de compra.",
+            )
         except Exception as exc:
             logger.exception("Fallo al cargar ordenes de compra")
-            MessageBox.critical(self, "Error", f"No se pudo cargar el listado de órdenes de compra: {exc}")
+            MessageBox.critical(
+                self,
+                "Error",
+                f"No se pudo cargar el listado de órdenes de compra: {exc}",
+            )
         finally:
             session.close()
 
     def nueva_oc(self) -> None:
         session = self.session_factory()
         try:
-            dialogo = OrdenCompraFormDialog(session, self.usuario.id_usuario, parent=self)
+            dialogo = OrdenCompraFormDialog(
+                session, self.usuario.id_usuario, parent=self
+            )
             if dialogo.exec() and dialogo.oc_creada is not None:
                 self.cargar_ocs()
-                MessageBox.information(self, "Orden creada", f"ODC {dialogo.oc_creada.numero_oc} creada con éxito.")
+                MessageBox.information(
+                    self,
+                    "Orden creada",
+                    f"ODC {dialogo.oc_creada.numero_oc} creada con éxito.",
+                )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear órdenes de compra.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para crear órdenes de compra."
+            )
         finally:
             session.close()
 
@@ -1640,7 +1888,9 @@ class ComprasView(QWidget):
             oc = session.get(CompraOC, id_oc)
             if oc is None:
                 return
-            dialogo = EnmiendaOCDialog(session, self.usuario.id_usuario, oc, parent=self)
+            dialogo = EnmiendaOCDialog(
+                session, self.usuario.id_usuario, oc, parent=self
+            )
             if dialogo.exec():
                 self.cargar_ocs()
         finally:
@@ -1663,16 +1913,26 @@ class ComprasView(QWidget):
         self._abriendo_dialogo = True
         session = self.session_factory()
         try:
-            datos = CompraOCService.obtener_oc(session, id_oc, id_usuario=self.usuario.id_usuario)
+            datos = CompraOCService.obtener_oc(
+                session, id_oc, id_usuario=self.usuario.id_usuario
+            )
             dialogo = OrdenCompraDetalleDialog(datos, parent=self)
             dialogo.exec()
         except ValueError as exc:
             MessageBox.warning(self, "Orden no encontrada", str(exc))
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar esta orden de compra.")
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar esta orden de compra.",
+            )
         except Exception as exc:
             logger.exception("Fallo al abrir el detalle de la OC %s", id_oc)
-            MessageBox.critical(self, "Error", f"No se pudo abrir el detalle de la orden de compra: {exc}")
+            MessageBox.critical(
+                self,
+                "Error",
+                f"No se pudo abrir el detalle de la orden de compra: {exc}",
+            )
         finally:
             session.close()
             self._abriendo_dialogo = False
@@ -1699,12 +1959,16 @@ class ComprasView(QWidget):
         )
 
         # Agregar botón de exportación a la toolbar
-        btn_exportar_nr = BotonExportar(on_excel=self._exportar_nrs_excel, on_pdf=self._exportar_nrs_pdf)
+        btn_exportar_nr = BotonExportar(
+            on_excel=self._exportar_nrs_excel, on_pdf=self._exportar_nrs_pdf
+        )
         toolbar.layout().addWidget(btn_exportar_nr)
 
         layout.addWidget(toolbar)
 
-        self.tabla_nr = self._make_tabla(["ID", "N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"])
+        self.tabla_nr = self._make_tabla(
+            ["ID", "N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"]
+        )
         alinear_encabezados(
             self.tabla_nr,
             {
@@ -1727,8 +1991,12 @@ class ComprasView(QWidget):
         btn_rechazar.setIcon(qta.icon("fa5s.undo", color=COLOR_TEXT_DARK))
         btn_rechazar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_rechazar.clicked.connect(self.rechazar_nr_seleccionada)
-        footer, self.lbl_pagina_nr, self.btn_nr_anterior, self.btn_nr_siguiente = self._make_footer(
-            lambda: self._pagina_anterior("nr"), lambda: self._pagina_siguiente("nr"), [btn_detalle_nr, btn_rechazar]
+        footer, self.lbl_pagina_nr, self.btn_nr_anterior, self.btn_nr_siguiente = (
+            self._make_footer(
+                lambda: self._pagina_anterior("nr"),
+                lambda: self._pagina_siguiente("nr"),
+                [btn_detalle_nr, btn_rechazar],
+            )
         )
         layout.addWidget(footer)
         return page
@@ -1741,7 +2009,10 @@ class ComprasView(QWidget):
         session = self.session_factory()
         try:
             resultado = NotaRecepcionService.listar_notas_recepcion(
-                session, pagina=self.paginas["nr"], por_pagina=POR_PAGINA, id_usuario=self.usuario.id_usuario
+                session,
+                pagina=self.paginas["nr"],
+                por_pagina=POR_PAGINA,
+                id_usuario=self.usuario.id_usuario,
             )
             nrs = resultado["items"]
 
@@ -1758,7 +2029,11 @@ class ComprasView(QWidget):
                     for n in nrs
                     if texto_busqueda in n.numero_nr.lower()
                     or (n.oc and texto_busqueda in n.oc.numero_oc.lower())
-                    or (n.oc and n.oc.proveedor and texto_busqueda in n.oc.proveedor.nombre_razon_social.lower())
+                    or (
+                        n.oc
+                        and n.oc.proveedor
+                        and texto_busqueda in n.oc.proveedor.nombre_razon_social.lower()
+                    )
                 ]
 
             self.tabla_nr.setRowCount(len(nrs))
@@ -1766,58 +2041,99 @@ class ComprasView(QWidget):
                 oc = nr.oc
                 self.tabla_nr.setItem(fila, 0, QTableWidgetItem(str(nr.id_nr)))
                 self.tabla_nr.setItem(fila, 1, QTableWidgetItem(nr.numero_nr))
-                self.tabla_nr.setItem(fila, 2, QTableWidgetItem(oc.numero_oc if oc else ""))
                 self.tabla_nr.setItem(
-                    fila, 3, QTableWidgetItem(oc.proveedor.nombre_razon_social if oc and oc.proveedor else "")
+                    fila, 2, QTableWidgetItem(oc.numero_oc if oc else "")
                 )
                 self.tabla_nr.setItem(
-                    fila, 4, QTableWidgetItem(nr.fecha_recepcion.strftime("%d/%m/%Y") if nr.fecha_recepcion else "")
+                    fila,
+                    3,
+                    QTableWidgetItem(
+                        oc.proveedor.nombre_razon_social if oc and oc.proveedor else ""
+                    ),
+                )
+                self.tabla_nr.setItem(
+                    fila,
+                    4,
+                    QTableWidgetItem(
+                        nr.fecha_recepcion.strftime("%d/%m/%Y")
+                        if nr.fecha_recepcion
+                        else ""
+                    ),
                 )
                 # Usuario que realizó la recepción
                 usuario = nr.usuario_recepcion if nr.usuario_recepcion else None
-                self.tabla_nr.setItem(fila, 5, QTableWidgetItem(usuario.nombre if usuario else ""))
+                self.tabla_nr.setItem(
+                    fila, 5, QTableWidgetItem(usuario.nombre if usuario else "")
+                )
                 color = COLORES_ESTADO_NR.get(nr.estado, COLOR_TEXT_MUTED)
-                self.tabla_nr.setCellWidget(fila, 6, EstadoBadge(nr.estado.capitalize(), color))
+                self.tabla_nr.setCellWidget(
+                    fila, 6, EstadoBadge(nr.estado.capitalize(), color)
+                )
             self._actualizar_paginacion(
-                "nr", resultado["total"], self.lbl_pagina_nr, self.btn_nr_anterior, self.btn_nr_siguiente
+                "nr",
+                resultado["total"],
+                self.lbl_pagina_nr,
+                self.btn_nr_anterior,
+                self.btn_nr_siguiente,
             )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar recepciones.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para consultar recepciones."
+            )
         except Exception:
             logger.exception("Fallo al cargar notas de recepcion")
-            MessageBox.critical(self, "Error", "No se pudo cargar el listado de recepciones.")
+            MessageBox.critical(
+                self, "Error", "No se pudo cargar el listado de recepciones."
+            )
         finally:
             session.close()
 
     def nueva_recepcion(self) -> None:
         session = self.session_factory()
         try:
-            resultado = CompraOCService.listar_ocs(session, por_pagina=200, id_usuario=self.usuario.id_usuario)
-            candidatas = [oc for oc in resultado["items"] if oc.estado in ("PENDIENTE", "PARCIAL")]
+            resultado = CompraOCService.listar_ocs(
+                session, por_pagina=200, id_usuario=self.usuario.id_usuario
+            )
+            candidatas = [
+                oc for oc in resultado["items"] if oc.estado in ("PENDIENTE", "PARCIAL")
+            ]
             if not candidatas:
                 MessageBox.information(
-                    self, "Sin órdenes pendientes", "No hay órdenes de compra con mercancía pendiente de recibir."
+                    self,
+                    "Sin órdenes pendientes",
+                    "No hay órdenes de compra con mercancía pendiente de recibir.",
                 )
                 return
             etiquetas = [
-                f"{oc.numero_oc} — {oc.proveedor.nombre_razon_social if oc.proveedor else ''}" for oc in candidatas
+                f"{oc.numero_oc} — {oc.proveedor.nombre_razon_social if oc.proveedor else ''}"
+                for oc in candidatas
             ]
             etiqueta, ok = QInputDialog.getItem(
-                self, "Nueva Recepción", "Seleccione la orden de compra:", etiquetas, editable=False
+                self,
+                "Nueva Recepción",
+                "Seleccione la orden de compra:",
+                etiquetas,
+                editable=False,
             )
             if not ok:
                 return
             oc = candidatas[etiquetas.index(etiqueta)]
 
-            dialogo = NotaRecepcionFormDialog(session, self.usuario.id_usuario, oc, parent=self)
+            dialogo = NotaRecepcionFormDialog(
+                session, self.usuario.id_usuario, oc, parent=self
+            )
             if dialogo.exec() and dialogo.nota_creada is not None:
                 self.cargar_nrs()
                 self.cargar_ocs()
                 MessageBox.information(
-                    self, "Recepción registrada", f"NR {dialogo.nota_creada.numero_nr} registrada con éxito."
+                    self,
+                    "Recepción registrada",
+                    f"NR {dialogo.nota_creada.numero_nr} registrada con éxito.",
                 )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para recibir mercancía.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para recibir mercancía."
+            )
         finally:
             session.close()
 
@@ -1830,7 +2146,9 @@ class ComprasView(QWidget):
             nr = session.get(NotaRecepcion, id_nr)
             if nr is None:
                 return
-            dialogo = NotaDevolucionFormDialog(session, self.usuario.id_usuario, nr, parent=self)
+            dialogo = NotaDevolucionFormDialog(
+                session, self.usuario.id_usuario, nr, parent=self
+            )
             if dialogo.exec() and dialogo.devolucion_creada is not None:
                 MessageBox.information(
                     self,
@@ -1847,11 +2165,15 @@ class ComprasView(QWidget):
             return
         session = self.session_factory()
         try:
-            dialogo = NotaRecepcionDetalleDialog(session, id_nr, id_usuario=self.usuario.id_usuario, parent=self)
+            dialogo = NotaRecepcionDetalleDialog(
+                session, id_nr, id_usuario=self.usuario.id_usuario, parent=self
+            )
             dialogo.exec()
         except Exception:
             logger.exception("Fallo al mostrar detalle de recepcion")
-            MessageBox.critical(self, "Error", "No se pudo mostrar el detalle de la recepción.")
+            MessageBox.critical(
+                self, "Error", "No se pudo mostrar el detalle de la recepción."
+            )
         finally:
             session.close()
 
@@ -1862,11 +2184,15 @@ class ComprasView(QWidget):
             return
         session = self.session_factory()
         try:
-            dialogo = CompraDetalleDialog(session, id_compra, id_usuario=self.usuario.id_usuario, parent=self)
+            dialogo = CompraDetalleDialog(
+                session, id_compra, id_usuario=self.usuario.id_usuario, parent=self
+            )
             dialogo.exec()
         except Exception:
             logger.exception("Fallo al mostrar detalle de compra")
-            MessageBox.critical(self, "Error", "No se pudo mostrar el detalle de la factura.")
+            MessageBox.critical(
+                self, "Error", "No se pudo mostrar el detalle de la factura."
+            )
         finally:
             session.close()
 
@@ -1878,21 +2204,38 @@ class ComprasView(QWidget):
         layout.setContentsMargins(4, 12, 4, 4)
         layout.setSpacing(12)
 
-        toolbar, self.compra_buscar_input, self.compra_estado_combo = self._make_toolbar(
-            [("Todos los estados", None), ("Emitida", "EMITIDA"), ("Anulada", "ANULADA")],
-            self._buscar_compras_desde_inicio,
-            self.nueva_factura_desde_oc,
-            "Nueva Factura",
+        toolbar, self.compra_buscar_input, self.compra_estado_combo = (
+            self._make_toolbar(
+                [
+                    ("Todos los estados", None),
+                    ("Emitida", "EMITIDA"),
+                    ("Anulada", "ANULADA"),
+                ],
+                self._buscar_compras_desde_inicio,
+                self.nueva_factura_desde_oc,
+                "Nueva Factura",
+            )
         )
 
         # Agregar botón de exportación a la toolbar
-        btn_exportar_compra = BotonExportar(on_excel=self._exportar_compras_excel, on_pdf=self._exportar_compras_pdf)
+        btn_exportar_compra = BotonExportar(
+            on_excel=self._exportar_compras_excel, on_pdf=self._exportar_compras_pdf
+        )
         toolbar.layout().addWidget(btn_exportar_compra)
 
         layout.addWidget(toolbar)
 
         self.tabla_compra = self._make_tabla(
-            ["ID", "N° Compra", "ODC", "Proveedor", "Fecha", "Condición", "Total", "Estado"]
+            [
+                "ID",
+                "N° Compra",
+                "ODC",
+                "Proveedor",
+                "Fecha",
+                "Condición",
+                "Total",
+                "Estado",
+            ]
         )
         alinear_encabezados(
             self.tabla_compra,
@@ -1913,8 +2256,15 @@ class ComprasView(QWidget):
         btn_detalle_compra.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_detalle_compra.clicked.connect(self.ver_detalle_compra)
 
-        footer, self.lbl_pagina_compra, self.btn_compra_anterior, self.btn_compra_siguiente = self._make_footer(
-            lambda: self._pagina_anterior("compra"), lambda: self._pagina_siguiente("compra"), [btn_detalle_compra]
+        (
+            footer,
+            self.lbl_pagina_compra,
+            self.btn_compra_anterior,
+            self.btn_compra_siguiente,
+        ) = self._make_footer(
+            lambda: self._pagina_anterior("compra"),
+            lambda: self._pagina_siguiente("compra"),
+            [btn_detalle_compra],
         )
         layout.addWidget(footer)
         return page
@@ -1944,7 +2294,10 @@ class ComprasView(QWidget):
                     for c in compras
                     if texto_busqueda in c.numero_compra.lower()
                     or (c.oc and texto_busqueda in c.oc.numero_oc.lower())
-                    or (c.proveedor and texto_busqueda in c.proveedor.nombre_razon_social.lower())
+                    or (
+                        c.proveedor
+                        and texto_busqueda in c.proveedor.nombre_razon_social.lower()
+                    )
                 ]
 
             self.tabla_compra.setRowCount(len(compras))
@@ -1952,23 +2305,41 @@ class ComprasView(QWidget):
                 self.tabla_compra.setItem(fila, 0, QTableWidgetItem(str(c.id_compra)))
                 self.tabla_compra.setItem(fila, 1, QTableWidgetItem(c.numero_compra))
                 oc = session.get(CompraOC, c.id_oc) if c.id_oc else None
-                self.tabla_compra.setItem(fila, 2, QTableWidgetItem(oc.numero_oc if oc else ""))
                 self.tabla_compra.setItem(
-                    fila, 3, QTableWidgetItem(c.proveedor.nombre_razon_social if c.proveedor else "")
+                    fila, 2, QTableWidgetItem(oc.numero_oc if oc else "")
                 )
                 self.tabla_compra.setItem(
-                    fila, 4, QTableWidgetItem(c.fecha_emision.strftime("%d/%m/%Y") if c.fecha_emision else "")
+                    fila,
+                    3,
+                    QTableWidgetItem(
+                        c.proveedor.nombre_razon_social if c.proveedor else ""
+                    ),
                 )
                 self.tabla_compra.setItem(
-                    fila, 5, QTableWidgetItem("Contado" if c.condicion_pago == "contado" else "Crédito")
+                    fila,
+                    4,
+                    QTableWidgetItem(
+                        c.fecha_emision.strftime("%d/%m/%Y") if c.fecha_emision else ""
+                    ),
+                )
+                self.tabla_compra.setItem(
+                    fila,
+                    5,
+                    QTableWidgetItem(
+                        "Contado" if c.condicion_pago == "contado" else "Crédito"
+                    ),
                 )
                 total_compra = _as_decimal(c.total_compra)
                 item_total = QTableWidgetItem(f"${float(total_compra):,.2f}")
-                item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item_total.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.tabla_compra.setItem(fila, 6, item_total)
                 estado = c.estado_compra or "EMITIDA"
                 color = COLORES_ESTADO_COMPRA.get(estado, COLOR_TEXT_MUTED)
-                self.tabla_compra.setCellWidget(fila, 7, EstadoBadge(estado.capitalize(), color))
+                self.tabla_compra.setCellWidget(
+                    fila, 7, EstadoBadge(estado.capitalize(), color)
+                )
             self._actualizar_paginacion(
                 "compra",
                 resultado["total"],
@@ -1977,65 +2348,99 @@ class ComprasView(QWidget):
                 self.btn_compra_siguiente,
             )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar compras.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para consultar compras."
+            )
         except Exception:
             logger.exception("Fallo al cargar compras desde OC")
-            MessageBox.critical(self, "Error", "No se pudo cargar el listado de facturas.")
+            MessageBox.critical(
+                self, "Error", "No se pudo cargar el listado de facturas."
+            )
         finally:
             session.close()
 
     def nueva_factura_desde_oc(self) -> None:
         session = self.session_factory()
         try:
-            resultado = CompraOCService.listar_ocs(session, por_pagina=200, id_usuario=self.usuario.id_usuario)
-            candidatas = [oc for oc in resultado["items"] if oc.cantidad_recibida > oc.cantidad_facturada]
+            resultado = CompraOCService.listar_ocs(
+                session, por_pagina=200, id_usuario=self.usuario.id_usuario
+            )
+            candidatas = [
+                oc
+                for oc in resultado["items"]
+                if oc.cantidad_recibida > oc.cantidad_facturada
+            ]
             if not candidatas:
                 MessageBox.information(
-                    self, "Nada que facturar", "No hay órdenes de compra con mercancía recibida pendiente de facturar."
+                    self,
+                    "Nada que facturar",
+                    "No hay órdenes de compra con mercancía recibida pendiente de facturar.",
                 )
                 return
             etiquetas = [
-                f"{oc.numero_oc} — {oc.proveedor.nombre_razon_social if oc.proveedor else ''}" for oc in candidatas
+                f"{oc.numero_oc} — {oc.proveedor.nombre_razon_social if oc.proveedor else ''}"
+                for oc in candidatas
             ]
             etiqueta, ok = QInputDialog.getItem(
-                self, "Nueva Factura", "Seleccione la orden de compra:", etiquetas, editable=False
+                self,
+                "Nueva Factura",
+                "Seleccione la orden de compra:",
+                etiquetas,
+                editable=False,
             )
             if not ok:
                 return
             oc = candidatas[etiquetas.index(etiqueta)]
 
-            dialogo = CompraDesdeOCFormDialog(session, self.usuario.id_usuario, oc, parent=self)
+            dialogo = CompraDesdeOCFormDialog(
+                session, self.usuario.id_usuario, oc, parent=self
+            )
             if dialogo.exec() and dialogo.compra_creada is not None:
                 self.cargar_compras()
                 self.cargar_ocs()
                 MessageBox.information(
-                    self, "Factura registrada", f"Compra {dialogo.compra_creada.numero_compra} registrada con éxito."
+                    self,
+                    "Factura registrada",
+                    f"Compra {dialogo.compra_creada.numero_compra} registrada con éxito.",
                 )
         except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar compras.")
+            MessageBox.warning(
+                self, "Sin permiso", "No tienes permiso para registrar compras."
+            )
         finally:
             session.close()
 
     # ── Paginacion compartida ────────────────────────────────────────────
 
     def _actualizar_paginacion(
-        self, clave: str, total: int, lbl_pagina: QLabel, btn_anterior: QPushButton, btn_siguiente: QPushButton
+        self,
+        clave: str,
+        total: int,
+        lbl_pagina: QLabel,
+        btn_anterior: QPushButton,
+        btn_siguiente: QPushButton,
     ) -> None:
         self.total_paginas[clave] = max(1, -(-total // POR_PAGINA))
         self.paginas[clave] = min(self.paginas[clave], self.total_paginas[clave])
-        lbl_pagina.setText(f"Página {self.paginas[clave]} de {self.total_paginas[clave]} ({total})")
+        lbl_pagina.setText(
+            f"Página {self.paginas[clave]} de {self.total_paginas[clave]} ({total})"
+        )
         btn_anterior.setEnabled(self.paginas[clave] > 1)
         btn_siguiente.setEnabled(self.paginas[clave] < self.total_paginas[clave])
 
     def _pagina_anterior(self, clave: str) -> None:
         if self.paginas[clave] > 1:
             self.paginas[clave] -= 1
-            [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][["oc", "nr", "compra"].index(clave)]()
+            [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][
+                ["oc", "nr", "compra"].index(clave)
+            ]()
 
     def _pagina_siguiente(self, clave: str) -> None:
         if self.paginas[clave] < self.total_paginas[clave]:
             self.paginas[clave] += 1
-            [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][["oc", "nr", "compra"].index(clave)]()
+            [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][
+                ["oc", "nr", "compra"].index(clave)
+            ]()
 
     # ── Exportación ───────────────────────────────────────────────────────
 
@@ -2054,9 +2459,25 @@ class ComprasView(QWidget):
 
         try:
             config_empresa = self._obtener_config_empresa()
-            encabezados = ["N° ODC", "Proveedor", "Fecha", "Total Productos", "Cant. Rec.", "Total", "Estado"]
-            exportar_excel(ruta, encabezados, filas, titulo="Órdenes de Compra", config_empresa=config_empresa)
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            encabezados = [
+                "N° ODC",
+                "Proveedor",
+                "Fecha",
+                "Total Productos",
+                "Cant. Rec.",
+                "Total",
+                "Estado",
+            ]
+            exportar_excel(
+                ruta,
+                encabezados,
+                filas,
+                titulo="Órdenes de Compra",
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
         except Exception:
             logger.exception("Fallo al exportar órdenes de compra a Excel")
             MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
@@ -2068,13 +2489,23 @@ class ComprasView(QWidget):
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
 
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Órdenes de Compra", "ordenes_compra.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Órdenes de Compra", "ordenes_compra.pdf", "PDF (*.pdf)"
+        )
         if not ruta:
             return
 
         try:
             config_empresa = self._obtener_config_empresa()
-            encabezados = ["N° ODC", "Proveedor", "Fecha", "Total Productos", "Cant. Rec.", "Total", "Estado"]
+            encabezados = [
+                "N° ODC",
+                "Proveedor",
+                "Fecha",
+                "Total Productos",
+                "Cant. Rec.",
+                "Total",
+                "Estado",
+            ]
             filtros = self._obtener_filtros_oc_para_exportar()
             col_widths = [1.5, 2.5, 1.2, 1.5, 1.2, 1.5, 1.0]
             exportar_pdf(
@@ -2086,7 +2517,9 @@ class ComprasView(QWidget):
                 col_widths=col_widths,
                 config_empresa=config_empresa,
             )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
         except Exception:
             logger.exception("Fallo al exportar órdenes de compra a PDF")
             MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
@@ -2098,15 +2531,25 @@ class ComprasView(QWidget):
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
 
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Recepciones", "recepciones.xlsx", "Excel (*.xlsx)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Recepciones", "recepciones.xlsx", "Excel (*.xlsx)"
+        )
         if not ruta:
             return
 
         try:
             config_empresa = self._obtener_config_empresa()
             encabezados = ["N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"]
-            exportar_excel(ruta, encabezados, filas, titulo="Recepciones", config_empresa=config_empresa)
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            exportar_excel(
+                ruta,
+                encabezados,
+                filas,
+                titulo="Recepciones",
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
         except Exception:
             logger.exception("Fallo al exportar recepciones a Excel")
             MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
@@ -2118,7 +2561,9 @@ class ComprasView(QWidget):
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
 
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Recepciones", "recepciones.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Recepciones", "recepciones.pdf", "PDF (*.pdf)"
+        )
         if not ruta:
             return
 
@@ -2136,7 +2581,9 @@ class ComprasView(QWidget):
                 col_widths=col_widths,
                 config_empresa=config_empresa,
             )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
         except Exception:
             logger.exception("Fallo al exportar recepciones a PDF")
             MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
@@ -2148,15 +2595,33 @@ class ComprasView(QWidget):
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
 
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Facturas", "facturas_compra.xlsx", "Excel (*.xlsx)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Facturas", "facturas_compra.xlsx", "Excel (*.xlsx)"
+        )
         if not ruta:
             return
 
         try:
             config_empresa = self._obtener_config_empresa()
-            encabezados = ["N° Compra", "ODC", "Proveedor", "Fecha", "Condición", "Total", "Estado"]
-            exportar_excel(ruta, encabezados, filas, titulo="Facturas de Compra", config_empresa=config_empresa)
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            encabezados = [
+                "N° Compra",
+                "ODC",
+                "Proveedor",
+                "Fecha",
+                "Condición",
+                "Total",
+                "Estado",
+            ]
+            exportar_excel(
+                ruta,
+                encabezados,
+                filas,
+                titulo="Facturas de Compra",
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
         except Exception:
             logger.exception("Fallo al exportar facturas de compra a Excel")
             MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
@@ -2168,13 +2633,23 @@ class ComprasView(QWidget):
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
 
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Facturas", "facturas_compra.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Facturas", "facturas_compra.pdf", "PDF (*.pdf)"
+        )
         if not ruta:
             return
 
         try:
             config_empresa = self._obtener_config_empresa()
-            encabezados = ["N° Compra", "ODC", "Proveedor", "Fecha", "Condición", "Total", "Estado"]
+            encabezados = [
+                "N° Compra",
+                "ODC",
+                "Proveedor",
+                "Fecha",
+                "Condición",
+                "Total",
+                "Estado",
+            ]
             filtros = self._obtener_filtros_compras_para_exportar()
             col_widths = [1.5, 1.5, 2.5, 1.2, 1.2, 1.5, 1.0]
             exportar_pdf(
@@ -2186,7 +2661,9 @@ class ComprasView(QWidget):
                 col_widths=col_widths,
                 config_empresa=config_empresa,
             )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+            MessageBox.information(
+                self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}"
+            )
         except Exception:
             logger.exception("Fallo al exportar facturas de compra a PDF")
             MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")

@@ -25,7 +25,12 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.comisiones import ComisionService
-from app.services.db_utils import _es_deadlock, _es_lock_timeout, aplicar_lock_timeout, traducir_error_trigger
+from app.services.db_utils import (
+    _es_deadlock,
+    _es_lock_timeout,
+    aplicar_lock_timeout,
+    traducir_error_trigger,
+)
 from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import require_permiso
@@ -78,7 +83,9 @@ def _cxc_vencida(cxc: CuentaPorCobrar, hoy: date) -> bool:
     return cxc.fecha_vencimiento is not None and cxc.fecha_vencimiento < hoy
 
 
-def _calcular_estado_visual(estado_factura: str, cxc: CuentaPorCobrar | None, hoy: date) -> str:
+def _calcular_estado_visual(
+    estado_factura: str, cxc: CuentaPorCobrar | None, hoy: date
+) -> str:
     """Estado que se muestra en la UI (Emitida/Pagada/Parcial/Vencida/Anulada) --
     FacturaVenta.estado_factura en la base solo distingue EMITIDA/ANULADA (ver
     anular_factura), el resto se deriva de la cuenta por cobrar asociada. 'vencida' nunca
@@ -109,11 +116,16 @@ def _validar_items(items: list[dict]) -> None:
             raise ValueError("Cada item requiere id_producto")
         if not item.get("cantidad") or Decimal(str(item["cantidad"])) <= 0:
             raise ValueError("Cada item requiere una cantidad mayor a cero")
-        if item.get("precio_unitario") is None or Decimal(str(item["precio_unitario"])) <= 0:
+        if (
+            item.get("precio_unitario") is None
+            or Decimal(str(item["precio_unitario"])) <= 0
+        ):
             raise ValueError("Cada item requiere un precio_unitario mayor a cero")
 
 
-def _convertir_a_usd(monto_moneda_origen: Decimal, moneda: str, tasa: ControlDeTasa | None) -> Decimal:
+def _convertir_a_usd(
+    monto_moneda_origen: Decimal, moneda: str, tasa: ControlDeTasa | None
+) -> Decimal:
     """Equivalente en USD de un monto tendido en `moneda` -- USD/USDT es 1:1 (USDT se
     trata como stablecoin fijo al dolar, practica estandar), VES/COP se convierten con la
     tasa vigente snapshoteada en la factura."""
@@ -121,7 +133,9 @@ def _convertir_a_usd(monto_moneda_origen: Decimal, moneda: str, tasa: ControlDeT
     if moneda in ("USD", "USDT"):
         return monto_moneda_origen
     if tasa is None:
-        raise ValueError(f"No hay tasa de cambio configurada para convertir un pago en {moneda}")
+        raise ValueError(
+            f"No hay tasa de cambio configurada para convertir un pago en {moneda}"
+        )
     if moneda == "VES":
         tasa_dolar = to_decimal(tasa.tasa_dolar_bcv)
         return (monto_moneda_origen / tasa_dolar).quantize(Decimal("0.01"))
@@ -171,7 +185,9 @@ class VentaService:
         if cliente is None:
             raise ValueError("Cliente no encontrado")
         if cliente.estado_cliente != "ACTIVO":
-            raise ValueError(f"El cliente '{cliente.nombre_razon_social}' esta inactivo")
+            raise ValueError(
+                f"El cliente '{cliente.nombre_razon_social}' esta inactivo"
+            )
 
         if id_vendedor is None:
             raise ValueError("El vendedor es obligatorio para emitir una factura")
@@ -189,9 +205,13 @@ class VentaService:
         # credito sigue el flujo de siempre y no admite pagos en el momento de emitir.
         pagos = pagos or []
         if condicion_pago == "contado" and not pagos:
-            raise ValueError("Una factura de contado requiere al menos una forma de pago")
+            raise ValueError(
+                "Una factura de contado requiere al menos una forma de pago"
+            )
         if condicion_pago == "credito" and pagos:
-            raise ValueError("condicion_pago='credito' no admite pagos al emitir la factura")
+            raise ValueError(
+                "condicion_pago='credito' no admite pagos al emitir la factura"
+            )
         if pagos:
             require_permiso(session, id_usuario, "pagos", "crear")
 
@@ -219,20 +239,31 @@ class VentaService:
                     "configurados y no puede facturarse a credito"
                 )
             dias_credito_aplicados = dias_credito_cliente
-            if dias_credito_personalizados is not None and dias_credito_personalizados != dias_credito_cliente:
+            if (
+                dias_credito_personalizados is not None
+                and dias_credito_personalizados != dias_credito_cliente
+            ):
                 if dias_credito_personalizados <= 0:
                     raise ValueError("dias_credito_personalizados debe ser mayor a 0")
                 if not motivo_dias_credito:
                     raise ValueError("El cambio de dias de credito requiere un motivo")
                 if id_autorizador_dias_credito is None:
-                    raise ValueError("El cambio de dias de credito requiere autorizacion de un supervisor")
-                require_permiso(session, id_autorizador_dias_credito, "creditos", "crear")
+                    raise ValueError(
+                        "El cambio de dias de credito requiere autorizacion de un supervisor"
+                    )
+                require_permiso(
+                    session, id_autorizador_dias_credito, "creditos", "crear"
+                )
                 dias_credito_aplicados = dias_credito_personalizados
                 hubo_override_dias_credito = True
             if fecha_vencimiento is None:
-                fecha_vencimiento = date.today() + timedelta(days=dias_credito_aplicados)
+                fecha_vencimiento = date.today() + timedelta(
+                    days=dias_credito_aplicados
+                )
         elif dias_credito_personalizados is not None:
-            raise ValueError("dias_credito_personalizados solo aplica a condicion_pago='credito'")
+            raise ValueError(
+                "dias_credito_personalizados solo aplica a condicion_pago='credito'"
+            )
 
         if id_tasa is not None and session.get(ControlDeTasa, id_tasa) is None:
             raise ValueError("Tasa de cambio no encontrada")
@@ -255,7 +286,9 @@ class VentaService:
         # antes de evaluar nada mas.
         productos_existentes = {
             p.id_producto
-            for p in session.query(Inventario.id_producto).filter(Inventario.id_producto.in_(ids_producto_items))
+            for p in session.query(Inventario.id_producto).filter(
+                Inventario.id_producto.in_(ids_producto_items)
+            )
         }
         ids_inexistentes = ids_producto_items - productos_existentes
         if ids_inexistentes:
@@ -263,7 +296,9 @@ class VentaService:
 
         precios_lista = {
             precio.id_producto: precio.precio_venta
-            for precio in session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto_items)).all()
+            for precio in session.query(ProductoPrecio)
+            .filter(ProductoPrecio.id_producto.in_(ids_producto_items))
+            .all()
         }
         # Todo producto vendible debe tener un precio de lista configurado -- sin uno, no
         # hay forma de detectar automaticamente si el vendedor le puso un precio bajo
@@ -274,32 +309,42 @@ class VentaService:
         if ids_sin_precio:
             productos_sin_precio = ", ".join(
                 p.nombre_producto
-                for p in session.query(Inventario).filter(Inventario.id_producto.in_(ids_sin_precio)).all()
+                for p in session.query(Inventario)
+                .filter(Inventario.id_producto.in_(ids_sin_precio))
+                .all()
             )
             raise ValueError(
                 f"Los siguientes productos no tienen precio de venta configurado: {productos_sin_precio}. "
                 "Configure un precio en Inventario antes de venderlos."
             )
         hay_precio_bajo_lista = any(
-            Decimal(str(item["precio_unitario"])) < precios_lista[item["id_producto"]] for item in items
+            Decimal(str(item["precio_unitario"])) < precios_lista[item["id_producto"]]
+            for item in items
         )
         requiere_autorizacion_descuento = hay_precio_bajo_lista or monto_descuento > 0
         if requiere_autorizacion_descuento:
             if not motivo_descuento:
                 raise ValueError("El descuento requiere un motivo")
             if id_autorizador_descuento is None:
-                raise ValueError("Esta factura tiene descuentos y requiere autorizacion de un supervisor")
+                raise ValueError(
+                    "Esta factura tiene descuentos y requiere autorizacion de un supervisor"
+                )
             require_permiso(session, id_autorizador_descuento, "descuentos", "crear")
 
         # --- Validar stock disponible por producto (agrupando items repetidos) ---
-        cantidades_por_producto: dict[int, dict] = {}  # {id_producto: {"bultos": X, "unidades": Y}}
+        cantidades_por_producto: dict[int, dict] = (
+            {}
+        )  # {id_producto: {"bultos": X, "unidades": Y}}
         for item in items:
             id_producto = item["id_producto"]
             cantidad = Decimal(str(item["cantidad"]))
             tipo_venta = item.get("tipo_venta")
 
             if id_producto not in cantidades_por_producto:
-                cantidades_por_producto[id_producto] = {"bultos": Decimal("0"), "unidades": Decimal("0")}
+                cantidades_por_producto[id_producto] = {
+                    "bultos": Decimal("0"),
+                    "unidades": Decimal("0"),
+                }
 
             if tipo_venta == "bulto":
                 cantidades_por_producto[id_producto]["bultos"] += cantidad
@@ -327,7 +372,9 @@ class VentaService:
             if producto is None:
                 raise ValueError(f"Producto {id_producto} no encontrado")
             if producto.estado_producto != "ACTIVO":
-                raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo")
+                raise ValueError(
+                    f"El producto '{producto.nombre_producto}' esta inactivo"
+                )
 
             # Usar cantidad_unidad como stock total
             stock_total = producto.cantidad_unidad or Decimal("0")
@@ -352,7 +399,9 @@ class VentaService:
                     )
 
             # Validar que la venta no deje stock por debajo de cantidad_minima
-            total_unidades_requeridas = (bultos_requeridos * unidades_por_caja) + unidades_requeridas
+            total_unidades_requeridas = (
+                bultos_requeridos * unidades_por_caja
+            ) + unidades_requeridas
             saldo_posterior = stock_total - total_unidades_requeridas
             if saldo_posterior < (producto.cantidad_minima or 0):
                 raise ValueError(
@@ -368,18 +417,31 @@ class VentaService:
         # IVA se calcula sobre el subtotal YA descontado -- se cobra impuesto sobre lo que
         # realmente se cobra, no sobre el precio de lista.
         total_factura = sum(
-            (Decimal(str(item["cantidad"])) * Decimal(str(item["precio_unitario"])) for item in items),
+            (
+                Decimal(str(item["cantidad"])) * Decimal(str(item["precio_unitario"]))
+                for item in items
+            ),
             Decimal("0.00"),
         )
         if monto_descuento > total_factura:
-            raise ValueError("monto_descuento no puede ser mayor al subtotal de la factura")
+            raise ValueError(
+                "monto_descuento no puede ser mayor al subtotal de la factura"
+            )
         subtotal_con_descuento = to_decimal(total_factura) - to_decimal(monto_descuento)
 
-        config_empresa = session.query(ConfiguracionEmpresa).order_by(ConfiguracionEmpresa.id_config).first()
+        config_empresa = (
+            session.query(ConfiguracionEmpresa)
+            .order_by(ConfiguracionEmpresa.id_config)
+            .first()
+        )
         iva_activo = bool(config_empresa.iva_activo) if config_empresa else False
-        porcentaje_iva = to_decimal(config_empresa.iva_porcentaje) if iva_activo else Decimal("0.00")
+        porcentaje_iva = (
+            to_decimal(config_empresa.iva_porcentaje) if iva_activo else Decimal("0.00")
+        )
         monto_iva = (
-            (subtotal_con_descuento * porcentaje_iva / Decimal("100")).quantize(Decimal("0.01"))
+            (subtotal_con_descuento * porcentaje_iva / Decimal("100")).quantize(
+                Decimal("0.01")
+            )
             if iva_activo
             else Decimal("0.00")
         )
@@ -410,19 +472,32 @@ class VentaService:
             if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
                 # Calcular deuda actual incluyendo cuentas BCV
                 deuda_bcv = (
-                    session.query(func.coalesce(func.sum(CuentaPorCobrarBCV.saldo_pendiente), 0))
-                    .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+                    session.query(
+                        func.coalesce(func.sum(CuentaPorCobrarBCV.saldo_pendiente), 0)
+                    )
+                    .join(
+                        FacturaVenta,
+                        FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura,
+                    )
                     .filter(
                         FacturaVenta.id_cliente_factura == id_cliente,
-                        CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial", "vencida")),
+                        CuentaPorCobrarBCV.estado.in_(
+                            ("pendiente", "parcial", "vencida")
+                        ),
                     )
                     .scalar()
                 )
-                deuda_actual = _deuda_pendiente_cliente(session, id_cliente) + Decimal(str(deuda_bcv))
+                deuda_actual = _deuda_pendiente_cliente(session, id_cliente) + Decimal(
+                    str(deuda_bcv)
+                )
             else:
                 deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
 
-            limite_credito = cliente.limite_credito if cliente.limite_credito is not None else Decimal("0.00")
+            limite_credito = (
+                cliente.limite_credito
+                if cliente.limite_credito is not None
+                else Decimal("0.00")
+            )
             if deuda_actual + total_a_cobrar > limite_credito:
                 raise ValueError(
                     f"El cliente excede su limite de credito: deuda actual {deuda_actual} + "
@@ -456,8 +531,12 @@ class VentaService:
             for pago_linea in pagos:
                 monto_origen = Decimal(str(pago_linea["monto_moneda_origen"]))
                 if monto_origen <= 0:
-                    raise ValueError("Cada forma de pago requiere un monto mayor a cero")
-                monto_usd = _convertir_a_usd(monto_origen, pago_linea["moneda"], tasa_vigente)
+                    raise ValueError(
+                        "Cada forma de pago requiere un monto mayor a cero"
+                    )
+                monto_usd = _convertir_a_usd(
+                    monto_origen, pago_linea["moneda"], tasa_vigente
+                )
                 pagos_usd.append(monto_usd)
                 total_pagado += monto_usd
             if total_pagado < total_a_cobrar:
@@ -487,8 +566,15 @@ class VentaService:
         # transferencia siempre requieren seleccion explicita + autorizacion, nunca se
         # infieren (y si hay mas de una caja involucrada o ninguna, no hay una unica
         # respuesta obvia -- se exige explicitar mas abajo).
-        if monto_vuelto > 0 and metodo_vuelto is None and id_caja_vuelto is None and id_cuenta_bancaria_vuelto is None:
-            cajas_usadas = {p.get("id_caja") for p in pagos if p.get("id_caja") is not None}
+        if (
+            monto_vuelto > 0
+            and metodo_vuelto is None
+            and id_caja_vuelto is None
+            and id_cuenta_bancaria_vuelto is None
+        ):
+            cajas_usadas = {
+                p.get("id_caja") for p in pagos if p.get("id_caja") is not None
+            }
             if len(cajas_usadas) == 1:
                 metodo_vuelto = "efectivo"
                 (id_caja_vuelto,) = cajas_usadas
@@ -501,9 +587,13 @@ class VentaService:
                 )
             if metodo_vuelto == "efectivo":
                 if id_caja_vuelto is None:
-                    raise ValueError("El vuelto en efectivo requiere indicar la caja de origen")
+                    raise ValueError(
+                        "El vuelto en efectivo requiere indicar la caja de origen"
+                    )
                 if id_cuenta_bancaria_vuelto is not None:
-                    raise ValueError("El vuelto en efectivo no admite cuenta bancaria de origen")
+                    raise ValueError(
+                        "El vuelto en efectivo no admite cuenta bancaria de origen"
+                    )
                 # WITH (UPDLOCK, ROWLOCK): mismo patron que Inventario/Cliente mas arriba --
                 # bloquea la fila hasta el commit para que dos vueltos concurrentes de la
                 # misma caja no lean el mismo saldo stale (C1). Solo se valida aca que la
@@ -518,18 +608,29 @@ class VentaService:
                 ).scalar_one_or_none()
                 if caja_vuelto is None:
                     raise ValueError("Caja de vuelto no encontrada")
-                if caja_vuelto.fecha_apertura is None or caja_vuelto.fecha_cierre is not None:
-                    raise ValueError(f"La caja '{caja_vuelto.nombre_caja}' no tiene un turno abierto")
+                if (
+                    caja_vuelto.fecha_apertura is None
+                    or caja_vuelto.fecha_cierre is not None
+                ):
+                    raise ValueError(
+                        f"La caja '{caja_vuelto.nombre_caja}' no tiene un turno abierto"
+                    )
             else:
                 if id_cuenta_bancaria_vuelto is None:
-                    raise ValueError("El vuelto por pago movil/transferencia requiere una cuenta bancaria de origen")
+                    raise ValueError(
+                        "El vuelto por pago movil/transferencia requiere una cuenta bancaria de origen"
+                    )
                 if id_caja_vuelto is not None:
-                    raise ValueError("El vuelto por pago movil/transferencia no admite caja de origen")
+                    raise ValueError(
+                        "El vuelto por pago movil/transferencia no admite caja de origen"
+                    )
                 cuenta_vuelto = session.get(CuentaBancaria, id_cuenta_bancaria_vuelto)
                 if cuenta_vuelto is None:
                     raise ValueError("Cuenta bancaria de vuelto no encontrada")
                 if cuenta_vuelto.estado_cuenta != "ACTIVO":
-                    raise ValueError(f"La cuenta bancaria '{cuenta_vuelto.numero_cuenta}' esta inactiva")
+                    raise ValueError(
+                        f"La cuenta bancaria '{cuenta_vuelto.numero_cuenta}' esta inactiva"
+                    )
                 referencia_vuelto = (referencia_vuelto or "").strip()
                 if len(referencia_vuelto) < 4:
                     raise ValueError(
@@ -537,12 +638,20 @@ class VentaService:
                         "bancaria de al menos 4 caracteres"
                     )
                 if len(referencia_vuelto) > 50:
-                    raise ValueError("La referencia bancaria del vuelto no puede superar 50 caracteres")
+                    raise ValueError(
+                        "La referencia bancaria del vuelto no puede superar 50 caracteres"
+                    )
                 if id_autorizador_vuelto is None:
-                    raise ValueError("El vuelto por pago movil/transferencia requiere autorizacion de un supervisor")
-                require_permiso(session, id_autorizador_vuelto, "vueltos_bancarios", "crear")
+                    raise ValueError(
+                        "El vuelto por pago movil/transferencia requiere autorizacion de un supervisor"
+                    )
+                require_permiso(
+                    session, id_autorizador_vuelto, "vueltos_bancarios", "crear"
+                )
         elif metodo_vuelto is not None:
-            raise ValueError("metodo_vuelto solo aplica si hay vuelto a favor del cliente")
+            raise ValueError(
+                "metodo_vuelto solo aplica si hay vuelto a favor del cliente"
+            )
 
         # --- Insercion atomica de cabecera y lineas ---
         # numero_factura/numero_control definitivos se asignan DESPUES del flush -- ver
@@ -568,11 +677,19 @@ class VentaService:
             porcentaje_iva_aplicado=porcentaje_iva,
             monto_iva=monto_iva,
             monto_descuento=monto_descuento,
-            motivo_descuento=motivo_descuento if requiere_autorizacion_descuento else None,
-            autorizado_por_descuento=id_autorizador_descuento if requiere_autorizacion_descuento else None,
+            motivo_descuento=(
+                motivo_descuento if requiere_autorizacion_descuento else None
+            ),
+            autorizado_por_descuento=(
+                id_autorizador_descuento if requiere_autorizacion_descuento else None
+            ),
             dias_credito_aplicados=dias_credito_aplicados,
-            motivo_dias_credito=motivo_dias_credito if hubo_override_dias_credito else None,
-            autorizado_por_dias_credito=id_autorizador_dias_credito if hubo_override_dias_credito else None,
+            motivo_dias_credito=(
+                motivo_dias_credito if hubo_override_dias_credito else None
+            ),
+            autorizado_por_dias_credito=(
+                id_autorizador_dias_credito if hubo_override_dias_credito else None
+            ),
         )
         session.add(factura)
         session.flush()
@@ -614,7 +731,11 @@ class VentaService:
         # transaccion, antes de comprometer. Desde migrations/0024 el trigger abre cuenta
         # por cobrar tanto para credito como para contado, asi que el ajuste aplica a
         # ambas condiciones (antes era solo credito).
-        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
+        cxc = (
+            session.query(CuentaPorCobrar)
+            .filter(CuentaPorCobrar.id_factura == factura.id_factura)
+            .first()
+        )
 
         # Si hay porcentaje BCV, la cuenta por cobrar original debe tener saldo 0
         # (solo la cuenta BCV maneja el monto total)
@@ -644,7 +765,9 @@ class VentaService:
 
                 # Crear cuenta por cobrar BCV con el monto total de la factura (con porcentaje)
                 estado_bcv = "pendiente" if condicion_pago == "credito" else "pagada"
-                logger.info(f"BCV - Creando cuenta con estado: {estado_bcv}, condición pago: {condicion_pago}")
+                logger.info(
+                    f"BCV - Creando cuenta con estado: {estado_bcv}, condición pago: {condicion_pago}"
+                )
                 cxc_bcv = CuentaPorCobrarBCV(
                     id_factura=factura.id_factura,
                     saldo_pendiente=total_a_cobrar,
@@ -653,8 +776,14 @@ class VentaService:
                     creado_por=id_usuario,
                     fecha_creacion=datetime.now(),
                     porcentaje=porcentaje_bcv,
-                    dias_credito=dias_credito_aplicados if condicion_pago == "credito" else None,
-                    fecha_emision=factura.fecha_emision.date() if factura.fecha_emision else date.today(),
+                    dias_credito=(
+                        dias_credito_aplicados if condicion_pago == "credito" else None
+                    ),
+                    fecha_emision=(
+                        factura.fecha_emision.date()
+                        if factura.fecha_emision
+                        else date.today()
+                    ),
                 )
                 session.add(cxc_bcv)
                 session.flush()  # Asegurar que se inserte la cuenta BCV antes de continuar
@@ -680,11 +809,11 @@ class VentaService:
                                     cxc_bcv.estado = "pagada"
 
                             # Registrar excedente (cambio) si lo hay
-                            excedente_linea = (monto_usd - monto_a_aplicar_bcv).quantize(Decimal("0.01"))
+                            excedente_linea = (
+                                monto_usd - monto_a_aplicar_bcv
+                            ).quantize(Decimal("0.01"))
                             if excedente_linea > 0:
-                                descripcion_excedente = (
-                                    f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
-                                )
+                                descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
                                 id_caja_linea = pago_linea.get("id_caja")
                                 id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
                                 if id_caja_linea is not None:
@@ -749,7 +878,9 @@ class VentaService:
                             id_usuario=id_usuario,
                         )
 
-                excedente_linea = (monto_usd - monto_a_aplicar).quantize(Decimal("0.01"))
+                excedente_linea = (monto_usd - monto_a_aplicar).quantize(
+                    Decimal("0.01")
+                )
                 if excedente_linea > 0:
                     descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
                     id_caja_linea = pago_linea.get("id_caja")
@@ -774,8 +905,14 @@ class VentaService:
                         )
 
         if monto_vuelto > 0:
-            nombre_cliente = factura.cliente.nombre_razon_social if factura.cliente else "Desconocido"
-            descripcion_vuelto = f"Vuelto factura {factura.numero_factura} - {nombre_cliente}"
+            nombre_cliente = (
+                factura.cliente.nombre_razon_social
+                if factura.cliente
+                else "Desconocido"
+            )
+            descripcion_vuelto = (
+                f"Vuelto factura {factura.numero_factura} - {nombre_cliente}"
+            )
             fecha_vuelto: datetime = factura.fecha_emision
             if metodo_vuelto == "efectivo":
                 # id_caja_vuelto/caja_vuelto ya se validaron como no-None mas arriba (unico
@@ -784,7 +921,9 @@ class VentaService:
                 # Recien aca, con los pagos de contado ya aplicados (el efectivo entregado
                 # por el cliente en ESTA factura ya se sumo al saldo de caja via
                 # _aplicar_pago_cobro -> trg_pagos_cobros_io), se compara el saldo real.
-                saldo_actual_caja = CajaService.calcular_saldo_actual(session, id_caja_vuelto)
+                saldo_actual_caja = CajaService.calcular_saldo_actual(
+                    session, id_caja_vuelto
+                )
                 if saldo_actual_caja < monto_vuelto:
                     raise ValueError(
                         f"La caja '{caja_vuelto.nombre_caja}' no tiene saldo suficiente para el "
@@ -801,7 +940,10 @@ class VentaService:
             else:
                 # id_cuenta_bancaria_vuelto/referencia_vuelto ya se validaron como no-None
                 # mas arriba (unico camino para llegar aca con metodo_vuelto bancario).
-                assert id_cuenta_bancaria_vuelto is not None and referencia_vuelto is not None
+                assert (
+                    id_cuenta_bancaria_vuelto is not None
+                    and referencia_vuelto is not None
+                )
                 BancoService._registrar_egreso_vuelto(
                     session,
                     id_cuenta=id_cuenta_bancaria_vuelto,
@@ -814,9 +956,15 @@ class VentaService:
 
             factura.monto_vuelto = monto_vuelto
             factura.metodo_vuelto = metodo_vuelto
-            factura.referencia_vuelto = referencia_vuelto if metodo_vuelto != "efectivo" else None
-            factura.autorizado_por_vuelto = id_autorizador_vuelto if metodo_vuelto != "efectivo" else None
-            factura.fecha_autorizacion_vuelto = datetime.now() if metodo_vuelto != "efectivo" else None
+            factura.referencia_vuelto = (
+                referencia_vuelto if metodo_vuelto != "efectivo" else None
+            )
+            factura.autorizado_por_vuelto = (
+                id_autorizador_vuelto if metodo_vuelto != "efectivo" else None
+            )
+            factura.fecha_autorizacion_vuelto = (
+                datetime.now() if metodo_vuelto != "efectivo" else None
+            )
 
         try:
             session.commit()
@@ -856,16 +1004,26 @@ class VentaService:
                 "condicion_pago": condicion_pago,
                 "total_venta": str(factura.total_venta),
                 "monto_iva": str(factura.monto_iva),
-                "monto_descuento": str(factura.monto_descuento) if factura.monto_descuento > 0 else None,
+                "monto_descuento": (
+                    str(factura.monto_descuento)
+                    if factura.monto_descuento > 0
+                    else None
+                ),
                 "autorizado_por_descuento": factura.autorizado_por_descuento,
                 "dias_credito_aplicados": factura.dias_credito_aplicados,
                 "autorizado_por_dias_credito": factura.autorizado_por_dias_credito,
-                "monto_vuelto": str(factura.monto_vuelto) if factura.monto_vuelto > 0 else None,
+                "monto_vuelto": (
+                    str(factura.monto_vuelto) if factura.monto_vuelto > 0 else None
+                ),
                 "metodo_vuelto": factura.metodo_vuelto,
                 "autorizado_por_vuelto": factura.autorizado_por_vuelto,
                 "pagos": (
                     [
-                        {"metodo_pago": p["metodo_pago"], "moneda": p["moneda"], "monto_usd": str(monto_usd)}
+                        {
+                            "metodo_pago": p["metodo_pago"],
+                            "moneda": p["moneda"],
+                            "monto_usd": str(monto_usd),
+                        }
                         for p, monto_usd in zip(pagos, pagos_usd, strict=True)
                     ]
                     if condicion_pago == "contado"
@@ -876,7 +1034,9 @@ class VentaService:
         return factura
 
     @staticmethod
-    def anular_factura(session: Session, id_factura: int, id_usuario: int | None, motivo: str) -> FacturaVenta:
+    def anular_factura(
+        session: Session, id_factura: int, id_usuario: int | None, motivo: str
+    ) -> FacturaVenta:
         """Anula la factura: repone el stock vendido y cierra la cuenta por cobrar (si la
         hubiera).
 
@@ -928,7 +1088,9 @@ class VentaService:
 
         ids_detalle = [
             id_factura_detalle
-            for (id_factura_detalle,) in session.query(FacturaDetalle.id_factura_detalle)
+            for (id_factura_detalle,) in session.query(
+                FacturaDetalle.id_factura_detalle
+            )
             .filter(FacturaDetalle.id_factura == id_factura)
             .all()
         ]
@@ -943,13 +1105,17 @@ class VentaService:
                 session.execute(
                     select(ComisionFactura)
                     .where(ComisionFactura.id_factura_detalle.in_(ids_detalle))
-                    .with_hint(ComisionFactura, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+                    .with_hint(
+                        ComisionFactura, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
+                    )
                 )
                 .scalars()
                 .all()
             )
             if any(comision.estado_pago == "pagada" for comision in comisiones):
-                raise ValueError("No se puede anular: hay comisiones ya pagadas sobre esta factura.")
+                raise ValueError(
+                    "No se puede anular: hay comisiones ya pagadas sobre esta factura."
+                )
             # 'liberada' (cliente ya pago la factura, el vendedor aun no cobro la
             # comision) tambien bloquea la anulacion: el dinero de la venta ya entro
             # (contado, o credito ya cobrado via trg_cxc_libera_comisiones,
@@ -964,11 +1130,15 @@ class VentaService:
                     "sobre esta factura."
                 )
             if comisiones:
-                session.query(ComisionFactura).filter(ComisionFactura.id_factura_detalle.in_(ids_detalle)).delete(
-                    synchronize_session=False
-                )
+                session.query(ComisionFactura).filter(
+                    ComisionFactura.id_factura_detalle.in_(ids_detalle)
+                ).delete(synchronize_session=False)
 
-        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
+        cxc = (
+            session.query(CuentaPorCobrar)
+            .filter(CuentaPorCobrar.id_factura == id_factura)
+            .first()
+        )
         monto_pagado = Decimal("0.00")
         if cxc is not None:
             monto_pagado = (
@@ -978,7 +1148,9 @@ class VentaService:
             )
             monto_pagado = Decimal(str(monto_pagado))
 
-        session.query(FacturaDetalle).filter(FacturaDetalle.id_factura == id_factura).delete(synchronize_session=False)
+        session.query(FacturaDetalle).filter(
+            FacturaDetalle.id_factura == id_factura
+        ).delete(synchronize_session=False)
         if cxc is not None:
             if monto_pagado > 0:
                 cxc.estado = "anulada"
@@ -1065,7 +1237,9 @@ class VentaService:
         # joinedload(vendedor): FacturacionPanel muestra el vendedor en el listado
         # (hallazgo #12 de la auditoria de facturacion) -- sin esto cada fila dispara su
         # propio SELECT lazy al acceder a factura.vendedor.nombre_vendedor (N+1).
-        query = session.query(FacturaVenta).options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor))
+        query = session.query(FacturaVenta).options(
+            joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor)
+        )
         if fecha_desde:
             query = query.filter(FacturaVenta.fecha_emision >= fecha_desde)
         if fecha_hasta:
@@ -1075,11 +1249,17 @@ class VentaService:
         if condicion_pago:
             query = query.filter(FacturaVenta.condicion_pago == condicion_pago)
         if numero_factura:
-            query = query.filter(FacturaVenta.numero_factura.ilike(f"%{_escapar_like(numero_factura)}%", escape="\\"))
+            query = query.filter(
+                FacturaVenta.numero_factura.ilike(
+                    f"%{_escapar_like(numero_factura)}%", escape="\\"
+                )
+            )
         if nombre_cliente:
             # Usar subquery para filtrar por nombre de cliente sin afectar los joinedloads
             subq_cliente = session.query(Cliente.id_cliente).filter(
-                Cliente.nombre_razon_social.ilike(f"%{_escapar_like(nombre_cliente)}%", escape="\\")
+                Cliente.nombre_razon_social.ilike(
+                    f"%{_escapar_like(nombre_cliente)}%", escape="\\"
+                )
             )
             query = query.filter(FacturaVenta.id_cliente_factura.in_(subq_cliente))
         if texto_busqueda:
@@ -1111,12 +1291,17 @@ class VentaService:
             if estado == "ANULADA":
                 query = query.filter(FacturaVenta.estado_factura == "ANULADA")
             elif estado == "PAGADA":
-                subq = session.query(CuentaPorCobrar.id_factura).filter(CuentaPorCobrar.estado == "pagada")
+                subq = session.query(CuentaPorCobrar.id_factura).filter(
+                    CuentaPorCobrar.estado == "pagada"
+                )
                 query = query.filter(FacturaVenta.id_factura.in_(subq))
             elif estado == "PARCIAL":
                 subq = session.query(CuentaPorCobrar.id_factura).filter(
                     CuentaPorCobrar.estado == "parcial",
-                    or_(CuentaPorCobrar.fecha_vencimiento.is_(None), CuentaPorCobrar.fecha_vencimiento >= hoy),
+                    or_(
+                        CuentaPorCobrar.fecha_vencimiento.is_(None),
+                        CuentaPorCobrar.fecha_vencimiento >= hoy,
+                    ),
                 )
                 query = query.filter(FacturaVenta.id_factura.in_(subq))
             elif estado == "VENCIDA":
@@ -1126,9 +1311,14 @@ class VentaService:
                 )
                 query = query.filter(FacturaVenta.id_factura.in_(subq))
             elif estado == "EMITIDA":
-                subq_abierta_no_vencida = session.query(CuentaPorCobrar.id_factura).filter(
+                subq_abierta_no_vencida = session.query(
+                    CuentaPorCobrar.id_factura
+                ).filter(
                     CuentaPorCobrar.estado == "pendiente",
-                    or_(CuentaPorCobrar.fecha_vencimiento.is_(None), CuentaPorCobrar.fecha_vencimiento >= hoy),
+                    or_(
+                        CuentaPorCobrar.fecha_vencimiento.is_(None),
+                        CuentaPorCobrar.fecha_vencimiento >= hoy,
+                    ),
                 )
                 subq_con_cxc = session.query(CuentaPorCobrar.id_factura)
                 query = query.filter(
@@ -1141,7 +1331,10 @@ class VentaService:
 
         total = query.count()
         facturas = (
-            query.order_by(FacturaVenta.fecha_emision.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+            query.order_by(FacturaVenta.fecha_emision.desc())
+            .offset((pagina - 1) * por_pagina)
+            .limit(por_pagina)
+            .all()
         )
 
         # estado_visual: atributo Python plano (no mapeado), calculado en un solo batch
@@ -1151,7 +1344,9 @@ class VentaService:
         if ids_pagina:
             cxc_por_factura = {
                 c.id_factura: c
-                for c in session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_(ids_pagina)).all()
+                for c in session.query(CuentaPorCobrar)
+                .filter(CuentaPorCobrar.id_factura.in_(ids_pagina))
+                .all()
             }
 
         # Metodos de pago para ventas de contado -- una factura puede tener varias lineas
@@ -1162,11 +1357,17 @@ class VentaService:
         if cxc_por_factura:
             ids_cxc = [c.id_cuenta_por_cobrar for c in cxc_por_factura.values()]
             if ids_cxc:
-                for p in session.query(PagoCobro).filter(PagoCobro.id_cuenta_por_cobrar.in_(ids_cxc)).all():
+                for p in (
+                    session.query(PagoCobro)
+                    .filter(PagoCobro.id_cuenta_por_cobrar.in_(ids_cxc))
+                    .all()
+                ):
                     pagos_por_cxc.setdefault(p.id_cuenta_por_cobrar, []).append(p)
 
         for f in facturas:
-            f.estado_visual = _calcular_estado_visual(f.estado_factura, cxc_por_factura.get(f.id_factura), hoy)
+            f.estado_visual = _calcular_estado_visual(
+                f.estado_factura, cxc_por_factura.get(f.id_factura), hoy
+            )
 
             # "mixto" es un sentinel para mas de un metodo distinto -- ver
             # historial_cliente.obtener_historial_cliente() para el mismo criterio.
@@ -1175,29 +1376,49 @@ class VentaService:
                 cxc = cxc_por_factura.get(f.id_factura)
                 if cxc:
                     metodos_distintos = list(
-                        dict.fromkeys(p.metodo_pago for p in pagos_por_cxc.get(cxc.id_cuenta_por_cobrar, []))
+                        dict.fromkeys(
+                            p.metodo_pago
+                            for p in pagos_por_cxc.get(cxc.id_cuenta_por_cobrar, [])
+                        )
                     )
                     if len(metodos_distintos) == 1:
                         f.metodo_pago = metodos_distintos[0]
                     elif len(metodos_distintos) > 1:
                         f.metodo_pago = "mixto"
 
-        return {"items": facturas, "total": total, "pagina": pagina, "por_pagina": por_pagina}
+        return {
+            "items": facturas,
+            "total": total,
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+        }
 
     @staticmethod
-    def obtener_factura(session: Session, id_factura: int, id_usuario: int | None = None) -> dict:
+    def obtener_factura(
+        session: Session, id_factura: int, id_usuario: int | None = None
+    ) -> dict:
         require_permiso(session, id_usuario, "ventas", "ver")
         factura = (
             session.query(FacturaVenta)
-            .options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor), joinedload(FacturaVenta.tasa))
+            .options(
+                joinedload(FacturaVenta.cliente),
+                joinedload(FacturaVenta.vendedor),
+                joinedload(FacturaVenta.tasa),
+            )
             .filter(FacturaVenta.id_factura == id_factura)
             .first()
         )
         if factura is None:
             raise ValueError("Factura no encontrada")
 
-        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
-        factura.estado_visual = _calcular_estado_visual(factura.estado_factura, cxc, date.today())
+        cxc = (
+            session.query(CuentaPorCobrar)
+            .filter(CuentaPorCobrar.id_factura == id_factura)
+            .first()
+        )
+        factura.estado_visual = _calcular_estado_visual(
+            factura.estado_factura, cxc, date.today()
+        )
 
         # Todas las lineas de pago para ventas de contado -- una factura puede tener mas
         # de una (PagoLineaDialog permite repartir el total entre varios metodos/monedas),
@@ -1216,7 +1437,9 @@ class VentaService:
         metodo_pago = None
         if pagos_cobro:
             metodos_distintos = list(dict.fromkeys(p.metodo_pago for p in pagos_cobro))
-            metodo_pago = metodos_distintos[0] if len(metodos_distintos) == 1 else "mixto"
+            metodo_pago = (
+                metodos_distintos[0] if len(metodos_distintos) == 1 else "mixto"
+            )
 
         detalles = (
             session.query(FacturaDetalle)
@@ -1231,7 +1454,9 @@ class VentaService:
         # "Devolver esta nota" sin que el usuario tenga que ir a buscarla al historial
         # del cliente.
         nota_credito = (
-            session.query(NotaCreditoCliente).filter(NotaCreditoCliente.id_factura_origen == id_factura).first()
+            session.query(NotaCreditoCliente)
+            .filter(NotaCreditoCliente.id_factura_origen == id_factura)
+            .first()
         )
 
         return {
@@ -1243,7 +1468,9 @@ class VentaService:
         }
 
     @staticmethod
-    def consultar_limite_disponible(session: Session, id_cliente: int, id_usuario: int | None = None) -> dict:
+    def consultar_limite_disponible(
+        session: Session, id_cliente: int, id_usuario: int | None = None
+    ) -> dict:
         """Para bloqueo visual proactivo en la UI (factura_form_dialog.py): cuanto puede
         cargarsele todavia a este cliente ANTES de armar/emitir la factura, sin duplicar
         la logica real de emitir_factura (misma consulta via _deuda_pendiente_cliente).
@@ -1259,7 +1486,11 @@ class VentaService:
         if cliente is None:
             raise ValueError("Cliente no encontrado")
 
-        limite_credito = cliente.limite_credito if cliente.limite_credito is not None else Decimal("0.00")
+        limite_credito = (
+            cliente.limite_credito
+            if cliente.limite_credito is not None
+            else Decimal("0.00")
+        )
         deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
         return {
             "limite_credito": limite_credito,

@@ -18,10 +18,14 @@ def _crear_panel(qtbot, monkeypatch):
     return panel
 
 
-def test_ver_detalle_factura_bloquea_reentrada_pero_no_queda_trabado(qtbot, monkeypatch):
+def test_ver_detalle_factura_bloquea_reentrada_pero_no_queda_trabado(
+    qtbot, monkeypatch
+):
     panel = _crear_panel(qtbot, monkeypatch)
     panel._fila_seleccionada_id = lambda: 1
-    monkeypatch.setattr(fp.VentaService, "obtener_factura", staticmethod(lambda *a, **k: {}))
+    monkeypatch.setattr(
+        fp.VentaService, "obtener_factura", staticmethod(lambda *a, **k: {})
+    )
 
     llamadas_sesion = []
 
