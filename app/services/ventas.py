@@ -813,7 +813,10 @@ class VentaService:
                                 monto_usd - monto_a_aplicar_bcv
                             ).quantize(Decimal("0.01"))
                             if excedente_linea > 0:
-                                descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
+                                descripcion_excedente = (
+                                    f"Excedente de pago factura {factura.numero_factura} "
+                                    "(vuelto pendiente)"
+                                )
                                 id_caja_linea = pago_linea.get("id_caja")
                                 id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
                                 if id_caja_linea is not None:

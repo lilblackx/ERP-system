@@ -191,7 +191,10 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
         etiqueta_metodo_pago = _ETIQUETAS_METODO_PAGO.get(
             metodo_pago, metodo_pago or "—"
         )
-        metodo_pago_row = f"<tr><td {_INFO_LBL}>Método de Pago:</td><td {_INFO_VAL}>{_esc(etiqueta_metodo_pago)}</td></tr>"
+        metodo_pago_row = (
+            f"<tr><td {_INFO_LBL}>Método de Pago:</td>"
+            f"<td {_INFO_VAL}>{_esc(etiqueta_metodo_pago)}</td></tr>"
+        )
 
     # Vuelto (cambio) entregado -- solo monto+metodo, igual criterio que el motivo/
     # autorizador de descuento (ver comentario mas abajo): la referencia bancaria y quien
@@ -219,11 +222,17 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
     watermark = ""
     if factura.estado_factura == "ANULADA":
-        watermark = f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** NOTA DE ENTREGA ANULADA ***</p>"
+        watermark = (
+            f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>"
+            "*** NOTA DE ENTREGA ANULADA ***</p>"
+        )
 
     observaciones_html = ""
     if factura.observaciones_factura:
-        observaciones_html = f"<p style='color:{_MUTED};'><b>Observaciones:</b> {_esc(factura.observaciones_factura)}</p>"
+        observaciones_html = (
+            f"<p style='color:{_MUTED};'><b>Observaciones:</b> "
+            f"{_esc(factura.observaciones_factura)}</p>"
+        )
 
     pie_html = ""
     if pie_pagina:

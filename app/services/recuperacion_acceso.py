@@ -168,7 +168,10 @@ def _crear_y_enviar_codigo(session: Session, usuario: Usuario, tipo: str) -> Non
     # cuerpo (texto plano) se mantiene igual que antes -- es el fallback para clientes de
     # correo sin HTML y lo unico que la suite de tests inspecciona (_extraer_codigo en
     # test_recuperacion_acceso.py). cuerpo_html es la version "corporativa" nueva.
-    cuerpo = f"Tu codigo es: {codigo}\n\nVence en {minutos_validez} minutos. Si no solicitaste esto, ignora este correo."
+    cuerpo = (
+        f"Tu codigo es: {codigo}\n\nVence en {minutos_validez} minutos. "
+        "Si no solicitaste esto, ignora este correo."
+    )
     cuerpo_html = _construir_html_codigo(
         _nombre_empresa(session), asunto, codigo, minutos_validez
     )

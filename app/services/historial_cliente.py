@@ -199,7 +199,10 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     else:
                         # Fallback: mostrar BCV si no se puede determinar
                         if pago.tasa.tasa_dolar_bcv:
-                            observaciones = f"Bs({pago.monto_moneda_origen:,.2f}) - BCV: {pago.tasa.tasa_dolar_bcv:,.2f}"
+                            observaciones = (
+                                f"Bs({pago.monto_moneda_origen:,.2f}) - "
+                                f"BCV: {pago.tasa.tasa_dolar_bcv:,.2f}"
+                            )
                         else:
                             observaciones = f"Bs({pago.monto_moneda_origen:,.2f})"
 

@@ -169,7 +169,10 @@ class ConfigEmpresaPanel(QWidget):
         self.direccion_input = _crear_input("Dirección principal")
         self.telefono_input = _crear_input("Ej: +58 412 1234567")
 
-        lbl_style = f"font-weight: bold; color: {COLOR_TEXT_DARK}; font-size: 14px; border: none; background: transparent;"
+        lbl_style = (
+            "font-weight: bold; color: {COLOR_TEXT_DARK}; font-size: 14px; "
+            "border: none; background: transparent;"
+        )
 
         lbl_rif = QLabel("RF Empresa:")
         lbl_rif.setStyleSheet(lbl_style)
