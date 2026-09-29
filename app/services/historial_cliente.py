@@ -6,7 +6,6 @@ from typing import Literal, TypedDict
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
-    ControlDeTasa,
     CuentaBancaria,
     CuentaPorCobrar,
     FacturaVenta,

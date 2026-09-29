@@ -242,7 +242,6 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
         f'<div style="color:{_MUTED};font-size:9pt;{_MB}">{_esc(telefono) or ""}</div>'
     )
 
-    codigo_cliente = (cliente.codigo_cliente if cliente else None) or (f"{cliente.id_cliente:06d}" if cliente else "—")
     nombre_cliente = cliente.nombre_razon_social if cliente else "—"
     if cliente and cliente.id_legal and cliente.identificacion_cliente:
         identificacion_cliente = f"{cliente.id_legal}-{cliente.identificacion_cliente}"

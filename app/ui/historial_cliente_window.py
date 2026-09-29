@@ -4,7 +4,7 @@ encabezado con icono + titulo/subtitulo) -- antes tenia su propio fondo azul sol
 no combinaba con el resto de dialogos de la app."""
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 
 import qtawesome as qta
