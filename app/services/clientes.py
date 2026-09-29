@@ -135,7 +135,7 @@ def create_cliente(session: Session, **datos) -> Cliente:
         session.rollback()
         # Normalize DB unique constraint failures into ValueError for caller/tests
         # Prefer a descriptive message; tests usually only check exception type.
-        raise ValueError(f"Error al crear cliente: código o identificación duplicado") from e
+        raise ValueError("Error al crear cliente: código o identificación duplicado") from e
 
     session.refresh(cliente)
 
