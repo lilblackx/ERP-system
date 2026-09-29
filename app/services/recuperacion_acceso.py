@@ -190,7 +190,7 @@ def _consumir_codigo(session: Session, usuario: Usuario, tipo: str, codigo_ingre
             .where(
                 CodigoVerificacion.id_usuario == usuario.id_usuario,
                 CodigoVerificacion.tipo == tipo,
-                not CodigoVerificacion.usado,
+                CodigoVerificacion.usado == False,  # noqa: E712 -- BIT en mssql
             )
             .order_by(CodigoVerificacion.fecha_creacion.desc())
         )

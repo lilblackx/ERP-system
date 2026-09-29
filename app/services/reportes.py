@@ -1382,7 +1382,7 @@ class ReporteService:
             session.query(CompraDetalle, Compra)
             .join(Compra, CompraDetalle.id_compra == Compra.id_compra)
             .filter(CompraDetalle.id_producto_compra == id_producto)
-            .filter(not CompraDetalle.stock_ya_contabilizado)
+            .filter(CompraDetalle.stock_ya_contabilizado == False)  # noqa: E712 -- BIT en mssql
             .all()
         )
         for detalle, compra in compras:
