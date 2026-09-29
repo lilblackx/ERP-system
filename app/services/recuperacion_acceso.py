@@ -213,8 +213,7 @@ def _consumir_codigo(
             .where(
                 CodigoVerificacion.id_usuario == usuario.id_usuario,
                 CodigoVerificacion.tipo == tipo,
-                CodigoVerificacion.usado
-                == False,  # noqa: E712 -- BIT en mssql, "IS 0" no es sintaxis valida
+                not CodigoVerificacion.usado,
             )
             .order_by(CodigoVerificacion.fecha_creacion.desc())
         )
