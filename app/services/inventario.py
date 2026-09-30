@@ -50,6 +50,18 @@ class ProductoService:
             raise ValueError("id_categoria es requerido")
         ProductoService._validar_codigo_unico(session, cod_producto)
         producto = Inventario(**datos)
+
+        # Calcular campos de cajas al crear
+        cantidad_unidad = datos.get("cantidad_unidad") or Decimal("0")
+        cantidad_caja = datos.get("cantidad_caja") or Decimal("0")
+
+        if cantidad_caja > 0 and cantidad_unidad > 0:
+            producto.cantidad_caja_total = cantidad_unidad // cantidad_caja
+            producto.cantidad_caja_unidad = cantidad_unidad % cantidad_caja
+        else:
+            producto.cantidad_caja_total = Decimal("0")
+            producto.cantidad_caja_unidad = cantidad_unidad
+
         session.add(producto)
         session.commit()
         session.refresh(producto)
@@ -96,6 +108,19 @@ class ProductoService:
 
         for campo, valor in datos.items():
             setattr(producto, campo, valor)
+
+        # Actualizar campos calculados de cajas si cambió cantidad_unidad o cantidad_caja
+        if "cantidad_unidad" in datos or "cantidad_caja" in datos:
+            cantidad_unidad = datos.get("cantidad_unidad", producto.cantidad_unidad) or Decimal("0")
+            cantidad_caja = datos.get("cantidad_caja", producto.cantidad_caja) or Decimal("0")
+
+            if cantidad_caja > 0 and cantidad_unidad > 0:
+                producto.cantidad_caja_total = cantidad_unidad // cantidad_caja
+                producto.cantidad_caja_unidad = cantidad_unidad % cantidad_caja
+            else:
+                producto.cantidad_caja_total = Decimal("0")
+                producto.cantidad_caja_unidad = cantidad_unidad
+
         session.commit()
         session.refresh(producto)
 

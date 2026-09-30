@@ -103,18 +103,11 @@ def _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usua
         cantidad_unidad = Decimal(str(p.cantidad_unidad)) if p.cantidad_unidad is not None else Decimal("0")
 
         # Calcular cajas y unidades sueltas dinámicamente usando Decimal
-        if p.cantidad_caja_total is not None and p.cantidad_caja_total > 0:
-            cajas = Decimal(str(p.cantidad_caja_total))
-        elif p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
+        if p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
             cajas = cantidad_unidad // Decimal(str(p.cantidad_caja))
-        else:
-            cajas = Decimal("0")
-
-        if p.cantidad_caja_unidad is not None and p.cantidad_caja_unidad > 0:
-            unidades_sueltas = Decimal(str(p.cantidad_caja_unidad))
-        elif p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
             unidades_sueltas = cantidad_unidad % Decimal(str(p.cantidad_caja))
         else:
+            cajas = Decimal("0")
             unidades_sueltas = cantidad_unidad
 
         filas.append(
