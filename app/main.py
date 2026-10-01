@@ -36,8 +36,16 @@ from PySide6.QtWidgets import QApplication
 
 from app.config import validar_configuracion
 from app.db.migrar import verificar_migraciones_al_dia
+from app.db.session import engine
 from app.logging_config import setup_logging
+from app.services.licencia import (
+    LicenciaService,
+    LicenciaSoloLecturaError,
+    instalar_gate,
+    registrar_aviso_bloqueo,
+)
 from app.ui.geo_http import esperar_workers_pendientes
+from app.ui.licencia_aviso import AvisoLicencia
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
 from app.ui.message_box import MessageBox
@@ -48,6 +56,11 @@ def _manejar_excepcion_no_capturada(tipo, valor, tb):
     """P-01: sin esto, una excepcion no capturada en un slot de Qt tira la app entera
     al escritorio sin quedar en log -- solo QueryWorker.run() capturaba errores hasta
     ahora, y solo lo que pasaba por ahi."""
+    if issubclass(tipo, LicenciaSoloLecturaError):
+        # No es un bug: la licencia no permite escribir. El usuario ya fue avisado por
+        # AvisoLicencia en el momento del bloqueo; aca solo queda constancia en el log.
+        logging.getLogger(__name__).warning("Escritura bloqueada por licencia: %s", valor)
+        return
     logging.getLogger(__name__).critical("Excepcion no capturada", exc_info=(tipo, valor, tb))
     sys.__excepthook__(tipo, valor, tb)
     if QApplication.instance() is not None:
@@ -63,6 +76,10 @@ def main():
     sys.excepthook = _manejar_excepcion_no_capturada
     validar_configuracion()
     verificar_migraciones_al_dia()
+    # Despues de migrar (las migraciones escriben en tablas de negocio y no deben chocar con
+    # el modo solo lectura) y solo si hay servidor de licencias configurado.
+    if LicenciaService.habilitada():
+        instalar_gate(engine)
     # Requisito documentado de Qt/PySide6 para QWebEngineView (app/ui/mapa_widget.py,
     # 2026-09-01): sin este atributo fijado ANTES de crear QApplication, el mapa puede
     # renderizar en blanco en Windows (el contexto OpenGL del widget no queda compartido
@@ -93,6 +110,9 @@ def main():
     # flechas de QComboBox/QDateEdit (GLOBAL_QSS y los QSS locales de los dialogos) --
     # ver el comentario junto a generar_iconos_qss() en app/ui/styles.py.
     generar_iconos_qss()
+    # Referencia viva: si se pierde, Qt destruye el objeto y el aviso deja de funcionar.
+    aviso_licencia = AvisoLicencia(app)
+    registrar_aviso_bloqueo(aviso_licencia.notificar)
 
     while True:
         login = LoginWindow()

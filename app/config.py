@@ -1,4 +1,5 @@
 import os
+import sys
 import urllib.parse
 
 from dotenv import load_dotenv
@@ -23,6 +24,26 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "yes").lower() in ("yes", "true", "1")
+
+# Rol de esta instalacion (lo fija el instalador): SERVIDOR (activa y renueva la licencia, aloja
+# SQL Server) o ESTACION (se conecta al servidor y solo lee el estado de licencia). Un valor
+# desconocido cae a ESTACION, el rol con menos privilegios.
+_MODO = os.getenv("MODO_INSTALACION", "SERVIDOR").strip().upper()
+MODO_INSTALACION = _MODO if _MODO in ("SERVIDOR", "ESTACION") else "ESTACION"
+
+# Licenciamiento (app/services/licencia.py). La app solo aplica el modo "solo lectura" si
+# hay URL del servidor Y clave publica configuradas -- sin ellas (desarrollo, tests) el
+# chequeo queda apagado. En un ejecutable empaquetado (sys.frozen) se IGNORA el .env y se
+# usan solo los valores horneados en app/licencia_embebida.py (generado por el script de
+# empaquetado): si no, borrar o editar el .env bastaria para apagar la proteccion.
+if getattr(sys, "frozen", False):
+    try:
+        from app.licencia_embebida import LICENCIA_PUBLIC_KEY_B64, LICENCIA_URL
+    except ImportError:
+        LICENCIA_URL, LICENCIA_PUBLIC_KEY_B64 = "", ""
+else:
+    LICENCIA_URL = os.getenv("LICENCIA_URL", "").rstrip("/")
+    LICENCIA_PUBLIC_KEY_B64 = os.getenv("LICENCIA_PUBLIC_KEY", "")
 
 
 def validar_configuracion() -> None:

@@ -19,6 +19,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QStackedWidget,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
+from app.services.licencia import EstadoLicencia, LicenciaService
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
 from app.ui.auditoria_panel import AuditoriaPanel
@@ -36,7 +38,8 @@ from app.ui.cajas_panel import CajasPanel
 from app.ui.clientes_panel import ClientesPanel
 from app.ui.comisiones_panel import ComisionesPanel
 from app.ui.compras import ComprasView
-from app.ui.config_empresa_panel import ConfigEmpresaPanel
+from app.ui.config_licencia_panel import color_estado
+from app.ui.configuracion_panel import ConfiguracionPanel
 from app.ui.cuentas_bancarias_panel import CuentasBancariasPanel
 from app.ui.cuentas_por_cobrar_bcv_panel import CuentasPorCobrarBCVPanel
 from app.ui.cuentas_por_cobrar_panel import CuentasPorCobrarPanel
@@ -55,6 +58,7 @@ from app.ui.tasas_panel import TasasPanel
 from app.ui.topbar import TopBar
 from app.ui.usuarios_panel import UsuariosPanel
 from app.ui.vendedores_panel import VendedoresPanel
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +87,7 @@ MODULOS_CONFIG = {
     # todavia -- un ADMIN lo otorga explicitamente por rol cuando corresponda (ADMIN mismo
     # bypassa el RBAC, ver UsuarioService.verificar_permiso).
     "reportes": ("Reportes", ReportesPanel),
-    "config_empresa": ("Configuración", ConfigEmpresaPanel),
+    "config_empresa": ("Configuración", ConfiguracionPanel),
     "usuarios": ("Usuarios", UsuariosPanel),
     "auditoria": ("Auditoría", AuditoriaPanel),
 }
@@ -184,6 +188,48 @@ class MainWindow(QMainWindow):
         # filtro estuviera instalado solo aca.
         QApplication.instance().installEventFilter(self)
 
+        # Licencia: el banner se recalcula cada minuto con el token local (sin red) y la
+        # validacion contra el servidor corre al abrir y luego cada hora, en segundo plano.
+        self._worker_licencia: QueryWorker | None = None
+        self._refrescar_banner_licencia()
+        self._timer_banner_licencia = QTimer(self)
+        self._timer_banner_licencia.setInterval(60_000)
+        self._timer_banner_licencia.timeout.connect(self._refrescar_banner_licencia)
+        self._timer_banner_licencia.start()
+        self._timer_validacion_licencia = QTimer(self)
+        self._timer_validacion_licencia.setInterval(3_600_000)
+        self._timer_validacion_licencia.timeout.connect(self._validar_licencia_en_segundo_plano)
+        self._timer_validacion_licencia.start()
+        QTimer.singleShot(2_000, self._validar_licencia_en_segundo_plano)
+
+    def _refrescar_banner_licencia(self, estado: EstadoLicencia | None = None) -> None:
+        estado = estado or LicenciaService.estado_actual()
+        if estado.permite_escritura:
+            self.banner_licencia.setVisible(False)
+            return
+        self.banner_licencia.setText(
+            f"  {estado.mensaje} La app esta en modo solo lectura: puede consultar, pero no registrar "
+            "operaciones. Gestione la licencia en Configuración > Licencia."
+        )
+        self.banner_licencia.setStyleSheet(
+            f"background-color: {color_estado(estado.estado)}; color: white; font-weight: bold; padding: 8px;"
+        )
+        self.banner_licencia.setVisible(True)
+
+    def _validar_licencia_en_segundo_plano(self) -> None:
+        if not LicenciaService.habilitada():
+            return
+        if self._worker_licencia is not None and self._worker_licencia.isRunning():
+            return
+        # Servidor: renueva el token (ademas de registrarse como estacion). Estacion: se registra
+        # y relee el estado que el servidor dejo en SQL Server.
+        self._worker_licencia = QueryWorker(SessionLocal, lambda session: LicenciaService.refrescar_periodico())
+        self._worker_licencia.resultado.connect(self._refrescar_banner_licencia)
+        # Sin internet/servidor caido no pasa nada: el token guardado sigue valiendo durante
+        # su periodo de gracia. QueryWorker ya registra la excepcion en el log.
+        self._worker_licencia.error.connect(lambda _mensaje: self._refrescar_banner_licencia())
+        self._worker_licencia.start()
+
     def eventFilter(self, watched, event) -> bool:
         if event.type() in _EVENTOS_ACTIVIDAD:
             self._timer_inactividad.start()  # reinicia la cuenta regresiva
@@ -265,6 +311,14 @@ class MainWindow(QMainWindow):
         right_v.setContentsMargins(0, 0, 0, 0)
         right_v.setSpacing(0)
 
+        # Aviso de licencia (solo visible si la licencia no permite escribir, ver
+        # app/services/licencia.py): sin esto el usuario solo veria errores genericos al
+        # intentar guardar algo.
+        self.banner_licencia = QLabel()
+        self.banner_licencia.setWordWrap(True)
+        self.banner_licencia.setVisible(False)
+        right_v.addWidget(self.banner_licencia)
+
         self.ticker_tasas = TasaTicker(SessionLocal, self.usuario)
         right_v.addWidget(self.ticker_tasas)
 
@@ -304,6 +358,8 @@ class MainWindow(QMainWindow):
                 panel.ver_facturas_solicitado.connect(lambda: self.navegar_a("facturacion"))
             if isinstance(panel, TasasPanel):
                 panel.tasa_registrada.connect(self.ticker_tasas.cargar_tasa)
+            if isinstance(panel, ConfiguracionPanel):
+                panel.licencia_panel.estado_cambiado.connect(self._refrescar_banner_licencia)
 
             self._paneles[clave] = panel
             self.stack.addWidget(panel)

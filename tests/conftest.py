@@ -46,6 +46,8 @@ TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test")
 # por eso el fixture db_session deshabilita todas las FK (NOCHECK CONSTRAINT ALL)
 # antes de borrar y las reactiva (WITH CHECK CHECK CONSTRAINT ALL) despues.
 TABLES_DELETE_ORDER = [
+    "licencia_estaciones",
+    "licencia_sistema",
     "comisiones_factura",
     "pagos_comisiones",
     "caja_movimientos",
