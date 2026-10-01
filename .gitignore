@@ -13,3 +13,8 @@ keep_wsl_running.bat
 licencias/worker/.dev.vars
 licencias/worker/.wrangler/
 licencias/worker/node_modules/
+
+# Instalador
+build/
+app/licencia_embebida.py
+packaging/redist/
