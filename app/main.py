@@ -32,12 +32,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.config import validar_configuracion
 from app.db.migrar import verificar_migraciones_al_dia
 from app.db.session import engine
 from app.logging_config import setup_logging
+from app.rutas import ARCHIVO_CONFIG, DIR_LOGS
 from app.services.licencia import (
     LicenciaService,
     LicenciaSoloLecturaError,
@@ -71,11 +72,30 @@ def _manejar_excepcion_no_capturada(tipo, valor, tb):
         )
 
 
+def _error_de_arranque(exc: Exception) -> None:
+    """Fallo antes de abrir la ventana principal (config incompleta, SQL Server inaccesible,
+    migraciones pendientes). La app instalada no tiene consola: sin este dialogo el usuario
+    veria que "no abre" y nada mas."""
+    logging.getLogger(__name__).critical("No se pudo iniciar la aplicacion", exc_info=exc)
+    app = QApplication.instance() or QApplication(sys.argv)
+    detalle = str(exc).strip() or exc.__class__.__name__
+    QMessageBox.critical(
+        None,
+        "No se pudo iniciar",
+        f"{detalle[:1200]}\n\nConfiguracion: {ARCHIVO_CONFIG}\nRegistro: {DIR_LOGS / 'app.log'}",
+    )
+    del app
+
+
 def main():
     setup_logging()
     sys.excepthook = _manejar_excepcion_no_capturada
-    validar_configuracion()
-    verificar_migraciones_al_dia()
+    try:
+        validar_configuracion()
+        verificar_migraciones_al_dia()
+    except Exception as exc:
+        _error_de_arranque(exc)
+        sys.exit(1)
     # Despues de migrar (las migraciones escriben en tablas de negocio y no deben chocar con
     # el modo solo lectura) y solo si hay servidor de licencias configurado.
     if LicenciaService.habilitada():
