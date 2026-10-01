@@ -4,7 +4,11 @@ import urllib.parse
 
 from dotenv import load_dotenv
 
-load_dotenv()
+from app.rutas import ARCHIVO_CONFIG, EMPAQUETADA
+
+# Desarrollo: .env en la raiz del proyecto. Instalada: config.env en ProgramData, que escribe el
+# instalador (conexion a SQL Server, rol SERVIDOR/ESTACION, etc.) -- ningun .env suelto se lee.
+load_dotenv(ARCHIVO_CONFIG) if EMPAQUETADA else load_dotenv()
 
 DB_SERVER = os.getenv("DB_SERVER", "localhost,1433")
 DB_NAME = os.getenv("DB_NAME", "distribuidora_dj")
