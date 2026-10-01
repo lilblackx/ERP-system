@@ -16,6 +16,8 @@ reportlab==4.2.0
 # no falle en Linux/Mac/CI (esta app corre solo en Windows de todos modos, ver README).
 # winrt-Windows.Foundation/Collections son dependencias transitivas de WinRT que pip no
 # resuelve solas (paquetes por namespace, sin declararse entre si).
+# Servicio de Windows de licencia del servidor (app/servicio_licencia.py)
+pywin32==312; sys_platform == "win32"
 winrt-Windows.Devices.Geolocation==3.2.1; sys_platform == "win32"
 winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
 winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
