@@ -42,6 +42,7 @@ from app.ui.styles import (
     COLOR_WHITE,
     FONT_FAMILY,
 )
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,7 @@ class SolicitarCodigoDialog(QDialog):
         self.session_factory = session_factory
         self.tipo = tipo
         self._nombre_usuario_confirmado: str | None = None
+        self._worker_envio: QueryWorker | None = None
 
         self.setWindowTitle(_TITULOS[tipo])
         self.setMinimumWidth(420)
@@ -172,17 +174,17 @@ class SolicitarCodigoDialog(QDialog):
 
         footer = QHBoxLayout()
         footer.addStretch()
-        btn_cancelar = QPushButton("Cancelar")
-        btn_cancelar.setObjectName("BtnSecondary")
-        btn_cancelar.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_cancelar.clicked.connect(self.reject)
-        btn_enviar = QPushButton("Enviar código al correo")
-        btn_enviar.setIcon(qta.icon("fa5s.paper-plane", color="#FFFFFF"))
-        btn_enviar.setObjectName("BtnPrimary")
-        btn_enviar.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_enviar.clicked.connect(self._enviar_codigo)
-        footer.addWidget(btn_cancelar)
-        footer.addWidget(btn_enviar)
+        self.btn_cancelar_envio = QPushButton("Cancelar")
+        self.btn_cancelar_envio.setObjectName("BtnSecondary")
+        self.btn_cancelar_envio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancelar_envio.clicked.connect(self.reject)
+        self.btn_enviar = QPushButton("Enviar código al correo")
+        self.btn_enviar.setIcon(qta.icon("fa5s.paper-plane", color="#FFFFFF"))
+        self.btn_enviar.setObjectName("BtnPrimary")
+        self.btn_enviar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_enviar.clicked.connect(self._enviar_codigo)
+        footer.addWidget(self.btn_cancelar_envio)
+        footer.addWidget(self.btn_enviar)
         layout.addLayout(footer)
 
         return pagina
@@ -193,27 +195,49 @@ class SolicitarCodigoDialog(QDialog):
             MessageBox.warning(self, "Dato requerido", "Ingrese el nombre de usuario.")
             return
 
-        session = self.session_factory()
-        try:
-            if self.tipo == TIPO_DESBLOQUEO:
-                mensaje = RecuperacionAccesoService.solicitar_codigo_desbloqueo(session, nombre_usuario)
-            else:
-                mensaje = RecuperacionAccesoService.solicitar_codigo_recuperacion(session, nombre_usuario)
-        except Exception:
-            logger.exception("Fallo al solicitar codigo (%s) para '%s'", self.tipo, nombre_usuario)
-            MessageBox.critical(
-                self,
-                "Error",
-                "No se pudo enviar el codigo. Intente nuevamente mas tarde.",
-            )
+        if self._worker_envio is not None and self._worker_envio.isRunning():
             return
-        finally:
-            session.close()
 
+        # El envio SMTP (conexion + STARTTLS + login) puede tardar varios segundos o
+        # colgarse hasta el timeout; en el hilo de la UI congelaba la ventana ("No responde").
+        tarea = (
+            RecuperacionAccesoService.solicitar_codigo_desbloqueo
+            if self.tipo == TIPO_DESBLOQUEO
+            else RecuperacionAccesoService.solicitar_codigo_recuperacion
+        )
+        self._set_enviando(True)
+        self._worker_envio = QueryWorker(self.session_factory, tarea, nombre_usuario)
+        self._worker_envio.resultado.connect(lambda mensaje: self._on_envio_ok(nombre_usuario, mensaje))
+        self._worker_envio.error.connect(lambda _msg: self._on_envio_error(nombre_usuario))
+        self._worker_envio.start()
+
+    def _set_enviando(self, enviando: bool) -> None:
+        self.btn_enviar.setEnabled(not enviando)
+        self.btn_cancelar_envio.setEnabled(not enviando)
+        self.usuario_input.setEnabled(not enviando)
+        self.btn_enviar.setText("Enviando..." if enviando else "Enviar código al correo")
+
+    def _on_envio_ok(self, nombre_usuario: str, mensaje: str) -> None:
+        self._set_enviando(False)
         self._nombre_usuario_confirmado = nombre_usuario
         MessageBox.information(self, "Codigo enviado", mensaje)
         self.stack.setCurrentIndex(1)
         self.codigo_input.setFocus()
+
+    def _on_envio_error(self, nombre_usuario: str) -> None:
+        self._set_enviando(False)
+        logger.error("Fallo al solicitar codigo (%s) para '%s'", self.tipo, nombre_usuario)
+        MessageBox.critical(
+            self,
+            "Error",
+            "No se pudo enviar el codigo. Intente nuevamente mas tarde.",
+        )
+
+    def reject(self) -> None:
+        # Cerrar con el hilo de envio vivo destruiria el QThread a mitad de ejecucion.
+        if self._worker_envio is not None and self._worker_envio.isRunning():
+            return
+        super().reject()
 
     # ── Paso 2: verificar el codigo ────────────────────────────────────────
 
