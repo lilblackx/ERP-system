@@ -9,3 +9,7 @@ CLAUDE.md
 FASE_*.md
 ROADMAP_*.md
 keep_wsl_running.bat
+
+licencias/worker/.dev.vars
+licencias/worker/.wrangler/
+licencias/worker/node_modules/

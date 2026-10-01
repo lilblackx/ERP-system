@@ -1,0 +1,12 @@
+name = "distribuidora-licencias"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+preview_urls = false # sin URLs de vista previa: una sola URL publica que proteger
+
+[vars]
+TTL_DIAS = "7" # dias de gracia sin conexion que ve la app
+
+# Crear con: wrangler kv namespace create LICENCIAS  (y pegar aqui el id que imprime)
+[[kv_namespaces]]
+binding = "LICENCIAS"
+id = "db4910275012479bbf5bead24f9148fd"
