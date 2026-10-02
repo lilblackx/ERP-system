@@ -27,6 +27,7 @@
 #define Nombre "Distribuidora DJ"
 #define Servicio "DistribuidoraDJLicencia"
 #define ReglaFirewall "Distribuidora DJ - SQL Server"
+#define CertNombre "Distribuidora DJ"
 
 [Setup]
 AppId={{E3009BDE-BFFE-421D-A4A6-5939CEC2EEEE}
@@ -77,6 +78,10 @@ Source: "{#Herramientas}"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "{#Herramientas}"; DestDir: "{app}\herramientas"; Flags: ignoreversion
 ; Controlador ODBC de Microsoft: solo se instala si falta
 Source: "redist\msodbcsql.msi"; DestDir: "{tmp}"; Flags: dontcopy
+#ifdef Cer
+; Certificado publico (autofirmado) con el que se firmo todo: se instala como de confianza en este equipo
+Source: "{#Cer}"; DestDir: "{tmp}"; DestName: "dj-firma.cer"; Flags: dontcopy
+#endif
 
 [Icons]
 Name: "{group}\{#Nombre}"; Filename: "{app}\DistribuidoraDJ.exe"
@@ -91,6 +96,10 @@ Filename: "{app}\DistribuidoraDJ.exe"; Description: "Abrir {#Nombre}"; Flags: po
 Filename: "{sys}\sc.exe"; Parameters: "stop {#Servicio}"; Flags: runhidden; RunOnceId: "DetenerServicio"
 Filename: "{sys}\sc.exe"; Parameters: "delete {#Servicio}"; Flags: runhidden; RunOnceId: "BorrarServicio"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#ReglaFirewall}"""; Flags: runhidden; RunOnceId: "BorrarFirewall"
+#ifdef Cer
+Filename: "{sys}\certutil.exe"; Parameters: "-delstore Root ""{#CertNombre}"""; Flags: runhidden; RunOnceId: "QuitarCertRaiz"
+Filename: "{sys}\certutil.exe"; Parameters: "-delstore TrustedPublisher ""{#CertNombre}"""; Flags: runhidden; RunOnceId: "QuitarCertEditor"
+#endif
 
 [Code]
 const
@@ -278,6 +287,13 @@ end;
 function ValPuerto: String;
 begin
   if WizardSilent then Result := Par('Puerto', '1433') else Result := Trim(PgServidor.Values[1]);
+  { El instalador fija este puerto en SQL Server (ver ConfigurarSqlLocal), asi que nunca queda vacio. }
+  if Result = '' then Result := '1433';
+end;
+function ConfigurarSqlActivado: Boolean;
+begin
+  { /ConfigurarSql=0 deja SQL Server tal cual (el administrador ya lo configuro a mano). }
+  Result := (Par('ConfigurarSql', '1') <> '0');
 end;
 function ValBase: String;
 begin
@@ -329,6 +345,46 @@ begin
   Result := Result + '"base":""}';
 end;
 
+{ Deja el SQL Server de ESTE equipo listo (TCP/IP, puerto fijo, modo mixto). Si hay que cambiar algo reinicia el
+  servicio de SQL Server, asi que antes pregunta (en modo silencioso se hace sin preguntar). True = se puede seguir. }
+function ConfigurarSqlLocal: Boolean;
+var
+  Json, Mensaje: String;
+begin
+  Result := True;
+  if not ConfigurarSqlActivado then Exit;
+  Json := '{"servidor":"' + JsonEscape(ValServidor) + '","puerto":"' + JsonEscape(ValPuerto) + '","solo_diagnostico":true}';
+  if not EjecutarTool('configurar-sql', Json, Mensaje) then
+  begin
+    MsgBox(Mensaje, mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+  if Pos('CAMBIOS:', Mensaje) <> 1 then
+  begin
+    Log('configurar-sql: ' + Mensaje);
+    Exit;
+  end;
+  if not WizardSilent then
+    if SuppressibleMsgBox('Para que las estaciones puedan conectarse hay que cambiar la configuracion de SQL Server en este equipo:' + #13#10 + #13#10 +
+         Copy(Mensaje, Length('CAMBIOS:') + 2, MaxInt) + #13#10 + #13#10 +
+         'Se reiniciara el servicio de SQL Server (las aplicaciones que lo usen perderan la conexion unos segundos). ' +
+         'Desea continuar?', mbConfirmation, MB_YESNO, IDYES) <> IDYES then
+    begin
+      Result := False;
+      Exit;
+    end;
+  WizardForm.NextButton.Enabled := False;
+  try
+    Json := '{"servidor":"' + JsonEscape(ValServidor) + '","puerto":"' + JsonEscape(ValPuerto) + '"}';
+    Result := EjecutarTool('configurar-sql', Json, Mensaje);
+  finally
+    WizardForm.NextButton.Enabled := True;
+  end;
+  Log('configurar-sql: ' + Mensaje);
+  if not Result then MsgBox(Mensaje, mbError, MB_OK);
+end;
+
 { ---------- paginas del asistente ---------- }
 
 procedure ProbarServidorClick(Sender: TObject);
@@ -368,16 +424,17 @@ begin
 
   PgServidor := CreateInputQueryPage(PgTipo.ID, 'Conexion con SQL Server',
     'Se usara un SQL Server que ya exista en este equipo.',
-    'Indique como conectarse. Se creara la base de datos y un usuario propio de la aplicacion; las credenciales de administrador solo se usan durante la instalacion y no se guardan.');
+    'Indique como conectarse. El instalador habilita TCP/IP, fija el puerto y el modo mixto en SQL Server (puede reiniciar el servicio), y crea la base de datos y un usuario propio de la aplicacion. Las credenciales de administrador solo se usan durante la instalacion y no se guardan. Con autenticacion de Windows (usuario vacio) su cuenta debe ser administradora de SQL Server.');
   PgServidor.Add('Servidor SQL (nombre, IP o nombre\instancia):', False);
-  PgServidor.Add('Puerto TCP (necesario para que las estaciones se conecten; vacio si usa instancia con nombre):', False);
+  PgServidor.Add('Puerto TCP (el instalador lo fija en SQL Server para que las estaciones se conecten):', False);
   PgServidor.Add('Nombre de la base de datos:', False);
   PgServidor.Add('Usuario administrador de SQL (vacio = autenticacion de Windows):', False);
   PgServidor.Add('Contrasena del administrador de SQL:', True);
   PgServidor.Values[0] := 'localhost';
   PgServidor.Values[1] := '1433';
   PgServidor.Values[2] := 'distribuidora_dj';
-  PgServidor.Values[3] := 'sa';
+  { Vacio = autenticacion de Windows: funciona aunque 'sa' este deshabilitado (SQL recien instalado solo con Windows auth). }
+  PgServidor.Values[3] := '';
 
   BtnProbarServidor := TNewButton.Create(PgServidor);
   BtnProbarServidor.Parent := PgServidor.Surface;
@@ -460,7 +517,7 @@ begin
     if not SqlServerInstalado then
     begin
       MsgBox('No se encontro SQL Server en este equipo.' + #13#10 + #13#10 +
-             'La instalacion como Servidor necesita un SQL Server existente. Instale SQL Server (la edicion Express es gratuita: ' +
+             'La instalacion como Servidor necesita un SQL Server existente. Instale SQL Server 2019 o posterior (para pruebas sirve la edicion Express, que es gratuita: ' +
              'https://www.microsoft.com/sql-server/sql-server-downloads), verifique que el servicio este iniciado y vuelva a ' +
              'ejecutar este instalador desde el principio.' + #13#10 + #13#10 + 'La instalacion se cerrara ahora.',
              mbError, MB_OK);
@@ -480,6 +537,7 @@ begin
       Exit;
     end;
     if not AsegurarOdbc then begin Result := False; Exit; end;
+    if not ConfigurarSqlLocal then begin Result := False; Exit; end;
     WizardForm.NextButton.Enabled := False;
     try
       Result := EjecutarTool('probar', JsonConexionAdmin(True), Mensaje);
@@ -534,11 +592,35 @@ end;
 
 { ---------- instalacion ---------- }
 
+{ Hace que este equipo confie en lo firmado por Distribuidora DJ (certificado autofirmado). No es fatal si falla. }
+procedure InstalarCertificado;
+#ifdef Cer
+var
+  Res: Integer;
+  Cert, Almacen: String;
+  I: Integer;
+begin
+  ExtractTemporaryFile('dj-firma.cer');
+  Cert := ExpandConstant('{tmp}\dj-firma.cer');
+  for I := 0 to 1 do
+  begin
+    if I = 0 then Almacen := 'Root' else Almacen := 'TrustedPublisher';
+    if not Exec(ExpandConstant('{sys}\certutil.exe'), '-addstore -f ' + Almacen + ' "' + Cert + '"', '', SW_HIDE,
+                ewWaitUntilTerminated, Res) or (Res <> 0) then
+      Log('No se pudo instalar el certificado en ' + Almacen + ' (codigo ' + IntToStr(Res) + ')');
+  end;
+end;
+#else
+begin
+end;
+#endif
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Res: Integer;
 begin
   Result := '';
+  InstalarCertificado;
   { En una actualizacion el servicio mantiene bloqueados sus archivos: se detiene antes de copiar. }
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop ' + NOMBRE_SERVICIO, '', SW_HIDE, ewWaitUntilTerminated, Res);
   Sleep(2500);

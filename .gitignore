@@ -18,3 +18,5 @@ licencias/worker/node_modules/
 build/
 app/licencia_embebida.py
 packaging/redist/
+packaging/firma/*.pfx
+packaging/firma/*.cer

@@ -273,3 +273,140 @@ def test_probar_con_requiere_sysadmin(servidor_instalado, tmp_path):
     _, estado, mensaje = _ejecutar("probar", {**base, "usuario": USUARIO_APP, "clave": CLAVE_APP}, tmp_path)
     assert estado == "ERROR"
     assert "sysadmin" in mensaje
+
+
+# ── configurar-sql: registro de Windows y servicio simulados (no se toca el SQL Server real) ──
+
+
+class _SqlFalso:
+    """Registro + servicios en memoria. Estado inicial: Express recien instalado (solo Windows auth,
+    TCP deshabilitado, puerto dinamico)."""
+
+    def __init__(self, monkeypatch, instancias=None):
+        self.reg = {}
+        self.servicios = {}
+        self.acciones = []
+        for nombre, id_ in ({"SQLEXPRESS": "MSSQL16.SQLEXPRESS"} if instancias is None else instancias).items():
+            self.reg[(instalacion.RAIZ_SQL + r"\Instance Names\SQL", nombre)] = id_
+            self.reg[(instalacion._ruta_instancia(id_), "LoginMode")] = 1
+            self.reg[(instalacion._ruta_tcp(id_), "Enabled")] = 0
+            self.reg[(instalacion._ruta_tcp(id_) + r"\IPAll", "TcpPort")] = ""
+            self.reg[(instalacion._ruta_tcp(id_) + r"\IPAll", "TcpDynamicPorts")] = "52111"
+            self.servicios[nombre if nombre == "MSSQLSERVER" else f"MSSQL${nombre}"] = 4
+        monkeypatch.setattr(instalacion, "_reg_leer", lambda ruta, nombre: self.reg.get((ruta, nombre)))
+        monkeypatch.setattr(
+            instalacion, "_reg_escribir", lambda ruta, nombre, valor: self.reg.__setitem__((ruta, nombre), valor)
+        )
+        monkeypatch.setattr(
+            instalacion,
+            "_reg_valores",
+            lambda ruta: {n: v for (r, n), v in self.reg.items() if r == ruta},
+        )
+        monkeypatch.setattr(instalacion, "_estado_servicio", lambda s: self.servicios.get(s))
+        monkeypatch.setattr(instalacion, "_net", self._net)
+
+    def _net(self, accion, servicio, *extra):
+        self.acciones.append((accion, servicio))
+        if servicio in self.servicios:
+            self.servicios[servicio] = 4 if accion == "start" else 1
+
+        class R:
+            stdout = stderr = ""
+            returncode = 0
+
+        return R()
+
+
+def test_configurar_sql_diagnostico_no_modifica_nada(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+    antes = dict(sql.reg)
+    _, estado, mensaje = _ejecutar(
+        "configurar-sql", {"servidor": "localhost", "puerto": "1433", "solo_diagnostico": True}, tmp_path
+    )
+    assert estado == "OK"
+    assert mensaje.startswith("CAMBIOS:")
+    assert "TCP/IP" in mensaje and "mixta" in mensaje and "1433" in mensaje
+    assert sql.reg == antes and sql.acciones == []
+
+
+def test_configurar_sql_aplica_los_cambios_y_reinicia(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+    assert estado == "OK" and mensaje.startswith("CONFIGURADO:")
+    id_ = "MSSQL16.SQLEXPRESS"
+    assert sql.reg[(instalacion._ruta_instancia(id_), "LoginMode")] == 2
+    assert sql.reg[(instalacion._ruta_tcp(id_), "Enabled")] == 1
+    assert sql.reg[(instalacion._ruta_tcp(id_) + r"\IPAll", "TcpPort")] == "1433"
+    assert sql.reg[(instalacion._ruta_tcp(id_) + r"\IPAll", "TcpDynamicPorts")] == ""
+    assert sql.acciones == [("stop", "MSSQL$SQLEXPRESS"), ("start", "MSSQL$SQLEXPRESS")]
+    # Segunda vez: ya esta todo, no hay cambios ni reinicio.
+    sql.acciones.clear()
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+    assert mensaje.startswith("SIN CAMBIOS:") and sql.acciones == []
+
+
+def test_configurar_sql_reinicia_sql_agent_si_estaba_activo(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+    sql.servicios["SQLAgent$SQLEXPRESS"] = 4
+    _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+    assert ("start", "SQLAgent$SQLEXPRESS") in sql.acciones
+
+
+def test_configurar_sql_servidor_remoto_se_omite(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "OTRO-PC,1433", "puerto": "1433"}, tmp_path)
+    assert estado == "OK" and mensaje.startswith("OMITIDO:") and sql.acciones == []
+
+
+def test_configurar_sql_instancia_inexistente_o_ambigua(monkeypatch, tmp_path):
+    _SqlFalso(monkeypatch, {"UNO": "MSSQL16.UNO", "DOS": "MSSQL16.DOS"})
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost\\TRES", "puerto": "1433"}, tmp_path)
+    assert estado == "ERROR" and "TRES" in mensaje and "UNO" in mensaje
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+    assert estado == "ERROR" and "varias instancias" in mensaje
+
+
+def test_configurar_sql_puerto_ocupado_por_otra_instancia(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch, {"UNO": "MSSQL16.UNO", "DOS": "MSSQL16.DOS"})
+    sql.reg[(instalacion._ruta_tcp("MSSQL16.UNO") + r"\IPAll", "TcpPort")] = "1433"
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost\\DOS", "puerto": "1433"}, tmp_path)
+    assert estado == "ERROR" and "UNO" in mensaje and sql.acciones == []
+
+
+@pytest.mark.parametrize("puerto", ["abc", "0", "70000"])
+def test_configurar_sql_puerto_invalido(monkeypatch, tmp_path, puerto):
+    _SqlFalso(monkeypatch)
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": puerto}, tmp_path)
+    assert estado == "ERROR" and "puerto" in mensaje.lower()
+
+
+def test_configurar_sql_sin_sql_server(monkeypatch, tmp_path):
+    _SqlFalso(monkeypatch, instancias={})
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+    assert estado == "ERROR" and "ninguna instancia" in mensaje
+
+
+def test_configurar_sql_servicio_que_no_arranca(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+    monkeypatch.setattr(instalacion, "_net", lambda accion, servicio, *e: sql._net("stop", servicio))
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+    assert estado == "ERROR" and "no volvio a iniciar" in mensaje
+
+
+def test_configurar_sql_instancia_predeterminada_de_sql_server_2019(monkeypatch, tmp_path):
+    # SQL Server 2019 instalado a mano: instancia predeterminada (MSSQL15), TCP ya habilitado en 1433,
+    # solo falta el modo mixto. Solo se cambia eso y se reinicia MSSQLSERVER (con su SQL Agent).
+    sql = _SqlFalso(monkeypatch, {"MSSQLSERVER": "MSSQL15.MSSQLSERVER"})
+    id_ = "MSSQL15.MSSQLSERVER"
+    sql.reg[(instalacion._ruta_tcp(id_), "Enabled")] = 1
+    sql.reg[(instalacion._ruta_tcp(id_) + r"\IPAll", "TcpPort")] = "1433"
+    sql.reg[(instalacion._ruta_tcp(id_) + r"\IPAll", "TcpDynamicPorts")] = ""
+    sql.servicios["SQLSERVERAGENT"] = 4
+    _, estado, mensaje = _ejecutar(
+        "configurar-sql", {"servidor": "localhost", "puerto": "1433", "solo_diagnostico": True}, tmp_path
+    )
+    assert estado == "OK" and mensaje.startswith("CAMBIOS:") and "mixta" in mensaje
+    assert "TCP/IP" not in mensaje and "puerto" not in mensaje
+    _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+    assert sql.reg[(instalacion._ruta_instancia(id_), "LoginMode")] == 2
+    assert sql.acciones == [("stop", "MSSQLSERVER"), ("start", "MSSQLSERVER"), ("start", "SQLSERVERAGENT")]

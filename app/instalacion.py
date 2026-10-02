@@ -15,6 +15,10 @@ mostrar al usuario. Codigo de salida: 0 si OK, 1 si ERROR.
 Comandos:
     probar       prueba una conexion (SQL Server accesible, credenciales validas); con
                  requiere_sysadmin=true exige ademas que el usuario sea administrador
+    configurar-sql  deja el SQL Server LOCAL listo para la app: TCP/IP habilitado, puerto fijo y modo de
+                 autenticacion mixto (cambios en el registro + reinicio del servicio; requiere administrador
+                 de Windows). El mensaje empieza con SIN CAMBIOS, CAMBIOS (solo_diagnostico), CONFIGURADO u
+                 OMITIDO (servidor remoto)
     validar-clave  valida una contrasena contra la politica de la app (usuario `admin`)
     servidor     crea la base, el esquema, el usuario SQL propio de la app y el usuario `admin`,
                  y escribe config.env (MODO_INSTALACION=SERVIDOR) + datos_estaciones.txt
@@ -30,6 +34,7 @@ import re
 import secrets
 import socket
 import string
+import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
@@ -125,6 +130,187 @@ def _host_para_estaciones(servidor: str) -> str:
     host = servidor.split(",")[0].split("\\")[0].strip()
     resto = servidor[len(servidor.split(",")[0].split("\\")[0]) :]
     return (socket.gethostname() if host.lower() in _LOCALES else host) + resto
+
+
+# ── Configuracion del SQL Server local (registro de Windows + servicio) ──────
+#
+# Lo que el administrador haria a mano en SQL Server Configuration Manager y en las propiedades del
+# servidor. Todo pasa por _reg_* y _servicio_*, que los tests reemplazan (winreg solo existe en Windows).
+
+RAIZ_SQL = r"SOFTWARE\Microsoft\Microsoft SQL Server"
+_INSTANCIA_PREDETERMINADA = "MSSQLSERVER"
+_SERVICIO_EN_EJECUCION = 4
+
+
+def _reg_leer(ruta: str, nombre: str):
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ruta, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as clave:
+            return winreg.QueryValueEx(clave, nombre)[0]
+    except FileNotFoundError:
+        return None
+
+
+def _reg_escribir(ruta: str, nombre: str, valor: int | str) -> None:
+    import winreg
+
+    tipo = winreg.REG_DWORD if isinstance(valor, int) else winreg.REG_SZ
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ruta, 0, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as clave:
+        winreg.SetValueEx(clave, nombre, 0, tipo, valor)
+
+
+def _reg_valores(ruta: str) -> dict[str, str]:
+    import winreg
+
+    valores: dict[str, str] = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ruta, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as clave:
+            i = 0
+            while True:
+                try:
+                    nombre, valor, _ = winreg.EnumValue(clave, i)
+                except OSError:
+                    break
+                valores[nombre] = valor
+                i += 1
+    except FileNotFoundError:
+        pass
+    return valores
+
+
+def _estado_servicio(servicio: str) -> int | None:
+    """Codigo de estado de `sc query` (4 = en ejecucion); None si el servicio no existe."""
+    r = subprocess.run(["sc", "query", servicio], capture_output=True, text=True)
+    m = re.search(r"(?:STATE|ESTADO)\s*:\s*(\d+)", r.stdout)
+    return int(m.group(1)) if m else None
+
+
+def _net(accion: str, servicio: str, *extra: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["net", accion, servicio, *extra], capture_output=True, text=True, timeout=300)
+
+
+def _es_local(host: str) -> bool:
+    return host.strip().lower() in _LOCALES or host.strip().lower() == socket.gethostname().lower()
+
+
+def _instancias_sql() -> dict[str, str]:
+    """{nombre de instancia: id en el registro (p. ej. MSSQL16.SQLEXPRESS)}."""
+    return _reg_valores(RAIZ_SQL + r"\Instance Names\SQL")
+
+
+def _instancia_destino(servidor: str, instancias: dict[str, str]) -> tuple[str, str]:
+    if not instancias:
+        raise ErrorInstalacion("No se encontro ninguna instancia de SQL Server en este equipo.")
+    _, _, pedida = servidor.split(",")[0].partition("\\")
+    pedida = pedida.strip()
+    por_nombre = {n.upper(): n for n in instancias}
+    if pedida:
+        if pedida.upper() not in por_nombre:
+            raise ErrorInstalacion(
+                f"No existe la instancia '{pedida}' de SQL Server. "
+                f"Instancias de este equipo: {', '.join(sorted(instancias))}."
+            )
+        nombre = por_nombre[pedida.upper()]
+    elif _INSTANCIA_PREDETERMINADA in por_nombre:
+        nombre = por_nombre[_INSTANCIA_PREDETERMINADA]
+    elif len(instancias) == 1:
+        nombre = next(iter(instancias))
+    else:
+        raise ErrorInstalacion(
+            f"Hay varias instancias de SQL Server ({', '.join(sorted(instancias))}). Indique el servidor como "
+            "equipo\\instancia."
+        )
+    return nombre, instancias[nombre]
+
+
+def _ruta_instancia(id_instancia: str) -> str:
+    return f"{RAIZ_SQL}\\{id_instancia}\\MSSQLServer"
+
+
+def _ruta_tcp(id_instancia: str) -> str:
+    return _ruta_instancia(id_instancia) + r"\SuperSocketNetLib\Tcp"
+
+
+def _validar_puerto(valor) -> str:
+    texto = str(valor or "").strip() or "1433"
+    if not texto.isdigit() or not 1 <= int(texto) <= 65535:
+        raise ErrorInstalacion("El puerto TCP debe ser un numero entre 1 y 65535.")
+    return str(int(texto))
+
+
+def _cambios_necesarios(id_instancia: str, puerto: str) -> list[str]:
+    tcp = _ruta_tcp(id_instancia)
+    cambios = []
+    if _reg_leer(_ruta_instancia(id_instancia), "LoginMode") != 2:
+        cambios.append("autenticacion mixta (SQL Server y Windows)")
+    if _reg_leer(tcp, "Enabled") != 1:
+        cambios.append("habilitar el protocolo TCP/IP")
+    if _reg_leer(tcp, "ListenOnAllIPs") == 0:
+        cambios.append("escuchar en todas las direcciones IP")
+    if str(_reg_leer(tcp + r"\IPAll", "TcpPort") or "") != puerto or str(
+        _reg_leer(tcp + r"\IPAll", "TcpDynamicPorts") or ""
+    ):
+        cambios.append(f"puerto TCP fijo {puerto}")
+    return cambios
+
+
+def _reiniciar_servicio(nombre_instancia: str) -> None:
+    predeterminada = nombre_instancia.upper() == _INSTANCIA_PREDETERMINADA
+    servicio = _INSTANCIA_PREDETERMINADA if predeterminada else f"MSSQL${nombre_instancia}"
+    agente = "SQLSERVERAGENT" if predeterminada else f"SQLAgent${nombre_instancia}"
+    agente_activo = _estado_servicio(agente) == _SERVICIO_EN_EJECUCION
+    if _estado_servicio(servicio) == _SERVICIO_EN_EJECUCION:
+        _net("stop", servicio, "/y")  # /y: detiene tambien los servicios que dependen de este (SQL Agent)
+        if _estado_servicio(servicio) == _SERVICIO_EN_EJECUCION:
+            raise ErrorInstalacion(f"No se pudo detener el servicio {servicio}. Detengalo manualmente y reintente.")
+    resultado = _net("start", servicio)
+    if _estado_servicio(servicio) != _SERVICIO_EN_EJECUCION:
+        detalle = (resultado.stdout or resultado.stderr).strip().splitlines()
+        raise ErrorInstalacion(
+            f"El servicio {servicio} no volvio a iniciar tras el cambio de configuracion. "
+            f"{detalle[-1] if detalle else ''}".strip()
+        )
+    if agente_activo:
+        _net("start", agente)
+
+
+def cmd_configurar_sql(datos: dict) -> str:
+    servidor = str(datos.get("servidor", "")).strip() or "localhost"
+    host = servidor.split(",")[0].split("\\")[0]
+    if not _es_local(host):
+        return (
+            "OMITIDO: el servidor SQL no es este equipo; configure TCP/IP, el puerto y el modo mixto en ese servidor."
+        )
+    puerto = _validar_puerto(datos.get("puerto"))
+    instancias = _instancias_sql()
+    nombre, id_instancia = _instancia_destino(servidor, instancias)
+
+    for otra, id_otra in instancias.items():
+        if id_otra != id_instancia and str(_reg_leer(_ruta_tcp(id_otra) + r"\IPAll", "TcpPort") or "") == puerto:
+            raise ErrorInstalacion(
+                f"El puerto {puerto} ya lo usa la instancia '{otra}' de SQL Server. Indique otro puerto."
+            )
+
+    cambios = _cambios_necesarios(id_instancia, puerto)
+    if not cambios:
+        return f"SIN CAMBIOS: la instancia '{nombre}' ya esta configurada (puerto {puerto})."
+    descripcion = "; ".join(cambios)
+    if datos.get("solo_diagnostico"):
+        return f"CAMBIOS: {descripcion}"
+
+    tcp = _ruta_tcp(id_instancia)
+    try:
+        _reg_escribir(_ruta_instancia(id_instancia), "LoginMode", 2)
+        _reg_escribir(tcp, "Enabled", 1)
+        if _reg_leer(tcp, "ListenOnAllIPs") == 0:
+            _reg_escribir(tcp, "ListenOnAllIPs", 1)
+        _reg_escribir(tcp + r"\IPAll", "TcpPort", puerto)
+        _reg_escribir(tcp + r"\IPAll", "TcpDynamicPorts", "")
+    except PermissionError as exc:
+        raise ErrorInstalacion("Se necesitan permisos de administrador de Windows para configurar SQL Server.") from exc
+    _reiniciar_servicio(nombre)
+    return f"CONFIGURADO: instancia '{nombre}' ({descripcion}). El servicio de SQL Server se reinicio."
 
 
 # ── Comandos ────────────────────────────────────────────────────────────────
@@ -280,6 +466,10 @@ def cmd_servidor(datos: dict) -> str:
     except Exception as exc:
         raise ErrorInstalacion(_traducir_error(exc)) from exc
 
+    # Con puerto fijo (lo deja configurar-sql) las estaciones se conectan por host,puerto: no dependen del
+    # servicio SQL Browser ni del nombre de instancia.
+    if str(datos.get("puerto", "")).strip():
+        servidor = f"{servidor.split(',')[0].split(chr(92))[0]},{str(datos['puerto']).strip()}"
     _escribir_config(
         destino,
         {
@@ -398,6 +588,7 @@ COMANDOS = {
     "servidor": cmd_servidor,
     "estacion": cmd_estacion,
     "actualizar": cmd_actualizar,
+    "configurar-sql": cmd_configurar_sql,
     "validar-clave": cmd_validar_clave,
     "generar-clave": cmd_generar_clave,
 }
