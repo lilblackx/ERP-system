@@ -499,7 +499,9 @@ _almacen = AlmacenDB()
 _cache: dict | None = None
 _cache_vigente_hasta = 0.0
 _ultimo_reloj_persistido = 0.0
-_ultimo_registro_estacion = 0.0
+# -inf y no 0.0: time.monotonic() parte del arranque del equipo, y en un equipo recien encendido
+# (< REGISTRO_ESTACION_CADA_SEG) el primer registro se saltaria.
+_ultimo_registro_estacion = float("-inf")
 # (hora UTC del SQL Server, monotonic en ese instante): las estaciones calculan "ahora" a partir de aqui
 # y NO de su reloj, que el usuario de esa PC puede cambiar. monotonic() no depende de la fecha de Windows.
 _ancla_hora: tuple[float, float] | None = None

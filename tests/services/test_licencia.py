@@ -94,7 +94,7 @@ def servidor(monkeypatch, tmp_path):
     monkeypatch.setattr(licencia, "CLAVE_REGISTRO", None)  # las pruebas no tocan el registro real
     monkeypatch.setattr(licencia, "_ancla_hora", None)
     monkeypatch.setattr(licencia, "_ultimo_reloj_persistido", 0.0)
-    monkeypatch.setattr(licencia, "_ultimo_registro_estacion", 0.0)
+    monkeypatch.setattr(licencia, "_ultimo_registro_estacion", float("-inf"))
     licencia.invalidar_cache()
 
     class Servidor:
