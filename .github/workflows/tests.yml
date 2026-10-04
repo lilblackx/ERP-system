@@ -50,7 +50,7 @@ jobs:
           --health-start-period 30s
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # pyodbc necesita el driver ODBC instalado en el SO -- no es un paquete pip (ver
       # README.md, seccion Requisitos). Los runners ubuntu-22.04 de GitHub YA traen
@@ -76,7 +76,7 @@ jobs:
           sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0
 
       - name: Configurar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
