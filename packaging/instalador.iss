@@ -54,6 +54,10 @@ PrivilegesRequired=admin
 #endif
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Qt 6 / Python 3.13 necesitan Windows 10 1809 (Server 2019) o posterior: Qt6Core importa icuuc.dll
+; (ICU del sistema, desde Windows 10 1703). En versiones anteriores la app no arranca ("DLL load failed
+; while importing QtCore"), asi que mejor negarse a instalar.
+MinVersion=10.0.17763
 UninstallDisplayIcon={app}\DistribuidoraDJ.exe
 CloseApplications=yes
 RestartApplications=no

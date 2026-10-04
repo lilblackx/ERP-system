@@ -53,6 +53,10 @@ El desinstalador que genera Inno Setup no se firma.
 | Servicio de Windows (solo servidor) | `DistribuidoraDJLicencia` (inicio automático, se reinicia si se cae) |
 | Regla de firewall (solo servidor) | `Distribuidora DJ - SQL Server` (TCP, el puerto indicado) |
 
+## Requisitos del equipo
+
+Windows 10 versión 1809 (build 17763) o posterior, o Windows Server 2019 o posterior, de 64 bits. El instalador lo exige (`MinVersion`). En versiones anteriores la app falla al abrir con `DLL load failed while importing QtCore`, porque Qt6Core necesita `icuuc.dll` del sistema (existe desde Windows 10 1703).
+
 ## Antes de instalar un servidor
 
 - **SQL Server** instalado y el servicio iniciado. Es lo único que hay que instalar a mano; el instalador hace el resto:
