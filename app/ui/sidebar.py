@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.ui.styles import (
-    COLOR_PRIMARY_DARK,
     COLOR_SIDEBAR_ACTIVE,
     COLOR_SIDEBAR_BG,
     COLOR_WHITE,
@@ -150,31 +149,31 @@ _SIDEBAR_CSS = f"""
 
     /* Header & Footer */
     QWidget#SidebarHeader {{
-        background-color: {COLOR_PRIMARY_DARK};
+        background-color: {COLOR_SIDEBAR_BG};
         border: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 30);
+        border-bottom: 1px solid rgba(255, 255, 255, 26);
     }}
     QWidget#SidebarFooter {{
-        background-color: {COLOR_PRIMARY_DARK};
+        background-color: {COLOR_SIDEBAR_BG};
         border: none;
-        border-top: 1px solid rgba(255, 255, 255, 30);
+        border-top: 1px solid rgba(255, 255, 255, 26);
     }}
 
     /* Etiquetas de sección */
     QLabel#SidebarSection {{
-        color: rgba(255,255,255,0.50);
+        color: rgba(255, 255, 255, 179);
         font-size: 10px;
         font-weight: bold;
         letter-spacing: 0.8px;
+        padding-left: 10px;
         background-color: {COLOR_SIDEBAR_BG};
     }}
 
     /* Logo / empresa */
     QLabel#SidebarLogo {{
         color: {COLOR_WHITE};
-        font-size: 14px;
+        font-size: 13px;
         font-weight: bold;
-        letter-spacing: 1px;
         background-color: transparent;
     }}
 
@@ -183,8 +182,8 @@ _SIDEBAR_CSS = f"""
         background-color: transparent;
         color: rgba(255,255,255,0.88);
         border: none;
-        border-radius: 8px;
-        padding: 11px 14px;
+        border-radius: 6px;
+        padding: 11px 10px;
         text-align: left;
         font-size: 15px;
         font-weight: 500;
@@ -194,7 +193,7 @@ _SIDEBAR_CSS = f"""
         color: {COLOR_WHITE};
     }}
     QPushButton#SidebarBtn[active="true"] {{
-        background-color: rgba(255,255,255,0.22);
+        background-color: {COLOR_SIDEBAR_ACTIVE};
         color: {COLOR_WHITE};
         font-weight: bold;
     }}
@@ -268,7 +267,7 @@ class SidebarButton(QPushButton):
     def _refresh_text(self) -> None:
         if self._expanded:
             self.setIcon(QIcon())
-            self.setText(f"  {self.texto}")
+            self.setText(self.texto)
         else:
             # Colapsado: icono especifico del modulo en vez de iniciales (1-2 letras
             # resultaba ilegible, reportado por el usuario, 2026-08-27) -- expandido
@@ -335,24 +334,28 @@ class Sidebar(QWidget):
         self._header.setPalette(_paleta_azul())
 
         h = QHBoxLayout(self._header)
-        h.setContentsMargins(10, 0, 10, 0)
-        h.setSpacing(8)
+        h.setContentsMargins(14, 0, 8, 0)
+        h.setSpacing(12)
 
         self.btn_toggle = QPushButton()
         self.btn_toggle.setIcon(qta.icon("fa5s.chevron-left", color=QColor(255, 255, 255, 204)))
         self.btn_toggle.setObjectName("ToggleBtn")
-        self.btn_toggle.setFixedSize(30, 30)
+        self.btn_toggle.setFixedSize(26, 26)
         self.btn_toggle.setFlat(True)
         self.btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_toggle.setToolTip("Colapsar menú")
         self.btn_toggle.clicked.connect(self.toggle)
+        # En reposo el header queda limpio (logo + nombre); la flecha aparece al pasar el
+        # mouse por el sidebar -- ver enterEvent/leaveEvent. Colapsado siempre se ve,
+        # es la unica forma de volver a expandir.
+        self.btn_toggle.setVisible(False)
 
         self._lbl_logo = QLabel(self._iniciales_empresa())
-        self._lbl_logo.setFixedSize(32, 32)
+        self._lbl_logo.setFixedSize(36, 36)
         self._lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._lbl_logo.setStyleSheet(
-            f"background-color: {COLOR_WHITE}; color: {COLOR_PRIMARY_DARK}; border: none;"
-            " border-radius: 16px; font-size: 12px; font-weight: bold;"
+            f"background-color: rgba(255, 255, 255, 38); color: {COLOR_WHITE}; border: none;"
+            " border-radius: 18px; font-size: 12px; font-weight: bold;"
         )
 
         self._col_empresa = QWidget()
@@ -360,29 +363,32 @@ class Sidebar(QWidget):
         self._col_empresa.setStyleSheet("QWidget#SidebarColEmpresa { background: transparent; border: none; }")
         col = QVBoxLayout(self._col_empresa)
         col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(0)
+        col.setSpacing(2)
 
-        self._lbl_empresa = QLabel(self._empresa.upper()[:18])
+        self._lbl_empresa = QLabel(self._empresa[:18])
         self._lbl_empresa.setObjectName("SidebarLogo")
         self._lbl_empresa.setStyleSheet(
-            "background: transparent; border: none; color: {COLOR_WHITE}; font-size: 14px;"
-            " font-weight: bold; letter-spacing: 1px;"
+            f"background: transparent; border: none; color: {COLOR_WHITE}; font-size: 13px; font-weight: bold;"
         )
         self._lbl_empresa.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         self._lbl_subtitulo_header = QLabel("Sistema de gestión")
         self._lbl_subtitulo_header.setStyleSheet(
-            "color: rgba(255,255,255,0.55); font-size: 10px; background: transparent; border: none;"
+            "color: rgba(255, 255, 255, 179); font-size: 11px; background: transparent; border: none;"
         )
         self._lbl_subtitulo_header.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
+        # Stretch arriba y abajo: sin ellos la columna ocupa todo el alto del header y
+        # reparte los dos labels a los extremos (titulo arriba, subtitulo abajo).
+        col.addStretch()
         col.addWidget(self._lbl_empresa)
         col.addWidget(self._lbl_subtitulo_header)
+        col.addStretch()
 
-        h.addWidget(self.btn_toggle)
         h.addWidget(self._lbl_logo)
         h.addWidget(self._col_empresa)
         h.addStretch()
+        h.addWidget(self.btn_toggle)
         return self._header
 
     def _iniciales_empresa(self) -> str:
@@ -417,15 +423,9 @@ class Sidebar(QWidget):
                 continue
 
             if self._nav_layout.count() > 0:
-                # Separador sutil entre grupos, igual que COLOR_BORDER separa cards en el
-                # resto de la app -- QLabel, no QFrame (ver GUIA_ESTILO_UI.md 8.8). Nunca
-                # antes de la primera seccion visible (queda huerfano arriba de todo).
-                separador_seccion = QLabel()
-                separador_seccion.setFixedHeight(1)
-                separador_seccion.setStyleSheet("background-color: rgba(255,255,255,0.08);")
-                self._lbl_secciones.append(separador_seccion)
-                self._nav_layout.addWidget(separador_seccion)
-                self._nav_layout.addSpacing(4)
+                # Solo aire entre grupos, sin linea separadora. Nunca antes de la primera
+                # seccion visible (queda huerfano arriba de todo).
+                self._nav_layout.addSpacing(10)
 
             lbl_seccion = QLabel(nombre_seccion)
             lbl_seccion.setObjectName("SidebarSection")
@@ -446,12 +446,12 @@ class Sidebar(QWidget):
     def _make_footer(self) -> QWidget:
         self._footer = QWidget()
         self._footer.setObjectName("SidebarFooter")
-        self._footer.setFixedHeight(64)
+        self._footer.setFixedHeight(56)
         self._footer.setAutoFillBackground(True)
         self._footer.setPalette(_paleta_azul())
 
         h = QHBoxLayout(self._footer)
-        h.setContentsMargins(14, 8, 14, 8)
+        h.setContentsMargins(14, 8, 8, 8)
         h.setSpacing(10)
 
         nombre = (self._usuario.nombre or self._usuario.nombre_usuario) if self._usuario else "Usuario"
@@ -459,11 +459,11 @@ class Sidebar(QWidget):
         iniciales = "".join(p[0].upper() for p in nombre.split()[:2]) or "U"
 
         self._lbl_avatar = QLabel(iniciales)
-        self._lbl_avatar.setFixedSize(34, 34)
+        self._lbl_avatar.setFixedSize(28, 28)
         self._lbl_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._lbl_avatar.setStyleSheet(
-            f"background-color: {COLOR_SIDEBAR_ACTIVE}; color: {COLOR_WHITE}; border: none;"
-            " border-radius: 17px; font-size: 12px; font-weight: bold;"
+            f"background-color: rgba(255, 255, 255, 51); color: {COLOR_WHITE}; border: none;"
+            " border-radius: 14px; font-size: 11px; font-weight: bold;"
         )
 
         self._footer_info = QWidget()
@@ -473,15 +473,14 @@ class Sidebar(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
 
-        lbl_nombre = QLabel(nombre[:20])
+        lbl_nombre = QLabel(nombre.upper()[:20])
+        lbl_nombre.setToolTip(rol)
         lbl_nombre.setStyleSheet(
-            "color: {COLOR_WHITE}; font-size: 12px; font-weight: bold; background: transparent; border: none;"
+            "color: rgba(255, 255, 255, 179); font-size: 11px; font-weight: 600; letter-spacing: 0.5px;"
+            " background: transparent; border: none;"
         )
-        lbl_rol = QLabel(rol)
-        lbl_rol.setStyleSheet("color: rgba(255,255,255,0.60); font-size: 10px; background: transparent; border: none;")
 
         v.addWidget(lbl_nombre)
-        v.addWidget(lbl_rol)
 
         self.btn_cerrar_sesion = QPushButton()
         self.btn_cerrar_sesion.setObjectName("BtnCerrarSesion")
@@ -500,6 +499,15 @@ class Sidebar(QWidget):
 
     # ── Toggle colapsar / expandir ────────────────────────────────────────
 
+    def enterEvent(self, event) -> None:
+        self.btn_toggle.setVisible(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._expandido:
+            self.btn_toggle.setVisible(False)
+        super().leaveEvent(event)
+
     def toggle(self) -> None:
         if self._expandido:
             self._colapsar()
@@ -516,6 +524,7 @@ class Sidebar(QWidget):
         self._footer_info.setVisible(False)
         self.btn_toggle.setIcon(qta.icon("fa5s.chevron-right", color=QColor(255, 255, 255, 204)))
         self.btn_toggle.setToolTip("Expandir menu")
+        self.btn_toggle.setVisible(True)
 
         for btn in self._botones.values():
             btn.set_expanded(False)
@@ -573,7 +582,7 @@ class Sidebar(QWidget):
 
     def actualizar_empresa(self, nombre: str) -> None:
         self._empresa = nombre
-        self._lbl_empresa.setText(nombre.upper()[:18])
+        self._lbl_empresa.setText(nombre[:18])
         self._lbl_logo.setText(self._iniciales_empresa())
 
     def seleccionar(self, clave: str) -> None:
