@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
 from app.services.licencia import EstadoLicencia, LicenciaService
+from app.services.notificaciones import NotificacionesService
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
 from app.ui.auditoria_panel import AuditoriaPanel
@@ -202,6 +203,15 @@ class MainWindow(QMainWindow):
         self._timer_validacion_licencia.start()
         QTimer.singleShot(2_000, self._validar_licencia_en_segundo_plano)
 
+        # Campana de la barra superior: alertas vigentes (cuentas vencidas, stock, tasa,
+        # licencia), al abrir y luego cada 5 minutos, en segundo plano.
+        self._worker_notificaciones: QueryWorker | None = None
+        self._timer_notificaciones = QTimer(self)
+        self._timer_notificaciones.setInterval(300_000)
+        self._timer_notificaciones.timeout.connect(self._refrescar_notificaciones)
+        self._timer_notificaciones.start()
+        QTimer.singleShot(1_000, self._refrescar_notificaciones)
+
     def _refrescar_banner_licencia(self, estado: EstadoLicencia | None = None) -> None:
         estado = estado or LicenciaService.estado_actual()
         if estado.permite_escritura:
@@ -322,7 +332,8 @@ class MainWindow(QMainWindow):
         self.ticker_tasas = TasaTicker(SessionLocal, self.usuario)
         right_v.addWidget(self.ticker_tasas)
 
-        self.topbar = TopBar(self.usuario)
+        self.topbar = TopBar(self.usuario, SessionLocal, self._modulos_visibles)
+        self.topbar.modulo_solicitado.connect(self._abrir_desde_topbar)
         right_v.addWidget(self.topbar)
 
         self.stack = QStackedWidget()
@@ -337,6 +348,30 @@ class MainWindow(QMainWindow):
         panel = self._obtener_o_crear_panel(clave)
         self.stack.setCurrentWidget(panel)
         self.topbar.actualizar_modulo(clave)
+
+    def _abrir_desde_topbar(self, clave: str, texto_busqueda: str) -> None:
+        """Destino elegido en la búsqueda global o en la campana: navega al módulo y, si
+        viene de un resultado concreto (un cliente, una factura...), deja su texto en la caja
+        de búsqueda de ese módulo para que la lista quede filtrada a lo que se buscaba."""
+        if clave not in MODULOS_CONFIG:
+            return
+        self.navegar_a(clave)
+        if texto_busqueda:
+            campo = getattr(self._paneles.get(clave), "buscar_input", None)
+            if campo is not None:
+                campo.setText(texto_busqueda)
+
+    def _refrescar_notificaciones(self) -> None:
+        if self._worker_notificaciones is not None and self._worker_notificaciones.isRunning():
+            return
+        id_usuario = self.usuario.id_usuario
+        self._worker_notificaciones = QueryWorker(
+            SessionLocal, lambda session: NotificacionesService.obtener(session, id_usuario)
+        )
+        self._worker_notificaciones.resultado.connect(self.topbar.set_notificaciones)
+        # La campana es informativa: si falla (QueryWorker ya lo registra en el log) queda
+        # como estaba, sin interrumpir al usuario con un diálogo.
+        self._worker_notificaciones.start()
 
     def navegar_a(self, clave: str) -> None:
         """Navegación disparada desde dentro de un panel (ej. botón "Nueva
@@ -373,6 +408,13 @@ class MainWindow(QMainWindow):
         # invocando eventFilter() de esta instancia ya cerrada.
         QApplication.instance().removeEventFilter(self)
         self._timer_inactividad.stop()
+        self._timer_notificaciones.stop()
+        # Hilos propios del shell (campana, licencia, búsqueda global de la barra superior):
+        # mismo motivo que el bloque de abajo.
+        for worker in (self._worker_notificaciones, self._worker_licencia, *self.topbar._workers):
+            if worker is not None and worker.isRunning():
+                worker.quit()
+                worker.wait(3000)
         # DashboardPanel y TasaTicker cargan datos en un QThread aparte
         # (QueryWorker) que puede seguir corriendo al cerrar la ventana --
         # destruir esos widgets con el hilo todavia activo aborta el proceso
