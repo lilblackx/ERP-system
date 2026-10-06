@@ -258,12 +258,22 @@ class PagoComisionService:
         id_caja: int | None = None,
         referencia: str | None = None,
         id_usuario: int | None = None,
+        ids_comision: list[int] | None = None,
+        monto_esperado: Decimal | None = None,
     ) -> PagoComision:
         """Paga en un solo batch TODAS las comisiones 'liberada' con monto_comision > 0
         de ese vendedor -- 'liberada' es el cliente ya pago la factura, el vendedor
         todavia no cobro esa comision (ver migrations/0045_comisiones_estado_liberada.sql).
         Las 'pendiente' (cliente no ha pagado) nunca son pagables aca. Un pago de comision
-        liquida lo acumulado de una vez, no hay pago parcial de una linea individual. Sin
+        liquida lo acumulado de una vez, no hay pago parcial de una linea individual.
+
+        `ids_comision` (opcional) restringe el pago a ESAS comisiones (las que siguen
+        'liberada'): la pantalla de comisiones puede estar filtrada (ej. "Solo con
+        porcentaje BCV") y mostrar un total menor al de todo lo liberado del vendedor; sin
+        esto el pago liquidaba todo igual y el usuario confirmaba un monto menor al que
+        realmente salia de la caja/banco. `monto_esperado` es el total que se le mostro al
+        usuario: si lo que hay ahora no coincide (se libero o pago algo mientras tanto) se
+        rechaza el pago en vez de mover un monto distinto al confirmado. Sin
         trigger INSTEAD OF INSERT (a diferencia de PagoCobro/PagoProveedor): no hay
         saldo_pendiente parcial que proteger, asi que el BancoMovimiento/CajaMovimiento se
         crea directo aca, en la misma transaccion."""
@@ -289,16 +299,15 @@ class PagoComisionService:
         # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18/C22/C24 -- bloquea las filas
         # hasta el commit para que un segundo pago concurrente sobre el mismo vendedor no
         # alcance a pagar dos veces las mismas comisiones.
+        consulta = select(ComisionFactura).where(
+            ComisionFactura.id_vendedor == id_vendedor,
+            ComisionFactura.estado_pago == "liberada",
+            ComisionFactura.monto_comision > 0,
+        )
+        if ids_comision is not None:
+            consulta = consulta.where(ComisionFactura.id_comision.in_(ids_comision))
         comisiones_liberadas = (
-            session.execute(
-                select(ComisionFactura)
-                .where(
-                    ComisionFactura.id_vendedor == id_vendedor,
-                    ComisionFactura.estado_pago == "liberada",
-                    ComisionFactura.monto_comision > 0,
-                )
-                .with_hint(ComisionFactura, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
-            )
+            session.execute(consulta.with_hint(ComisionFactura, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"))
             .scalars()
             .all()
         )
@@ -306,6 +315,11 @@ class PagoComisionService:
             raise ValueError("No hay comisiones liberadas para pagar a este vendedor")
 
         monto_total = sum((c.monto_comision for c in comisiones_liberadas), Decimal("0.00"))
+        if monto_esperado is not None and monto_total != to_decimal(monto_esperado):
+            raise ValueError(
+                f"El monto a pagar (${monto_total}) no coincide con el confirmado (${to_decimal(monto_esperado)}): "
+                "las comisiones cambiaron desde que se mostraron. Actualice la pantalla e intente de nuevo."
+            )
 
         pago = PagoComision(
             id_vendedor=id_vendedor,

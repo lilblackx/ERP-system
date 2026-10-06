@@ -205,12 +205,17 @@ class PagarComisionesDialog(QDialog):
         monto_pendiente: Decimal,
         nombre_vendedor: str,
         parent=None,
+        ids_comision: list[int] | None = None,
     ):
         super().__init__(parent)
         self.session = session
         self.id_usuario = id_usuario
         self.id_vendedor = id_vendedor
         self.monto_pendiente = monto_pendiente
+        # Las comisiones que suman `monto_pendiente`: con la lista filtrada (ej. "Solo con
+        # porcentaje BCV") es un subconjunto de lo liberado del vendedor, y el pago tiene que
+        # liquidar exactamente esas -- no todas.
+        self.ids_comision = ids_comision
         self.nombre_vendedor = nombre_vendedor
         self.pago_creado = None
         self._cajas_abiertas: list = []
@@ -359,6 +364,8 @@ class PagarComisionesDialog(QDialog):
                 id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
                 referencia=self.referencia_input.text().strip() or None,
                 id_usuario=self.id_usuario,
+                ids_comision=self.ids_comision,
+                monto_esperado=self.monto_pendiente,
             )
         except ValueError as exc:
             self.session.rollback()
@@ -869,10 +876,11 @@ class ComisionesPanel(QWidget):
             MessageBox.information(self, "Selección requerida", "Selecciona un vendedor.")
             return
 
-        total_liberada = sum(
-            (c.monto_comision for c in self.comisiones_cargadas if c.estado_pago == "liberada"),
-            Decimal("0.00"),
-        )
+        # Lo que se muestra/confirma son las comisiones cargadas, que con el filtro "Solo con
+        # porcentaje BCV" activo son un subconjunto: se pagan exactamente esas (ver
+        # PagoComisionService.pagar_comisiones_vendedor).
+        liberadas = [c for c in self.comisiones_cargadas if c.estado_pago == "liberada" and c.monto_comision > 0]
+        total_liberada = sum((c.monto_comision for c in liberadas), Decimal("0.00"))
         if total_liberada <= 0:
             MessageBox.information(
                 self,
@@ -892,6 +900,7 @@ class ComisionesPanel(QWidget):
                 total_liberada,
                 nombre_vendedor,
                 parent=self,
+                ids_comision=[c.id_comision for c in liberadas],
             )
             if dialogo.exec() and dialogo.pago_creado is not None:
                 self._on_vendedor_cambiado()

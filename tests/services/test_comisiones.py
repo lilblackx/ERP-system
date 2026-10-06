@@ -463,3 +463,103 @@ def test_comision_credito_se_libera_al_cobrar_cxc_completa(db_session):
     assert pago.monto == Decimal("2.00")  # (2.00-1.00)*2
     db_session.refresh(comision)
     assert comision.estado_pago == "pagada"
+
+
+# --- Pago restringido a un subconjunto (ej. filtro "Solo con porcentaje BCV") -------
+
+
+def _dos_comisiones_liberadas(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    comisiones = _crear_comisiones_liberadas(
+        db_session,
+        vendedor,
+        admin,
+        [
+            (Decimal("1.00"), Decimal("2.00"), Decimal("3")),  # comision 3.00
+            (Decimal("1.00"), Decimal("3.00"), Decimal("2")),  # comision 4.00
+        ],
+    )
+    assert [c.monto_comision for c in comisiones] == [Decimal("3.00"), Decimal("4.00")]
+    return admin, vendedor, comisiones, crear_caja(db_session)
+
+
+def test_pagar_con_ids_paga_solo_esas_comisiones(db_session):
+    """Con la lista filtrada la pantalla muestra (y el usuario confirma) $3, no los $7 que
+    suman todas las liberadas: el pago tiene que liquidar solo lo mostrado."""
+    admin, vendedor, comisiones, caja = _dos_comisiones_liberadas(db_session)
+
+    pago = PagoComisionService.pagar_comisiones_vendedor(
+        db_session,
+        id_vendedor=vendedor.id_vendedor,
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+        ids_comision=[comisiones[0].id_comision],
+        monto_esperado=Decimal("3.00"),
+    )
+
+    assert pago.monto == Decimal("3.00")
+    db_session.refresh(comisiones[0])
+    db_session.refresh(comisiones[1])
+    assert comisiones[0].estado_pago == "pagada"
+    assert comisiones[1].estado_pago == "liberada"  # no se toco
+    movimiento = db_session.query(CajaMovimiento).filter_by(id_pago_comision=pago.id_pago_comision).one()
+    assert movimiento.monto_movimiento == Decimal("3.00")
+
+
+def test_pagar_sin_ids_sigue_pagando_todo_lo_liberado(db_session):
+    admin, vendedor, comisiones, caja = _dos_comisiones_liberadas(db_session)
+
+    pago = PagoComisionService.pagar_comisiones_vendedor(
+        db_session,
+        id_vendedor=vendedor.id_vendedor,
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    assert pago.monto == Decimal("7.00")
+
+
+def test_pagar_con_monto_esperado_distinto_se_rechaza_sin_pagar_nada(db_session):
+    """El usuario confirmo $3 pero las comisiones indicadas suman $7: no se mueve plata."""
+    admin, vendedor, comisiones, caja = _dos_comisiones_liberadas(db_session)
+
+    with pytest.raises(ValueError, match="no coincide con el confirmado"):
+        PagoComisionService.pagar_comisiones_vendedor(
+            db_session,
+            id_vendedor=vendedor.id_vendedor,
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+            ids_comision=[c.id_comision for c in comisiones],
+            monto_esperado=Decimal("3.00"),
+        )
+
+    for comision in comisiones:
+        db_session.refresh(comision)
+        assert comision.estado_pago == "liberada"
+    assert db_session.query(CajaMovimiento).filter_by(id_caja=caja.id_caja).count() == 0
+
+
+def test_pagar_con_ids_ya_pagados_falla(db_session):
+    admin, vendedor, comisiones, caja = _dos_comisiones_liberadas(db_session)
+    PagoComisionService.pagar_comisiones_vendedor(
+        db_session,
+        id_vendedor=vendedor.id_vendedor,
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+        ids_comision=[comisiones[0].id_comision],
+    )
+
+    with pytest.raises(ValueError, match="No hay comisiones liberadas"):
+        PagoComisionService.pagar_comisiones_vendedor(
+            db_session,
+            id_vendedor=vendedor.id_vendedor,
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+            ids_comision=[comisiones[0].id_comision],
+        )
