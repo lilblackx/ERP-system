@@ -29,6 +29,7 @@ from app.services.inventario import PrecioService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHT,
@@ -193,11 +194,12 @@ class ProductoFormDialog(QDialog):
         self.id_usuario = id_usuario
         self.producto = producto
         self.setWindowTitle("Editar Producto" if producto else "Nuevo Producto")
-        self.setFixedSize(860, 580)
+        ajustar_tamano(self, 860, 580)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
 
         if producto:
             self._precargar(producto)

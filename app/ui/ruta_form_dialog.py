@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from app.db.models import Ruta
 from app.ui.mapa_widget import MapaWidget
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHTER,
@@ -160,11 +161,12 @@ class RutaFormDialog(QDialog):
         # Mas ancho/alto que el resto de los dialogos de este tamaño (VendedorFormDialog,
         # etc.) a proposito -- pedido del usuario 2026-09-03: la zona se marca a puro
         # click sobre el mapa, asi que mas area de mapa hace la tarea mas facil.
-        self.setFixedSize(620, 780)
+        ajustar_tamano(self, 620, 780)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
 
         if ruta:
             self._precargar(ruta)

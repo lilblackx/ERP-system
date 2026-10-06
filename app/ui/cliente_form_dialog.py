@@ -23,6 +23,7 @@ from app.services.rutas import RutaService
 from app.ui.mapa_widget import MapaWidget
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHT,
@@ -156,11 +157,12 @@ class ClienteFormDialog(QDialog):
         self.id_usuario = id_usuario
         self.setWindowTitle("Editar Cliente" if cliente else "Nuevo Cliente")
         # Ajustado para que los botones sean visibles en pantallas estándar
-        self.setFixedSize(920, 900)
+        ajustar_tamano(self, 920, 900)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
 
         if cliente:
             self._precargar(cliente)

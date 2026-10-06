@@ -47,6 +47,7 @@ from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -192,10 +193,11 @@ class PagoProveedorDialog(QDialog):
         self._cuentas_activas: list = []
 
         self.setWindowTitle("Pagar a Proveedor")
-        self.setFixedSize(420, 550)
+        ajustar_tamano(self, 420, 550)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_origenes()
         self._cargar_tasas()
         self._toggle_origen()

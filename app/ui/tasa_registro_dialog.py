@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHTER,
@@ -95,11 +96,12 @@ class TasaRegistroDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Registrar Tasa del Día")
-        self.setFixedSize(420, 380)
+        ajustar_tamano(self, 420, 380)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)

@@ -23,6 +23,7 @@ from app.db.session import SessionLocal
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.recuperacion_acceso import TIPO_DESBLOQUEO, TIPO_RECUPERAR_CLAVE
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano
 from app.ui.solicitar_codigo_dialog import SolicitarCodigoDialog
 from app.ui.styles import (
     COLOR_BORDER,
@@ -42,7 +43,7 @@ class LoginWindow(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ERP — Iniciar Sesión")
-        self.setFixedSize(850, 500)
+        ajustar_tamano(self, 850, 500)
         self.usuario_autenticado = None
 
         # Obtener nombre de empresa

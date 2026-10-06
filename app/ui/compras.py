@@ -62,6 +62,7 @@ from app.ui.nota_recepcion_detalle_dialog import NotaRecepcionDetalleDialog
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_PRIMARY_QSS,
@@ -266,12 +267,12 @@ class OrdenCompraFormDialog(QDialog):
         self._productos: list = []
 
         self.setWindowTitle("Nueva Orden de Compra")
-        self.resize(820, 620)
-        self.setMinimumSize(760, 560)
+        ajustar_tamano(self, 820, 620, 760, 560)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_proveedores()
         self._cargar_productos()
 
@@ -661,10 +662,11 @@ class EnmiendaOCDialog(QDialog):
         self.enmienda_creada = None
 
         self.setWindowTitle(f"Enmendar ODC {oc.numero_oc}")
-        self.setFixedSize(480, 480)
+        ajustar_tamano(self, 480, 480)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
 
     def _make_card_info_tipos(self) -> QWidget:
         """Documentacion fija de que efecto tiene autorizar cada tipo de enmienda -- ver
@@ -895,10 +897,11 @@ class NotaRecepcionFormDialog(QDialog):
         self.detalles_pendientes = [d for d in datos["detalles"] if d.cantidad_pendiente > 0]
 
         self.setWindowTitle(f"Nueva Recepción — ODC {oc.numero_oc}")
-        self.resize(720, 560)
+        ajustar_tamano(self, 720, 560)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -1073,10 +1076,11 @@ class NotaDevolucionFormDialog(QDialog):
                 self.lineas_disponibles.append((detalle, disponible))
 
         self.setWindowTitle(f"Nota de Devolución — NR {nr.numero_nr}")
-        self.resize(680, 520)
+        ajustar_tamano(self, 680, 520)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -1215,10 +1219,11 @@ class CompraDesdeOCFormDialog(QDialog):
         ]
 
         self.setWindowTitle(f"Nueva Factura — ODC {oc.numero_oc}")
-        self.resize(720, 640)
+        ajustar_tamano(self, 720, 640)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)

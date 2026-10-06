@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
     COLOR_BLUE_LIGHTER,
@@ -37,11 +38,12 @@ class MovimientosCuentaDialog(QDialog):
         self._movimientos = []
 
         self.setWindowTitle(f"Movimientos - {cuenta.numero_cuenta}")
-        self.setFixedSize(900, 600)
+        ajustar_tamano(self, 900, 600)
         self.setStyleSheet(TABLE_QSS)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_movimientos()
 
     def _build_ui(self):

@@ -22,6 +22,7 @@ from app.db.models import Banco, BancoMovimiento, ControlDeTasa, CuentaBancaria,
 from app.services.banco_movimientos import BancoMovimientoService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -51,13 +52,13 @@ class ConciliacionBancosDialog(QDialog):
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         # Tamaño mínimo adaptativo y permitir redimensionamiento
-        self.setMinimumSize(1100, 750)
-        self.resize(1200, 800)
+        ajustar_tamano(self, 1200, 800, 1100, 750)
 
         # Centrar la ventana en la pantalla
         self._centrar_ventana()
 
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_cuentas()
 
     def _centrar_ventana(self):

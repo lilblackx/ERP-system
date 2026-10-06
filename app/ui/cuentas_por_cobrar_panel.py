@@ -49,6 +49,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -196,10 +197,11 @@ class PagoCobroDialog(QDialog):
         self._id_tasa_seleccionada: int | None = None
 
         self.setWindowTitle("Registrar Cobro")
-        self.setFixedSize(420, 550)
+        ajustar_tamano(self, 420, 550)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_origenes()
         self._cargar_tasas()
         self._toggle_origen()
@@ -614,10 +616,11 @@ class AbonoGeneralDialog(QDialog):
         self._id_tasa_seleccionada: int | None = None
 
         self.setWindowTitle("Abono General")
-        self.setFixedSize(450, 500)
+        ajustar_tamano(self, 450, 500)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_origenes()
         self._cargar_tasas()
         self._toggle_origen()
@@ -1096,10 +1099,11 @@ class DetalleClienteDialog(QDialog):
         self.se_realizo_cobro = False
 
         self.setWindowTitle(f"Detalle de Cuentas - {cliente.nombre_razon_social if cliente else 'Cliente'}")
-        self.setFixedSize(900, 600)
+        ajustar_tamano(self, 900, 600)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
         self._poblar_tabla_detalle()
 
     def _build_ui(self) -> None:

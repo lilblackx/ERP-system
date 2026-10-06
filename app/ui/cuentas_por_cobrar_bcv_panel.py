@@ -37,6 +37,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BORDER,
@@ -181,10 +182,11 @@ class PagoCobroBCVDialog(QDialog):
         self._id_tasa_seleccionada: int | None = None
 
         self.setWindowTitle("Registrar Cobro BCV")
-        self.setFixedSize(420, 550)
+        ajustar_tamano(self, 420, 550)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_origenes()
         self._cargar_tasas()
         self._toggle_origen()
@@ -599,10 +601,11 @@ class SeleccionarCuentaBCVDialog(QDialog):
         self.cuenta_seleccionada = None
 
         self.setWindowTitle("Seleccionar Cuenta BCV")
-        self.setFixedSize(700, 500)
+        ajustar_tamano(self, 700, 500)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -721,10 +724,11 @@ class AbonoGeneralBCVDialog(QDialog):
         self._id_tasa_seleccionada: int | None = None
 
         self.setWindowTitle("Abono General BCV")
-        self.setFixedSize(450, 500)
+        ajustar_tamano(self, 450, 500)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_origenes()
         self._cargar_tasas()
         self._toggle_origen()
@@ -1187,10 +1191,11 @@ class DetalleCuentasBCVDialog(QDialog):
         self.se_realizo_cobro = False
 
         self.setWindowTitle(f"Detalle de Cuentas BCV - {cliente.nombre_razon_social if cliente else 'Cliente'}")
-        self.setFixedSize(900, 600)
+        ajustar_tamano(self, 900, 600)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
         self._poblar_tabla_detalle()
 
     def _build_ui(self) -> None:

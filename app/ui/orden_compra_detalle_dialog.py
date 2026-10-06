@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
@@ -111,12 +112,12 @@ class OrdenCompraDetalleDialog(QDialog):
         self.oc = datos["oc"]
         self.detalles = datos["detalles"]
         self.setWindowTitle(f"Orden de Compra {self.oc.numero_oc}")
-        self.resize(720, 600)
-        self.setMinimumSize(720, 600)
+        ajustar_tamano(self, 720, 600, 720, 600)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)

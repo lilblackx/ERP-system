@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.services.nota_recepcion import NotaRecepcionService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -71,6 +72,7 @@ class NotaRecepcionDetalleDialog(QDialog):
         self.nr = None
         self._load_data()
         self._build_ui()
+        hacer_desplazable(self)
 
     def _load_data(self) -> None:
         """Carga los datos de la nota de recepcion."""
@@ -96,7 +98,7 @@ class NotaRecepcionDetalleDialog(QDialog):
             return
 
         self.setWindowTitle(f"Detalle Recepción — {self.nr.numero_nr}")
-        self.resize(900, 700)
+        ajustar_tamano(self, 900, 700)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 

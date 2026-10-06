@@ -27,6 +27,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.autorizacion_dialog import AutorizacionDialog
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHTER,
@@ -151,12 +152,12 @@ class DevolverNotaCreditoDialog(QDialog):
         self._cuentas_activas: list = []
 
         self.setWindowTitle("Devolver Nota de Crédito")
-        self.setMinimumWidth(420)
-        self.resize(420, 400)
+        ajustar_tamano(self, 420, 400, 420)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_origenes()
         self._toggle_origen()
         self._on_nota_cambiada()

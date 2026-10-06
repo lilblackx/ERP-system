@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Auditoria, Usuario
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
     COLOR_BORDER,
@@ -67,8 +68,7 @@ class ProductoAuditoriaDialog(QDialog):
             titulo = "Auditoría General de Productos"
 
         self.setWindowTitle(titulo)
-        self.setMinimumSize(1000, 600)
-        self.resize(1200, 700)
+        ajustar_tamano(self, 1200, 700, 1000, 600)
         self.setStyleSheet(TABLE_QSS)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 

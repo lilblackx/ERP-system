@@ -44,6 +44,7 @@ from app.services.ventas import VentaService
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -222,10 +223,11 @@ class PagarComisionesDialog(QDialog):
         self._cuentas_activas: list = []
 
         self.setWindowTitle("Pagar Comisiones")
-        self.setFixedSize(420, 380)
+        ajustar_tamano(self, 420, 380)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_origenes()
         self._toggle_origen()
 
@@ -444,10 +446,11 @@ class DetalleComisionFacturaDialog(QDialog):
         super().__init__(parent)
         self.grupo = grupo
         self.setWindowTitle(f"Detalle de comisión - Factura {grupo['numero_factura']}")
-        self.setFixedSize(560, 420)
+        ajustar_tamano(self, 560, 420)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
+        hacer_desplazable(self)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)

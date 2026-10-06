@@ -26,6 +26,7 @@ from app.db.models import Usuario
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.permisos import PermisoDenegadoError, require_permiso
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BORDER,
@@ -133,11 +134,12 @@ class AutorizacionDialog(QDialog):
         self.motivo_min_length = motivo_min_length
 
         self.setWindowTitle(titulo)
-        self.setFixedSize(420, 320)
+        ajustar_tamano(self, 420, 320)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui(mensaje, motivo_label)
+        hacer_desplazable(self)
         if motivo_max_length is not None:
             self.motivo_input.setMaxLength(motivo_max_length)
 

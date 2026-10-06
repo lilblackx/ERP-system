@@ -27,6 +27,7 @@ from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_pdf import generar_pdf_factura, imprimir_factura
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
@@ -143,12 +144,12 @@ class FacturaDetalleDialog(QDialog):
             alto_pagos_vuelto += 40
         hay_nota_disponible = self.nota_credito is not None and self.nota_credito.saldo_disponible > 0
         alto = 580 + alto_pagos_vuelto + (70 if hay_nota_disponible else 0)
-        self.resize(720, alto)
-        self.setMinimumSize(720, alto)
+        ajustar_tamano(self, 720, alto, 720, alto)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)

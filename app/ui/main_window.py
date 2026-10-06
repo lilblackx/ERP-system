@@ -49,6 +49,7 @@ from app.ui.dashboard_panel import DashboardPanel
 from app.ui.facturacion_panel import FacturacionPanel
 from app.ui.inventario_panel import InventarioPanel
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano
 from app.ui.placeholder_view import PlaceholderView
 from app.ui.proveedores_panel import ProveedoresPanel
 from app.ui.reportes_panel import ReportesPanel
@@ -155,8 +156,7 @@ class MainWindow(QMainWindow):
         self._paneles: dict[str, QWidget] = {}  # cache lazy de paneles
 
         self.setWindowTitle("ERP — Sistema de Gestión Administrativa")
-        self.resize(1200, 720)
-        self.setMinimumSize(900, 600)
+        ajustar_tamano(self, 1200, 720, 900, 600)
 
         # Aplicar estilos globales
         self.setStyleSheet(GLOBAL_QSS)

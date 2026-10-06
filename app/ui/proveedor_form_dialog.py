@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Proveedor
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHT,
@@ -143,11 +144,12 @@ class ProveedorFormDialog(QDialog):
         self.session = session
         self.proveedor = proveedor
         self.setWindowTitle("Editar Proveedor" if proveedor else "Nuevo Proveedor")
-        self.setFixedSize(860, 420)
+        ajustar_tamano(self, 860, 420)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
 
         if proveedor:
             self._precargar(proveedor)

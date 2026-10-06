@@ -33,6 +33,7 @@ from app.services.tesoreria import CajaService
 from app.ui.corte_caja_pdf import generar_pdf_corte_caja, imprimir_corte_caja
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -104,12 +105,12 @@ class CajaCierreDialog(QDialog):
         self.saldo_calculado = Decimal("0.00")
 
         self.setWindowTitle("Cerrar Turno de Caja")
-        self.setMinimumWidth(560)
-        self.resize(560, 580)
+        ajustar_tamano(self, 560, 580, 560)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_arqueo()
 
     def _build_ui(self) -> None:

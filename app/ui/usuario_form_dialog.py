@@ -29,6 +29,7 @@ from app.services.usuarios import (
 )
 from app.services.vendedores import VendedorService
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHTER,
@@ -171,7 +172,8 @@ class UsuarioFormDialog(QDialog):
         # fila (ver mas abajo) hace que sizeHint() ya reserve su espacio aunque este oculta
         # -- fijar el alto sobre ese sizeHint elimina la compresion sin necesidad de
         # adivinar un numero de pixeles.
-        self.setFixedSize(480, self.sizeHint().height())
+        ajustar_tamano(self, 480, self.sizeHint().height())
+        hacer_desplazable(self)
 
         if usuario:
             self._precargar(usuario)

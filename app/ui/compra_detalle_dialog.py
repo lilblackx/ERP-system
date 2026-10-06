@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.services.compras import CompraService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -78,6 +79,7 @@ class CompraDetalleDialog(QDialog):
         self.compra = None
         self._load_data()
         self._build_ui()
+        hacer_desplazable(self)
 
     def _load_data(self) -> None:
         """Carga los datos de la compra."""
@@ -97,7 +99,7 @@ class CompraDetalleDialog(QDialog):
             return
 
         self.setWindowTitle(f"Detalle Factura — {self.compra.numero_compra}")
-        self.resize(900, 700)
+        ajustar_tamano(self, 900, 700)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 

@@ -38,6 +38,7 @@ from app.services.tesoreria import CajaService
 from app.ui.caja_cierre_dialog import CajaCierreDialog
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -207,8 +208,7 @@ class HistorialMovimientosDialog(QDialog):
         self.usuario = usuario
 
         self.setWindowTitle(f"Historial de Movimientos - {nombre_caja}")
-        self.setMinimumWidth(700)
-        self.resize(700, 500)
+        ajustar_tamano(self, 700, 500, 700)
         self.setStyleSheet(DIALOG_STYLE_HISTORIAL)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 

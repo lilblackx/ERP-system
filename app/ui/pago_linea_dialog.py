@@ -27,6 +27,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHTER,
@@ -176,13 +177,12 @@ class PagoLineaDialog(QDialog):
         self._cuentas_activas: list = []
 
         self.setWindowTitle("Agregar Forma de Pago")
-        self.setMinimumWidth(420)
-        self.setMinimumHeight(500)
-        self.resize(420, 500)
+        ajustar_tamano(self, 420, 500, 420, 500)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_origenes()
         self._cargar_tasas()
         self._toggle_origen()

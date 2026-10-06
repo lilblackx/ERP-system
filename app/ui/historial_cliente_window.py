@@ -37,6 +37,7 @@ from app.ui.aplicar_nota_credito_dialog import AplicarNotaCreditoDialog
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano
 from app.ui.styles import (
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
@@ -217,7 +218,7 @@ class HistorialClienteWindow(QDialog):
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
         self.setWindowTitle(f"Historial - {cliente.nombre_razon_social}")
-        self.setMinimumSize(1400, 700)
+        ajustar_tamano(self, 1400, 700, 1400, 700)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(
             self.windowFlags() | Qt.WindowType.WindowCloseButtonHint & ~Qt.WindowType.WindowContextHelpButtonHint

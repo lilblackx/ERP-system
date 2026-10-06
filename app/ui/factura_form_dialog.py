@@ -48,6 +48,7 @@ from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS, PagoLineaDialog
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHT,
@@ -311,8 +312,7 @@ class FacturaFormDialog(QDialog):
         self._precios_originales: dict = {}
 
         self.setWindowTitle("Nueva Factura")
-        self.resize(920, 740)
-        self.setMinimumSize(820, 640)
+        ajustar_tamano(self, 920, 740, 820, 640)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -320,6 +320,7 @@ class FacturaFormDialog(QDialog):
         self._productos: list = []
 
         self._build_ui()
+        hacer_desplazable(self)
         self._cargar_clientes()
         self._cargar_vendedores()
         self._cargar_productos()

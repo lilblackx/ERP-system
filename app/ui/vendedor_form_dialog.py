@@ -20,6 +20,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHTER,
@@ -130,11 +131,12 @@ class VendedorFormDialog(QDialog):
         self.vendedor = vendedor
         self.id_usuario = id_usuario
         self.setWindowTitle("Editar Vendedor" if vendedor else "Nuevo Vendedor")
-        self.setFixedSize(480, 530)
+        ajustar_tamano(self, 480, 530)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
 
         if vendedor:
             self._precargar(vendedor)

@@ -27,6 +27,7 @@ from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHTER,
@@ -141,12 +142,12 @@ class AplicarNotaCreditoDialog(QDialog):
         self.nota_actualizada: NotaCreditoCliente | None = None
 
         self.setWindowTitle("Aplicar Nota de Crédito")
-        self.setMinimumWidth(420)
-        self.resize(420, 340)
+        ajustar_tamano(self, 420, 340, 420)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
+        hacer_desplazable(self)
         self._on_seleccion_cambiada()
 
     def _build_ui(self) -> None:
