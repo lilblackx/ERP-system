@@ -202,3 +202,53 @@ def test_validar_y_aceptar_pasa_decimal_al_servicio(qtbot, monkeypatch):
 
     assert llamada["monto"] == Decimal("300")
     assert isinstance(llamada["monto"], Decimal)
+
+
+def _capturar_cobro(monkeypatch):
+    llamada = {}
+
+    def fake_registrar(*args, **kwargs):
+        llamada.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr("app.ui.cuentas_por_cobrar_panel.PagoService.registrar_pago_cobro", fake_registrar)
+    monkeypatch.setattr("app.ui.cuentas_por_cobrar_panel.reintentar_en_deadlock", lambda fn: fn())
+    return llamada
+
+
+def test_cobro_en_bolivares_se_envia_con_moneda_ves(qtbot, monkeypatch):
+    """Bs 500 a tasa 50 = $10. `monto` va en USD (lo que descuenta el saldo) y el monto en Bs
+    se guarda como `monto_moneda_origen`: su moneda tiene que ser VES. Antes se mandaba
+    moneda='USD' con el monto en Bs, y la factura mostraba '500 USD' para un cobro de $10."""
+    dialogo = PagoCobroDialog(_crear_sesion(), 1, _crear_cuenta(Decimal("300")))
+    qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
+    _mostrar_campos_bolivares(dialogo, qtbot)
+    _escribir_y_perder_foco(qtbot, dialogo.tasa_input, "50")
+    _escribir_y_perder_foco(qtbot, dialogo.bolivares_input, "500")
+    llamada = _capturar_cobro(monkeypatch)
+
+    dialogo._validar_y_aceptar()
+
+    assert llamada["monto"] == Decimal("10")
+    assert llamada["moneda"] == "VES"
+    assert llamada["monto_moneda_origen"] == Decimal("500")
+    assert llamada["monto_bolivares"] == Decimal("500")
+    assert llamada["tasa_cambio"] == Decimal("50")
+
+
+def test_cobro_en_efectivo_se_envia_en_usd(qtbot, monkeypatch):
+    dialogo = PagoCobroDialog(_crear_sesion(), 1, _crear_cuenta(Decimal("300")))
+    qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo, timeout=15000)
+    dialogo._cajas_abiertas = [SimpleNamespace(id_caja=1, nombre_caja="Caja 1", fecha_apertura=1, fecha_cierre=None)]
+    dialogo._toggle_origen()
+    dialogo.origen_combo.setCurrentIndex(0)
+    llamada = _capturar_cobro(monkeypatch)
+
+    dialogo._validar_y_aceptar()
+
+    assert llamada["moneda"] == "USD"
+    assert llamada["monto_moneda_origen"] is None

@@ -140,9 +140,13 @@ MONEDAS = [
 METODOS_MONEDA_SUGERIDA = {
     "zelle": "USD",
     "binance": "USDT",
-    "transferencia": "VES",
-    "punto_de_venta": "VES",
 }
+# Metodos que muestran el bloque "Monto (Bs) + Tasa". Ahi el campo "Monto" es SIEMPRE el
+# equivalente en USD (lo calcula el bloque Bs, o se escribe directo en USD), asi que la
+# moneda queda fija en USD. Antes se sugeria VES: el dialogo devolvia moneda="VES" con un
+# monto que ya estaba en USD, y emitir_factura lo dividia otra vez por la tasa
+# (Bs 4.000 a tasa 40 = $100 contaban como $2,50) -- doble conversion.
+METODOS_CON_BLOQUE_BS = ("transferencia", "punto_de_venta")
 METODOS_QUE_REQUIEREN_CAJA = {"efectivo"}
 
 
@@ -247,8 +251,8 @@ class PagoLineaDialog(QDialog):
         col_moneda.addWidget(self.moneda_combo)
 
         col_monto = QVBoxLayout()
-        lbl_monto = QLabel(f"Monto {ASTERISCO_REQUERIDO}")
-        lbl_monto.setProperty("class", "FormLabel")
+        self.lbl_monto = QLabel(f"Monto {ASTERISCO_REQUERIDO}")
+        self.lbl_monto.setProperty("class", "FormLabel")
         self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
         self.monto_input.setFixedHeight(32)
         # Con el monto ya precargado (ver __init__/monto_sugerido) y seleccionado, Enter
@@ -257,7 +261,7 @@ class PagoLineaDialog(QDialog):
         # (auditoria UX de facturacion, cajero).
         self.monto_input.returnPressed.connect(self._validar_y_aceptar)
         self.monto_input.valueChanged.connect(self._on_monto_usd_cambiado)
-        col_monto.addWidget(lbl_monto)
+        col_monto.addWidget(self.lbl_monto)
         col_monto.addWidget(self.monto_input)
 
         fila_monto.addLayout(col_moneda, stretch=1)
@@ -375,11 +379,21 @@ class PagoLineaDialog(QDialog):
 
     def _on_metodo_cambiado(self) -> None:
         metodo = self.metodo_combo.currentData()
-        moneda_sugerida = METODOS_MONEDA_SUGERIDA.get(metodo)
+        con_bloque_bs = metodo in METODOS_CON_BLOQUE_BS
+        moneda_sugerida = "USD" if con_bloque_bs else METODOS_MONEDA_SUGERIDA.get(metodo)
         if moneda_sugerida:
             indice = self.moneda_combo.findData(moneda_sugerida)
             if indice >= 0:
                 self.moneda_combo.setCurrentIndex(indice)
+        # Con el bloque Bs la moneda no se elige: el monto es USD (ver METODOS_CON_BLOQUE_BS).
+        self.moneda_combo.setEnabled(not con_bloque_bs)
+        self.moneda_combo.setToolTip(
+            "Con este método el monto se ingresa en Bs y la tasa; el equivalente en USD se calcula."
+            if con_bloque_bs
+            else ""
+        )
+        etiqueta_monto = "Monto (USD)" if con_bloque_bs else "Monto"
+        self.lbl_monto.setText(f"{etiqueta_monto} {ASTERISCO_REQUERIDO}")
         self._toggle_origen()
         self._toggle_campos_bolivares()
         # Un pago en efectivo no tiene "referencia" que registrar (a diferencia de una
@@ -473,13 +487,13 @@ class PagoLineaDialog(QDialog):
         """Muestra/oculta los campos de cálculo en bolivares según el método de pago."""
         metodo = self.metodo_combo.currentData()
         # Solo mostrar para transferencia y punto de venta
-        mostrar_bolivares = metodo in ("transferencia", "punto_de_venta")
+        mostrar_bolivares = metodo in METODOS_CON_BLOQUE_BS
         self.campos_bolivares_widget.setVisible(mostrar_bolivares)
 
     def _on_monto_usd_cambiado(self) -> None:
         """Cuando el monto en USD cambia, calcula el equivalente en Bs si aplica."""
         metodo = self.metodo_combo.currentData()
-        if metodo in ("transferencia", "punto_de_venta"):
+        if metodo in METODOS_CON_BLOQUE_BS:
             self._calcular_bolivares_desde_usd()
 
     def _calcular_monto_usd(self) -> None:
@@ -529,13 +543,17 @@ class PagoLineaDialog(QDialog):
         # Incluir monto_bolivares y tasa_cambio para transferencia y punto de venta
         monto_bolivares = None
         tasa_cambio = None
-        if metodo in ("transferencia", "punto_de_venta"):
+        # Con el bloque Bs el monto ya esta en USD: la moneda se fuerza a USD aunque el combo
+        # diga otra cosa, para que el servicio nunca lo convierta una segunda vez.
+        moneda = self.moneda_combo.currentData()
+        if metodo in METODOS_CON_BLOQUE_BS:
             monto_bolivares = self.bolivares_input.get_value()
             tasa_cambio = self.tasa_input.get_value()
+            moneda = "USD"
 
         return {
             "metodo_pago": metodo,
-            "moneda": self.moneda_combo.currentData(),
+            "moneda": moneda,
             "monto_moneda_origen": self.monto_input.get_value(),
             "monto_bolivares": monto_bolivares,
             "tasa_cambio": tasa_cambio,

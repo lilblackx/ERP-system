@@ -548,6 +548,7 @@ class PagoCobroDialog(QDialog):
                 # Siempre guardar los valores para pagos bancarios
                 # Esto asegura que el trigger tenga los datos para crear el movimiento bancario
                 if bolivares > 0:
+                    # moneda se manda como VES mas abajo: monto_moneda_origen va en la misma moneda
                     monto_moneda_origen = bolivares
                     monto_bolivares = bolivares
                 if tasa > 0:
@@ -561,7 +562,7 @@ class PagoCobroDialog(QDialog):
                     id_cuenta_por_cobrar=self.cuenta.id_cuenta_por_cobrar,
                     monto=self.monto_input.get_value(),
                     metodo_pago=metodo,
-                    moneda="USD",
+                    moneda="VES" if monto_moneda_origen is not None else "USD",
                     monto_moneda_origen=monto_moneda_origen,
                     monto_bolivares=monto_bolivares,
                     tasa_cambio=tasa_cambio,
