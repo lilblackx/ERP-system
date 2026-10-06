@@ -364,6 +364,65 @@ El flujo es:
 La tabla `cuentas_por_pagar_otros` no existía en el schema original; se agregó siguiendo
 el mismo patrón (`IF OBJECT_ID ... IS NULL`) que el resto del archivo.
 
+### Configuración de correo (SMTP) desde la app
+
+Configuración > Correo (`app/ui/config_smtp_panel.py`) guarda el servidor SMTP en la tabla
+`configuracion_smtp` (migración 0077, una sola fila) para que el usuario no edite el `.env`.
+El usuario solo elige su servicio (Gmail, Outlook/Hotmail, Microsoft 365, Yahoo, iCloud, Zoho)
+y escribe correo + contraseña: servidor/puerto/TLS salen del catálogo `PROVEEDORES` en
+`app/services/smtp_config.py`; "Otro" muestra los campos manuales. Decisiones:
+
+- Se guarda en la base, no en un archivo local, porque el correo de desbloqueo se dispara
+  desde cualquier estación y todas deben compartir la misma cuenta. Sin fila (o fila sin
+  usuario/clave) se usan las variables `SMTP_*` del `.env` como respaldo
+  (`SmtpConfigService.obtener_efectiva`).
+- No hay columna `proveedor`: el selector se reconstruye comparando servidor+puerto+TLS con el
+  catálogo (`proveedor_de_servidor`).
+- Permisos: reutiliza `empresa`/`ver` y `empresa`/`editar`.
+- La contraseña se guarda en texto plano (igual que antes en el `.env`) y nunca se muestra ni
+  va a auditoría; dejar el campo vacío al guardar la conserva.
+- Gmail responde a una contraseña mala cerrando la conexión en vez de devolver 535 —
+  `email_service._autenticar` lo convierte en `SMTPAuthenticationError`; sin eso la UI
+  mostraba "revise el puerto".
+- Puerto 465 usa `SMTP_SSL` (SSL directo); el resto, STARTTLS si `usar_tls`.
+
+### Revisión de cobros, comisiones y pantallas chicas (2026-10-06)
+
+- **Pagos de cuentas por cobrar BCV (migración 0078).** Un pago contra `cuentas_por_cobrar_bcv`
+  solo le restaba saldo a la cuenta: no dejaba constancia, no ingresaba a la caja/cuenta bancaria
+  y por eso tampoco salía en el historial del cliente. `trg_pagos_cobros_io` no sirve para BCV
+  (valida y descuenta de `cuentas_por_cobrar`), así que hay tabla propia `pagos_cobros_bcv` y
+  `PagoBCVService._registrar_pago_bcv` inserta la fila + el movimiento (`BancoMovimiento` 'abono'
+  / `CajaMovimiento` 'entrada', enlazados por `id_pago_cobro_bcv`). Lo usan los tres caminos:
+  cobro individual, abono general FIFO y factura de contado con porcentaje BCV (esta última no
+  ingresaba nada a la caja). El sobreabono también ingresa el excedente. `historial_cliente`
+  incluye estos pagos y toma el saldo de la factura de la cuenta BCV (la normal queda en 0).
+  Bug previo corregido: `numero_nota_credito` es VARCHAR(20) y `ABONO-BCV-` + 14 dígitos no
+  cabía, así que todo sobreabono BCV fallaba (ahora `ABV-...`).
+  *No cubierto:* anular una factura BCV con pagos no revierte estos movimientos (los de
+  `pagos_cobros` los revierte un trigger al borrar el pago; aquí no hay equivalente).
+- **Doble conversión en el diálogo de pago de factura.** Con transferencia/punto de venta el
+  campo "Monto" ya es USD (lo calcula el bloque Bs + tasa) pero se enviaba `moneda='VES'`, y
+  `emitir_factura` lo dividía otra vez por la tasa (Bs 4.000 a tasa 40 contaban $2,50). Con el
+  bloque Bs la moneda queda fija en USD (`METODOS_CON_BLOQUE_BS`); el Bs y la tasa viajan en
+  `monto_bolivares`/`tasa_cambio`. Los diálogos de cobro de CxC (normal y BCV) mandaban Bs con
+  `moneda='USD'` (la factura mostraba "4.000 USD"): ahora `moneda='VES'` si hay Bs.
+- **Pago de comisiones con filtro BCV.** El panel mostraba/confirmaba el total filtrado pero
+  `pagar_comisiones_vendedor` pagaba TODO lo liberado. Ahora recibe `ids_comision` (las
+  mostradas) y `monto_esperado` (lo confirmado; si no coincide se rechaza sin pagar). Sin esos
+  parámetros mantiene el comportamiento de siempre (pagar todo lo liberado).
+- **`Proveedor.dias_credito`.** El tooltip decía "0 = de contado, no se le podrá comprar a
+  crédito" pero nada lo comprobaba. `CompraService.registrar_compra` y `crear_compra_desde_oc`
+  ahora lo exigen (mismo gate que `Cliente.dias_credito` en ventas). **Efecto en datos
+  existentes:** los proveedores con 0 días (el default de la columna) solo podrán comprarse de
+  contado hasta que se les configuren los días.
+- **Pantallas chicas.** Los diálogos tenían tamaño fijo (cliente 920x900) y en monitores de
+  ~768 px de alto —o con escala de Windows al 125-150 %— la barra de tareas tapaba los botones.
+  `app/ui/pantalla.py`: `ajustar_tamano` acota el tamaño a `availableGeometry()` y
+  `hacer_desplazable` pone el cuerpo en un `QScrollArea` dejando el pie de botones siempre
+  visible. Aplicado a todos los diálogos con `setFixedSize`/mínimos grandes y a la ventana
+  principal. Los diálogos nuevos deben usarlo en vez de `setFixedSize`.
+
 ## 5. Auditoría
 
 `auditoria.py` expone `registrar_evento()` (usuario, acción, módulo, detalle en texto o
