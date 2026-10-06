@@ -52,6 +52,19 @@ def _validar_items(items: list[dict]) -> None:
             raise ValueError("Cada item requiere un costo_unitario mayor a cero")
 
 
+def _exigir_credito_habilitado(proveedor: Proveedor) -> None:
+    """Comprar a credito exige que el proveedor tenga dias_credito configurados (>0): 0 es
+    'proveedor de contado', tal como lo dice el tooltip de Dias de Credito en
+    proveedor_form_dialog.py. Mismo gate de elegibilidad que VentaService.emitir_factura hace
+    con Cliente.dias_credito (ver docs/ESTADO_DEL_PROYECTO.md); antes el campo se guardaba pero
+    nada lo consultaba."""
+    if (proveedor.dias_credito or 0) <= 0:
+        raise ValueError(
+            f"El proveedor '{proveedor.nombre_razon_social}' no tiene dias de credito configurados "
+            "y no se le puede comprar a credito (configurelos en Proveedores > Editar, o compre de contado)"
+        )
+
+
 class CompraService:
     @staticmethod
     def registrar_compra(
@@ -113,6 +126,7 @@ class CompraService:
         if condicion_pago == "credito":
             if pago is not None:
                 raise ValueError("Una compra a credito no admite pago -- se paga despues contra la cuenta por pagar")
+            _exigir_credito_habilitado(proveedor)
             # WITH (UPDLOCK, ROWLOCK): mismo patron que VentaService.emitir_factura con
             # Cliente -- sin esto, dos compras a credito concurrentes al MISMO proveedor
             # pueden ambas leer la misma deuda_actual antes de que ninguna haya
@@ -509,6 +523,7 @@ class CompraService:
         if condicion_pago == "credito":
             if pago is not None:
                 raise ValueError("Una compra a credito no admite pago -- se paga despues contra la cuenta por pagar")
+            _exigir_credito_habilitado(proveedor)
             deuda_actual = (
                 session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0))
                 .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)

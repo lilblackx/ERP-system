@@ -112,12 +112,18 @@ def crear_cliente(
     return cliente
 
 
-def crear_proveedor(session: Session, limite_credito: Decimal | int = 0, **overrides) -> Proveedor:
+def crear_proveedor(
+    session: Session, limite_credito: Decimal | int = 0, dias_credito: int = 30, **overrides
+) -> Proveedor:
+    """dias_credito default 30 (no 0, el default real de la columna) por el mismo motivo que en
+    crear_cliente: comprar a credito exige dias_credito>0 (CompraService), y la mayoria de los
+    tests no prueban ese gate -- los que si lo prueban pasan dias_credito=0 explicito."""
     datos = {
         "codigo_proveedor": _siguiente("PROV-"),
         "identificacion_proveedor": _siguiente("J-"),
         "nombre_razon_social": "Proveedor de prueba",
         "limite_credito": Decimal(str(limite_credito)),
+        "dias_credito": dias_credito,
     }
     datos.update(overrides)
     proveedor = Proveedor(**datos)

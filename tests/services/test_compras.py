@@ -5,6 +5,7 @@ import pytest
 from app.db.models import (
     BancoMovimiento,
     CajaMovimiento,
+    Compra,
     CompraDetalle,
     CuentaPorPagar,
     NotaCreditoProveedor,
@@ -1039,5 +1040,77 @@ def test_crear_compra_desde_oc_oc_anulada_falla(db_session):
             id_oc=oc.id_oc,
             id_usuario=admin.id_usuario,
             items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 5}],
+            condicion_pago="credito",
+        )
+
+
+# --- Gate de elegibilidad: Proveedor.dias_credito debe ser > 0 para comprar a credito ---
+
+
+def test_registrar_compra_credito_exige_dias_de_credito_del_proveedor(db_session):
+    """El tooltip de 'Dias de Credito' dice '0 = proveedor de contado, no se le podra comprar
+    a credito': el servicio tiene que hacerlo cumplir."""
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"), dias_credito=0)
+
+    with pytest.raises(ValueError, match="no tiene dias de credito"):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=proveedor.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "10.00"}],
+        )
+    assert db_session.query(Compra).count() == 0
+
+
+def test_registrar_compra_de_contado_no_exige_dias_de_credito(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session)
+    proveedor = crear_proveedor(db_session, dias_credito=0)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("100.00"))
+
+    compra = CompraService.registrar_compra(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        id_usuario=admin.id_usuario,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "10.00"}],
+        pago={
+            "metodo_pago": "efectivo",
+            "moneda": "USD",
+            "monto_moneda_origen": Decimal("10.00"),
+            "id_caja": caja.id_caja,
+        },
+    )
+
+    assert compra.condicion_pago == "contado"
+
+
+def test_crear_compra_desde_oc_credito_exige_dias_de_credito_del_proveedor(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"), dias_credito=0)
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 10, "precio_unitario": "5.00"}],
+        id_usuario=admin.id_usuario,
+    )
+    NotaRecepcionService.crear_nota_recepcion(
+        db_session,
+        id_oc=oc.id_oc,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad_recibida": 10}],
+        id_usuario=admin.id_usuario,
+    )
+
+    with pytest.raises(ValueError, match="no tiene dias de credito"):
+        CompraService.crear_compra_desde_oc(
+            db_session,
+            id_oc=oc.id_oc,
+            id_usuario=admin.id_usuario,
+            items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 10}],
             condicion_pago="credito",
         )
