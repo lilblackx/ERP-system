@@ -6,12 +6,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    BancoMovimiento,
     Caja,
+    CajaMovimiento,
     Cliente,
     CuentaBancaria,
     CuentaPorCobrarBCV,
     FacturaVenta,
     NotaCreditoCliente,
+    PagoCobroBCV,
 )
 from app.services.auditoria import AuditoriaService
 from app.services.db_utils import (
@@ -21,6 +24,7 @@ from app.services.db_utils import (
     traducir_error_trigger,
 )
 from app.services.permisos import require_permiso
+from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
@@ -88,12 +92,6 @@ class PagoBCVService:
         if fecha_pago is None:
             fecha_pago = datetime.now()
 
-        # Crear registro de pago similar a PagoCobro pero para BCV
-        # Nota: Necesitaríamos crear un modelo PagoCobroBCV o reutilizar PagoCobro
-        # Por ahora, vamos a asumir que usamos la misma tabla pagos_cobros
-        # con un indicador de que es BCV, o creamos una tabla separada
-        # Para simplificar, vamos a registrar el pago y actualizar la cuenta
-
         # Actualizar saldo pendiente
         cuenta.saldo_pendiente = cuenta.saldo_pendiente - monto
 
@@ -107,6 +105,25 @@ class PagoBCVService:
         session.add(cuenta)
         try:
             session.flush()
+            # Constancia del pago + ingreso en la caja/cuenta bancaria. Sin esto el saldo
+            # bajaba pero el dinero no aparecia en ningun lado (ni en bancos/caja ni en el
+            # historial del cliente) -- ver PagoBCVService._registrar_pago_bcv.
+            PagoBCVService._registrar_pago_bcv(
+                session,
+                cuenta,
+                monto,
+                metodo_pago=metodo_pago,
+                moneda=moneda,
+                monto_moneda_origen=monto_moneda_origen,
+                monto_bolivares=monto_bolivares,
+                tasa_cambio=tasa_cambio,
+                id_cuenta_bancaria=id_cuenta_bancaria,
+                id_caja=id_caja,
+                id_tasa=id_tasa,
+                referencia=referencia,
+                fecha_pago=fecha_pago,
+                id_usuario=id_usuario,
+            )
         except Exception as e:
             session.rollback()
             if _es_deadlock(e):
@@ -115,6 +132,106 @@ class PagoBCVService:
                 raise ValueError("La operación tardó demasiado esperando acceso a la cuenta. Intente de nuevo.") from e
             raise ValueError(traducir_error_trigger(e)) from e
         return cuenta
+
+    @staticmethod
+    def _registrar_pago_bcv(
+        session: Session,
+        cuenta: CuentaPorCobrarBCV,
+        monto,
+        metodo_pago: str,
+        moneda: str = "USD",
+        monto_moneda_origen=None,
+        monto_bolivares=None,
+        tasa_cambio=None,
+        id_cuenta_bancaria: int | None = None,
+        id_caja: int | None = None,
+        id_tasa: int | None = None,
+        referencia: str | None = None,
+        fecha_pago: date | datetime | None = None,
+        id_usuario: int | None = None,
+    ) -> PagoCobroBCV:
+        """Deja constancia de un pago YA descontado del saldo de `cuenta`: la fila en
+        pagos_cobros_bcv y el ingreso en la caja ('entrada') o cuenta bancaria ('abono') de
+        destino. Hace flush, no commit -- queda en la transaccion de quien la llama (cobro
+        individual, abono general o factura de contado con porcentaje BCV).
+
+        `monto` es siempre USD, lo que se descuenta del saldo; el detalle en Bs va aparte
+        (monto_bolivares/tasa_cambio), igual que en PagoCobro. No hay trigger sobre las
+        tablas BCV: el saldo de la cuenta lo mueve el caller, y el saldo de la cuenta bancaria
+        lo sigue moviendo trg_banco_movimientos_saldo al insertar el movimiento."""
+        if (id_cuenta_bancaria is None) == (id_caja is None):
+            raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
+        if id_cuenta_bancaria is not None:
+            cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
+            if cuenta_bancaria is None:
+                raise ValueError("Cuenta bancaria no encontrada")
+            if cuenta_bancaria.estado_cuenta != "ACTIVO":
+                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+        else:
+            caja = session.get(Caja, id_caja)
+            if caja is None:
+                raise ValueError("Caja no encontrada")
+            if caja.fecha_apertura is None or caja.fecha_cierre is not None:
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+
+        monto = to_decimal(monto)
+        fecha_pago = fecha_pago or datetime.now()
+        pago = PagoCobroBCV(
+            id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
+            id_cuenta_bancaria=id_cuenta_bancaria,
+            id_caja=id_caja,
+            id_tasa=id_tasa,
+            metodo_pago=metodo_pago,
+            moneda=moneda,
+            monto=monto,
+            monto_moneda_origen=(to_decimal(monto_moneda_origen) if monto_moneda_origen is not None else None),
+            monto_bolivares=(to_decimal(monto_bolivares) if monto_bolivares is not None else None),
+            tasa_cambio=to_decimal(tasa_cambio) if tasa_cambio is not None else None,
+            referencia=referencia,
+            fecha_pago=fecha_pago,
+            creado_por=id_usuario,
+        )
+        session.add(pago)
+        session.flush()  # necesito el id para enlazar el movimiento
+
+        factura = cuenta.factura
+        cliente = factura.cliente if factura else None
+        descripcion = f"Cobro a cliente BCV: {cliente.nombre_razon_social if cliente else 'Desconocido'}"
+        if factura is not None and factura.numero_factura:
+            descripcion += f" - Fact. {factura.numero_factura}"
+        descripcion = descripcion[:255]
+
+        if id_cuenta_bancaria is not None:
+            session.add(
+                BancoMovimiento(
+                    id_cuenta=id_cuenta_bancaria,
+                    tipo_movimiento="abono",
+                    monto_movimiento=monto,
+                    monto_bolivares=pago.monto_bolivares,
+                    tasa_cambio=pago.tasa_cambio,
+                    id_tasa=id_tasa,
+                    fecha_movimiento=fecha_pago,
+                    referencia_movimiento=referencia,
+                    descripcion_movimiento=descripcion,
+                    creado_por=id_usuario,
+                    fecha_creacion=datetime.now(),
+                    id_pago_cobro_bcv=pago.id_pago_cobro_bcv,
+                )
+            )
+        else:
+            session.add(
+                CajaMovimiento(
+                    id_caja=id_caja,
+                    tipo_movimiento="entrada",
+                    descripcion_movimiento=descripcion,
+                    monto_movimiento=monto,
+                    fecha_registro=fecha_pago,
+                    creado_por=id_usuario,
+                    id_pago_cobro_bcv=pago.id_pago_cobro_bcv,
+                )
+            )
+        session.flush()
+        return pago
 
     @staticmethod
     def registrar_pago_cobro_bcv(
@@ -511,6 +628,23 @@ class PagoBCVService:
                 else:
                     cuenta.estado = "parcial"
 
+                # Un pago por cada factura afectada, con su ingreso en caja/banco: sin esto el
+                # abono bajaba los saldos pero el dinero no quedaba registrado en ningun lado.
+                PagoBCVService._registrar_pago_bcv(
+                    session,
+                    cuenta,
+                    monto_aplicar,
+                    metodo_pago=metodo_pago,
+                    moneda="USD",
+                    monto_bolivares=monto_aplicado_bs,
+                    tasa_cambio=tasa_cambio.quantize(Decimal("0.01")),
+                    id_cuenta_bancaria=id_cuenta_bancaria,
+                    id_caja=id_caja,
+                    id_tasa=id_tasa,
+                    referencia=referencia,
+                    id_usuario=id_usuario,
+                )
+
                 # Actualizar observaciones de la factura si existe (truncando si es necesario)
                 if cuenta.factura:
                     observaciones_actuales = cuenta.factura.observaciones_factura or ""
@@ -546,7 +680,9 @@ class PagoBCVService:
                     if cliente:
                         motivo = f"Sobreabono BCV por pago en exceso - {metodo_pago}"
                         nota_credito = NotaCreditoCliente(
-                            numero_nota_credito=f"ABONO-BCV-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                            # numero_nota_credito es VARCHAR(20): "ABONO-BCV-" + 14 digitos (24)
+                            # no cabia y todo sobreabono BCV fallaba al insertar la nota.
+                            numero_nota_credito=f"ABV-{datetime.now().strftime('%Y%m%d%H%M%S')}",
                             id_cliente=id_cliente,
                             id_factura_origen=None,  # No asociada a una factura específica
                             monto=saldo_restante,
@@ -559,6 +695,33 @@ class PagoBCVService:
                         session.add(nota_credito)
                         session.flush()
                         nota_credito_id = nota_credito.id_nota_credito
+
+                        # El excedente tambien entro a la caja/cuenta (queda como saldo a favor
+                        # del cliente en la nota de credito) -- si no se registra, la caja/banco
+                        # quedaria corta por esa diferencia.
+                        descripcion_sobreabono = f"Sobreabono BCV (saldo a favor) de {cliente.nombre_razon_social}"[
+                            :255
+                        ]
+                        if id_cuenta_bancaria is not None:
+                            BancoService._registrar_ingreso_excedente(
+                                session,
+                                id_cuenta=id_cuenta_bancaria,
+                                monto=saldo_restante,
+                                descripcion=descripcion_sobreabono,
+                                id_usuario=id_usuario,
+                                fecha=datetime.now(),
+                                monto_bolivares=(saldo_restante * tasa_cambio).quantize(Decimal("0.01")),
+                                tasa_cambio=tasa_cambio.quantize(Decimal("0.01")),
+                            )
+                        else:
+                            CajaService._registrar_ingreso_excedente(
+                                session,
+                                id_caja=id_caja,
+                                monto=saldo_restante,
+                                descripcion=descripcion_sobreabono,
+                                id_usuario=id_usuario,
+                                fecha=datetime.now(),
+                            )
 
                         logger.info(
                             "BCV - Nota de crédito creada por sobreabono: cliente=%s monto=%s metodo=%s nota_id=%s",

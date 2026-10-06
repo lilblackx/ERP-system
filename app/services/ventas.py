@@ -33,6 +33,7 @@ from app.services.db_utils import (
 )
 from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
+from app.services.pagos_bcv import PagoBCVService
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
@@ -687,6 +688,28 @@ class VentaService:
                                 if cxc_bcv.saldo_pendiente <= 0:
                                     cxc_bcv.saldo_pendiente = Decimal("0.00")
                                     cxc_bcv.estado = "pagada"
+
+                                # Constancia del pago + ingreso en la caja/cuenta de esta linea.
+                                # Sin esto, una venta de contado con porcentaje BCV dejaba la
+                                # cuenta BCV en 'pagada' pero el dinero nunca entraba a la
+                                # caja/banco (a diferencia de una venta de contado normal, donde
+                                # lo hace trg_pagos_cobros_io via _aplicar_pago_cobro).
+                                PagoBCVService._registrar_pago_bcv(
+                                    session,
+                                    cxc_bcv,
+                                    monto_a_aplicar_bcv,
+                                    metodo_pago=pago_linea["metodo_pago"],
+                                    moneda=pago_linea["moneda"],
+                                    monto_moneda_origen=pago_linea["monto_moneda_origen"],
+                                    monto_bolivares=pago_linea.get("monto_bolivares"),
+                                    tasa_cambio=pago_linea.get("tasa_cambio"),
+                                    id_cuenta_bancaria=pago_linea.get("id_cuenta_bancaria"),
+                                    id_caja=pago_linea.get("id_caja"),
+                                    id_tasa=id_tasa,
+                                    referencia=pago_linea.get("referencia"),
+                                    fecha_pago=factura.fecha_emision,
+                                    id_usuario=id_usuario,
+                                )
 
                             # Registrar excedente (cambio) si lo hay
                             excedente_linea = (monto_usd - monto_a_aplicar_bcv).quantize(Decimal("0.01"))

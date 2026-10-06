@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models import (
     CuentaBancaria,
     CuentaPorCobrar,
+    CuentaPorCobrarBCV,
     FacturaVenta,
     NotaCreditoCliente,
     PagoCobro,
+    PagoCobroBCV,
 )
 
 
@@ -79,6 +81,23 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         .all()
     )
 
+    # Pagos de las cuentas por cobrar BCV (tabla aparte, ver migrations/0078): sin esto, un
+    # abono a una factura con porcentaje BCV no aparecia en el historial.
+    pagos_bcv = (
+        session.query(PagoCobroBCV)
+        .join(
+            CuentaPorCobrarBCV,
+            PagoCobroBCV.id_cuenta_por_cobrar == CuentaPorCobrarBCV.id_cuenta_por_cobrar,
+        )
+        .join(FacturaVenta, CuentaPorCobrarBCV.id_factura == FacturaVenta.id_factura)
+        .filter(FacturaVenta.id_cliente_factura == id_cliente)
+        .options(
+            joinedload(PagoCobroBCV.cuenta_bancaria).joinedload(CuentaBancaria.banco),
+            joinedload(PagoCobroBCV.cuenta_por_cobrar),
+        )
+        .all()
+    )
+
     # Obtener notas de crédito disponibles del cliente
     notas_credito = (
         session.query(NotaCreditoCliente)
@@ -97,20 +116,27 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         .all()
     )
 
-    # Agrupar pagos por factura
+    # Agrupar pagos por factura (normales y BCV juntos, el más reciente primero)
     pagos_por_factura: dict[int, list] = {}
-    for pago in pagos:
+    for pago in [*pagos, *pagos_bcv]:
         cxc = pago.cuenta_por_cobrar
         if cxc and cxc.id_factura:
-            if cxc.id_factura not in pagos_por_factura:
-                pagos_por_factura[cxc.id_factura] = []
-            pagos_por_factura[cxc.id_factura].append(pago)
+            pagos_por_factura.setdefault(cxc.id_factura, []).append(pago)
+    for lista in pagos_por_factura.values():
+        lista.sort(key=lambda p: p.fecha_pago, reverse=True)
 
     # Construir historial agrupado por factura
     historial: list[HistorialItem] = []
 
     for factura in facturas:
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
+        # Una factura con porcentaje BCV deja su cuenta normal en saldo 0 y lleva la deuda real
+        # en cuentas_por_cobrar_bcv: sin mirarla, el historial mostraba saldo 0 estando pendiente.
+        cxc_bcv = (
+            session.query(CuentaPorCobrarBCV)
+            .filter(CuentaPorCobrarBCV.id_factura == factura.id_factura, CuentaPorCobrarBCV.porcentaje > 0)
+            .first()
+        )
         fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d %H:%M") if factura.fecha_emision else ""
         fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
 
@@ -132,7 +158,9 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "metodo_pago": None,
             "monto_vuelto": factura.monto_vuelto,
             "metodo_vuelto": factura.metodo_vuelto,
-            "saldo_corrido": cxc.saldo_pendiente if cxc else Decimal("0.00"),
+            "saldo_corrido": (
+                cxc_bcv.saldo_pendiente if cxc_bcv else (cxc.saldo_pendiente if cxc else Decimal("0.00"))
+            ),
         }
         historial.append(item_factura)
 
@@ -164,11 +192,12 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                         else:
                             observaciones = nombre_banco
 
+                id_pago = pago.id_pago_cobro_bcv if isinstance(pago, PagoCobroBCV) else pago.id_pago_cobro
                 item_pago: HistorialItem = {
                     "tipo_transaccion": "pago",
                     "id_cuenta": cxc_pago.id_cuenta_por_cobrar if cxc_pago else None,
                     "id_factura": factura.id_factura,
-                    "id_pago": pago.id_pago_cobro,
+                    "id_pago": id_pago,
                     "id_nota_credito": None,
                     "numero_factura": factura.numero_factura or "",
                     "fecha": fecha_pago_str,

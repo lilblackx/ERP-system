@@ -220,7 +220,7 @@ class MovimientosCuentaDialog(QDialog):
 
             # Origen (Cliente, Proveedor, Comisión, Manual, Otro)
             origen = "Manual"
-            if movimiento.id_pago_cobro:
+            if movimiento.id_pago_cobro or movimiento.id_pago_cobro_bcv:
                 origen = "Cliente"
             elif movimiento.id_pago_proveedor:
                 origen = "Proveedor"
@@ -242,6 +242,8 @@ class MovimientosCuentaDialog(QDialog):
             pago_rel = "N/A"
             if movimiento.id_pago_cobro:
                 pago_rel = f"Cobro #{movimiento.id_pago_cobro}"
+            elif movimiento.id_pago_cobro_bcv:
+                pago_rel = f"Cobro BCV #{movimiento.id_pago_cobro_bcv}"
             elif movimiento.id_pago_proveedor:
                 pago_rel = f"Prov. #{movimiento.id_pago_proveedor}"
             elif movimiento.id_pago_comision:

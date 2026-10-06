@@ -938,6 +938,38 @@ class PagoCobro(Base):
     creador = relationship("Usuario")
 
 
+class PagoCobroBCV(Base):
+    """Pago aplicado a una CuentaPorCobrarBCV. A diferencia de PagoCobro no hay trigger: el
+    saldo de la cuenta BCV y el ingreso en caja/banco los resuelve PagoBCVService (ver
+    app/services/pagos_bcv.py y migrations/0078). Mismo significado de columnas que
+    PagoCobro: `monto` siempre en USD (lo que se descuenta del saldo), `moneda`/
+    `monto_moneda_origen` lo recibido tal cual, `monto_bolivares`/`tasa_cambio` el detalle en Bs."""
+
+    __tablename__ = "pagos_cobros_bcv"
+
+    id_pago_cobro_bcv: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_cuenta_por_cobrar: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("cuentas_por_cobrar_bcv.id_cuenta_por_cobrar"), nullable=False
+    )
+    id_cuenta_bancaria: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cuentas_bancarias.id_cuenta"))
+    id_caja: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cajas.id_caja"))
+    id_tasa: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("control_de_tasas.id_tasa"))
+    metodo_pago: Mapped[str] = mapped_column(String(20), nullable=False)
+    moneda: Mapped[str] = mapped_column(String(10), nullable=False, server_default="USD")
+    monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    monto_moneda_origen: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
+    monto_bolivares: Mapped[decimal.Decimal | None] = mapped_column(Numeric(20, 2))
+    tasa_cambio: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
+    referencia: Mapped[str | None] = mapped_column(String(100))
+    fecha_pago: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+
+    cuenta_por_cobrar = relationship("CuentaPorCobrarBCV")
+    cuenta_bancaria = relationship("CuentaBancaria")
+    caja = relationship("Caja")
+    tasa = relationship("ControlDeTasa")
+
+
 class PagoProveedor(Base):
     __tablename__ = "pagos_proveedores"
     __table_args__ = {"implicit_returning": False}
@@ -1008,6 +1040,7 @@ class BancoMovimiento(Base):
     id_pago_cobro: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_cobros.id_pago_cobro"))
     id_pago_proveedor: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_proveedores.id_pago_proveedor"))
     id_pago_comision: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_comisiones.id_pago_comision"))
+    id_pago_cobro_bcv: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_cobros_bcv.id_pago_cobro_bcv"))
 
     cuenta = relationship("CuentaBancaria")
     creador = relationship("Usuario")
@@ -1015,6 +1048,7 @@ class BancoMovimiento(Base):
     pago_cobro = relationship("PagoCobro")
     pago_proveedor = relationship("PagoProveedor")
     pago_comision = relationship("PagoComision")
+    pago_cobro_bcv = relationship("PagoCobroBCV")
 
 
 class CajaMovimiento(Base):
@@ -1030,6 +1064,7 @@ class CajaMovimiento(Base):
     id_pago_cobro: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_cobros.id_pago_cobro"))
     id_pago_proveedor: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_proveedores.id_pago_proveedor"))
     id_pago_comision: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_comisiones.id_pago_comision"))
+    id_pago_cobro_bcv: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("pagos_cobros_bcv.id_pago_cobro_bcv"))
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
 
     caja = relationship("Caja")

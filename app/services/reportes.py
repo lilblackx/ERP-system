@@ -1974,7 +1974,7 @@ class ReporteService:
         movimientos = query.order_by(CajaMovimiento.fecha_registro).all()
 
         def _origen(m: CajaMovimiento) -> str:
-            if m.id_pago_cobro is not None:
+            if m.id_pago_cobro is not None or m.id_pago_cobro_bcv is not None:
                 return "Cobro"
             if m.id_pago_proveedor is not None:
                 return "Pago Proveedor"

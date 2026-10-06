@@ -381,7 +381,7 @@ class HistorialMovimientosDialog(QDialog):
 
                     # Determinar origen
                     origen = "Manual"
-                    if mov.id_pago_cobro:
+                    if mov.id_pago_cobro or mov.id_pago_cobro_bcv:
                         origen = "Cobro"
                     elif mov.id_pago_proveedor:
                         origen = "Pago Proveedor"

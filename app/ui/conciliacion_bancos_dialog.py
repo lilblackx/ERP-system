@@ -429,7 +429,7 @@ class ConciliacionBancosDialog(QDialog):
         todos_movimientos = []
         for mov in movimientos_db:
             origen = "Otro"
-            if mov.id_pago_cobro:
+            if mov.id_pago_cobro or mov.id_pago_cobro_bcv:
                 origen = "Cliente"
             elif mov.id_pago_proveedor:
                 origen = "Proveedor"
