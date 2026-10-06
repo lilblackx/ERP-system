@@ -2696,3 +2696,110 @@ def test_emitir_factura_vuelto_efectivo_se_infiere_de_la_unica_caja_usada(db_ses
     )
     assert salida is not None
     assert salida.monto_movimiento == Decimal("50.00")
+
+
+def test_emitir_factura_pago_mixto_con_vuelto_aplica_cada_linea_al_saldo_restante(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "103.36")
+    cliente = crear_cliente(db_session)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "103.36"}],
+        pagos=[
+            {
+                "metodo_pago": "efectivo",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("100.00"),
+                "id_caja": caja.id_caja,
+            },
+            {
+                "metodo_pago": "efectivo",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("10.00"),
+                "id_caja": caja.id_caja,
+            },
+        ],
+        metodo_vuelto="efectivo",
+        id_caja_vuelto=caja.id_caja,
+    )
+
+    assert factura.monto_vuelto == Decimal("6.64")
+    cxc = db_session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).one()
+    assert cxc.saldo_pendiente == Decimal("0.00")
+    # 500 apertura + 110 entregado - 6.64 vuelto
+    assert CajaService.calcular_saldo_actual(db_session, caja.id_caja) == Decimal("603.36")
+
+
+def test_emitir_factura_precio_de_lista_float_no_pide_descuento(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "7.20")
+    cliente = crear_cliente(db_session)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": 7.2}],
+    )
+
+    assert factura.motivo_descuento is None
+    assert factura.autorizado_por_descuento is None
+
+
+def test_emitir_factura_venta_por_unidad_a_precio_de_lista_no_pide_descuento(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50, cantidad_caja=Decimal("12"))
+    crear_precio_producto(db_session, producto, "10.00")
+    cliente = crear_cliente(db_session)
+
+    # 10.00 / 12 = 0.8333... -> 0.83 a la precision de factura_detalle.precio_unitario
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[
+            {"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": 10 / 12, "tipo_venta": "unidad"}
+        ],
+    )
+
+    assert factura.motivo_descuento is None
+    assert factura.autorizado_por_descuento is None
+
+
+def test_emitir_factura_venta_por_unidad_bajo_el_precio_de_lista_unitario_pide_descuento(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50, cantidad_caja=Decimal("12"))
+    crear_precio_producto(db_session, producto, "12.00")
+    cliente = crear_cliente(db_session)
+
+    with pytest.raises(ValueError, match="requiere un motivo"):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            pagos=pago_contado(db_session),
+            items=[
+                {"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "0.90", "tipo_venta": "unidad"}
+            ],
+        )

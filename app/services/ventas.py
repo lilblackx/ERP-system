@@ -1,7 +1,7 @@
 import logging
 import uuid
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
@@ -259,11 +259,13 @@ class VentaService:
         # pero le falta el precio. El chequeo real con lock (UPDLOCK/ROWLOCK) sigue
         # ocurriendo mas abajo al validar stock; este es solo para dar el mensaje correcto
         # antes de evaluar nada mas.
-        productos_existentes = {
-            p.id_producto
-            for p in session.query(Inventario.id_producto).filter(Inventario.id_producto.in_(ids_producto_items))
+        unidades_por_caja_producto = {
+            p.id_producto: p.cantidad_caja
+            for p in session.query(Inventario.id_producto, Inventario.cantidad_caja).filter(
+                Inventario.id_producto.in_(ids_producto_items)
+            )
         }
-        ids_inexistentes = ids_producto_items - productos_existentes
+        ids_inexistentes = ids_producto_items - unidades_por_caja_producto.keys()
         if ids_inexistentes:
             raise ValueError(f"Producto {next(iter(ids_inexistentes))} no encontrado")
 
@@ -286,8 +288,24 @@ class VentaService:
                 f"Los siguientes productos no tienen precio de venta configurado: {productos_sin_precio}. "
                 "Configure un precio en Inventario antes de venderlos."
             )
+        # Se compara a la precision con que se guarda factura_detalle.precio_unitario
+        # (Numeric(18,2)), con el precio de lista pasado por to_decimal (str(float), no el
+        # valor binario exacto: Decimal("7.2") < 7.2 es True porque el float 7.2 es
+        # 7.2000000000000002). En venta por unidad el precio de lista es el del bulto
+        # dividido entre las unidades de la caja -- el mismo calculo que hace la UI al
+        # elegir "Unidad" y ComisionService para la base de la comision.
+        centavo = Decimal("0.01")
+
+        def _precio_lista_del_item(item: dict) -> Decimal:
+            precio_lista = to_decimal(precios_lista[item["id_producto"]])
+            unidades_por_caja = unidades_por_caja_producto[item["id_producto"]]
+            if item.get("tipo_venta") == "unidad" and unidades_por_caja and unidades_por_caja > 1:
+                precio_lista = precio_lista / to_decimal(unidades_por_caja)
+            return precio_lista.quantize(centavo, rounding=ROUND_HALF_UP)
+
         hay_precio_bajo_lista = any(
-            Decimal(str(item["precio_unitario"])) < precios_lista[item["id_producto"]] for item in items
+            to_decimal(item["precio_unitario"]).quantize(centavo, rounding=ROUND_HALF_UP) < _precio_lista_del_item(item)
+            for item in items
         )
         requiere_autorizacion_descuento = hay_precio_bajo_lista or monto_descuento > 0
         if requiere_autorizacion_descuento:
@@ -762,6 +780,11 @@ class VentaService:
             elif cxc is not None:
                 # Sin porcentaje BCV, comportamiento normal: aplicar pagos a cuenta original
                 for pago_linea, monto_usd in zip(pagos, pagos_usd, strict=True):
+                    # trg_pagos_cobros_io descuenta cada pago del saldo en la base, pero el
+                    # objeto cxc en memoria no se entera: sin refresh, la 2da linea de un
+                    # pago mixto se recorta contra el saldo previo a la 1ra y el trigger la
+                    # rechaza con "excede el saldo pendiente".
+                    session.refresh(cxc)
                     monto_a_aplicar = min(monto_usd, cxc.saldo_pendiente)
                     if monto_a_aplicar > 0:
                         PagoService._aplicar_pago_cobro(
@@ -781,29 +804,29 @@ class VentaService:
                             id_usuario=id_usuario,
                         )
 
-                excedente_linea = (monto_usd - monto_a_aplicar).quantize(Decimal("0.01"))
-                if excedente_linea > 0:
-                    descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
-                    id_caja_linea = pago_linea.get("id_caja")
-                    id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
-                    if id_caja_linea is not None:
-                        CajaService._registrar_ingreso_excedente(
-                            session,
-                            id_caja=id_caja_linea,
-                            monto=excedente_linea,
-                            descripcion=descripcion_excedente,
-                            id_usuario=id_usuario,
-                            fecha=factura.fecha_emision,
-                        )
-                    elif id_cuenta_linea is not None:
-                        BancoService._registrar_ingreso_excedente(
-                            session,
-                            id_cuenta=id_cuenta_linea,
-                            monto=excedente_linea,
-                            descripcion=descripcion_excedente,
-                            id_usuario=id_usuario,
-                            fecha=factura.fecha_emision,
-                        )
+                    excedente_linea = (monto_usd - monto_a_aplicar).quantize(Decimal("0.01"))
+                    if excedente_linea > 0:
+                        descripcion_excedente = f"Excedente de pago factura {factura.numero_factura} (vuelto pendiente)"
+                        id_caja_linea = pago_linea.get("id_caja")
+                        id_cuenta_linea = pago_linea.get("id_cuenta_bancaria")
+                        if id_caja_linea is not None:
+                            CajaService._registrar_ingreso_excedente(
+                                session,
+                                id_caja=id_caja_linea,
+                                monto=excedente_linea,
+                                descripcion=descripcion_excedente,
+                                id_usuario=id_usuario,
+                                fecha=factura.fecha_emision,
+                            )
+                        elif id_cuenta_linea is not None:
+                            BancoService._registrar_ingreso_excedente(
+                                session,
+                                id_cuenta=id_cuenta_linea,
+                                monto=excedente_linea,
+                                descripcion=descripcion_excedente,
+                                id_usuario=id_usuario,
+                                fecha=factura.fecha_emision,
+                            )
 
         if monto_vuelto > 0:
             nombre_cliente = factura.cliente.nombre_razon_social if factura.cliente else "Desconocido"
