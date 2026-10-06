@@ -1000,7 +1000,7 @@ class FacturaFormDialog(QDialog):
         fila_total.setSpacing(8)
 
         lbl_descuento = QLabel("Descuento de factura:")
-        lbl_descuento.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        lbl_descuento.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
         self.descuento_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.descuento_input.setFixedWidth(130)
         self.descuento_input.setFixedHeight(30)
@@ -1010,7 +1010,9 @@ class FacturaFormDialog(QDialog):
         fila_total.addWidget(self.descuento_input)
         fila_total.addStretch()
         self.lbl_total = QLabel("Total: $0.00")
-        self.lbl_total.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        self.lbl_total.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK}; background: transparent;"
+        )
         fila_total.addWidget(self.lbl_total)
         layout.addLayout(fila_total)
 
