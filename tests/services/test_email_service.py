@@ -135,3 +135,72 @@ def test_enviar_correo_con_cuerpo_html_arma_multipart_alternative(monkeypatch):
     partes = list(mensaje.iter_parts())
     assert any(p.get_content_type() == "text/plain" and "Cuerpo plano" in p.get_content() for p in partes)
     assert any(p.get_content_type() == "text/html" and "Cuerpo HTML" in p.get_content() for p in partes)
+
+
+class _FakeSMTPSSL(_FakeSMTP):
+    """Como _FakeSMTP, pero no debe llamar a starttls(): SMTP_SSL ya viene cifrado."""
+
+    def starttls(self):
+        raise AssertionError("SMTP_SSL no debe hacer STARTTLS")
+
+
+def test_enviar_correo_con_ajustes_explicitos_ignora_el_env(monkeypatch):
+    _FakeSMTP.instancias = []
+    monkeypatch.setattr(config, "SMTP_USER", "env@example.com")
+    monkeypatch.setattr(config, "SMTP_PASSWORD", "clave-env")
+    monkeypatch.setattr(email_service.smtplib, "SMTP", _FakeSMTP)
+    ajustes = email_service.AjustesSmtp("smtp.db.com", 2525, "db@example.com", "clave-db", "yo@db.com", True)
+
+    email_service.enviar_correo("destino@example.com", "Asunto", "Cuerpo", ajustes=ajustes)
+
+    servidor = _FakeSMTP.instancias[0]
+    assert (servidor.host, servidor.port) == ("smtp.db.com", 2525)
+    assert servidor.login_args == ("db@example.com", "clave-db")
+    assert servidor.mensaje_enviado["From"] == "yo@db.com"
+
+
+def test_enviar_correo_ajustes_sin_credenciales_lanza():
+    ajustes = email_service.AjustesSmtp("smtp.db.com", 587, "", "", "", True)
+    with pytest.raises(RuntimeError, match="SMTP no esta configurado"):
+        email_service.enviar_correo("destino@example.com", "Asunto", "Cuerpo", ajustes=ajustes)
+
+
+def test_enviar_correo_puerto_465_usa_ssl_directo_sin_starttls(monkeypatch):
+    _FakeSMTP.instancias = []
+    monkeypatch.setattr(email_service.smtplib, "SMTP_SSL", _FakeSMTPSSL)
+    ajustes = email_service.AjustesSmtp("smtp.db.com", 465, "db@example.com", "clave-db", "", True)
+
+    email_service.enviar_correo("destino@example.com", "Asunto", "Cuerpo", ajustes=ajustes)
+
+    servidor = _FakeSMTP.instancias[0]
+    assert servidor.port == 465
+    assert servidor.login_args == ("db@example.com", "clave-db")
+    assert servidor.mensaje_enviado is not None
+
+
+def test_probar_conexion_autentica_sin_enviar(monkeypatch):
+    _FakeSMTP.instancias = []
+    monkeypatch.setattr(email_service.smtplib, "SMTP", _FakeSMTP)
+    ajustes = email_service.AjustesSmtp("smtp.db.com", 587, "db@example.com", "clave-db", "", True)
+
+    email_service.probar_conexion(ajustes)
+
+    servidor = _FakeSMTP.instancias[0]
+    assert servidor.iniciado_tls is True
+    assert servidor.login_args == ("db@example.com", "clave-db")
+    assert servidor.mensaje_enviado is None
+
+
+class _FakeSMTPCierraAlAutenticar(_FakeSMTP):
+    """Como Gmail ante una clave mala: corta la conexion en vez de contestar 535."""
+
+    def login(self, usuario, clave):
+        raise email_service.smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+
+
+def test_desconexion_durante_el_login_se_reporta_como_credenciales_rechazadas(monkeypatch):
+    monkeypatch.setattr(email_service.smtplib, "SMTP", _FakeSMTPCierraAlAutenticar)
+    ajustes = email_service.AjustesSmtp("smtp.gmail.com", 587, "db@example.com", "mala", "", True)
+
+    with pytest.raises(email_service.smtplib.SMTPAuthenticationError):
+        email_service.probar_conexion(ajustes)

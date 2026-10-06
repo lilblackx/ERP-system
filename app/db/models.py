@@ -181,6 +181,26 @@ class ConfiguracionEmpresa(Base):
     modificador = relationship("Usuario")
 
 
+class ConfiguracionSmtp(Base):
+    """Servidor SMTP para el envio de correos (codigos de desbloqueo/recuperacion de clave),
+    editable desde Configuracion > Correo. Una sola fila; sin ella email_service cae a las
+    variables SMTP_* del .env -- ver app/services/smtp_config.py y migrations/0077."""
+
+    __tablename__ = "configuracion_smtp"
+
+    id_config: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    puerto: Mapped[int] = mapped_column(Integer, nullable=False, server_default="587")
+    usuario: Mapped[str | None] = mapped_column(String(255))
+    password: Mapped[str | None] = mapped_column(String(255))
+    remitente: Mapped[str | None] = mapped_column(String(255))
+    usar_tls: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
+    modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_modificacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+
+    modificador = relationship("Usuario")
+
+
 class Auditoria(Base):
     __tablename__ = "auditoria"
 

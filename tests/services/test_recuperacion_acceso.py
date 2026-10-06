@@ -9,7 +9,8 @@ from app.services.recuperacion_acceso import (
     MAX_INTENTOS_VERIFICACION,
     RecuperacionAccesoService,
 )
-from tests.factories import crear_usuario
+from app.services.smtp_config import SmtpConfigService
+from tests.factories import crear_usuario, crear_usuario_admin
 
 
 def _crear_usuario_con_email(session, **overrides):
@@ -28,13 +29,14 @@ def codigos_capturados(monkeypatch):
     """Intercepta el envio real de correo -- los tests nunca deben tocar SMTP real."""
     enviados = []
 
-    def _fake_enviar(destinatario, asunto, cuerpo, cuerpo_html=None):
+    def _fake_enviar(destinatario, asunto, cuerpo, cuerpo_html=None, ajustes=None):
         enviados.append(
             {
                 "destinatario": destinatario,
                 "asunto": asunto,
                 "cuerpo": cuerpo,
                 "cuerpo_html": cuerpo_html,
+                "ajustes": ajustes,
             }
         )
 
@@ -62,6 +64,25 @@ def test_solicitar_codigo_desbloqueo_envia_correo(db_session, codigos_capturados
 
     assert len(codigos_capturados) == 1
     assert codigos_capturados[0]["destinatario"] == "jperez@example.com"
+
+
+def test_solicitar_codigo_envia_con_el_smtp_configurado_en_la_app(db_session, codigos_capturados):
+    """El correo sale por el servidor guardado en Configuracion > Correo, no por el .env."""
+    admin = crear_usuario_admin(db_session)
+    SmtpConfigService.guardar_configuracion(
+        db_session,
+        host="smtp.example.com",
+        puerto=2525,
+        usuario="bot@example.com",
+        password="clave-app",
+        modificado_por=admin.id_usuario,
+    )
+    _crear_usuario_con_email(db_session)
+
+    RecuperacionAccesoService.solicitar_codigo_desbloqueo(db_session, "jperez")
+
+    ajustes = codigos_capturados[0]["ajustes"]
+    assert (ajustes.host, ajustes.puerto, ajustes.usuario) == ("smtp.example.com", 2525, "bot@example.com")
 
 
 def test_solicitar_codigo_incluye_version_html_corporativa(db_session, codigos_capturados):

@@ -39,7 +39,9 @@ cp .env.example .env
 # Editar .env si se quiere otra contrasena (debe coincidir con la que usa el contenedor,
 # ver nota arriba sobre el caracter $). Las variables SMTP_* son opcionales -- solo hacen
 # falta para el envio de codigos de desbloqueo/recuperacion de clave (app/services/
-# email_service.py); sin configurar, el resto de la app funciona igual.
+# email_service.py) y solo como respaldo: el correo se configura desde la app
+# (Configuracion > Correo, se elige Gmail/Outlook/etc.); sin configurar, el resto de la
+# app funciona igual.
 
 docker compose up -d
 ```

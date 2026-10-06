@@ -11,6 +11,7 @@ from app.db.models import CodigoVerificacion, ConfiguracionEmpresa, Usuario
 from app.services.auditoria import AuditoriaService
 from app.services.auth import hash_password, validar_password_policy
 from app.services.email_service import enviar_correo
+from app.services.smtp_config import SmtpConfigService
 
 VALIDEZ_CODIGO = timedelta(minutes=15)
 MAX_INTENTOS_VERIFICACION = 5
@@ -158,7 +159,13 @@ def _crear_y_enviar_codigo(session: Session, usuario: Usuario, tipo: str) -> Non
         f"Tu codigo es: {codigo}\n\nVence en {minutos_validez} minutos. Si no solicitaste esto, ignora este correo."
     )
     cuerpo_html = _construir_html_codigo(_nombre_empresa(session), asunto, codigo, minutos_validez)
-    enviar_correo(usuario.email, asunto, cuerpo, cuerpo_html=cuerpo_html)
+    enviar_correo(
+        usuario.email,
+        asunto,
+        cuerpo,
+        cuerpo_html=cuerpo_html,
+        ajustes=SmtpConfigService.obtener_efectiva(session),
+    )
 
     AuditoriaService.registrar_evento(
         session,

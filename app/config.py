@@ -19,6 +19,8 @@ DB_TRUST_SERVER_CERTIFICATE = os.getenv("DB_TRUST_SERVER_CERTIFICATE", "yes")
 DB_TRUSTED_CONNECTION = os.getenv("DB_TRUSTED_CONNECTION", "no")
 
 # Envio de codigos de desbloqueo/recuperacion de clave (app/services/email_service.py).
+# RESPALDO: lo que se guarda en Configuracion > Correo (tabla configuracion_smtp, ver
+# app/services/smtp_config.py) tiene prioridad sobre estas variables.
 # Con Gmail/Google Workspace: smtp.gmail.com:587 + App Password de 16 caracteres (no la
 # clave normal de la cuenta) -- se genera en la configuracion de seguridad de la cuenta
 # de Google, con verificacion en 2 pasos activada.

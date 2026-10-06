@@ -78,6 +78,7 @@ TABLES_DELETE_ORDER = [
     "cajas",
     "auditoria",
     "configuracion_empresa",
+    "configuracion_smtp",
     "clientes",
     "proveedores",
     "vendedores",
