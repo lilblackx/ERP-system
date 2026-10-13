@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
+from app.rutas import NOMBRE_APP
 from app.services.licencia import EstadoLicencia, LicenciaService
 from app.services.notificaciones import NotificacionesService
 from app.services.permisos import PermisoDenegadoError
@@ -128,6 +129,19 @@ MODULO_PERMISO: dict[str, tuple[str, str]] = {
     "auditoria": ("auditoria", "ver"),
 }
 
+# Acciones de la busqueda global (busqueda_global.ACCIONES) -> (modulo, metodo del panel que abre el
+# formulario) o, para Configuracion, el indice de su pestana.
+ACCIONES_PANEL: dict[str, tuple[str, str]] = {
+    "nueva_factura": ("facturacion", "nueva_factura"),
+    "nuevo_cliente": ("clientes", "nuevo_cliente"),
+    "nuevo_producto": ("inventario", "nuevo_producto"),
+    "nuevo_proveedor": ("proveedores", "nuevo_proveedor"),
+    "nuevo_vendedor": ("vendedores", "nuevo_vendedor"),
+    "nueva_compra": ("compras", "nueva_oc"),
+    "registrar_tasa": ("control_tasas", "registrar_tasa"),
+}
+ACCIONES_CONFIG: dict[str, int] = {"config_empresa": 0, "config_correo": 1, "config_licencia": 2}
+
 # Hallazgo 4.1 (auditoria 2026-09-05): sin esto, una sesion de escritorio abierta y
 # olvidada quedaba operable indefinidamente -- el chequeo de estado/bloqueo en
 # require_permiso() solo corta el acceso si OTRO admin desactiva al usuario mientras
@@ -155,7 +169,7 @@ class MainWindow(QMainWindow):
         self.usuario = usuario
         self._paneles: dict[str, QWidget] = {}  # cache lazy de paneles
 
-        self.setWindowTitle("ERP — Sistema de Gestión Administrativa")
+        self.setWindowTitle(f"{NOMBRE_APP} — Sistema de gestión")
         ajustar_tamano(self, 1200, 720, 900, 600)
 
         # Aplicar estilos globales
@@ -334,6 +348,7 @@ class MainWindow(QMainWindow):
 
         self.topbar = TopBar(self.usuario, SessionLocal, self._modulos_visibles)
         self.topbar.modulo_solicitado.connect(self._abrir_desde_topbar)
+        self.topbar.accion_solicitada.connect(self._ejecutar_accion)
         right_v.addWidget(self.topbar)
 
         self.stack = QStackedWidget()
@@ -357,9 +372,29 @@ class MainWindow(QMainWindow):
             return
         self.navegar_a(clave)
         if texto_busqueda:
-            campo = getattr(self._paneles.get(clave), "buscar_input", None)
+            panel = self._paneles.get(clave)
+            # CuentasBancariasPanel llama a su caja `search_input`, el resto `buscar_input`.
+            campo = getattr(panel, "buscar_input", None) or getattr(panel, "search_input", None)
             if campo is not None:
                 campo.setText(texto_busqueda)
+
+    def _ejecutar_accion(self, accion: str) -> None:
+        """Accion elegida en la busqueda global (ver busqueda_global.ACCIONES): lleva al modulo y
+        abre su formulario, o la pestana de Configuracion. El formulario se abre con singleShot(0)
+        para que el modulo ya este visible detras del dialogo; los permisos y requisitos (ej.
+        caja abierta para facturar) los sigue validando cada panel al abrirse."""
+        if accion in ACCIONES_CONFIG:
+            self.navegar_a("config_empresa")
+            self._paneles["config_empresa"].tabs.setCurrentIndex(ACCIONES_CONFIG[accion])
+            return
+        destino = ACCIONES_PANEL.get(accion)
+        if destino is None:
+            return
+        modulo, metodo = destino
+        self.navegar_a(modulo)
+        abrir = getattr(self._paneles.get(modulo), metodo, None)
+        if abrir is not None:
+            QTimer.singleShot(0, abrir)
 
     def _refrescar_notificaciones(self) -> None:
         if self._worker_notificaciones is not None and self._worker_notificaciones.isRunning():

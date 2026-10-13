@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QComboBox,
     QGraphicsDropShadowEffect,
@@ -49,6 +49,18 @@ ICON_CHECK_PATH = _ICON_CACHE_DIR / "check.png"
 ICON_CHECK_URL = str(ICON_CHECK_PATH).replace("\\", "/")
 
 
+def aplicar_colores_de_marca(paleta: QPalette) -> QPalette:
+    """Colores que no se pueden fijar por QSS y Qt toma del sistema. El estilo nativo de Windows 11
+    usa el color de ACENTO del usuario para el texto seleccionado (naranja en algunos equipos); la
+    app lo fija en su azul. Los tooltips tambien: el estilo nativo ignora su QSS (ver main.py).
+    Devuelve la misma paleta, modificada."""
+    paleta.setColor(QPalette.ColorRole.Highlight, QColor(COLOR_PRIMARY_LIGHT))
+    paleta.setColor(QPalette.ColorRole.HighlightedText, QColor("white"))
+    paleta.setColor(QPalette.ColorRole.ToolTipBase, QColor(COLOR_TEXT_DARK))
+    paleta.setColor(QPalette.ColorRole.ToolTipText, QColor("white"))
+    return paleta
+
+
 def generar_iconos_qss() -> None:
     """Genera (si falta) los PNG que referencian los `image: url(...)` de este archivo y
     de los QSS locales de los dialogos. Requiere una QApplication ya creada -- llamar
@@ -65,13 +77,13 @@ def generar_iconos_qss() -> None:
 
 
 # ── Paleta principal ────────────────────────────────────────────────────────
-COLOR_PRIMARY = "#0D47A1"  # Azul corporativo principal
-COLOR_PRIMARY_DARK = "#0A3A83"  # Azul oscuro (hover / pressed)
-COLOR_PRIMARY_LIGHT = "#1565C0"  # Azul medio (elementos activos)
-COLOR_SIDEBAR_BG = "#0D47A1"
+COLOR_PRIMARY = "#12459B"  # Azul corporativo principal
+COLOR_PRIMARY_DARK = "#0E387E"  # Azul oscuro (hover / pressed)
+COLOR_PRIMARY_LIGHT = "#1B62B9"  # Azul medio (elementos activos)
+COLOR_SIDEBAR_BG = "#12459B"
 COLOR_SIDEBAR_TEXT = "#FFFFFF"
-COLOR_SIDEBAR_ACTIVE = "#1565C0"
-COLOR_SIDEBAR_HOVER = "#0B4F9F"
+COLOR_SIDEBAR_ACTIVE = "#1B62B9"
+COLOR_SIDEBAR_HOVER = "#104C99"
 
 COLOR_TOPBAR_BG = "#FFFFFF"
 COLOR_TOPBAR_BORDER = "#E2E8F0"

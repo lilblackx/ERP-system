@@ -60,6 +60,7 @@ from app.ui.styles import (
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 from app.ui.workers import QueryWorker
+from app.utils.rif import formatear_identificacion
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +103,7 @@ def _filas_clientes_query(session, texto_busqueda, id_usuario, estado_cliente, i
         [
             c.id_cliente,
             c.nombre_razon_social,
-            (
-                f"{c.id_legal}-{c.identificacion_cliente}"
-                if c.id_legal and c.identificacion_cliente
-                else (c.id_legal or c.identificacion_cliente or "")
-            ),
+            formatear_identificacion(c.id_legal, c.identificacion_cliente),
             c.email,
             c.telefono,
             c.direccion,
@@ -447,10 +444,7 @@ class ClientesPanel(QWidget):
             # Columna 1: Nombre Completo
             self.tabla.setItem(fila, 1, QTableWidgetItem(c.nombre_razon_social or ""))
             # Columna 2: Identificación
-            if c.id_legal and c.identificacion_cliente:
-                identificacion = f"{c.id_legal}-{c.identificacion_cliente}"
-            else:
-                identificacion = c.id_legal or c.identificacion_cliente or ""
+            identificacion = formatear_identificacion(c.id_legal, c.identificacion_cliente)
             self.tabla.setItem(fila, 2, QTableWidgetItem(identificacion))
             # Columna 3: Email
             self.tabla.setItem(fila, 3, QTableWidgetItem(c.email or ""))

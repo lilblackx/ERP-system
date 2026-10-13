@@ -7,7 +7,7 @@ No ofrece abrir un turno de caja desde aca: FacturacionPanel exige una caja con 
 abierto para poder entrar a facturar (ver FacturacionPanel._verificar_caja_abierta /
 CajaAperturaDialog), asi que si se llego hasta este dialogo ya deberia existir una."""
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
@@ -175,6 +175,14 @@ class PagoLineaDialog(QDialog):
         self.id_usuario = id_usuario
         self._cajas_abiertas: list = []
         self._cuentas_activas: list = []
+        # Saldo pendiente de la factura, siempre en USD. Se convierte a la moneda elegida
+        # (ver _aplicar_monto_sugerido) mientras el cajero no haya tecleado un monto propio.
+        self._saldo_usd = (
+            Decimal(f"{monto_sugerido:.2f}") if monto_sugerido is not None and monto_sugerido > 0.005 else None
+        )
+        self._monto_editado = False
+        self._tasa_bcv: Decimal | None = None
+        self._tasa_cop: Decimal | None = None
 
         self.setWindowTitle("Agregar Forma de Pago")
         ajustar_tamano(self, 420, 500, 420, 500)
@@ -187,14 +195,17 @@ class PagoLineaDialog(QDialog):
         self._cargar_tasas()
         self._toggle_origen()
         self._toggle_campos_bolivares()
+        self.moneda_combo.currentIndexChanged.connect(self._aplicar_monto_sugerido)
+        self.monto_input.textEdited.connect(self._marcar_monto_editado)
+        self.bolivares_input.textEdited.connect(self._marcar_monto_editado)
 
         # Precarga el saldo pendiente de la factura (auditoria UX de facturacion,
         # cajero): sin esto, el caso mas comun -- un solo pago en efectivo por el total
         # exacto -- igual obligaba a recordar y tipear el monto a mano. Preseleccionado
         # (selectAll) para poder sobreescribirlo de un tiro si el cajero va a repartir el
         # pago entre varias formas/monedas.
-        if monto_sugerido is not None and monto_sugerido > 0:
-            self.monto_input.set_value(monto_sugerido)
+        if self._saldo_usd is not None:
+            self._aplicar_monto_sugerido()
             self.monto_input.setFocus()
             self.monto_input.selectAll()
 
@@ -396,6 +407,9 @@ class PagoLineaDialog(QDialog):
         self.lbl_monto.setText(f"{etiqueta_monto} {ASTERISCO_REQUERIDO}")
         self._toggle_origen()
         self._toggle_campos_bolivares()
+        self._aplicar_monto_sugerido()
+        if con_bloque_bs:
+            self._calcular_bolivares_desde_usd()
         # Un pago en efectivo no tiene "referencia" que registrar (a diferencia de una
         # transferencia/Zelle/Binance/punto de venta, donde suele ser la confirmacion o
         # los ultimos digitos) -- se deshabilita y limpia para no dejar un valor cargado
@@ -473,6 +487,16 @@ class PagoLineaDialog(QDialog):
                 etiqueta_cop = f"COP: {tasa_registro.tasa_cop:,.2f}"
                 self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_registro.tasa_cop)))
 
+            self._tasa_bcv = Decimal(str(tasa_registro.tasa_dolar_bcv)) if tasa_registro.tasa_dolar_bcv else None
+            self._tasa_cop = Decimal(str(tasa_registro.tasa_cop)) if tasa_registro.tasa_cop else None
+
+        # BCV preseleccionada: es la que usa VentaService para convertir pagos en VES, y
+        # con ella el "Monto (Bs)" de transferencia/punto de venta sale ya calculado con el
+        # saldo pendiente. Si se cobra a otra tasa, el cajero la cambia en el combo.
+        if self._tasa_bcv is not None:
+            self.tasa_combo.setCurrentIndex(1)
+            self.tasa_input.set_value(self._tasa_bcv)
+
         self.tasa_combo.blockSignals(False)
 
     def _on_tasa_seleccionada(self) -> None:
@@ -482,6 +506,29 @@ class PagoLineaDialog(QDialog):
             _, tasa_valor = datos_tasa
             self.tasa_input.set_value(Decimal(str(tasa_valor)))
             self._calcular_monto_usd()
+
+    def _marcar_monto_editado(self) -> None:
+        self._monto_editado = True
+
+    def _aplicar_monto_sugerido(self) -> None:
+        """Precarga el saldo pendiente convertido a la moneda elegida: VES con la tasa
+        BCV y COP con la tasa COP (las mismas que usa VentaService._convertir_a_usd, asi
+        que el monto sugerido cubre exacto el faltante). No pisa un monto que el cajero ya
+        tecleo, ni sugiere nada si falta la tasa de esa moneda."""
+        if self._saldo_usd is None or self._monto_editado:
+            return
+        moneda = self.moneda_combo.currentData()
+        if moneda == "VES":
+            tasa = self._tasa_bcv
+        elif moneda == "COP":
+            tasa = self._tasa_cop
+        else:
+            tasa = Decimal(1)
+        if tasa is None:
+            return
+        self.monto_input.set_value((self._saldo_usd * tasa).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        if self.metodo_combo.currentData() in METODOS_CON_BLOQUE_BS:
+            self._calcular_bolivares_desde_usd()
 
     def _toggle_campos_bolivares(self) -> None:
         """Muestra/oculta los campos de cálculo en bolivares según el método de pago."""

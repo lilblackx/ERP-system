@@ -9,8 +9,8 @@ Sidebar izquierda del ERP — versión con toggle collapse/expand.
 """
 
 import qtawesome as qta
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPalette
+from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.models import Usuario
+from app.rutas import ARCHIVO_LOGO, NOMBRE_APP
 from app.ui.styles import (
     COLOR_SIDEBAR_ACTIVE,
     COLOR_SIDEBAR_BG,
@@ -334,8 +335,12 @@ class Sidebar(QWidget):
         self._header.setPalette(_paleta_azul())
 
         h = QHBoxLayout(self._header)
+        self._header_layout = h
         h.setContentsMargins(14, 0, 8, 0)
         h.setSpacing(12)
+        # Colapsado (58 px) no caben logo y flecha a la vez: el hover del encabezado los
+        # intercambia (ver eventFilter/_actualizar_header_colapsado).
+        self._header.installEventFilter(self)
 
         self.btn_toggle = QPushButton()
         self.btn_toggle.setIcon(qta.icon("fa5s.chevron-left", color=QColor(255, 255, 255, 204)))
@@ -346,17 +351,29 @@ class Sidebar(QWidget):
         self.btn_toggle.setToolTip("Colapsar menú")
         self.btn_toggle.clicked.connect(self.toggle)
         # En reposo el header queda limpio (logo + nombre); la flecha aparece al pasar el
-        # mouse por el sidebar -- ver enterEvent/leaveEvent. Colapsado siempre se ve,
-        # es la unica forma de volver a expandir.
+        # mouse por el sidebar -- ver enterEvent/leaveEvent. Colapsado el logo ocupa su
+        # lugar y la flecha (la unica forma de volver a expandir) aparece al pasar el mouse
+        # por el encabezado.
         self.btn_toggle.setVisible(False)
 
-        self._lbl_logo = QLabel(self._iniciales_empresa())
+        # Logo de la app. Si el archivo no esta (instalacion incompleta) se cae a las
+        # iniciales de la empresa, como antes.
+        self._lbl_logo = QLabel()
         self._lbl_logo.setFixedSize(36, 36)
         self._lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lbl_logo.setStyleSheet(
-            f"background-color: rgba(255, 255, 255, 38); color: {COLOR_WHITE}; border: none;"
-            " border-radius: 18px; font-size: 12px; font-weight: bold;"
-        )
+        logo = QPixmap(str(ARCHIVO_LOGO))
+        self._tiene_logo = not logo.isNull()
+        if self._tiene_logo:
+            self._lbl_logo.setStyleSheet("background: transparent; border: none;")
+            self._lbl_logo.setPixmap(
+                logo.scaled(36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            )
+        else:
+            self._lbl_logo.setText(self._iniciales_empresa())
+            self._lbl_logo.setStyleSheet(
+                f"background-color: rgba(255, 255, 255, 38); color: {COLOR_WHITE}; border: none;"
+                " border-radius: 18px; font-size: 12px; font-weight: bold;"
+            )
 
         self._col_empresa = QWidget()
         self._col_empresa.setObjectName("SidebarColEmpresa")
@@ -365,14 +382,14 @@ class Sidebar(QWidget):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(2)
 
-        self._lbl_empresa = QLabel(self._empresa[:18])
+        self._lbl_empresa = QLabel(NOMBRE_APP)
         self._lbl_empresa.setObjectName("SidebarLogo")
         self._lbl_empresa.setStyleSheet(
             f"background: transparent; border: none; color: {COLOR_WHITE}; font-size: 13px; font-weight: bold;"
         )
         self._lbl_empresa.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        self._lbl_subtitulo_header = QLabel("Sistema de gestión")
+        self._lbl_subtitulo_header = QLabel(self._empresa[:24])
         self._lbl_subtitulo_header.setStyleSheet(
             "color: rgba(255, 255, 255, 179); font-size: 11px; background: transparent; border: none;"
         )
@@ -500,13 +517,30 @@ class Sidebar(QWidget):
     # ── Toggle colapsar / expandir ────────────────────────────────────────
 
     def enterEvent(self, event) -> None:
-        self.btn_toggle.setVisible(True)
+        if self._expandido:
+            self.btn_toggle.setVisible(True)
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
         if self._expandido:
             self.btn_toggle.setVisible(False)
         super().leaveEvent(event)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (override de Qt)
+        if obj is self._header and not self._expandido:
+            if event.type() == QEvent.Type.Enter:
+                self._actualizar_header_colapsado(hover=True)
+            elif event.type() == QEvent.Type.Leave:
+                self._actualizar_header_colapsado(hover=False)
+        return super().eventFilter(obj, event)
+
+    def _actualizar_header_colapsado(self, hover: bool) -> None:
+        """Colapsado: el logo (36 px) o la flecha (26 px), centrados en los 58 px. Con el
+        mouse sobre el encabezado se muestra la flecha para poder expandir."""
+        self._lbl_logo.setVisible(not hover)
+        self.btn_toggle.setVisible(hover)
+        margen = (SIDEBAR_COLLAPSED - (26 if hover else 36)) // 2
+        self._header_layout.setContentsMargins(margen, 0, margen, 0)
 
     def toggle(self) -> None:
         if self._expandido:
@@ -517,14 +551,13 @@ class Sidebar(QWidget):
     def _colapsar(self) -> None:
         self._expandido = False
         self._col_empresa.setVisible(False)
-        self._lbl_logo.setVisible(False)
+        self._actualizar_header_colapsado(hover=self._header.underMouse())
         for lbl in self._lbl_secciones:
             lbl.setVisible(False)
         self._lbl_avatar.setVisible(False)
         self._footer_info.setVisible(False)
         self.btn_toggle.setIcon(qta.icon("fa5s.chevron-right", color=QColor(255, 255, 255, 204)))
         self.btn_toggle.setToolTip("Expandir menu")
-        self.btn_toggle.setVisible(True)
 
         for btn in self._botones.values():
             btn.set_expanded(False)
@@ -536,6 +569,8 @@ class Sidebar(QWidget):
         self._expandido = True
         self._col_empresa.setVisible(True)
         self._lbl_logo.setVisible(True)
+        self.btn_toggle.setVisible(self.underMouse())
+        self._header_layout.setContentsMargins(14, 0, 8, 0)
         for lbl in self._lbl_secciones:
             lbl.setVisible(True)
         self._lbl_avatar.setVisible(True)
@@ -582,8 +617,9 @@ class Sidebar(QWidget):
 
     def actualizar_empresa(self, nombre: str) -> None:
         self._empresa = nombre
-        self._lbl_empresa.setText(nombre[:18])
-        self._lbl_logo.setText(self._iniciales_empresa())
+        self._lbl_subtitulo_header.setText(nombre[:24])
+        if not self._tiene_logo:
+            self._lbl_logo.setText(self._iniciales_empresa())
 
     def seleccionar(self, clave: str) -> None:
         """Marca `clave` como módulo activo sin emitir `modulo_seleccionado`

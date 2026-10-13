@@ -205,9 +205,9 @@ class VentasSemanaChart(QWidget):
             area.closeSubpath()
 
             gradiente = QLinearGradient(0, plot.top(), 0, plot.bottom())
-            gradiente.setColorAt(0.0, QColor(13, 71, 161, 65))  # Azul suave arriba
-            gradiente.setColorAt(0.65, QColor(13, 71, 161, 15))  # Difuminado medio
-            gradiente.setColorAt(1.0, QColor(13, 71, 161, 0))  # Transparente abajo
+            gradiente.setColorAt(0.0, QColor(18, 69, 155, 65))  # Azul suave arriba
+            gradiente.setColorAt(0.65, QColor(18, 69, 155, 15))  # Difuminado medio
+            gradiente.setColorAt(1.0, QColor(18, 69, 155, 0))  # Transparente abajo
             painter.fillPath(area, gradiente)
 
             # 3. Línea superior continua

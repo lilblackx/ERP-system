@@ -94,3 +94,40 @@ def test_porcentaje_se_ajusta_a_100_si_excede(qtbot, monkeypatch):
     panel.iva_activo_check.setChecked(True)
     _escribir_y_perder_foco(qtbot, panel.iva_porcentaje_input, "150")
     assert panel.iva_porcentaje_input.get_value() == Decimal("100")
+
+
+def _config_con_rif(rif):
+    return SimpleNamespace(
+        rif_empresa=rif,
+        razon_social_empresa="Distribuidora DJ C.A",
+        direccion_empresa=None,
+        telefono_empresa=None,
+        pie_pagina_empresa=None,
+        iva_activo=False,
+        iva_porcentaje=Decimal("16.00"),
+        impresora_predeterminada=None,
+        logotipo_empresa=None,
+    )
+
+
+def test_la_etiqueta_del_rif_esta_bien_escrita(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QLabel
+
+    panel = _crear_panel(qtbot, monkeypatch)
+    textos = {lbl.text() for lbl in panel.findChildren(QLabel)}
+    assert "RIF Empresa:" in textos
+    assert "RF Empresa:" not in textos
+
+
+def test_el_rif_guardado_sin_formato_se_muestra_formateado(qtbot, monkeypatch):
+    panel = _crear_panel(qtbot, monkeypatch, config=_config_con_rif("070007508"))
+    assert panel.rif_input.text() == "J-07000750-8"
+
+
+def test_el_rif_se_formatea_al_terminar_de_escribirlo(qtbot, monkeypatch):
+    panel = _crear_panel(qtbot, monkeypatch)
+    _escribir_y_perder_foco(qtbot, panel.rif_input, "070007508")
+    assert panel.rif_input.text() == "J-07000750-8"
+
+    _escribir_y_perder_foco(qtbot, panel.rif_input, "g200000010")
+    assert panel.rif_input.text() == "G-20000001-0"  # la letra escrita manda sobre la J por defecto

@@ -8,7 +8,7 @@ mock de session.query(), que no es el objeto de este test (el widget numerico)."
 
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import Qt
 
@@ -35,7 +35,20 @@ def _escribir_y_perder_foco(qtbot, campo, texto):
     campo.clearFocus()
 
 
-def _crear_dialogo(qtbot, monto_sugerido=None):
+def _session_con_tasa(tasa_bcv="36.50", tasa_cop="4000.00"):
+    """Sesion falsa para _cargar_tasas(): session.query(...).order_by(...).first()."""
+    tasa = SimpleNamespace(
+        id_tasa=1,
+        tasa_dolar_bcv=Decimal(tasa_bcv),
+        tasa_dolar_paralelo=None,
+        tasa_cop=Decimal(tasa_cop) if tasa_cop else None,
+    )
+    session = MagicMock()
+    session.query.return_value.order_by.return_value.first.return_value = tasa
+    return session
+
+
+def _crear_dialogo(qtbot, monto_sugerido=None, session=None):
     with (
         patch(
             "app.ui.pago_linea_dialog.CajaService.listar_cajas",
@@ -43,7 +56,7 @@ def _crear_dialogo(qtbot, monto_sugerido=None):
         ),
         patch("app.ui.pago_linea_dialog.BancoService.listar_cuentas", return_value=[]),
     ):
-        dialogo = PagoLineaDialog(None, id_usuario=1, monto_sugerido=monto_sugerido)
+        dialogo = PagoLineaDialog(session, id_usuario=1, monto_sugerido=monto_sugerido)
     qtbot.addWidget(dialogo)
     return dialogo
 
@@ -110,3 +123,53 @@ def test_enter_en_monto_dispara_validar_con_el_valor_recien_tecleado(qtbot):
         qtbot.keyClick(dialogo.monto_input, Qt.Key.Key_Return)
 
     assert valores_vistos == [Decimal("150.50")]
+
+
+# --- Monto sugerido convertido a la moneda elegida ---------------------------------------
+# Caso reportado: factura de $1.50, $1 en efectivo, el resto en Bs -- el dialogo seguia
+# sugiriendo 0,50 al elegir Bolivares (y agregado asi contaba como Bs 0,50).
+
+
+def _elegir(combo, valor):
+    combo.setCurrentIndex(combo.findData(valor))
+
+
+def test_monto_sugerido_se_convierte_a_bs_con_tasa_bcv(qtbot):
+    dialogo = _crear_dialogo(qtbot, monto_sugerido=0.5, session=_session_con_tasa())
+    _elegir(dialogo.moneda_combo, "VES")
+    assert dialogo.monto_input.get_value() == Decimal("18.25")
+
+
+def test_monto_sugerido_se_convierte_a_cop(qtbot):
+    dialogo = _crear_dialogo(qtbot, monto_sugerido=0.5, session=_session_con_tasa())
+    _elegir(dialogo.moneda_combo, "COP")
+    assert dialogo.monto_input.get_value() == Decimal("2000.00")
+
+
+def test_volver_a_usd_restaura_el_saldo_en_dolares(qtbot):
+    dialogo = _crear_dialogo(qtbot, monto_sugerido=0.5, session=_session_con_tasa())
+    _elegir(dialogo.moneda_combo, "VES")
+    _elegir(dialogo.moneda_combo, "USD")
+    assert dialogo.monto_input.get_value() == Decimal("0.50")
+
+
+def test_monto_tecleado_no_se_pisa_al_cambiar_moneda(qtbot):
+    dialogo = _crear_dialogo(qtbot, monto_sugerido=0.5, session=_session_con_tasa())
+    _escribir_y_perder_foco(qtbot, dialogo.monto_input, "10")
+    _elegir(dialogo.moneda_combo, "VES")
+    assert dialogo.monto_input.get_value() == Decimal("10.00")
+
+
+def test_sin_tasa_cop_no_sugiere_monto_en_cop(qtbot):
+    dialogo = _crear_dialogo(qtbot, monto_sugerido=0.5, session=_session_con_tasa(tasa_cop=None))
+    _elegir(dialogo.moneda_combo, "COP")
+    # Sin tasa no hay conversion posible: queda el valor anterior, no uno inventado.
+    assert dialogo.monto_input.get_value() == Decimal("0.50")
+
+
+def test_transferencia_preselecciona_bcv_y_calcula_bs_del_saldo(qtbot):
+    dialogo = _crear_dialogo(qtbot, monto_sugerido=0.5, session=_session_con_tasa())
+    _elegir(dialogo.metodo_combo, "transferencia")
+    assert dialogo.tasa_input.get_value() == Decimal("36.50")
+    assert dialogo.monto_input.get_value() == Decimal("0.50")
+    assert dialogo.bolivares_input.get_value() == Decimal("18.25")

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.models import ConfiguracionEmpresa
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+from app.utils.rif import formatear_rif
 
 _SENTINEL = object()
 
@@ -77,7 +78,7 @@ class EmpresaService:
             config = ConfiguracionEmpresa()
             session.add(config)
 
-        config.rif_empresa = rif
+        config.rif_empresa = formatear_rif(rif, "J") if rif else rif
         config.razon_social_empresa = razon_social
         config.direccion_empresa = direccion
         config.telefono_empresa = telefono

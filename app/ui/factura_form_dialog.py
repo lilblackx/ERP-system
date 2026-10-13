@@ -5,7 +5,7 @@ tipografia de app/ui/styles.py); a diferencia de esos dos, permite redimensionar
 porque la tabla del carrito se beneficia de espacio vertical extra."""
 
 import logging
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import QDate, QSize, Qt, QTimer
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -46,7 +47,7 @@ from app.services.ventas import VentaService
 from app.ui.autorizacion_dialog import AutorizacionDialog
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.message_box import MessageBox
-from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, formatear_monto
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS, PagoLineaDialog
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
@@ -79,6 +80,7 @@ from app.ui.styles import (
     aplicar_sombra,
 )
 from app.ui.workers import QueryWorker
+from app.utils.rif import formatear_identificacion
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,15 @@ def _tarea_emitir_factura(session: Session, id_usuario: int | None, **datos) -> 
             "titulo": "Sin permiso",
             "mensaje": "No tienes permiso para emitir facturas.",
         }
-    return {"ok": True, "factura": factura}
+    # id y numero se leen ACA, con la sesion del hilo todavia abierta: QueryWorker.run() la
+    # cierra al terminar, y despues cualquier atributo expirado de `factura` lanza
+    # DetachedInstanceError (eso tumbaba la impresion automatica, que corre en el hilo de GUI).
+    return {
+        "ok": True,
+        "factura": factura,
+        "id_factura": factura.id_factura,
+        "numero_factura": factura.numero_factura,
+    }
 
 
 _ETIQUETAS_MONEDA = {valor: etiqueta for etiqueta, valor in MONEDAS}
@@ -291,6 +301,10 @@ class FacturaFormDialog(QDialog):
         # carrito/formas de pago intactos, en vez de cerrarse y perder todo lo cargado
         # (hallazgo #3 de la auditoria de facturacion).
         self.factura_emitida: FacturaVenta | None = None
+        # Valores simples de la factura emitida: `factura_emitida` queda desligada de su sesion
+        # (se cerro con el hilo de emision) y no se puede leer de forma segura desde el caller.
+        self.id_factura_emitida: int | None = None
+        self.numero_factura_emitida: str | None = None
         # Guarda la referencia mientras corre -- si se pierde, Python puede recolectar
         # el QThread a mitad de ejecucion (ver docstring de QueryWorker). El flag bloquea
         # reject()/closeEvent() mientras tanto: sin el, Esc o la X de la ventana podrian
@@ -314,13 +328,20 @@ class FacturaFormDialog(QDialog):
         self.setWindowTitle("Nueva Factura")
         ajustar_tamano(self, 920, 740, 820, 640)
         self.setStyleSheet(DIALOG_STYLE)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            (self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint) | Qt.WindowType.WindowMaximizeButtonHint
+        )
+        # Abre maximizada (pedido del usuario): es el dialogo mas denso de la app y el
+        # cajero necesita ver carrito/pagos completos. Al restaurar vuelve al tamano de
+        # ajustar_tamano de arriba.
+        self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
 
         self._clientes: list = []
         self._productos: list = []
 
         self._build_ui()
-        hacer_desplazable(self)
+        # 2 fijos al final: resumen de pagos + pie de botones (ver _make_resumen_pagos).
+        hacer_desplazable(self, fijos_al_final=2)
         self._cargar_clientes()
         self._cargar_vendedores()
         self._cargar_productos()
@@ -355,8 +376,10 @@ class FacturaFormDialog(QDialog):
         self.tabs.addTab(self._make_tab_factura(), "Factura")
         self._idx_tab_pagos = self.tabs.addTab(self._make_tab_pagos(), "Formas de Pago")
         self.tabs.currentChanged.connect(self._on_tab_cambiada)
+        self._ajustar_alto_a_pestana_activa(self.tabs.currentIndex())
         root.addWidget(self.tabs, stretch=1)
 
+        root.addWidget(self._make_resumen_pagos())
         root.addLayout(self._make_footer())
 
     def _make_tab_factura(self) -> QWidget:
@@ -691,6 +714,19 @@ class FacturaFormDialog(QDialog):
         aplicar_sombra(self.tabla_pagos)
         layout.addWidget(self.tabla_pagos, stretch=1)
 
+        return self.card_pagos
+
+    def _make_resumen_pagos(self) -> QWidget:
+        """Total/pagado/falta y vuelto de la pestana Formas de Pago, FUERA del cuerpo con
+        scroll (ver hacer_desplazable en __init__): el alto minimo de las pestanas lo pone
+        la de Factura (cabecera + carrito), y en pantallas chicas el pie de la pestana de
+        pagos quedaba debajo del borde de la ventana -- el cajero no veia cuanto faltaba
+        sin hacer scroll. Solo visible con la pestana de pagos activa (_on_tab_cambiada)."""
+        self.resumen_pagos = QWidget()
+        layout = QVBoxLayout(self.resumen_pagos)
+        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setSpacing(0)
+
         self.lbl_total_pagos = QLabel()
         self.lbl_total_pagos.setStyleSheet("font-size: 13px; font-weight: 600;")
         layout.addWidget(self.lbl_total_pagos)
@@ -744,7 +780,8 @@ class FacturaFormDialog(QDialog):
         self.vuelto_widget.hide()
         layout.addWidget(self.vuelto_widget)
 
-        return self.card_pagos
+        self.resumen_pagos.hide()
+        return self.resumen_pagos
 
     def _toggle_origen_vuelto(self) -> None:
         metodo = self.metodo_vuelto_combo.currentData()
@@ -843,9 +880,21 @@ class FacturaFormDialog(QDialog):
         total_factura = self._total_factura_actual()
         falta = total_factura - total_usd
         if falta > 0.005:
+            # Faltante tambien en Bs (tasa BCV, la misma con que VentaService convierte
+            # los pagos en VES) para que el cajero sepa cuanto pedir si el resto se paga
+            # en bolivares.
+            texto_falta_bs = ""
+            if self._tasa_vigente is not None and self._tasa_vigente.get("tasa_bcv"):
+                # Mismo calculo que PagoLineaDialog._aplicar_monto_sugerido, para que el
+                # monto mostrado aca sea exactamente el que el dialogo sugiere en VES.
+                falta_bs = (Decimal(f"{falta:.2f}") * Decimal(str(self._tasa_vigente["tasa_bcv"]))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                texto_falta_bs = f" · Bs {formatear_monto(falta_bs)}"
             self.lbl_total_pagos.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_DANGER};")
             self.lbl_total_pagos.setText(
-                f"Total factura: ${total_factura:,.2f}  ·  Pagado: ${total_usd:,.2f}  ·  Falta: ${falta:,.2f}"
+                f"Total factura: ${total_factura:,.2f}  ·  Pagado: ${total_usd:,.2f}  ·  "
+                f"Falta: ${falta:,.2f}{texto_falta_bs}"
             )
         else:
             self.lbl_total_pagos.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_SUCCESS};")
@@ -1066,10 +1115,7 @@ class FacturaFormDialog(QDialog):
         if not clientes:
             self.cliente_combo.addItem("Sin resultados")
         for cliente in clientes:
-            if cliente.id_legal and cliente.identificacion_cliente:
-                identificacion = f"{cliente.id_legal}-{cliente.identificacion_cliente}"
-            else:
-                identificacion = cliente.id_legal or cliente.identificacion_cliente or "s/i"
+            identificacion = formatear_identificacion(cliente.id_legal, cliente.identificacion_cliente) or "s/i"
             etiqueta = f"{cliente.nombre_razon_social} ({identificacion})"
             self.cliente_combo.addItem(etiqueta, cliente.id_cliente)
         self.cliente_combo.blockSignals(False)
@@ -1305,6 +1351,10 @@ class FacturaFormDialog(QDialog):
             self._referencia_vuelto = None
             self.metodo_vuelto_combo.setCurrentIndex(0)
         self.tabs.setTabEnabled(self._idx_tab_pagos, not es_credito)
+        # Re-evalua alerta de credito, boton principal y bloque de dias de credito segun la
+        # nueva condicion: sin esto, el aviso "no tiene dias de credito" (y el boton
+        # deshabilitado) quedaban pegados al volver a Contado.
+        self._on_cliente_cambiado()
 
     def _toggle_porcentaje_bcv(self) -> None:
         """Muestra/oculta el campo de porcentaje BCV según el checkbox."""
@@ -1421,7 +1471,7 @@ class FacturaFormDialog(QDialog):
             total_unidades = producto.cantidad_unidad
 
             # Si tiene los nuevos campos, mostrar información adicional
-            stock_info = f"{total_unidades:g} u."
+            stock_info = f"{total_unidades:g} Und"
             if (
                 hasattr(producto, "cantidad_caja_total")
                 and producto.cantidad_caja_total
@@ -1730,7 +1780,13 @@ class FacturaFormDialog(QDialog):
                 )
                 return
 
-        nombre_producto = self.producto_combo.currentText()
+        # El texto del combo incluye el stock ("... (stock: 37 Und)"): el carrito solo lleva
+        # codigo y nombre, el stock disponible se ve unicamente al elegir el producto.
+        nombre_producto = (
+            f"{producto_seleccionado.cod_producto} - {producto_seleccionado.nombre_producto}"
+            if producto_seleccionado is not None
+            else self.producto_combo.currentText().split(" (stock:")[0]
+        )
         nota = self.nota_item_input.text().strip() or None
         precio_lista = self._precio_lista_actual
         precio_unitario = float(self.precio_input.get_value() or 0)
@@ -1797,12 +1853,11 @@ class FacturaFormDialog(QDialog):
         self._refrescar_tabla_items()
         self.producto_buscar_input.clear()
         self.nota_item_input.clear()
-        # Resetear selección de precio y comisión
-        self.precio_seleccion_combo.blockSignals(True)
-        self.precio_seleccion_combo.clear()
-        self.precio_seleccion_combo.setEnabled(False)
-        self.precio_seleccion_combo.blockSignals(False)
-        self.lbl_comision.setVisible(False)
+        # Reinicia cantidad, precio y selector de precio (Precio 1 por defecto) para el producto
+        # que sigue seleccionado. Antes se vaciaba el selector: si se volvia a agregar el MISMO
+        # producto, la nueva linea llevaba tipo_precio_seleccionado=None contra el 1 de la ya
+        # agregada, no coincidian y se creaba una fila duplicada en vez de sumar cantidad.
+        self._on_producto_cambiado()
         # Vuelve el foco a la busqueda para el siguiente item sin tocar el mouse --
         # cierra el ciclo escaneo/tipeo -> agregar -> escaneo/tipeo (auditoria UX de
         # facturacion, cajero).
@@ -1915,7 +1970,20 @@ class FacturaFormDialog(QDialog):
             self.btn_emitir.setText("Facturar")
             self.btn_emitir.setIcon(qta.icon("fa5s.check", color="#FFFFFF"))
 
-    def _on_tab_cambiada(self, _index: int) -> None:
+    def _ajustar_alto_a_pestana_activa(self, index: int) -> None:
+        """QTabWidget toma como alto minimo el de su pestana MAS alta (Factura: cabecera +
+        carrito), asi que en pantallas chicas la pestana de pagos -- que cabe de sobra --
+        heredaba ese alto y el dialogo mostraba scroll igual. Las pestanas ocultas pasan a
+        QSizePolicy.Ignored para que solo cuente la activa; con muchas formas de pago el
+        que hace scroll es tabla_pagos, no el dialogo."""
+        for i in range(self.tabs.count()):
+            politica = QSizePolicy.Policy.Preferred if i == index else QSizePolicy.Policy.Ignored
+            self.tabs.widget(i).setSizePolicy(politica, politica)
+        self.tabs.updateGeometry()
+
+    def _on_tab_cambiada(self, index: int) -> None:
+        self._ajustar_alto_a_pestana_activa(index)
+        self.resumen_pagos.setVisible(index == self._idx_tab_pagos)
         self._actualizar_boton_footer()
         self._actualizar_alerta_credito()
 
@@ -2071,6 +2139,8 @@ class FacturaFormDialog(QDialog):
         self._finalizar_emision_ui()
         if resultado["ok"]:
             self.factura_emitida = resultado["factura"]
+            self.id_factura_emitida = resultado.get("id_factura")
+            self.numero_factura_emitida = resultado.get("numero_factura")
             self.accept()
         else:
             MessageBox.warning(self, resultado["titulo"], resultado["mensaje"])

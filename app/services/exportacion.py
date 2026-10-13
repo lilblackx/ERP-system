@@ -39,10 +39,11 @@ from reportlab.platypus import (
 )
 
 from app.db.models import ConfiguracionEmpresa
+from app.utils.rif import formatear_rif
 
 logger = logging.getLogger(__name__)
 
-_COLOR_PRIMARIO = colors.HexColor("#0D47A1")
+_COLOR_PRIMARIO = colors.HexColor("#12459B")
 _COLOR_MUTED = colors.HexColor("#64748B")
 
 # Excel/LibreOffice interpretan una celda de texto que empieza con estos caracteres
@@ -89,9 +90,9 @@ def exportar_excel(
         lineas_empresa = (
             (
                 config_empresa.razon_social_empresa,
-                Font(bold=True, size=13, color="0D47A1"),
+                Font(bold=True, size=13, color="12459B"),
             ),
-            (config_empresa.rif_empresa, Font(size=10, color="64748B")),
+            (formatear_rif(config_empresa.rif_empresa, "J"), Font(size=10, color="64748B")),
             (config_empresa.direccion_empresa, Font(size=10, color="64748B")),
             (config_empresa.telefono_empresa, Font(size=10, color="64748B")),
         )
@@ -148,7 +149,7 @@ def exportar_excel(
             celda.font = Font(bold=True)
             # Si es la columna de saldo (índice 2 en cuentas por pagar), aplicar color
             if col_idx == 3:  # Columna de Saldo Pendiente
-                celda.font = Font(bold=True, color="0D47A1")
+                celda.font = Font(bold=True, color="12459B")
         fila_actual += 1
         cantidad_filas += 1
 
@@ -187,7 +188,7 @@ def _bloque_empresa_pdf(config_empresa: ConfiguracionEmpresa, styles) -> Table |
     if config_empresa.razon_social_empresa:
         lineas.append(Paragraph(config_empresa.razon_social_empresa, estilo_nombre))
     for valor in (
-        config_empresa.rif_empresa,
+        formatear_rif(config_empresa.rif_empresa, "J"),
         config_empresa.direccion_empresa,
         config_empresa.telefono_empresa,
     ):
@@ -279,7 +280,7 @@ def exportar_pdf(
         parent=styles["Heading1"],
         fontSize=16,
         alignment=TA_CENTER,
-        textColor=colors.HexColor("#0D47A1"),
+        textColor=colors.HexColor("#12459B"),
         spaceAfter=12,
     )
     elements.append(Paragraph(titulo_completo, title_style))
@@ -330,7 +331,7 @@ def exportar_pdf(
     # Estilo de la tabla
     table_style = TableStyle(
         [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D47A1")),  # Header azul
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#12459B")),  # Header azul
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
@@ -356,7 +357,7 @@ def exportar_pdf(
     for i in range(1, len(data)):
         if total_row is not None and i == len(data) - 1:
             # Fila de totales - fondo azul oscuro, texto blanco
-            table_style.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#0D47A1"))
+            table_style.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#12459B"))
             table_style.add("TEXTCOLOR", (0, i), (-1, i), colors.white)
             table_style.add("FONTNAME", (0, i), (-1, i), "Helvetica-Bold")
         elif i % 2 == 0:

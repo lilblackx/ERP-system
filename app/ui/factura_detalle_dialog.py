@@ -578,11 +578,13 @@ class FacturaDetalleDialog(QDialog):
                 )
                 return
 
-            imprimir_factura(self.datos, config_empresa, config_empresa.impresora_predeterminada)
+            ruta_pdf = imprimir_factura(self.datos, config_empresa, config_empresa.impresora_predeterminada)
             MessageBox.information(
                 self,
                 "Impresión enviada",
-                f"Factura enviada a: {config_empresa.impresora_predeterminada}",
+                f"PDF guardado en: {ruta_pdf}"
+                if ruta_pdf
+                else f"Factura enviada a: {config_empresa.impresora_predeterminada}",
             )
         except PermisoDenegadoError:
             MessageBox.warning(

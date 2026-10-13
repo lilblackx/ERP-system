@@ -31,14 +31,14 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.config import validar_configuracion
 from app.db.migrar import verificar_migraciones_al_dia
 from app.db.session import engine
 from app.logging_config import setup_logging
-from app.rutas import ARCHIVO_CONFIG, DIR_LOGS
+from app.rutas import ARCHIVO_CONFIG, ARCHIVO_ICONO, DIR_LOGS
 from app.services.licencia import (
     LicenciaService,
     LicenciaSoloLecturaError,
@@ -50,7 +50,7 @@ from app.ui.licencia_aviso import AvisoLicencia
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
 from app.ui.message_box import MessageBox
-from app.ui.styles import COLOR_TEXT_DARK, GLOBAL_QSS, generar_iconos_qss
+from app.ui.styles import GLOBAL_QSS, aplicar_colores_de_marca, generar_iconos_qss
 
 
 def _manejar_excepcion_no_capturada(tipo, valor, tb):
@@ -106,6 +106,17 @@ def main():
     # con el compositor de Chromium) -- hallazgo real, no un caso hipotetico.
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
+    # Icono de todas las ventanas y de la barra de tareas. En Windows el agrupamiento de la
+    # barra de tareas es por AppUserModelID: sin uno propio, al correr desde `python -m` el
+    # icono que se ve es el de python.exe, no el de la app.
+    app.setWindowIcon(QIcon(str(ARCHIVO_ICONO)))
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DistribuidoraDJ.App")
+        except Exception:
+            logging.getLogger(__name__).debug("No se pudo fijar el AppUserModelID", exc_info=True)
     # QToolTip es una ventana emergente aparte, no un hijo normal del widget que la
     # dispara -- fijar GLOBAL_QSS solo en MainWindow.setStyleSheet() (como se hacia antes)
     # no le llega de forma confiable, y el tooltip caia al estilo nativo de Windows
@@ -118,10 +129,8 @@ def main():
     # stylesheet (reportado por el usuario, 2026-09-08 -- seguia ilegible incluso despues
     # de reiniciar la app con el fix de arriba ya aplicado). El tooltip SI respeta la
     # paleta (QPalette.ToolTip*), asi que se fija tambien de forma explicita como refuerzo.
-    paleta = app.palette()
-    paleta.setColor(QPalette.ColorRole.ToolTipBase, QColor(COLOR_TEXT_DARK))
-    paleta.setColor(QPalette.ColorRole.ToolTipText, QColor("white"))
-    app.setPalette(paleta)
+    # La misma paleta fija el color del texto seleccionado (azul de la app, no el acento de Windows).
+    app.setPalette(aplicar_colores_de_marca(app.palette()))
     # Ver app/ui/geo_http.py::esperar_workers_pendientes -- evita que cerrar la app
     # mientras una busqueda/geolocalizacion en el mapa sigue en vuelo destruya un QThread
     # todavia corriendo (fatal en Qt).

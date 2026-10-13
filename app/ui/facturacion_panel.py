@@ -90,14 +90,14 @@ def _etiqueta_metodo_pago(valor: str | None) -> str:
     return "Mixto" if valor == "mixto" else (valor or "—")
 
 
-def _tarea_imprimir_factura(session, id_factura: int, id_usuario: int | None) -> str | None:
-    """Corre en un QThread aparte (QueryWorker), no en el hilo de GUI: enviar un
-    trabajo a un driver de impresora real via QPrinter.print_() puede tardar varios
-    cientos de ms (a veces mas en el primer trabajo de la sesion, mientras el driver
-    inicializa), y hacerlo de forma sincrona justo despues de "Facturar" era lo que
-    hacia sentir lento todo el flujo -- la ventana quedaba bloqueada hasta que el
-    spooler aceptaba el documento. Devuelve el nombre de la impresora usada, o None si
-    no hay ninguna configurada (no es un error, ver FacturacionPanel._disparar_impresion_automatica).
+def _imprimir_factura_en_predeterminada(session, id_factura: int, id_usuario: int | None) -> str | None:
+    """Envia la factura a la impresora predeterminada configurada en Configuracion >
+    Empresa. Devuelve el nombre de la impresora usada, o None si no hay ninguna
+    configurada (no es un error: sin impresora no se imprime nada).
+
+    Debe correr en el hilo de GUI, NO en un QThread/QueryWorker: QTextDocument.print_()
+    sobre un QPrinter de un driver real (Windows) no es seguro fuera del hilo principal
+    y fallaba sin imprimir nada -- ver FacturacionPanel._disparar_impresion_automatica.
     """
     config_empresa = EmpresaService.obtener_configuracion(session, id_usuario=id_usuario)
     if not config_empresa or not config_empresa.impresora_predeterminada:
@@ -579,16 +579,21 @@ class FacturacionPanel(QWidget):
             # facturacion). Aca solo queda reaccionar a un exec() exitoso.
             dialogo = FacturaFormDialog(session, self.usuario.id_usuario, parent=self)
             if dialogo.exec() and dialogo.factura_emitida is not None:
-                factura = dialogo.factura_emitida
-                factura_emitida = factura
+                factura_emitida = dialogo.factura_emitida
+                # Solo id/numero: `factura_emitida` esta desligada de su sesion (ver
+                # FacturaFormDialog.id_factura_emitida) y leer cualquiera de sus campos
+                # lanzaba DetachedInstanceError -- la impresion nunca se disparaba.
+                id_factura = dialogo.id_factura_emitida
+                numero_factura = dialogo.numero_factura_emitida
                 self.cargar_facturas()
-                # La impresion se dispara en segundo plano (no bloquea este mensaje ni
-                # el resto de la UI) -- ver _disparar_impresion_automatica.
-                self._disparar_impresion_automatica(factura.id_factura)
+                # La impresion se agenda en el hilo de GUI (no bloquea este mensaje) -- ver
+                # _disparar_impresion_automatica.
+                if id_factura is not None:
+                    self._disparar_impresion_automatica(id_factura)
                 MessageBox.information(
                     self,
                     "Factura emitida",
-                    f"Factura {factura.numero_factura} emitida con éxito.",
+                    f"Factura {numero_factura} emitida con éxito.",
                 )
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para emitir facturas.")
@@ -602,40 +607,30 @@ class FacturacionPanel(QWidget):
             self.btn_nueva_factura.setEnabled(True)
 
     def _disparar_impresion_automatica(self, id_factura: int) -> None:
-        """Lanza _tarea_imprimir_factura en un QueryWorker (QThread) para que enviar el
-        trabajo al driver de la impresora no bloquee la ventana -- ver el docstring de
-        _tarea_imprimir_factura para el por que. Si ya hay una impresion en curso, esta
-        se omite en vez de pisar el QThread anterior mientras sigue corriendo (mismo
-        riesgo que DashboardPanel/TasaTicker, ver app/ui/workers.py); la factura ya
-        quedo guardada y se puede exportar/imprimir manualmente desde el detalle."""
-        if getattr(self, "_worker", None) is not None and self._worker.isRunning():
-            logger.warning(
-                "Se omitio la impresion automatica de la factura %s: ya hay otra en curso",
-                id_factura,
+        """Agenda la impresion en el hilo de GUI (QTimer.singleShot(0)) para que corra
+        en cuanto el bucle de eventos quede libre, sin bloquear el flujo de "Facturar".
+        No se usa un QThread: imprimir via QPrinter con un driver real fuera del hilo
+        principal fallaba sin imprimir. Si no hay impresora configurada, no hace nada."""
+        QTimer.singleShot(0, lambda: self._imprimir_automaticamente(id_factura))
+
+    def _imprimir_automaticamente(self, id_factura: int) -> None:
+        session = self.session_factory()
+        try:
+            nombre_impresora = _imprimir_factura_en_predeterminada(session, id_factura, self.usuario.id_usuario)
+        except Exception as exc:
+            logger.exception("Fallo la impresion automatica de la factura %s", id_factura)
+            detalle = f"\n\n{exc}" if isinstance(exc, ValueError) else ""
+            MessageBox.warning(
+                self,
+                "No se pudo imprimir",
+                "La factura se emitió correctamente, pero no se pudo enviar a la impresora "
+                "predeterminada configurada. Puede imprimirla manualmente desde el detalle." + detalle,
             )
-            return
-        self._worker = QueryWorker(
-            self.session_factory,
-            _tarea_imprimir_factura,
-            id_factura=id_factura,
-            id_usuario=self.usuario.id_usuario,
-        )
-        self._worker.resultado.connect(self._on_impresion_automatica_ok)
-        self._worker.error.connect(self._on_impresion_automatica_error)
-        self._worker.start()
-
-    def _on_impresion_automatica_ok(self, nombre_impresora: str | None) -> None:
-        if nombre_impresora:
-            logger.info("Factura enviada automaticamente a la impresora '%s'", nombre_impresora)
-
-    def _on_impresion_automatica_error(self, mensaje: str) -> None:
-        logger.warning("Fallo la impresion automatica de la factura: %s", mensaje)
-        MessageBox.warning(
-            self,
-            "No se pudo imprimir",
-            "La factura se emitió correctamente, pero no se pudo enviar a la impresora "
-            "predeterminada configurada. Puede exportarla a PDF manualmente desde el detalle.",
-        )
+        else:
+            if nombre_impresora:
+                logger.info("Factura enviada automaticamente a la impresora '%s'", nombre_impresora)
+        finally:
+            session.close()
 
     def ver_detalle_factura(self) -> None:
         id_factura = self._fila_seleccionada_id()

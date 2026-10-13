@@ -13,8 +13,9 @@ EmpresaService.obtener_configuracion() (puede ser None si nunca se configuro).""
 
 import base64
 import html
+import os
 
-from PySide6.QtCore import QMarginsF
+from PySide6.QtCore import QMarginsF, QStandardPaths
 from PySide6.QtGui import QPageLayout, QPageSize, QTextDocument
 from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
@@ -27,6 +28,7 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
 )
+from app.utils.rif import formatear_identificacion, formatear_rif
 
 # Etiquetas de metodo de pago (venta) -- "mixto" es el sentinel que VentaService.
 # obtener_factura() usa cuando hubo mas de una forma de pago con metodo distinto (ver
@@ -76,6 +78,9 @@ def _fila_item(detalle: FacturaDetalle) -> str:
     producto = detalle.producto
     codigo = producto.cod_producto if producto else ""
     nombre = producto.nombre_producto if producto else "Producto eliminado"
+    # Item facturado por unidad (no por bulto): se marca para distinguirlo en el documento.
+    if detalle.tipo_venta == "unidad":
+        nombre += " (und)"
     cantidad = float(detalle.cantidad_producto)
     precio = float(detalle.precio_unitario)
     subtotal = cantidad * precio
@@ -164,7 +169,7 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     tasa = factura.tasa
 
     razon_social = config_empresa.razon_social_empresa if config_empresa else None
-    rif = config_empresa.rif_empresa if config_empresa else None
+    rif = formatear_rif(config_empresa.rif_empresa, "J") if config_empresa else None
     direccion = config_empresa.direccion_empresa if config_empresa else None
     telefono = config_empresa.telefono_empresa if config_empresa else None
     pie_pagina = config_empresa.pie_pagina_empresa if config_empresa else None
@@ -243,10 +248,10 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     )
 
     nombre_cliente = cliente.nombre_razon_social if cliente else "—"
-    if cliente and cliente.id_legal and cliente.identificacion_cliente:
-        identificacion_cliente = f"{cliente.id_legal}-{cliente.identificacion_cliente}"
+    if cliente:
+        identificacion_cliente = formatear_identificacion(cliente.id_legal, cliente.identificacion_cliente) or "—"
     else:
-        identificacion_cliente = cliente.id_legal or cliente.identificacion_cliente if cliente else "—"
+        identificacion_cliente = "—"
     telefono_cliente = (cliente.telefono if cliente else None) or "—"
     email_cliente = (cliente.email if cliente else None) or "—"
     direccion_cliente = (cliente.direccion if cliente else None) or "—"
@@ -285,19 +290,19 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
         <table width="100%" style="border-collapse:collapse;margin-top:10pt;"><tr>
             <td style="background-color:{_PRIMARY};color:#FFFFFF;padding:5pt 8pt;font-size:10pt;font-weight:bold;">
-                CLIENTE
+                Datos
             </td>
         </tr></table>
         <table width="100%" style="border-collapse:collapse;border:1pt solid {_BORDER};border-top:none;"><tr>
             <td width="58%" style="padding:10pt;vertical-align:top;">
-                <div style="{_MB}"><b>Cliente:</b> {_esc(nombre_cliente)}</div>
+                <div style="{_MB}"><b>Razón social:</b> {_esc(nombre_cliente)}</div>
                 <div style="{_MB}"><b>RIF / C.I.:</b> {_esc(identificacion_cliente)}</div>
                 <div style="{_MB}"><b>Teléfono:</b> {_esc(telefono_cliente)}</div>
                 <div style="{_MB}"><b>Email:</b> {_esc(email_cliente)}</div>
                 <div><b>Vendedor:</b> {_esc(vendedor.nombre_vendedor) if vendedor else "—"}</div>
             </td>
             <td width="42%" style="padding:10pt;vertical-align:top;border-left:1pt solid {_BORDER};">
-                <div><b>Dirección:</b> {_esc(direccion_cliente)}</div>
+                <div><b>Dirección fiscal:</b> {_esc(direccion_cliente)}</div>
             </td>
         </tr></table>
 
@@ -343,13 +348,20 @@ def generar_pdf_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None
     _documento(datos, config_empresa).print_(impresora)
 
 
-def imprimir_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, nombre_impresora: str) -> None:
+def _es_impresora_pdf(nombre_impresora: str) -> bool:
+    return "pdf" in nombre_impresora.lower()
+
+
+def imprimir_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, nombre_impresora: str) -> str | None:
     """Envia la factura digital directo a una impresora instalada en el sistema (por
-    nombre, via QPrinterInfo) en vez de guardarla en un archivo -- usada para el
-    auto-print al emitir factura (ver FacturacionPanel.nueva_factura). Si el usuario
-    configuro "Microsoft Print to PDF" (u otra impresora virtual) como impresora
-    predeterminada, esto cubre tambien el caso de "guardar" automaticamente sin
-    necesitar una ruta separada -- es la misma llamada a QPrinter.
+    nombre, via QPrinterInfo) -- usada para el auto-print al emitir factura (ver
+    FacturacionPanel.nueva_factura).
+
+    Si la impresora es de tipo PDF ("Microsoft Print to PDF" u otra), NO se manda al
+    driver: su dialogo "Guardar impresion como" sale con el nombre vacio (QPrinter.
+    setDocName no se propaga) y bloquea cada factura. En su lugar se escribe el PDF
+    directo en la carpeta Descargas como Nota_Entrega_<numero_factura>.pdf, y se
+    devuelve esa ruta. Con una impresora fisica devuelve None.
 
     Lanza ValueError si `nombre_impresora` ya no corresponde a ninguna impresora
     instalada (se desconecto, se reinstalo con otro nombre, etc.) -- el caller decide
@@ -359,7 +371,14 @@ def imprimir_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, n
     if info.isNull():
         raise ValueError(f"La impresora configurada '{nombre_impresora}' ya no está disponible en este equipo.")
 
+    if _es_impresora_pdf(nombre_impresora):
+        carpeta = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
+        ruta = os.path.join(carpeta, f"Nota_Entrega_{datos['factura'].numero_factura}.pdf")
+        generar_pdf_factura(datos, config_empresa, ruta)
+        return ruta
+
     impresora = QPrinter(info, QPrinter.PrinterMode.HighResolution)
     _configurar_pagina(impresora)
 
     _documento(datos, config_empresa).print_(impresora)
+    return None

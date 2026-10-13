@@ -7,7 +7,7 @@ import logging
 
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import ConfiguracionEmpresa
 from app.db.session import SessionLocal
+from app.rutas import ARCHIVO_LOGO, NOMBRE_APP
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.recuperacion_acceso import TIPO_DESBLOQUEO, TIPO_RECUPERAR_CLAVE
 from app.ui.message_box import MessageBox
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 class LoginWindow(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ERP — Iniciar Sesión")
+        self.setWindowTitle(f"{NOMBRE_APP} — Iniciar sesión")
         ajustar_tamano(self, 850, 500)
         self.usuario_autenticado = None
 
@@ -96,7 +97,22 @@ class LoginWindow(QDialog):
         lbl_empresa.setStyleSheet("color: white; font-size: 24px; font-weight: normal; background: transparent;")
         lbl_empresa.setWordWrap(True)
 
+        lbl_logo = QLabel()
+        lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_logo.setStyleSheet("background: transparent;")
+        logo = QPixmap(str(ARCHIVO_LOGO))
+        if not logo.isNull():
+            lbl_logo.setPixmap(
+                logo.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            )
+
+        lbl_marca = QLabel(NOMBRE_APP)
+        lbl_marca.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_marca.setStyleSheet("color: white; font-size: 20px; font-weight: bold; background: transparent;")
+
         left_layout.addStretch()
+        left_layout.addWidget(lbl_logo)
+        left_layout.addWidget(lbl_marca)
         left_layout.addWidget(lbl_hola)
         left_layout.addWidget(lbl_empresa)
         left_layout.addStretch()

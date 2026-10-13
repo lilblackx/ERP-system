@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Banco
 from app.ui.message_box import MessageBox
+from app.ui.rif_input import conectar_formato_identificacion
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHT,
@@ -39,6 +40,7 @@ from app.ui.styles import (
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
 )
+from app.utils.rif import formatear_rif
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -242,6 +244,8 @@ class BancoFormDialog(QDialog):
         # Validador para RIF/Cédula: 1-8 dígitos opcionalmente seguidos de guión y un dígito
         id_validator = QRegularExpressionValidator(QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$"))
         self.identificacion_input.setValidator(id_validator)
+        # RIF completo en un solo campo; sin letra no se inventa una (un banco puede ser J o G).
+        self._formatear_identificacion = conectar_formato_identificacion(self.identificacion_input)
         grid.addWidget(lbl_rif, 4, 0)
         grid.addWidget(self.identificacion_input, 5, 0)
 
@@ -327,7 +331,7 @@ class BancoFormDialog(QDialog):
     def _precargar(self, banco: Banco):
         self.codigo_input.setText(banco.codigo_banco or "")
         self.nombre_input.setText(banco.nombre_banco or "")
-        self.identificacion_input.setText(banco.identificacion_banco or "")
+        self.identificacion_input.setText(formatear_rif(banco.identificacion_banco))
         self.correo_input.setText(banco.correo_banco or "")
         self.telefono_input.setText(banco.numero_telefono_banco or "")
 
@@ -373,6 +377,7 @@ class BancoFormDialog(QDialog):
         self.accept()
 
     def get_data(self) -> dict:
+        self._formatear_identificacion()
         return {
             "codigo_banco": self.codigo_input.text().strip() or None,
             "nombre_banco": self.nombre_input.text().strip(),

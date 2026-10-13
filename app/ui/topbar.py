@@ -12,7 +12,6 @@ y notificaciones. La info del usuario autenticado vive en el pie de la sidebar
 """
 
 import logging
-import unicodedata
 
 import qtawesome as qta
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
@@ -23,7 +22,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMenu,
     QPushButton,
     QSizePolicy,
     QSpacerItem,
@@ -33,14 +31,28 @@ from PySide6.QtWidgets import (
 from app.db.models import Usuario
 from app.services.busqueda_global import (
     LONGITUD_MINIMA,
+    TIPO_ACCION,
+    TIPO_BANCO,
+    TIPO_CAJA,
     TIPO_CLIENTE,
+    TIPO_COMPRA,
+    TIPO_CUENTA_BANCARIA,
+    TIPO_CXC,
+    TIPO_CXP,
     TIPO_FACTURA,
     TIPO_PRODUCTO,
     TIPO_PROVEEDOR,
+    TIPO_USUARIO,
+    TIPO_VENDEDOR,
     BusquedaGlobalService,
     ResultadoBusqueda,
+    normalizar,
 )
-from app.services.notificaciones import SEVERIDAD_ALTA, SEVERIDAD_MEDIA, Notificacion
+from app.services.notificaciones import SEVERIDAD_ALTA, Notificacion
+from app.ui.notificaciones_leidas import cargar as cargar_leidas
+from app.ui.notificaciones_leidas import firma as firma_notificacion
+from app.ui.notificaciones_leidas import guardar as guardar_leidas
+from app.ui.notificaciones_panel import PanelNotificaciones
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -51,6 +63,7 @@ from app.ui.styles import (
     COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
+    SEARCH_QSS,
     TOPBAR_HEIGHT,
     TOPBAR_QSS,
 )
@@ -70,6 +83,15 @@ _ICONO_TIPO = {
     TIPO_PRODUCTO: "fa5s.box",
     TIPO_PROVEEDOR: "fa5s.truck",
     TIPO_FACTURA: "fa5s.file-invoice-dollar",
+    TIPO_VENDEDOR: "fa5s.user-tie",
+    TIPO_COMPRA: "fa5s.shopping-cart",
+    TIPO_CXC: "fa5s.hand-holding-usd",
+    TIPO_CXP: "fa5s.file-invoice",
+    TIPO_BANCO: "fa5s.university",
+    TIPO_CUENTA_BANCARIA: "fa5s.credit-card",
+    TIPO_CAJA: "fa5s.cash-register",
+    TIPO_USUARIO: "fa5s.user-cog",
+    TIPO_ACCION: "fa5s.bolt",
 }
 
 # Títulos presentables para cada módulo
@@ -96,25 +118,14 @@ TITULOS = {
 }
 
 
-def _normalizar(texto: str) -> str:
-    """Minúsculas y sin tildes: 'facturacion' tiene que encontrar 'Facturación'."""
-    sin_tildes = unicodedata.normalize("NFD", texto)
-    return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn").lower()
-
-
-def _color_severidad(severidad: str) -> str:
-    if severidad == SEVERIDAD_ALTA:
-        return COLOR_DANGER
-    if severidad == SEVERIDAD_MEDIA:
-        return COLOR_WARNING
-    return COLOR_PRIMARY
-
-
 class TopBar(QWidget):
     """Barra superior con breadcrumb de módulo activo, búsqueda y notificaciones."""
 
     # (clave_modulo, texto_para_su_caja_de_busqueda) -- el texto va vacío para "ir al módulo".
     modulo_solicitado = Signal(str, str)
+    # clave de una accion de la busqueda (ver busqueda_global.ACCIONES): abrir un formulario o
+    # una pestana, no solo ir al modulo.
+    accion_solicitada = Signal(str)
 
     def __init__(
         self,
@@ -129,6 +140,9 @@ class TopBar(QWidget):
         # None = sin filtrar (cualquier caller que no pase el set calculado por rol).
         self._modulos_visibles = modulos_visibles
         self._notificaciones: list[Notificacion] = []
+        # Firmas de las alertas que este usuario ya marco como leidas (ver notificaciones_leidas.py).
+        self._leidas: set[str] = cargar_leidas(getattr(usuario, "id_usuario", None))
+        self._panel_notificaciones: PanelNotificaciones | None = None
         self._workers: set[QueryWorker] = set()
         self._id_busqueda = 0
         self.setObjectName("TopBar")
@@ -159,6 +173,10 @@ class TopBar(QWidget):
             QLineEdit.ActionPosition.LeadingPosition,
         )
         self.buscar_input.setObjectName("TopBarSearch")
+        # Mismo estilo (bordes redondeados de 6 px) que las cajas de busqueda de los modulos.
+        # La regla `QLineEdit#TopBarSearch` de TOPBAR_QSS no llegaba a aplicarse, y el campo se
+        # veia con esquinas rectas.
+        self.buscar_input.setStyleSheet(SEARCH_QSS)
         self.buscar_input.setFixedWidth(240)
         self.buscar_input.setFixedHeight(36)
         self.buscar_input.textChanged.connect(self._on_texto_cambiado)
@@ -197,7 +215,7 @@ class TopBar(QWidget):
         self.btn_notif.setObjectName("TopBarBtn")
         self.btn_notif.setFixedSize(38, 38)
         self.btn_notif.setToolTip("Notificaciones")
-        self.btn_notif.clicked.connect(self._mostrar_menu_notificaciones)
+        self.btn_notif.clicked.connect(self._mostrar_panel_notificaciones)
         layout.addWidget(self.btn_notif)
 
         # Contador sobre la campana (hijo del botón: se posiciona sobre su esquina).
@@ -302,12 +320,12 @@ class TopBar(QWidget):
         worker.start()
 
     def _buscar_modulos(self, texto: str) -> list[ResultadoBusqueda]:
-        buscado = _normalizar(texto)
+        buscado = normalizar(texto)
         encontrados = []
         for clave, titulo in TITULOS.items():
             if self._modulos_visibles is not None and clave not in self._modulos_visibles:
                 continue
-            if buscado in _normalizar(titulo):
+            if buscado in normalizar(titulo):
                 encontrados.append(ResultadoBusqueda(TIPO_MODULO, titulo, "Ir al módulo", clave, ""))
         return encontrados
 
@@ -330,7 +348,7 @@ class TopBar(QWidget):
             icono = qta.icon(_ICONO_TIPO.get(r.tipo, "fa5s.search"), color=COLOR_PRIMARY)
             segunda_linea = f"{r.tipo} · {r.detalle}" if r.detalle else r.tipo
             item = QListWidgetItem(icono, f"{r.titulo}\n{segunda_linea}")
-            item.setData(Qt.ItemDataRole.UserRole, (r.modulo, r.texto_busqueda))
+            item.setData(Qt.ItemDataRole.UserRole, (r.modulo, r.texto_busqueda, r.accion))
             self.lista_resultados.addItem(item)
         if resultados:
             self.lista_resultados.setCurrentRow(0)
@@ -361,21 +379,45 @@ class TopBar(QWidget):
         datos = item.data(Qt.ItemDataRole.UserRole)
         if not datos:
             return  # "Sin resultados"
-        modulo, texto = datos
+        modulo, texto, accion = datos
         self.buscar_input.clear()  # también oculta la lista (ver _on_texto_cambiado)
         self.buscar_input.clearFocus()
-        self.modulo_solicitado.emit(modulo, texto)
+        if accion:
+            self.accion_solicitada.emit(accion)
+        else:
+            self.modulo_solicitado.emit(modulo, texto)
 
     # ── Notificaciones ──────────────────────────────────────────────────────
 
+    def _id_usuario(self) -> int | None:
+        return getattr(self.usuario, "id_usuario", None)
+
+    def _no_leidas(self) -> list[Notificacion]:
+        return [n for n in self._notificaciones if firma_notificacion(n) not in self._leidas]
+
     def set_notificaciones(self, notificaciones: list[Notificacion]) -> None:
         self._notificaciones = list(notificaciones)
-        cantidad = len(self._notificaciones)
+        # Se descartan las firmas de alertas que ya no existen: si la condicion vuelve a
+        # darse mas adelante, cuenta como no leida otra vez.
+        vigentes = {firma_notificacion(n) for n in self._notificaciones}
+        if not self._leidas <= vigentes:
+            self._leidas &= vigentes
+            guardar_leidas(self._id_usuario(), self._leidas)
+        self._actualizar_contador()
+        if self._panel_notificaciones is not None and self._panel_notificaciones.isVisible():
+            self._panel_notificaciones.set_filas(self._filas_panel())
+
+    def _actualizar_contador(self) -> None:
+        """El contador cuenta solo las alertas SIN leer (y su color sale de ellas)."""
+        sin_leer = self._no_leidas()
+        cantidad = len(sin_leer)
         if not cantidad:
             self.lbl_contador.setVisible(False)
-            self.btn_notif.setToolTip("Notificaciones — no hay alertas")
+            self.btn_notif.setToolTip(
+                "Notificaciones — no hay alertas" if not self._notificaciones else "Notificaciones — todo leído"
+            )
             return
-        hay_alta = any(n.severidad == SEVERIDAD_ALTA for n in self._notificaciones)
+        hay_alta = any(n.severidad == SEVERIDAD_ALTA for n in sin_leer)
         color = COLOR_DANGER if hay_alta else COLOR_WARNING
         self.lbl_contador.setText(str(cantidad) if cantidad < 10 else "9+")
         self.lbl_contador.setStyleSheet(
@@ -383,39 +425,36 @@ class TopBar(QWidget):
         )
         self.lbl_contador.setGeometry(self.btn_notif.width() - 18, 2, 16, 16)
         self.lbl_contador.setVisible(True)
-        self.btn_notif.setToolTip(f"Notificaciones — {cantidad} alerta(s)")
+        self.btn_notif.setToolTip(f"Notificaciones — {cantidad} sin leer")
 
-    def _mostrar_menu_notificaciones(self) -> None:
-        menu = self._construir_menu_notificaciones()
-        ancla = QPoint(self.btn_notif.width() - menu.sizeHint().width(), self.btn_notif.height() + 4)
-        menu.exec(self.btn_notif.mapToGlobal(ancla))
-        menu.deleteLater()  # es hijo de la barra: sin esto se acumulaba uno por cada click
+    def _filas_panel(self) -> list[tuple[Notificacion, bool]]:
+        return [(n, firma_notificacion(n) in self._leidas) for n in self._notificaciones]
 
-    def _construir_menu_notificaciones(self) -> QMenu:
-        menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {COLOR_CARD_BG};
-                border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
-                padding: 6px;
-            }}
-            QMenu::item {{
-                padding: 8px 14px 8px 10px;
-                border-radius: 6px;
-                color: {COLOR_TEXT_DARK};
-            }}
-            QMenu::item:selected {{
-                background-color: {COLOR_CONTENT_BG};
-            }}
-            QMenu::item:disabled {{
-                color: {COLOR_TEXT_MUTED};
-            }}
-        """)
-        if not self._notificaciones:
-            menu.addAction("No hay alertas por ahora").setEnabled(False)
-        for n in self._notificaciones:
-            icono = qta.icon("fa5s.circle", color=_color_severidad(n.severidad))
-            accion = menu.addAction(icono, f"{n.titulo}: {n.detalle}")
-            accion.triggered.connect(lambda _checked=False, modulo=n.modulo: self.modulo_solicitado.emit(modulo, ""))
-        return menu
+    def _marcar_leidas(self, notificaciones: list[Notificacion]) -> None:
+        self._leidas |= {firma_notificacion(n) for n in notificaciones}
+        guardar_leidas(self._id_usuario(), self._leidas)
+        self._actualizar_contador()
+
+    def _construir_panel_notificaciones(self) -> PanelNotificaciones:
+        panel = PanelNotificaciones(self)
+        panel.set_filas(self._filas_panel())
+        panel.notificacion_elegida.connect(lambda n: self._abrir_notificacion(panel, n))
+        panel.marcar_todas_leidas.connect(lambda: self._marcar_todas_leidas(panel))
+        return panel
+
+    def _mostrar_panel_notificaciones(self) -> None:
+        if self._panel_notificaciones is not None:
+            self._panel_notificaciones.close()
+            self._panel_notificaciones.deleteLater()
+        self._panel_notificaciones = self._construir_panel_notificaciones()
+        self._panel_notificaciones.mostrar_bajo(self.btn_notif)
+
+    def _abrir_notificacion(self, panel: PanelNotificaciones, notificacion: Notificacion) -> None:
+        """Click en una alerta: queda leida (baja el contador) y lleva a su modulo."""
+        self._marcar_leidas([notificacion])
+        panel.close()
+        self.modulo_solicitado.emit(notificacion.modulo, "")
+
+    def _marcar_todas_leidas(self, panel: PanelNotificaciones) -> None:
+        self._marcar_leidas(self._notificaciones)
+        panel.set_filas(self._filas_panel())

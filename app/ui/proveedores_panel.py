@@ -57,6 +57,7 @@ from app.ui.styles import (
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 from app.ui.workers import QueryWorker
+from app.utils.rif import formatear_identificacion
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +96,7 @@ def _filas_proveedores_query(session, texto_busqueda, estado_proveedor, id_usuar
             p.id_proveedor,
             p.codigo_proveedor,
             p.nombre_razon_social,
-            (
-                f"{p.id_legal}-{p.identificacion_proveedor}"
-                if p.id_legal and p.identificacion_proveedor
-                else (p.id_legal or p.identificacion_proveedor or "")
-            ),
+            formatear_identificacion(p.id_legal, p.identificacion_proveedor),
             p.telefono,
             p.email,
             p.dias_credito if p.dias_credito is not None else 0,
@@ -364,10 +361,7 @@ class ProveedoresPanel(QWidget):
             self.tabla.setItem(fila, 1, QTableWidgetItem(p.codigo_proveedor or ""))
             self.tabla.setItem(fila, 2, QTableWidgetItem(p.nombre_razon_social or ""))
 
-            if p.id_legal and p.identificacion_proveedor:
-                identificacion = f"{p.id_legal}-{p.identificacion_proveedor}"
-            else:
-                identificacion = p.id_legal or p.identificacion_proveedor or ""
+            identificacion = formatear_identificacion(p.id_legal, p.identificacion_proveedor)
             self.tabla.setItem(fila, 3, QTableWidgetItem(identificacion))
 
             self.tabla.setItem(fila, 4, QTableWidgetItem(p.telefono or ""))

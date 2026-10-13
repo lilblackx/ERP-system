@@ -20,6 +20,7 @@ from app.db.models import Proveedor
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.rif_input import conectar_formato_identificacion
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHT,
@@ -43,6 +44,7 @@ from app.ui.styles import (
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
 )
+from app.utils.rif import formatear_numero
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -252,6 +254,7 @@ class ProveedorFormDialog(QDialog):
         # Validador para RIF/Cédula: 1-8 dígitos opcionalmente seguidos de guión y un dígito
         id_validator = QRegularExpressionValidator(QRegularExpression(r"^[0-9]{1,8}(-[0-9])?$"))
         self.identificacion_input.setValidator(id_validator)
+        self._formatear_identificacion = conectar_formato_identificacion(self.identificacion_input, self.tipo_id_combo)
 
         id_hbox.addWidget(self.tipo_id_combo)
         id_hbox.addWidget(self.identificacion_input)
@@ -384,7 +387,7 @@ class ProveedorFormDialog(QDialog):
         idx_pref = self.tipo_id_combo.findText(prefix)
         if idx_pref >= 0:
             self.tipo_id_combo.setCurrentIndex(idx_pref)
-        self.identificacion_input.setText(numero)
+        self.identificacion_input.setText(formatear_numero(numero))
 
         self.nombre_input.setText(proveedor.nombre_razon_social or "")
         self.telefono_input.setText(proveedor.telefono or "")
@@ -417,6 +420,7 @@ class ProveedorFormDialog(QDialog):
         self.accept()
 
     def get_data(self) -> dict:
+        self._formatear_identificacion()
         tipo = self.tipo_id_combo.currentText().strip()
         num = self.identificacion_input.text().strip()
 

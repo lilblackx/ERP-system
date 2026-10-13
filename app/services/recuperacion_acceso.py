@@ -58,7 +58,7 @@ def _construir_html_codigo(nombre_empresa: str, titulo: str, codigo: str, minuto
               style="background-color:#FFFFFF; border-radius:10px; overflow:hidden;
               box-shadow:0 1px 3px rgba(0,0,0,0.08); max-width:480px;">
             <tr>
-              <td style="background-color:#0D47A1; padding:22px 32px;">
+              <td style="background-color:#12459B; padding:22px 32px;">
                 <span style="color:#FFFFFF; font-size:17px; font-weight:bold;
                     letter-spacing:0.3px;">{nombre_empresa_html}</span>
               </td>
@@ -75,7 +75,7 @@ def _construir_html_codigo(nombre_empresa: str, titulo: str, codigo: str, minuto
                     <td align="center" style="background-color:#EFF6FF; border:1px solid #BFDBFE;
                         border-radius:8px; padding:18px;">
                       <span style="font-family:'Consolas','Courier New',monospace; font-size:32px;
-                          font-weight:bold; letter-spacing:8px; color:#0D47A1;">{codigo}</span>
+                          font-weight:bold; letter-spacing:8px; color:#12459B;">{codigo}</span>
                     </td>
                   </tr>
                 </table>

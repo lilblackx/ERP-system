@@ -63,3 +63,61 @@ def test_todos_los_destinos_de_busqueda_y_alertas_son_modulos_reales():
         "cuentas_por_cobrar", "cuentas_por_pagar", "control_tasas", "config_empresa",  # notificaciones.py
     }  # fmt: skip
     assert destinos <= set(MODULOS_CONFIG)
+
+
+def test_la_caja_de_busqueda_de_cuentas_bancarias_tambien_se_filtra(qtbot):
+    """CuentasBancariasPanel llama a su caja `search_input`, no `buscar_input`."""
+    campo = QLineEdit()
+    qtbot.addWidget(campo)
+    ventana = _ventana_falsa({"cuentas_bancarias": SimpleNamespace(search_input=campo)})
+
+    MainWindow._abrir_desde_topbar(ventana, "cuentas_bancarias", "Inversiones Quiroz")
+
+    assert campo.text() == "Inversiones Quiroz"
+
+
+def test_todos_los_destinos_de_la_busqueda_ampliada_son_modulos_reales():
+    destinos = {
+        "vendedores", "compras", "cuentas_por_cobrar", "cuentas_por_pagar",  # busqueda_global.py
+        "bancos", "cuentas_bancarias", "cajas", "usuarios",
+    }  # fmt: skip
+    assert destinos <= set(MODULOS_CONFIG)
+
+
+def test_ejecutar_una_accion_lleva_al_modulo_y_abre_su_formulario(qtbot):
+    abrir = MagicMock()
+    ventana = _ventana_falsa({"facturacion": SimpleNamespace(nueva_factura=abrir)})
+
+    MainWindow._ejecutar_accion(ventana, "nueva_factura")
+    ventana.navegar_a.assert_called_once_with("facturacion")
+    qtbot.waitUntil(lambda: abrir.called, timeout=1000)  # se abre con singleShot(0)
+
+
+def test_ejecutar_una_accion_de_configuracion_selecciona_su_pestana():
+    tabs = MagicMock()
+    ventana = _ventana_falsa({"config_empresa": SimpleNamespace(tabs=tabs)})
+
+    MainWindow._ejecutar_accion(ventana, "config_correo")
+
+    ventana.navegar_a.assert_called_once_with("config_empresa")
+    tabs.setCurrentIndex.assert_called_once_with(1)
+
+
+def test_accion_desconocida_no_hace_nada():
+    ventana = _ventana_falsa()
+
+    MainWindow._ejecutar_accion(ventana, "no_existe")
+
+    ventana.navegar_a.assert_not_called()
+
+
+def test_todas_las_acciones_de_la_busqueda_estan_cableadas_a_un_panel_real():
+    """Cada clave de busqueda_global.ACCIONES debe saber abrirse, y su metodo existir en el panel."""
+    from app.services.busqueda_global import ACCIONES
+    from app.ui.main_window import ACCIONES_CONFIG, ACCIONES_PANEL
+
+    for accion in ACCIONES:
+        assert accion.clave in ACCIONES_PANEL or accion.clave in ACCIONES_CONFIG, accion.clave
+    for modulo, metodo in ACCIONES_PANEL.values():
+        _, clase_panel = MODULOS_CONFIG[modulo]
+        assert callable(getattr(clase_panel, metodo, None)), f"{clase_panel.__name__}.{metodo}"

@@ -30,6 +30,7 @@ from app.services.empresa import _SENTINEL, EmpresaService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.rif_input import conectar_formato_identificacion
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -43,6 +44,7 @@ from app.ui.styles import (
     COLOR_WHITE,
     ICON_CHEVRON_DOWN_URL,
 )
+from app.utils.rif import formatear_rif
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +165,8 @@ class ConfigEmpresaPanel(QWidget):
             return inp
 
         self.rif_input = _crear_input("Ej: J-12345678-9")
+        # El RIF de la empresa se asume juridico (J) si se escribe sin letra.
+        self._formatear_rif = conectar_formato_identificacion(self.rif_input, letra_defecto="J")
         self.nombre_input = _crear_input("Razón Social")
         self.direccion_input = _crear_input("Dirección principal")
         self.telefono_input = _crear_input("Ej: +58 412 1234567")
@@ -171,7 +175,7 @@ class ConfigEmpresaPanel(QWidget):
             "font-weight: bold; color: {COLOR_TEXT_DARK}; font-size: 14px; border: none; background: transparent;"
         )
 
-        lbl_rif = QLabel("RF Empresa:")
+        lbl_rif = QLabel("RIF Empresa:")
         lbl_rif.setStyleSheet(lbl_style)
 
         lbl_nombre = QLabel("Nombre Empresa:")
@@ -367,7 +371,7 @@ class ConfigEmpresaPanel(QWidget):
         try:
             config = EmpresaService.obtener_configuracion(session, self.usuario.id_usuario)
             if config:
-                self.rif_input.setText(config.rif_empresa or "")
+                self.rif_input.setText(formatear_rif(config.rif_empresa, "J"))
                 self.nombre_input.setText(config.razon_social_empresa or "")
                 self.direccion_input.setText(config.direccion_empresa or "")
                 self.telefono_input.setText(config.telefono_empresa or "")
@@ -442,6 +446,7 @@ class ConfigEmpresaPanel(QWidget):
             self.lbl_logo_preview.setText("")
 
     def guardar_cambios(self) -> None:
+        self._formatear_rif()
         session = self.session_factory()
         try:
             EmpresaService.guardar_configuracion(

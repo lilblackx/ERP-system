@@ -15,9 +15,9 @@ acá y el archivo no coinciden, gana el archivo (esta guía puede quedar desactu
 
 | Constante | Hex | Uso |
 |---|---|---|
-| `COLOR_PRIMARY` | `#0D47A1` | Azul corporativo — botones primarios, acentos, íconos activos, sidebar |
-| `COLOR_PRIMARY_DARK` | `#0A3A83` | Estado `:pressed` de elementos primarios |
-| `COLOR_PRIMARY_LIGHT` | `#1565C0` | Estado `:hover` de elementos primarios |
+| `COLOR_PRIMARY` | `#12459B` | Azul corporativo — botones primarios, acentos, íconos activos, sidebar |
+| `COLOR_PRIMARY_DARK` | `#0E387E` | Estado `:pressed` de elementos primarios |
+| `COLOR_PRIMARY_LIGHT` | `#1B62B9` | Estado `:hover` de elementos primarios |
 | `COLOR_CONTENT_BG` | `#F8FAFC` | Fondo de página/diálogo (el gris casi blanco de toda la app) |
 | `COLOR_CARD_BG` | `#FFFFFF` | Fondo de tarjetas, tablas, inputs |
 | `COLOR_BORDER` | `#CBD5E1` | Borde estándar de tarjetas/tablas/inputs |

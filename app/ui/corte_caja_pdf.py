@@ -10,6 +10,7 @@ from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
 from app.db.models import Caja, CajaMovimiento
 from app.ui.styles import COLOR_BORDER, COLOR_PRIMARY, COLOR_TEXT_DARK, COLOR_TEXT_MUTED
+from app.utils.rif import formatear_rif
 
 _PRIMARY = COLOR_PRIMARY
 _MUTED = COLOR_TEXT_MUTED
@@ -61,7 +62,7 @@ def _armar_html(
 ) -> str:
     # Datos de la empresa
     razon_social = config_empresa.razon_social_empresa if config_empresa else "Mi Empresa"
-    rif = config_empresa.rif_empresa if config_empresa else ""
+    rif = formatear_rif(config_empresa.rif_empresa, "J") if config_empresa else ""
     direccion = config_empresa.direccion_empresa if config_empresa else ""
     telefono = config_empresa.telefono_empresa if config_empresa else ""
     logo_tag = _logo_img_tag(config_empresa.logotipo_empresa if config_empresa else None)

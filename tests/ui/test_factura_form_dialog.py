@@ -16,6 +16,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from PySide6.QtWidgets import QSizePolicy
+
 import app.ui.factura_form_dialog as ffd
 from tests.factories import (
     crear_cliente,
@@ -154,6 +156,55 @@ def test_agregar_item_usa_cantidad_y_precio_tecleados(qtbot, monkeypatch):
     assert item["precio_unitario"] == 10.25
     assert isinstance(item["cantidad"], float)
     assert isinstance(item["precio_unitario"], float)
+
+
+def test_stock_solo_en_el_selector_no_en_el_carrito(qtbot, monkeypatch):
+    producto = SimpleNamespace(
+        id_producto=1,
+        cod_producto="PROD-1",
+        nombre_producto="Producto Uno",
+        cantidad_unidad=Decimal("37.00"),
+        cantidad_caja=Decimal("1.00"),
+        estado_producto="ACTIVO",
+    )
+    dialogo = _crear_dialogo(qtbot, monkeypatch, productos=[producto])
+    assert dialogo.producto_combo.itemText(0) == "PROD-1 - Producto Uno (stock: 37.00 Und)"
+
+    dialogo.producto_combo.setCurrentIndex(dialogo.producto_combo.findData(1))
+    dialogo.precio_input.set_value(Decimal("10.00"))  # sin precio, _agregar_item abre un aviso modal
+    dialogo._agregar_item()
+
+    assert dialogo.items[0]["nombre_producto"] == "PROD-1 - Producto Uno"
+    assert dialogo.tabla_items.item(0, 0).text() == "PROD-1 - Producto Uno"
+
+
+def test_agregar_el_mismo_producto_dos_veces_suma_en_la_misma_linea(qtbot, monkeypatch):
+    """Regresion: tras agregar, se vaciaba el selector de precio; la segunda linea llevaba
+    tipo_precio_seleccionado=None contra el 1 de la primera, no coincidian y se duplicaba la fila."""
+    producto = SimpleNamespace(
+        id_producto=1,
+        cod_producto="PROD-1",
+        nombre_producto="Producto Uno",
+        cantidad_unidad=Decimal("1000.00"),
+        cantidad_caja=Decimal("1.00"),
+        estado_producto="ACTIVO",
+    )
+    dialogo = _crear_dialogo(qtbot, monkeypatch, productos=[producto])
+    precio = SimpleNamespace(
+        precio_venta=Decimal("1.50"), precio_1=Decimal("1.50"), precio_2=Decimal("1.40"), precio_3=None
+    )
+    monkeypatch.setattr(ffd.PrecioService, "obtener_precio", staticmethod(lambda *a, **k: precio))
+    dialogo.producto_combo.setCurrentIndex(dialogo.producto_combo.findData(1))
+    dialogo._on_producto_cambiado()
+
+    dialogo._agregar_item()
+    dialogo._agregar_item()
+    dialogo._agregar_item()
+
+    assert len(dialogo.items) == 1
+    assert dialogo.items[0]["cantidad"] == 3
+    assert dialogo.items[0]["tipo_precio_seleccionado"] == 1
+    assert dialogo.precio_seleccion_combo.currentData() == 1
 
 
 # --- get_data(): dias_credito_personalizados debe ser int, monto_descuento Decimal --------
@@ -428,6 +479,10 @@ def test_tarea_emitir_factura_ok_devuelve_factura(db_session):
 
     assert resultado["ok"] is True
     assert resultado["factura"].total_venta == Decimal("100.00")
+    # id/numero llegan como valores simples: el caller no puede leer `factura` (la sesion del hilo
+    # ya esta cerrada y el objeto expirado) sin DetachedInstanceError.
+    assert resultado["id_factura"] == resultado["factura"].id_factura
+    assert resultado["numero_factura"] == resultado["factura"].numero_factura
 
 
 def test_tarea_emitir_factura_value_error_devuelve_mensaje_sin_lanzar(db_session):
@@ -552,6 +607,19 @@ def test_on_resultado_emitir_factura_ok_acepta_dialogo(qtbot, monkeypatch):
     assert dialogo.btn_emitir.isEnabled() is True
 
 
+def test_on_resultado_emitir_factura_guarda_id_y_numero_como_valores_simples(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo._iniciar_emision_ui()
+    monkeypatch.setattr(dialogo, "accept", lambda: None)
+
+    dialogo._on_resultado_emitir_factura(
+        {"ok": True, "factura": object(), "id_factura": 7, "numero_factura": "FV-000007"}
+    )
+
+    assert dialogo.id_factura_emitida == 7
+    assert dialogo.numero_factura_emitida == "FV-000007"
+
+
 def test_on_resultado_emitir_factura_fallo_muestra_mensaje_y_no_cierra(qtbot, monkeypatch):
     dialogo = _crear_dialogo(qtbot, monkeypatch)
     dialogo._iniciar_emision_ui()
@@ -590,3 +658,73 @@ def test_on_error_emitir_factura_muestra_mensaje_generico(qtbot, monkeypatch):
     assert dialogo._emitiendo_factura is False
     assert dialogo.btn_emitir.isEnabled() is True
     assert avisos[0][0][1:] == ("Error", "No se pudo emitir la factura.")
+
+
+def test_falta_muestra_tambien_el_equivalente_en_bs(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo._tasa_vigente = {"tasa_bcv": Decimal("36.50"), "tasa_cop": None}
+    monkeypatch.setattr(dialogo, "_total_factura_actual", lambda: 1.50)
+    dialogo.pagos.append(_pago_usd("1.00"))
+
+    dialogo._refrescar_tabla_pagos()
+
+    assert dialogo.lbl_total_pagos.text().endswith("Falta: $0.50 · Bs 18,25")
+
+
+def test_falta_sin_tasa_vigente_muestra_solo_usd(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo._tasa_vigente = None
+    monkeypatch.setattr(dialogo, "_total_factura_actual", lambda: 1.50)
+    dialogo.pagos.append(_pago_usd("1.00"))
+
+    dialogo._refrescar_tabla_pagos()
+
+    assert dialogo.lbl_total_pagos.text().endswith("Falta: $0.50")
+
+
+def test_resumen_de_pagos_solo_visible_en_la_pestana_de_pagos(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo.show()
+
+    assert not dialogo.resumen_pagos.isVisible()
+    dialogo.tabs.setCurrentIndex(dialogo._idx_tab_pagos)
+    assert dialogo.resumen_pagos.isVisible()
+    dialogo.tabs.setCurrentIndex(0)
+    assert not dialogo.resumen_pagos.isVisible()
+
+
+def test_pestana_oculta_no_impone_su_alto_minimo(qtbot, monkeypatch):
+    """Sin esto la pestana de pagos heredaba el alto minimo de la de Factura y el dialogo
+    mostraba scroll en pantallas chicas aunque los pagos cupieran."""
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    ignorada = QSizePolicy.Policy.Ignored
+
+    assert dialogo.tabs.widget(dialogo._idx_tab_pagos).sizePolicy().verticalPolicy() == ignorada
+    dialogo.tabs.setCurrentIndex(dialogo._idx_tab_pagos)
+    assert dialogo.tabs.widget(0).sizePolicy().verticalPolicy() == ignorada
+    assert dialogo.tabs.widget(dialogo._idx_tab_pagos).sizePolicy().verticalPolicy() != ignorada
+
+
+def test_volver_a_contado_quita_la_alerta_de_cliente_sin_credito_y_habilita_el_boton(qtbot, monkeypatch):
+    """Regresion: _toggle_credito no re-evaluaba _actualizar_alerta_credito, asi que el aviso
+    "no tiene dias de credito" y el boton deshabilitado quedaban pegados al volver a Contado."""
+    _mock_servicios(monkeypatch)
+    monkeypatch.setattr(
+        ffd,
+        "list_clientes",
+        lambda *a, **k: {"items": [_cliente_fake(1, "Cliente Prueba")]},
+    )
+    session = MagicMock()
+    session.get.return_value = None
+    dialogo = ffd.FacturaFormDialog(session, id_usuario=1)
+    qtbot.addWidget(dialogo)
+    dialogo.show()
+    dialogo.cliente_combo.setCurrentIndex(dialogo.cliente_combo.findData(1))
+
+    dialogo.condicion_combo.setCurrentIndex(dialogo.condicion_combo.findData("credito"))
+    assert dialogo.lbl_alerta_credito.isVisible()
+    assert not dialogo.btn_emitir.isEnabled()
+
+    dialogo.condicion_combo.setCurrentIndex(dialogo.condicion_combo.findData("contado"))
+    assert not dialogo.lbl_alerta_credito.isVisible()
+    assert dialogo.btn_emitir.isEnabled()

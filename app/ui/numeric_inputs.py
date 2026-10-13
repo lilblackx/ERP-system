@@ -113,6 +113,12 @@ def _formatear(valor: Decimal, decimals: int, agrupar: bool) -> str:
     return f"-{resultado}" if negativo else resultado
 
 
+def formatear_monto(valor, decimals: int = 2) -> str:
+    """Mismo formato que muestra NumericLineEdit (miles con ".", decimales con ","),
+    para textos fuera de un input -- ej. el faltante en Bs de FacturaFormDialog."""
+    return _formatear(_as_decimal(valor), decimals, agrupar=True)
+
+
 def _parse_raw(texto: str, decimals: int) -> Decimal | None:
     """Parsea texto crudo tecleado por el usuario -- el validador nunca deja pasar mas de
     un separador (',' o '.', cualquiera de los dos vale como decimal mientras se tipea),

@@ -8,7 +8,7 @@ reemplaza por uno síncrono para no depender de hilos en el test."""
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import Qt
 
 from app.services.busqueda_global import ResultadoBusqueda
 from app.services.notificaciones import (
@@ -272,56 +272,137 @@ def test_resolver_alertas_oculta_el_contador(qtbot, monkeypatch):
     assert barra.lbl_contador.isHidden()
 
 
-def test_menu_lista_las_alertas_y_cada_una_navega_a_su_modulo(qtbot, monkeypatch):
+def _panel(barra):
+    panel = barra._construir_panel_notificaciones()
+    return panel
+
+
+def test_panel_lista_las_alertas_y_cada_una_navega_a_su_modulo(qtbot, monkeypatch):
     barra = _crear_topbar(qtbot, monkeypatch)
     barra.set_notificaciones([_ALTA, _MEDIA])
     capturado = []
     barra.modulo_solicitado.connect(lambda modulo, texto: capturado.append((modulo, texto)))
 
-    menu = barra._construir_menu_notificaciones()
-    acciones = menu.actions()
+    panel = _panel(barra)
 
-    assert [a.text() for a in acciones] == [
-        "Cuentas por cobrar vencidas: 2 facturas vencidas",
-        "Stock bajo: 1 producto por debajo de su mínimo",
-    ]
-    acciones[1].trigger()
-    acciones[0].trigger()
+    assert [f.notificacion for f in panel.filas] == [_ALTA, _MEDIA]
+    panel.filas[1].clicked.emit()
+    panel.filas[0].clicked.emit()
     assert capturado == [("inventario", ""), ("cuentas_por_cobrar", "")]
 
 
-def test_menu_sin_alertas_dice_que_no_hay(qtbot, monkeypatch):
+def test_abrir_una_alerta_la_marca_leida_y_baja_el_contador(qtbot, monkeypatch):
+    barra = _crear_topbar(qtbot, monkeypatch)
+    barra.set_notificaciones([_ALTA, _MEDIA, _INFO])
+    assert barra.lbl_contador.text() == "3"
+
+    _panel(barra).filas[1].clicked.emit()
+
+    assert barra.lbl_contador.text() == "2"
+    assert [leida for _, leida in barra._filas_panel()] == [False, True, False]
+
+
+def test_marcar_todas_como_leidas_oculta_el_contador_pero_conserva_las_alertas(qtbot, monkeypatch):
+    barra = _crear_topbar(qtbot, monkeypatch)
+    barra.set_notificaciones([_ALTA, _MEDIA])
+    panel = _panel(barra)
+
+    panel.btn_marcar_todas.click()
+
+    assert barra.lbl_contador.isHidden()
+    assert all(leida for _, leida in barra._filas_panel())
+    assert len(panel.filas) == 2  # siguen listadas, ahora como leidas
+    assert not panel.btn_marcar_todas.isEnabled()
+
+
+def test_el_contador_solo_cuenta_las_no_leidas_y_su_color_sale_de_ellas(qtbot, monkeypatch):
+    barra = _crear_topbar(qtbot, monkeypatch)
+    barra.set_notificaciones([_ALTA, _MEDIA])
+    assert topbar_mod.COLOR_DANGER in barra.lbl_contador.styleSheet()
+
+    _panel(barra).filas[0].clicked.emit()  # se lee la alta
+
+    assert barra.lbl_contador.text() == "1"
+    assert topbar_mod.COLOR_WARNING in barra.lbl_contador.styleSheet()
+
+
+def test_lo_leido_se_conserva_al_reabrir_la_app(qtbot, monkeypatch):
+    barra = _crear_topbar(qtbot, monkeypatch)
+    barra.set_notificaciones([_ALTA, _MEDIA])
+    _panel(barra).filas[0].clicked.emit()
+
+    otra_sesion = _crear_topbar(qtbot, monkeypatch)
+    otra_sesion.set_notificaciones([_ALTA, _MEDIA])
+
+    assert otra_sesion.lbl_contador.text() == "1"
+
+
+def test_si_cambia_el_detalle_de_una_alerta_vuelve_a_ser_no_leida(qtbot, monkeypatch):
+    barra = _crear_topbar(qtbot, monkeypatch)
+    barra.set_notificaciones([_ALTA])
+    _panel(barra).filas[0].clicked.emit()
+    assert barra.lbl_contador.isHidden()
+
+    mas_vencidas = Notificacion(
+        "cxc_vencidas", "Cuentas por cobrar vencidas", "5 facturas vencidas", "cuentas_por_cobrar", SEVERIDAD_ALTA
+    )
+    barra.set_notificaciones([mas_vencidas])
+
+    assert barra.lbl_contador.text() == "1"
+
+
+def test_alerta_resuelta_deja_de_estar_leida_si_vuelve_a_aparecer(qtbot, monkeypatch):
+    barra = _crear_topbar(qtbot, monkeypatch)
+    barra.set_notificaciones([_ALTA])
+    _panel(barra).filas[0].clicked.emit()
+
+    barra.set_notificaciones([])
+    barra.set_notificaciones([_ALTA])
+
+    assert barra.lbl_contador.text() == "1"
+
+
+def test_panel_sin_alertas_dice_que_no_hay(qtbot, monkeypatch):
     barra = _crear_topbar(qtbot, monkeypatch)
 
-    acciones = barra._construir_menu_notificaciones().actions()
+    panel = _panel(barra)
 
-    assert [a.text() for a in acciones] == ["No hay alertas por ahora"]
-    assert not acciones[0].isEnabled()
-
-
-class _MenuFalso:
-    """Reemplaza al QMenu real: exec() abre un bucle de eventos modal (cuelga el test)."""
-
-    def __init__(self):
-        self.abierto_en = None
-        self.liberado = False
-
-    def sizeHint(self):
-        return QSize(200, 50)
-
-    def exec(self, posicion):
-        self.abierto_en = posicion
-
-    def deleteLater(self):
-        self.liberado = True
+    assert panel.filas == []
+    assert not panel.btn_marcar_todas.isVisibleTo(panel)
 
 
-def test_el_boton_de_la_campana_abre_el_menu(qtbot, monkeypatch):
+def test_el_boton_de_la_campana_abre_el_panel(qtbot, monkeypatch):
     barra = _crear_topbar(qtbot, monkeypatch)
-    menu = _MenuFalso()
-    monkeypatch.setattr(barra, "_construir_menu_notificaciones", lambda: menu)
+    barra.set_notificaciones([_ALTA])
+    barra.show()
 
     barra.btn_notif.click()
 
-    assert menu.abierto_en is not None
-    assert menu.liberado
+    assert barra._panel_notificaciones is not None
+    assert barra._panel_notificaciones.isVisible()
+    barra._panel_notificaciones.close()
+
+
+def test_elegir_una_accion_emite_accion_solicitada_y_no_navega(qtbot, monkeypatch):
+    accion = ResultadoBusqueda("Acción", "Nueva factura", "Emitir una factura", "facturacion", "", "nueva_factura")
+    barra = _crear_topbar(qtbot, monkeypatch, entidades=[accion])
+    acciones, modulos = [], []
+    barra.accion_solicitada.connect(acciones.append)
+    barra.modulo_solicitado.connect(lambda m, t: modulos.append((m, t)))
+    _escribir(barra, "nueva fact")
+
+    barra._elegir_item(barra.lista_resultados.item(0))
+
+    assert acciones == ["nueva_factura"]
+    assert modulos == []
+    assert barra.buscar_input.text() == ""
+
+
+def test_los_tipos_nuevos_tienen_icono_propio():
+    from app.services import busqueda_global as bg
+
+    tipos = [
+        bg.TIPO_VENDEDOR, bg.TIPO_COMPRA, bg.TIPO_CXC, bg.TIPO_CXP, bg.TIPO_BANCO,
+        bg.TIPO_CUENTA_BANCARIA, bg.TIPO_CAJA, bg.TIPO_USUARIO, bg.TIPO_ACCION,
+    ]  # fmt: skip
+    assert all(t in topbar_mod._ICONO_TIPO for t in tipos)

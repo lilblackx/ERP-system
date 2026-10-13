@@ -3,16 +3,26 @@ from decimal import Decimal
 
 from app.services.busqueda_global import (
     LIMITE_POR_TIPO,
+    TIPO_ACCION,
+    TIPO_BANCO,
+    TIPO_CAJA,
     TIPO_CLIENTE,
+    TIPO_CUENTA_BANCARIA,
+    TIPO_CXC,
     TIPO_FACTURA,
     TIPO_PRODUCTO,
     TIPO_PROVEEDOR,
+    TIPO_USUARIO,
+    TIPO_VENDEDOR,
     BusquedaGlobalService,
 )
 from app.services.ventas import VentaService
 from tests.factories import (
     asignar_permiso,
+    crear_banco,
+    crear_caja,
     crear_cliente,
+    crear_cuenta_bancaria,
     crear_permiso,
     crear_precio_producto,
     crear_producto,
@@ -151,3 +161,116 @@ def test_usuario_sin_ningun_permiso_no_ve_nada(db_session):
     crear_cliente(db_session, nombre_razon_social="Comercial Sur")
 
     assert BusquedaGlobalService.buscar(db_session, usuario.id_usuario, "comercial") == []
+
+
+# ── Mas entidades y acciones ────────────────────────────────────────────────
+
+
+def test_encuentra_vendedor_banco_caja_y_usuario(db_session):
+    admin = crear_usuario_admin(db_session)
+    crear_vendedor(db_session, nombre_vendedor="Zoraida Vendedora")
+    crear_banco(db_session, nombre_banco="Banco Zoraida", codigo_banco="0999")
+    crear_caja(db_session, nombre_caja="Caja Zoraida")
+    crear_usuario(db_session, nombre_usuario="zoraida.cajera", nombre="Zoraida", apellido="Perez", id_rol=admin.id_rol)
+
+    resultados = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "zoraida")
+
+    por_tipo = {r.tipo: r for r in resultados}
+    assert {TIPO_VENDEDOR, TIPO_BANCO, TIPO_CAJA, TIPO_USUARIO} <= set(por_tipo)
+    assert por_tipo[TIPO_VENDEDOR].modulo == "vendedores"
+    assert por_tipo[TIPO_BANCO].modulo == "bancos"
+    assert por_tipo[TIPO_CAJA].modulo == "cajas"
+    assert por_tipo[TIPO_USUARIO].titulo == "Zoraida Perez"
+    assert por_tipo[TIPO_USUARIO].detalle == "zoraida.cajera"
+
+
+def test_cuenta_bancaria_se_busca_por_titular_y_muestra_el_numero_enmascarado(db_session):
+    admin = crear_usuario_admin(db_session)
+    banco = crear_banco(db_session, nombre_banco="Banco Unico")
+    crear_cuenta_bancaria(db_session, banco=banco, nombre_titular="Inversiones Quiroz", numero_cuenta="01020304050607")
+
+    resultados = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "quiroz")
+
+    cuentas = [r for r in resultados if r.tipo == TIPO_CUENTA_BANCARIA]
+    assert len(cuentas) == 1
+    assert cuentas[0].modulo == "cuentas_bancarias"
+    assert cuentas[0].detalle == "**********0607"
+    assert "01020304050607" not in cuentas[0].titulo + cuentas[0].detalle
+    # El numero completo no es un criterio de busqueda (mismo criterio que el modulo: va enmascarado).
+    assert [
+        r
+        for r in BusquedaGlobalService.buscar(db_session, admin.id_usuario, "01020304")
+        if r.tipo == TIPO_CUENTA_BANCARIA
+    ] == []
+
+
+def test_cuenta_por_cobrar_abierta_se_encuentra_por_cliente_pero_exige_tres_letras(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session)
+    crear_precio_producto(db_session, producto, "25.00")
+    cliente = crear_cliente(db_session, nombre_razon_social="Xylofonos del Sur", limite_credito=Decimal("1000.00"))
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "25.00"}],
+        fecha_vencimiento=date.today() + timedelta(days=30),
+    )
+
+    resultados = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "xylofonos")
+    cuentas = [r for r in resultados if r.tipo == TIPO_CXC]
+    assert len(cuentas) == 1
+    assert cuentas[0].modulo == "cuentas_por_cobrar"
+    assert cuentas[0].texto_busqueda == "Xylofonos del Sur"
+    assert "saldo $25.00" in cuentas[0].detalle
+
+    # Con 2 letras solo se consultan los tipos "chicos": la cuenta por cobrar no aparece.
+    assert [r for r in BusquedaGlobalService.buscar(db_session, admin.id_usuario, "xy") if r.tipo == TIPO_CXC] == []
+
+
+def test_compras_y_cuentas_por_pagar_se_consultan_sin_error_aunque_no_haya_datos(db_session):
+    admin = crear_usuario_admin(db_session)
+
+    assert BusquedaGlobalService._compras(db_session, "%abc%", 4) == []
+    assert BusquedaGlobalService._cuentas_por_pagar(db_session, "%abc%", 4) == []
+    assert BusquedaGlobalService.buscar(db_session, admin.id_usuario, "abcdef") == []
+
+
+def test_acciones_aparecen_primero_por_titulo_o_sinonimo(db_session):
+    admin = crear_usuario_admin(db_session)
+    crear_cliente(db_session, nombre_razon_social="Nueva Factura Ltda")
+
+    por_titulo = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "nueva fact")
+    assert por_titulo[0].tipo == TIPO_ACCION
+    assert por_titulo[0].accion == "nueva_factura"
+    assert por_titulo[0].modulo == "facturacion"
+
+    por_sinonimo = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "facturar")
+    assert [r.accion for r in por_sinonimo if r.tipo == TIPO_ACCION] == ["nueva_factura"]
+
+    sin_tilde = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "configuracion")
+    assert {r.accion for r in sin_tilde if r.tipo == TIPO_ACCION} == {
+        "config_empresa",
+        "config_correo",
+        "config_licencia",
+    }
+    smtp = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "smtp")
+    assert [r.accion for r in smtp] == ["config_correo"]
+
+
+def test_una_accion_exige_el_permiso_de_crear(db_session):
+    rol = crear_rol(db_session)
+    asignar_permiso(db_session, rol, crear_permiso(db_session, recurso="ventas", accion="ver"))
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+
+    # Solo puede VER ventas, no crearlas: "Nueva factura" no se le ofrece.
+    assert [
+        r for r in BusquedaGlobalService.buscar(db_session, usuario.id_usuario, "nueva fact") if r.tipo == TIPO_ACCION
+    ] == []
+
+    asignar_permiso(db_session, rol, crear_permiso(db_session, recurso="ventas", accion="crear"))
+    resultados = BusquedaGlobalService.buscar(db_session, usuario.id_usuario, "nueva fact")
+    assert [r.accion for r in resultados if r.tipo == TIPO_ACCION] == ["nueva_factura"]
