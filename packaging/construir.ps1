@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Construye el instalador de Distribuidora DJ: PyInstaller (carpeta con la app y el servicio + herramientas del instalador) +
+    Construye el instalador de Nexo ERP: PyInstaller (carpeta con la app y el servicio + herramientas del instalador) +
     Inno Setup (instalador unico con la opcion Servidor / Estacion).
 
 .DESCRIPTION
@@ -57,7 +57,7 @@ else { Write-Warning "Build SIN firma (-SinFirma): el instalador saldra sin firm
 function Firmar([string[]]$archivos) {
     if (-not $firmar) { return }
     foreach ($archivo in $archivos) {
-        & $signtool sign /f $pfx /p $claveFirma /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "Distribuidora DJ" $archivo | Out-Null
+        & $signtool sign /f $pfx /p $claveFirma /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "Nexo ERP" $archivo | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "No se pudo firmar $archivo" }
         Write-Host "    firmado: $(Split-Path -Leaf $archivo)"
     }
@@ -120,7 +120,7 @@ if ($firmar) { $argsIscc += "/DCer=$cer" }
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo." }
 if ($firmar) {
     Write-Host "==> Firmando instalador..." -ForegroundColor Cyan
-    Firmar @((Join-Path $salida "DistribuidoraDJ-Setup-$Version.exe"))
+    Firmar @((Join-Path $salida "NexoERP-Setup-$Version.exe"))
     # Para la PRIMERA vez en cada equipo (el instalador aun no pudo instalar el certificado, y SmartScreen
     # desconfia de el hasta entonces): el .bat instala el certificado y lanza el instalador.
     Copy-Item $cer (Join-Path $salida "dj-firma.cer") -Force

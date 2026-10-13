@@ -1,6 +1,6 @@
 # Instalador (Inno Setup + PyInstaller)
 
-Un solo instalador, `DistribuidoraDJ-Setup-<version>.exe`, con dos modos:
+Un solo instalador, `NexoERP-Setup-<version>.exe`, con dos modos:
 
 | Modo | Qué hace |
 |---|---|
@@ -17,7 +17,7 @@ Requisitos en la PC de construcción: el entorno virtual (`.venv`) con `requirem
 .\packaging\construir.ps1 -Version 1.0.0
 ```
 
-Genera `build\instalador\DistribuidoraDJ-Setup-1.0.0.exe` (≈ 250 MB). Pasos:
+Genera `build\instalador\NexoERP-Setup-1.0.0.exe` (≈ 250 MB). Pasos:
 
 1. Lee `LICENCIA_URL` y `LICENCIA_PUBLIC_KEY` del `.env` y los **hornea** en `app/licencia_embebida.py` (el programa instalado ignora cualquier `.env` para esto).
 2. PyInstaller → `build\dist\DistribuidoraDJ\` (`DistribuidoraDJ.exe` y `DJ-Servicio.exe`) y `build\herramientas\DJ-Herramientas.exe` (16 MB, sin Qt).
@@ -37,17 +37,23 @@ Es gratis, pero solo es "de confianza" en las PCs que tienen instalado el certif
    - `dj-firma.cer`: clave pública (válida 5 años).
 2. Firma `DistribuidoraDJ.exe`, `DJ-Servicio.exe`, `DJ-Herramientas.exe` y el instalador (con sello de tiempo: la firma sigue válida después de que venza el certificado). Contraseña: se pide, o la variable `DJ_FIRMA_CLAVE`. Requiere el Windows SDK (`signtool.exe`).
 3. Mete el `.cer` dentro del instalador: al instalar, la PC pasa a confiar en él (*Raíz de confianza* y *Editores de confianza*; se quita al desinstalar). Así las actualizaciones posteriores ya salen como "Distribuidora DJ".
-4. Deja en `build\instalador\` lo necesario para desplegar: `DistribuidoraDJ-Setup-<version>.exe`, `dj-firma.cer` e `Instalar.bat`.
+4. Deja en `build\instalador\` lo necesario para desplegar: `NexoERP-Setup-<version>.exe`, `dj-firma.cer` e `Instalar.bat`.
 
 **Desplegar la primera vez en una PC**: copiar los tres archivos y hacer doble clic en `Instalar.bat` (pide administrador, instala el certificado y lanza el instalador; acepta los mismos parámetros que el instalador, p. ej. `/Tipo=ESTACION ...`). Esto evita la advertencia de SmartScreen, que aparece si se ejecuta el `.exe` directamente en una PC que aún no confía en el certificado. Alternativa manual: `firma\confiar-certificado.ps1` (`-Quitar` lo revierte).
 
 El desinstalador que genera Inno Setup no se firma.
 
+## Nombre del producto y nombres internos
+
+El instalador, los accesos directos y el editor que aparece en *Programas y características* usan el nombre **Nexo ERP** (`#define Nombre` en `instalador.iss`). Los accesos directos de versiones que se llamaban «Distribuidora DJ» se eliminan al actualizar.
+
+Los nombres **internos** no se renombran a propósito, para no dejar huérfanos el servicio, la regla de firewall o el certificado ya instalados al actualizar: la carpeta de datos `ProgramData\DistribuidoraDJ`, el servicio `DistribuidoraDJLicencia`, la regla de firewall, el certificado (`CN=Distribuidora DJ`) y el ejecutable `DistribuidoraDJ.exe`. Ojo: el *editor verificado* que muestra Windows (UAC/SmartScreen) sale del certificado de firma, no del instalador; cambiarlo implica generar un certificado nuevo.
+
 ## Dónde queda cada cosa en el equipo del cliente
 
 | Qué | Dónde |
 |---|---|
-| Programa | `C:\Program Files\Distribuidora DJ\` |
+| Programa | `C:\Program Files\Nexo ERP\` (en instalaciones nuevas; una actualización conserva la carpeta anterior, p. ej. `Distribuidora DJ`) |
 | Configuración (`config.env`), logs, estado del reloj | `C:\ProgramData\DistribuidoraDJ\` |
 | Datos para instalar estaciones (solo servidor) | `C:\ProgramData\DistribuidoraDJ\datos_estaciones.txt` |
 | Servicio de Windows (solo servidor) | `DistribuidoraDJLicencia` (inicio automático, se reinicia si se cae) |
@@ -72,11 +78,11 @@ Ejecutar el instalador en la PC cliente, elegir *Estación* e ingresar los datos
 ## Instalación silenciosa
 
 ```
-DistribuidoraDJ-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="C:\temp\instalacion.log" ^
+NexoERP-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="C:\temp\instalacion.log" ^
   /Tipo=SERVIDOR /Servidor=localhost /Puerto=1433 /Base=distribuidora_dj ^
   /AdminSql=sa /ClaveAdminSql="..." /ClaveAdminApp="..."
 
-DistribuidoraDJ-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES ^
+NexoERP-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES ^
   /Tipo=ESTACION /Servidor=PC-SERVIDOR,1433 /Base=distribuidora_dj /UsuarioSql=dj_app /ClaveSql="..."
 ```
 

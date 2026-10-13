@@ -1,13 +1,13 @@
-﻿; Instalador de Distribuidora DJ (Inno Setup 6). Un solo instalador con dos modos:
+﻿; Instalador de Nexo ERP (Inno Setup 6). Un solo instalador con dos modos:
 ;   SERVIDOR : usa un SQL Server que ya exista, crea la base + el usuario SQL de la app, instala el
 ;              servicio de Windows de licencia y abre el puerto en el firewall.
 ;   ESTACION : se conecta al servidor; no instala base de datos ni servicio.
 ; Se compila con packaging\construir.ps1 (pasa Version, Origen, Herramientas y Salida).
 ;
 ; Instalacion silenciosa (todos los datos por parametro; sin ventanas):
-;   Servidor : DistribuidoraDJ-Setup.exe /VERYSILENT /Tipo=SERVIDOR /Servidor=localhost /Puerto=1433
+;   Servidor : NexoERP-Setup.exe /VERYSILENT /Tipo=SERVIDOR /Servidor=localhost /Puerto=1433
 ;              /Base=distribuidora_dj /AdminSql=sa /ClaveAdminSql=... /ClaveAdminApp=...
-;   Estacion : DistribuidoraDJ-Setup.exe /VERYSILENT /Tipo=ESTACION /Servidor=PC-SERVIDOR,1433
+;   Estacion : NexoERP-Setup.exe /VERYSILENT /Tipo=ESTACION /Servidor=PC-SERVIDOR,1433
 ;              /Base=distribuidora_dj /UsuarioSql=dj_app /ClaveSql=...
 ; Registro detallado: agregar /LOG="C:\ruta\instalacion.log".
 
@@ -24,7 +24,12 @@
   #define Salida "..\build\instalador"
 #endif
 
-#define Nombre "Distribuidora DJ"
+; Nombre del producto que ve el usuario (asistente, accesos directos, Agregar o quitar programas).
+#define Nombre "Nexo ERP"
+; Nombre anterior: solo para limpiar los accesos directos de versiones previas (ver [InstallDelete]).
+#define NombreAnterior "Distribuidora DJ"
+; Nombres INTERNOS: no se renombran a proposito. Cambiarlos dejaria huerfanos el servicio, la regla de
+; firewall y el certificado ya instalados en los equipos que se actualizan.
 #define Servicio "DistribuidoraDJLicencia"
 #define ReglaFirewall "Distribuidora DJ - SQL Server"
 #define CertNombre "Distribuidora DJ"
@@ -43,7 +48,11 @@ DefaultDirName={autopf}\{#Nombre}
 DefaultGroupName={#Nombre}
 DisableProgramGroupPage=yes
 OutputDir={#Salida}
-OutputBaseFilename=DistribuidoraDJ-Setup-{#Version}
+OutputBaseFilename=NexoERP-Setup-{#Version}
+; Propiedades del .exe del instalador (clic derecho > Propiedades > Detalles).
+VersionInfoProductName={#Nombre}
+VersionInfoDescription=Instalador de {#Nombre}
+VersionInfoCompany={#Nombre}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -59,6 +68,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; while importing QtCore"), asi que mejor negarse a instalar.
 MinVersion=10.0.17763
 UninstallDisplayIcon={app}\DistribuidoraDJ.exe
+; Icono del propio instalador (ruta relativa a este .iss).
+SetupIconFile=..\app\assets\icono.ico
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
@@ -86,6 +97,12 @@ Source: "redist\msodbcsql.msi"; DestDir: "{tmp}"; Flags: dontcopy
 ; Certificado publico (autofirmado) con el que se firmo todo: se instala como de confianza en este equipo
 Source: "{#Cer}"; DestDir: "{tmp}"; DestName: "dj-firma.cer"; Flags: dontcopy
 #endif
+
+[InstallDelete]
+; Al actualizar una instalacion que se llamaba "{#NombreAnterior}": se quitan sus accesos directos para
+; que no queden duplicados junto a los de "{#Nombre}".
+Type: files; Name: "{autodesktop}\{#NombreAnterior}.lnk"
+Type: filesandordirs; Name: "{autoprograms}\{#NombreAnterior}"
 
 [Icons]
 Name: "{group}\{#Nombre}"; Filename: "{app}\DistribuidoraDJ.exe"

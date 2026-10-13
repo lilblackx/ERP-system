@@ -14,6 +14,7 @@ RAIZ = Path(SPECPATH).parent
 
 datos = [
     (str(RAIZ / "app" / "ui" / "web"), "app/ui/web"),  # Leaflet para el mapa
+    (str(RAIZ / "app" / "assets"), "app/assets"),  # logo e icono de la app
     (str(RAIZ / "migrations"), "migrations"),  # migraciones SQL
     (str(RAIZ / "schema_sqlserver.sql"), "."),  # esquema base para instalar un servidor nuevo
 ]
@@ -54,6 +55,7 @@ exe_app = EXE(
     exclude_binaries=True,
     name="DistribuidoraDJ",
     console=False,
+    icon=str(RAIZ / "app" / "assets" / "icono.ico"),
 )
 exe_servicio = EXE(
     PYZ(a_servicio.pure),

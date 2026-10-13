@@ -1,6 +1,6 @@
 @echo off
-rem Instala el certificado de Distribuidora DJ en esta PC y ejecuta el instalador.
-rem Copiar junto a DistribuidoraDJ-Setup-*.exe y dj-firma.cer; doble clic.
+rem Instala el certificado de Nexo ERP en esta PC y ejecuta el instalador.
+rem Copiar junto a NexoERP-Setup-*.exe y dj-firma.cer; doble clic.
 rem Pide permisos de administrador (necesarios para instalar el certificado y la aplicacion).
 setlocal
 cd /d "%~dp0"
@@ -21,9 +21,9 @@ certutil -addstore -f Root "dj-firma.cer" >nul || goto :error
 certutil -addstore -f TrustedPublisher "dj-firma.cer" >nul || goto :error
 
 set "SETUP="
-for %%F in ("DistribuidoraDJ-Setup-*.exe") do set "SETUP=%%F"
+for %%F in ("NexoERP-Setup-*.exe") do set "SETUP=%%F"
 if not defined SETUP (
-    echo Falta DistribuidoraDJ-Setup-*.exe junto a este archivo.
+    echo Falta NexoERP-Setup-*.exe junto a este archivo.
     pause
     exit /b 1
 )
