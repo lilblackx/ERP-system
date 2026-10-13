@@ -20,3 +20,7 @@ app/licencia_embebida.py
 packaging/redist/
 packaging/firma/*.pfx
 packaging/firma/*.cer
+
+# Local
+/Logo.png
+notificaciones_leidas.json
