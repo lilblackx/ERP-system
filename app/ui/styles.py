@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLayout,
     QTableWidget,
@@ -587,6 +588,18 @@ def alinear_encabezados(tabla: QTableWidget, alineaciones: dict[int, Qt.Alignmen
         item = tabla.horizontalHeaderItem(columna)
         if item is not None:
             item.setTextAlignment(int(alineacion | Qt.AlignmentFlag.AlignVCenter))
+
+
+# Ancho de una columna que muestra un EstadoBadge ("Pendiente", "Parcial", ...). El badge es un
+# widget de celda: ResizeToContents solo mide items de texto, no widgets, y deja la columna casi
+# sin ancho -- el texto del badge salia cortado ("pendi", "parcia").
+ANCHO_COLUMNA_ESTADO = 120
+
+
+def fijar_columna_estado(tabla: QTableWidget, columna: int) -> None:
+    """Deja la columna de un EstadoBadge con ancho fijo suficiente para su texto completo."""
+    tabla.horizontalHeader().setSectionResizeMode(columna, QHeaderView.ResizeMode.Fixed)
+    tabla.setColumnWidth(columna, ANCHO_COLUMNA_ESTADO)
 
 
 class ComboBoxSinScroll(QComboBox):

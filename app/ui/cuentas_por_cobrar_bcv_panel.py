@@ -64,6 +64,7 @@ from app.ui.styles import (
     EstadoBadge,
     alinear_encabezados,
     aplicar_sombra,
+    fijar_columna_estado,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 
@@ -741,6 +742,7 @@ class AbonoGeneralBCVDialog(QDialog):
 
         lbl_titulo = QLabel(f"Abono General BCV - {self.cliente.nombre_razon_social if self.cliente else 'Cliente'}")
         lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setWordWrap(True)  # razones sociales largas: pasan a otra linea en vez de cortarse
         root.addWidget(lbl_titulo)
 
         card = QWidget()
@@ -1291,7 +1293,7 @@ class DetalleCuentasBCVDialog(QDialog):
         # Establecer anchos mínimos para columnas que muestran datos largos
         tabla.setColumnWidth(2, 100)  # Porcentaje BCV - mínimo 100px
         tabla.setColumnWidth(3, 150)  # Saldo Pendiente - mínimo 150px
-        tabla.setColumnWidth(6, 100)  # Estado - mínimo 100px
+        fijar_columna_estado(tabla, 6)  # Estado: el badge es un widget, ResizeToContents no lo mide
 
         alinear_encabezados(
             tabla,
@@ -1620,7 +1622,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
         tabla.setColumnWidth(2, 150)  # SALDO PENDIENTE - mínimo 150px
         tabla.setColumnWidth(3, 150)  # SALDO A FAVOR - mínimo 150px
         tabla.setColumnWidth(4, 150)  # SALDO VENCIDO BCV - mínimo 150px
-        tabla.setColumnWidth(7, 100)  # ESTADO - mínimo 100px
+        fijar_columna_estado(tabla, 7)  # ESTADO: el badge es un widget, ResizeToContents no lo mide
         return tabla
 
     def _make_footer(self) -> QWidget:
