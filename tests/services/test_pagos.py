@@ -4,7 +4,7 @@ sobre por que estos triggers necesitan un SELECT final para que SQLAlchemy pueda
 leer el id autogenerado con session.add(...) + commit() como cualquier otro modelo.
 """
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -1258,6 +1258,36 @@ def test_listar_cuentas_por_cobrar_excluye_facturas_de_contado(db_session):
 
     assert resultado["total"] == 0
     assert resultado["items"] == []
+
+
+def test_listar_cuentas_por_cobrar_por_cliente_excluye_contado_y_calcula_saldo_vencido(db_session):
+    """El listado agrupado por cliente tampoco debe mostrar a un cliente que solo tiene
+    ventas de contado (CuentaPorCobrar tecnica con saldo 0), y debe sumar en saldo_vencido
+    solo las cuentas de credito ya vencidas."""
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    cxc.fecha_vencimiento = date.today() - timedelta(days=5)
+    db_session.commit()
+
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=10)
+    crear_precio_producto(db_session, producto, "50.00")
+    cliente_contado = crear_cliente(db_session)
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente_contado.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "50.00"}],
+    )
+
+    resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(db_session, id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 1
+    fila = resultado["items"][0]
+    assert fila["saldo_total"] == Decimal("100.00")
+    assert fila["saldo_vencido"] == Decimal("100.00")
 
 
 def test_listar_cuentas_por_cobrar_sin_usuario_autorizado_falla(db_session):

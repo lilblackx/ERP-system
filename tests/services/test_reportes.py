@@ -2996,3 +2996,137 @@ def test_comisiones_pagadas_vs_pendientes_credito_sin_cobrar_cuenta_como_pendien
     assert fila["liberada"] == Decimal("0.00")
     assert fila["pagado"] == Decimal("0.00")
     assert resultado["total_pendiente"] == Decimal("2.00")
+
+
+# --- ventas_productos_clientes -----------------------------------------------------
+
+
+def _escenario_ventas_productos_clientes(session):
+    """Aceite: 2 x 10.00 a Cliente A y 1 x 10.00 a Cliente B (monto 30.00, cantidad 3).
+    Harina: 1 x 50.00 a Cliente A (monto 50.00, cantidad 1). Todo con el mismo vendedor."""
+    admin = crear_usuario_admin(session)
+    vendedor = crear_vendedor(session)
+    aceite = crear_producto(session, nombre_producto="Aceite", cantidad_unidad=100)
+    harina = crear_producto(session, nombre_producto="Harina", cantidad_unidad=100)
+    crear_precio_producto(session, aceite, "10.00")
+    crear_precio_producto(session, harina, "50.00")
+    cliente_a = crear_cliente(session, nombre_razon_social="Cliente A")
+    cliente_b = crear_cliente(session, nombre_razon_social="Cliente B")
+    _factura_contado(session, admin, cliente_a, vendedor, aceite, 2, "10.00")
+    _factura_contado(session, admin, cliente_b, vendedor, aceite, 1, "10.00")
+    _factura_contado(session, admin, cliente_a, vendedor, harina, 1, "50.00")
+    return admin, vendedor, aceite, harina, cliente_a, cliente_b
+
+
+def _rango_hoy():
+    hoy = date.today()
+    return hoy - timedelta(days=1), hoy + timedelta(days=1)
+
+
+def test_ventas_productos_clientes_agrupa_por_producto_y_cliente_ordenado_por_monto(db_session):
+    admin, *_ = _escenario_ventas_productos_clientes(db_session)
+    desde, hasta = _rango_hoy()
+
+    resultado = ReporteService.ventas_productos_clientes(db_session, admin.id_usuario, desde, hasta)
+
+    assert [f["producto"] for f in resultado["filas"]] == ["Harina", "Aceite"]
+    harina, aceite = resultado["filas"]
+    assert (harina["cantidad_total"], harina["monto_total"]) == (Decimal("1"), Decimal("50.00"))
+    assert (aceite["cantidad_total"], aceite["monto_total"]) == (Decimal("3"), Decimal("30.00"))
+    assert [(c["cliente"], c["cantidad_total"], c["monto_total"]) for c in aceite["clientes"]] == [
+        ("Cliente A", Decimal("2"), Decimal("20.00")),
+        ("Cliente B", Decimal("1"), Decimal("10.00")),
+    ]
+    assert resultado["total_general"] == Decimal("80.00")
+    assert resultado["cantidad_general"] == Decimal("4")
+
+
+def test_ventas_productos_clientes_filtra_por_producto(db_session):
+    admin, _vendedor, aceite, *_ = _escenario_ventas_productos_clientes(db_session)
+    desde, hasta = _rango_hoy()
+
+    resultado = ReporteService.ventas_productos_clientes(
+        db_session, admin.id_usuario, desde, hasta, id_producto=aceite.id_producto
+    )
+
+    assert [f["producto"] for f in resultado["filas"]] == ["Aceite"]
+    assert resultado["id_producto"] == aceite.id_producto
+    assert resultado["total_general"] == Decimal("30.00")
+
+
+def test_ventas_productos_clientes_sin_filtro_de_producto_devuelve_id_producto_none(db_session):
+    """El panel decide entre la vista 'un producto' y la vista 'todos' mirando
+    resultado['id_producto']: debe reflejar el filtro pedido, no el ultimo producto recorrido."""
+    admin, *_ = _escenario_ventas_productos_clientes(db_session)
+    desde, hasta = _rango_hoy()
+
+    resultado = ReporteService.ventas_productos_clientes(db_session, admin.id_usuario, desde, hasta)
+
+    assert resultado["id_producto"] is None
+    assert len(resultado["filas"]) == 2
+
+
+def test_ventas_productos_clientes_filtra_por_vendedor(db_session):
+    admin, _vendedor, aceite, _harina, cliente_a, _cliente_b = _escenario_ventas_productos_clientes(db_session)
+    otro_vendedor = crear_vendedor(db_session)
+    _factura_contado(db_session, admin, cliente_a, otro_vendedor, aceite, 5, "10.00")
+    desde, hasta = _rango_hoy()
+
+    resultado = ReporteService.ventas_productos_clientes(
+        db_session, admin.id_usuario, desde, hasta, id_vendedor=otro_vendedor.id_vendedor
+    )
+
+    assert [f["producto"] for f in resultado["filas"]] == ["Aceite"]
+    assert resultado["filas"][0]["monto_total"] == Decimal("50.00")
+    assert resultado["id_vendedor"] == otro_vendedor.id_vendedor
+
+
+def test_ventas_productos_clientes_excluye_facturas_anuladas(db_session):
+    admin, vendedor, aceite, _harina, cliente_a, _cliente_b = _escenario_ventas_productos_clientes(db_session)
+    anulada = _factura_contado(db_session, admin, cliente_a, vendedor, aceite, 7, "10.00")
+    VentaService.anular_factura(db_session, anulada.id_factura, admin.id_usuario, "error de carga")
+    desde, hasta = _rango_hoy()
+
+    resultado = ReporteService.ventas_productos_clientes(db_session, admin.id_usuario, desde, hasta)
+
+    aceite_fila = next(f for f in resultado["filas"] if f["producto"] == "Aceite")
+    assert aceite_fila["cantidad_total"] == Decimal("3")
+
+
+def test_ventas_productos_clientes_fuera_del_rango_no_devuelve_filas(db_session):
+    admin, *_ = _escenario_ventas_productos_clientes(db_session)
+    hoy = date.today()
+
+    resultado = ReporteService.ventas_productos_clientes(
+        db_session, admin.id_usuario, hoy - timedelta(days=30), hoy - timedelta(days=10)
+    )
+
+    assert resultado["filas"] == []
+    assert resultado["total_general"] == Decimal("0")
+
+
+def test_ventas_productos_clientes_rango_invalido_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    hoy = date.today()
+
+    with pytest.raises(ValueError, match="fecha_desde"):
+        ReporteService.ventas_productos_clientes(db_session, admin.id_usuario, hoy, hoy - timedelta(days=1))
+
+
+def test_ventas_productos_clientes_sin_usuario_autorizado_falla(db_session):
+    desde, hasta = _rango_hoy()
+
+    with pytest.raises(PermisoDenegadoError):
+        ReporteService.ventas_productos_clientes(db_session, None, desde, hasta)
+
+
+# --- libro_ventas: cantidad_facturas -----------------------------------------------
+
+
+def test_libro_ventas_informa_la_cantidad_de_facturas(db_session):
+    admin, *_ = _escenario_ventas_productos_clientes(db_session)
+    desde, hasta = _rango_hoy()
+
+    resultado = ReporteService.libro_ventas(db_session, admin.id_usuario, desde, hasta)
+
+    assert resultado["cantidad_facturas"] == 3

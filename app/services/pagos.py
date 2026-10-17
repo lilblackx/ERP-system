@@ -736,12 +736,14 @@ class PagoService:
         require_permiso(session, id_usuario, "pagos", "ver")
         hoy = date.today()
 
-        # Query base para obtener todas las cuentas relevantes
-        # Las cuentas por cobrar se generan tanto para facturas de crédito como de contado
+        # Query base para obtener todas las cuentas relevantes. Solo credito: las facturas de
+        # contado tambien abren una CuentaPorCobrar (vehiculo tecnico para sus PagoCobro, nace
+        # con saldo 0 / 'pagada'), pero no tienen nada pendiente de cobrar.
         query = (
             session.query(CuentaPorCobrar)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
+            .filter(FacturaVenta.condicion_pago == "credito")
         )
 
         if id_cliente:

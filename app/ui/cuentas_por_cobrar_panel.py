@@ -1422,6 +1422,8 @@ class DetalleClienteDialog(QDialog):
             resultado = PagoService.listar_cuentas_por_cobrar(
                 self.session,
                 id_cliente=self.cliente.id_cliente if self.cliente else None,
+                pagina=1,
+                por_pagina=10000,  # Traer todas las facturas (el dialogo pagina por su cuenta)
                 id_usuario=self.id_usuario,
             )
             self.cuentas = resultado["items"]

@@ -17,10 +17,14 @@ consulta de tasas, pero *no* validan el tipo de lo que devuelve `session.query(.
 formateo de tasas (`f"{...:,.2f}"`), asi que hay que fijar ese `.first()` a None a mano.
 """
 
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
+import app.ui.cuentas_por_cobrar_panel as cxc
 from app.ui.cuentas_por_cobrar_panel import PagoCobroDialog
 
 
@@ -252,3 +256,255 @@ def test_cobro_en_efectivo_se_envia_en_usd(qtbot, monkeypatch):
 
     assert llamada["moneda"] == "USD"
     assert llamada["monto_moneda_origen"] is None
+
+
+# -- Saldo vencido en el listado por cliente --------------------------------------------
+
+
+@pytest.fixture()
+def panel_cxc(qtbot, monkeypatch):
+    """CuentasPorCobrarPanel sin la carga inicial (QTimer + showEvent llaman cargar_cuentas,
+    que hace consultas reales): aca solo se prueba el armado de la tabla con datos dados."""
+    # Sin el QTimer.singleShot(100, ...) del constructor: correria (ya sin el parche) contra la
+    # Session mockeada en medio de otro test y pytest-qt lo reportaria como falla de ese test.
+    monkeypatch.setattr(cxc.QTimer, "singleShot", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(cxc.CuentasPorCobrarPanel, "cargar_cuentas", lambda self: None)
+    panel = cxc.CuentasPorCobrarPanel(MagicMock(), SimpleNamespace(id_usuario=1))
+    qtbot.addWidget(panel)
+    return panel
+
+
+def _cliente_data(saldo_total, saldo_vencido, id_cliente=1, nombre="Cliente Uno"):
+    return {
+        "cliente": SimpleNamespace(id_cliente=id_cliente, nombre_razon_social=nombre),
+        "saldo_total": Decimal(saldo_total),
+        "saldo_favor": Decimal("0.00"),
+        "saldo_vencido": Decimal(saldo_vencido),
+        "cuentas": [],
+        "fecha_emision_mas_antigua_pendiente": None,
+        "dias_transcurridos": 0,
+    }
+
+
+def _encabezados(tabla):
+    return [tabla.horizontalHeaderItem(c).text() for c in range(tabla.columnCount())]
+
+
+def test_tabla_de_clientes_tiene_columna_saldo_vencido_entre_saldo_a_favor_y_dias(panel_cxc):
+    assert _encabezados(panel_cxc.tabla) == [
+        "ID",
+        "Cliente",
+        "Saldo Pendiente",
+        "Saldo a Favor",
+        "Saldo Vencido",
+        "Días",
+        "Fecha Factura",
+        "Estado",
+    ]
+
+
+def test_poblar_tabla_muestra_saldo_vencido_y_deja_el_resto_de_columnas_en_su_lugar(panel_cxc):
+    datos = _cliente_data("300.00", "120.50")
+    datos["fecha_emision_mas_antigua_pendiente"] = date(2026, 10, 1)
+    datos["dias_transcurridos"] = 16
+
+    panel_cxc._poblar_tabla({"items": [datos], "total": 1, "pagina": 1, "por_pagina": 20})
+
+    tabla = panel_cxc.tabla
+    assert tabla.item(0, 1).text() == "Cliente Uno"
+    assert tabla.item(0, 2).text() == "$300.00"
+    assert tabla.item(0, 4).text() == "$120.50"
+    assert tabla.item(0, 5).text() == "16"
+    assert tabla.item(0, 6).text() == "01/10/2026"
+    assert tabla.cellWidget(0, 7) is not None
+
+
+def test_saldo_vencido_positivo_va_en_color_de_peligro_y_cero_en_color_atenuado(panel_cxc):
+    panel_cxc._poblar_tabla(
+        {
+            "items": [_cliente_data("300.00", "120.50", 1), _cliente_data("50.00", "0.00", 2, "Cliente Dos")],
+            "total": 2,
+            "pagina": 1,
+            "por_pagina": 20,
+        }
+    )
+
+    vencido, sin_vencido = panel_cxc.tabla.item(0, 4), panel_cxc.tabla.item(1, 4)
+    assert sin_vencido.text() == "$0.00"
+    assert vencido.foreground().color() != sin_vencido.foreground().color()
+
+
+def test_poblar_tabla_tolera_cliente_sin_clave_saldo_vencido(panel_cxc):
+    datos = _cliente_data("300.00", "0.00")
+    del datos["saldo_vencido"]
+
+    panel_cxc._poblar_tabla({"items": [datos], "total": 1, "pagina": 1, "por_pagina": 20})
+
+    assert panel_cxc.tabla.item(0, 4).text() == "$0.00"
+
+
+# -- DetalleClienteDialog: ver todas, paginacion y doble clic -----------------------------
+
+
+def _cuenta(id_cuenta, estado, saldo="10.00", vence_en=5, numero=None):
+    return SimpleNamespace(
+        id_cuenta_por_cobrar=id_cuenta,
+        estado=estado,
+        saldo_pendiente=Decimal(saldo),
+        fecha_vencimiento=date.today() + timedelta(days=vence_en),
+        factura=SimpleNamespace(
+            numero_factura=numero or f"F-{id_cuenta:03d}",
+            fecha_emision=datetime.now() - timedelta(days=3),
+        ),
+    )
+
+
+def _detalle(qtbot, cuentas, tasa_paralelo=None):
+    session = MagicMock()
+    session.query.return_value.join.return_value.filter.return_value.first.return_value = None
+    cliente = SimpleNamespace(id_cliente=1, nombre_razon_social="Cliente Uno")
+    dialogo = cxc.DetalleClienteDialog(session, cliente, cuentas, tasa_paralelo, 1)
+    qtbot.addWidget(dialogo)
+    return dialogo
+
+
+def _facturas_visibles(dialogo):
+    return [dialogo.tabla.item(f, 1).text() for f in range(dialogo.tabla.rowCount())]
+
+
+def test_detalle_por_defecto_oculta_las_cuentas_pagadas(qtbot):
+    cuentas = [_cuenta(1, "pendiente"), _cuenta(2, "pagada"), _cuenta(3, "parcial"), _cuenta(4, "vencida")]
+
+    dialogo = _detalle(qtbot, cuentas)
+
+    assert _facturas_visibles(dialogo) == ["F-001", "F-003", "F-004"]
+
+
+def test_detalle_ver_todas_las_facturas_incluye_pagadas_y_cambia_el_titulo(qtbot):
+    dialogo = _detalle(qtbot, [_cuenta(1, "pendiente"), _cuenta(2, "pagada")])
+
+    dialogo.chk_ver_todas.setChecked(True)
+
+    assert _facturas_visibles(dialogo) == ["F-001", "F-002"]
+    assert dialogo.windowTitle().endswith("(Todas las facturas)")
+
+    dialogo.chk_ver_todas.setChecked(False)
+
+    assert _facturas_visibles(dialogo) == ["F-001"]
+    assert "(Todas las facturas)" not in dialogo.windowTitle()
+
+
+def test_detalle_pagina_de_a_20_facturas_y_navega(qtbot):
+    dialogo = _detalle(qtbot, [_cuenta(i, "pendiente") for i in range(1, 46)])
+
+    assert dialogo.tabla.rowCount() == 20
+    assert dialogo.lbl_paginacion.text() == "Página 1 de 3"
+    assert not dialogo.btn_anterior.isEnabled()
+    assert dialogo.btn_siguiente.isEnabled()
+
+    dialogo.btn_siguiente.click()
+    dialogo.btn_siguiente.click()
+
+    assert dialogo.tabla.rowCount() == 5
+    assert dialogo.lbl_paginacion.text() == "Página 3 de 3"
+    assert dialogo.btn_anterior.isEnabled()
+    assert not dialogo.btn_siguiente.isEnabled()
+    assert _facturas_visibles(dialogo)[0] == "F-041"
+
+    dialogo.btn_anterior.click()
+
+    assert dialogo.lbl_paginacion.text() == "Página 2 de 3"
+
+
+def test_detalle_al_marcar_ver_todas_vuelve_a_la_primera_pagina(qtbot):
+    dialogo = _detalle(qtbot, [_cuenta(i, "pendiente") for i in range(1, 46)])
+    dialogo.btn_siguiente.click()
+    assert dialogo.pagina_actual == 1
+
+    dialogo.chk_ver_todas.setChecked(True)
+
+    assert dialogo.pagina_actual == 0
+    assert dialogo.lbl_paginacion.text() == "Página 1 de 3"
+
+
+def test_detalle_sin_facturas_pendientes_muestra_pagina_1_de_1(qtbot):
+    dialogo = _detalle(qtbot, [_cuenta(1, "pagada")])
+
+    assert dialogo.tabla.rowCount() == 0
+    assert dialogo.lbl_paginacion.text() == "Página 1 de 1"
+    assert not dialogo.btn_anterior.isEnabled()
+    assert not dialogo.btn_siguiente.isEnabled()
+
+
+def test_detalle_doble_clic_en_una_factura_abre_el_cobro_de_esa_cuenta(qtbot, monkeypatch):
+    dialogo = _detalle(qtbot, [_cuenta(7, "pendiente"), _cuenta(8, "pendiente")])
+    cobradas = []
+    monkeypatch.setattr(dialogo, "_cobrar_cuenta", cobradas.append)
+
+    dialogo.tabla.selectRow(1)
+    dialogo._on_double_click_factura_detalle()
+
+    assert cobradas == [8]
+
+
+def test_detalle_doble_clic_sin_seleccion_no_hace_nada(qtbot, monkeypatch):
+    dialogo = _detalle(qtbot, [_cuenta(7, "pendiente")])
+    cobradas = []
+    monkeypatch.setattr(dialogo, "_cobrar_cuenta", cobradas.append)
+
+    dialogo._on_double_click_factura_detalle()
+
+    assert cobradas == []
+
+
+def test_detalle_cobrar_pasa_la_tasa_paralelo_al_dialogo_de_pago(qtbot, monkeypatch):
+    dialogo = _detalle(qtbot, [_cuenta(7, "pendiente")], tasa_paralelo=62.5)
+    dialogo.session.get.return_value = _cuenta(7, "pendiente")
+    creados = {}
+
+    class DialogoFalso:
+        pago_creado = None
+
+        def __init__(self, session, id_usuario, cuenta, tasa_bcv=None, parent=None):
+            creados["tasa_bcv"] = tasa_bcv
+            creados["cuenta"] = cuenta
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(cxc, "PagoCobroDialog", DialogoFalso)
+
+    dialogo._cobrar_cuenta(7)
+
+    assert creados["tasa_bcv"] == 62.5
+
+
+def test_detalle_cobrar_cuenta_ya_pagada_avisa_y_no_abre_el_dialogo(qtbot, monkeypatch):
+    dialogo = _detalle(qtbot, [_cuenta(7, "pendiente")])
+    dialogo.session.get.return_value = _cuenta(7, "pagada")
+    avisos = []
+    monkeypatch.setattr(cxc.MessageBox, "information", lambda *a, **k: avisos.append(a[1]))
+    monkeypatch.setattr(cxc, "PagoCobroDialog", lambda *a, **k: pytest.fail("no debe abrir el cobro"))
+
+    dialogo._cobrar_cuenta(7)
+
+    assert avisos == ["Ya pagada"]
+
+
+def test_detalle_recargar_tras_un_cobro_trae_todas_las_facturas_y_no_solo_la_primera_pagina(qtbot, monkeypatch):
+    """_recargar_cuentas() usa el mismo listado que el panel; sin por_pagina explicito
+    PagoService.listar_cuentas_por_cobrar devuelve solo 20, y un cliente con mas facturas las
+    perderia del detalle despues de cobrar una."""
+    dialogo = _detalle(qtbot, [_cuenta(1, "pendiente")])
+    llamadas = []
+
+    def fake_listar(session, **kwargs):
+        llamadas.append(kwargs)
+        return {"items": [_cuenta(i, "pendiente") for i in range(1, 26)]}
+
+    monkeypatch.setattr(cxc.PagoService, "listar_cuentas_por_cobrar", staticmethod(fake_listar))
+
+    dialogo._recargar_cuentas()
+
+    assert llamadas[0].get("por_pagina", 20) > 20
+    assert dialogo.lbl_paginacion.text() == "Página 1 de 2"

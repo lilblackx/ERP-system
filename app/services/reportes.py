@@ -586,11 +586,11 @@ class ReporteService:
         # Agrupar por producto, luego por cliente
         grupos: dict[int, dict] = {}
         for detalle in detalles:
-            id_producto = detalle.id_producto_factura
+            id_producto_detalle = detalle.id_producto_factura
             id_cliente = detalle.factura.id_cliente_factura
 
             grupo_producto = grupos.setdefault(
-                id_producto,
+                id_producto_detalle,
                 {
                     "producto": detalle.producto.nombre_producto if detalle.producto else "N/A",
                     "cod_producto": detalle.producto.cod_producto if detalle.producto else "N/A",
