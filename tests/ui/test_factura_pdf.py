@@ -5,6 +5,9 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace as NS
 
+import pytest
+
+import app.ui.factura_pdf as fp
 from app.ui.factura_pdf import _armar_html
 
 
@@ -81,3 +84,133 @@ def test_rif_de_la_empresa_y_del_cliente_salen_formateados():
 
     assert html.count("J-07000750-8") == 2  # RIF de la empresa y RIF / C.I. del cliente
     assert "070007508" not in html
+
+
+# -- Telefono del encabezado: vendedor del cliente, con la empresa como respaldo -----------
+
+
+def _config(telefono_empresa="0261-1111111"):
+    return NS(
+        razon_social_empresa="Distribuidora DJ C.A",
+        rif_empresa="070007508",
+        direccion_empresa=None,
+        telefono_empresa=telefono_empresa,
+        pie_pagina_empresa=None,
+        logotipo_empresa=None,
+    )
+
+
+def test_encabezado_usa_el_telefono_del_vendedor_del_cliente():
+    datos = _datos("bulto")
+    datos["factura"].cliente.vendedor = NS(telefono_vendedor="0414-2223344")
+
+    html = _armar_html(datos, _config())
+
+    assert "0414-2223344" in html
+    assert "0261-1111111" not in html
+
+
+def test_encabezado_cae_al_telefono_de_la_empresa_si_el_vendedor_no_tiene():
+    datos = _datos("bulto")
+    datos["factura"].cliente.vendedor = NS(telefono_vendedor=None)
+
+    assert "0261-1111111" in _armar_html(datos, _config())
+
+
+def test_encabezado_cae_al_telefono_de_la_empresa_si_el_cliente_no_tiene_vendedor():
+    datos = _datos("bulto")  # cliente.vendedor = None
+
+    assert "0261-1111111" in _armar_html(datos, _config())
+
+
+def test_encabezado_sin_ningun_telefono_no_revienta():
+    datos = _datos("bulto")
+
+    html = _armar_html(datos, _config(telefono_empresa=None))
+
+    assert "FV-000001" in html
+    assert _armar_html(datos, None)
+
+
+# -- "Copia del cliente" ----------------------------------------------------------------
+
+
+def test_el_original_no_lleva_la_leyenda_de_copia():
+    assert "COPIA DEL CLIENTE" not in _armar_html(_datos("bulto"), None)
+
+
+def test_la_copia_lleva_la_leyenda_de_copia_del_cliente():
+    html = _armar_html(_datos("bulto"), None, es_copia=True)
+
+    assert "*** COPIA DEL CLIENTE ***" in html
+    assert "Aceite 1L" in html  # el resto del documento es identico al original
+
+
+def test_titulo_de_la_seccion_de_datos_es_datos_del_cliente():
+    assert "Datos del Cliente" in _armar_html(_datos("bulto"), None)
+
+
+# -- imprimir_factura: dos impresiones en impresora fisica, una sola en PDF -----------------
+
+
+class _InfoImpresora:
+    def __init__(self, nula=False):
+        self._nula = nula
+
+    def isNull(self):
+        return self._nula
+
+
+def _preparar_impresion(monkeypatch, nombre_nulo=False):
+    impresiones = []
+
+    class _Documento:
+        def __init__(self, es_copia):
+            self.es_copia = es_copia
+
+        def print_(self, impresora):
+            impresiones.append((self.es_copia, impresora))
+
+    monkeypatch.setattr(fp.QPrinterInfo, "printerInfo", staticmethod(lambda nombre: _InfoImpresora(nombre_nulo)))
+
+    class _Impresora:
+        PrinterMode = fp.QPrinter.PrinterMode
+
+        def __init__(self, info, modo):
+            self.info = info
+
+    monkeypatch.setattr(fp, "QPrinter", _Impresora)
+    monkeypatch.setattr(fp, "_configurar_pagina", lambda impresora: None)
+    monkeypatch.setattr(fp, "_documento", lambda datos, config, es_copia=False: _Documento(es_copia))
+    return impresiones
+
+
+def test_impresora_fisica_imprime_original_y_despues_la_copia_del_cliente(monkeypatch):
+    impresiones = _preparar_impresion(monkeypatch)
+
+    resultado = fp.imprimir_factura(_datos("bulto"), None, "HP LaserJet")
+
+    assert resultado is None
+    assert [es_copia for es_copia, _ in impresiones] == [False, True]
+    assert impresiones[0][1] is not impresiones[1][1]  # cada copia con su propio QPrinter
+
+
+def test_impresora_pdf_genera_un_solo_archivo_sin_segunda_copia(monkeypatch):
+    impresiones = _preparar_impresion(monkeypatch)
+    generados = []
+    monkeypatch.setattr(fp, "generar_pdf_factura", lambda datos, config, ruta: generados.append(ruta))
+
+    ruta = fp.imprimir_factura(_datos("bulto"), None, "Microsoft Print to PDF")
+
+    assert impresiones == []
+    assert generados == [ruta]
+    assert ruta.endswith("Nota_Entrega_FV-000001.pdf")
+
+
+def test_impresora_que_ya_no_existe_lanza_value_error_sin_imprimir_nada(monkeypatch):
+    impresiones = _preparar_impresion(monkeypatch, nombre_nulo=True)
+
+    with pytest.raises(ValueError, match="ya no está disponible"):
+        fp.imprimir_factura(_datos("bulto"), None, "Impresora fantasma")
+
+    assert impresiones == []

@@ -728,3 +728,95 @@ def test_volver_a_contado_quita_la_alerta_de_cliente_sin_credito_y_habilita_el_b
     dialogo.condicion_combo.setCurrentIndex(dialogo.condicion_combo.findData("contado"))
     assert not dialogo.lbl_alerta_credito.isVisible()
     assert dialogo.btn_emitir.isEnabled()
+
+
+# ── Vendedor autoasignado desde el cliente ───────────────────────────────────
+
+
+def _dialogo_con_clientes_y_vendedores(qtbot, monkeypatch, clientes):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo._clientes = clientes
+    dialogo.cliente_combo.blockSignals(True)
+    dialogo.cliente_combo.clear()
+    dialogo.cliente_combo.addItem("Seleccione un cliente", None)
+    for cliente in clientes:
+        dialogo.cliente_combo.addItem(cliente.nombre_razon_social, cliente.id_cliente)
+    dialogo.cliente_combo.blockSignals(False)
+    dialogo.vendedor_combo.clear()
+    dialogo.vendedor_combo.addItem("Vendedor A", 10)
+    dialogo.vendedor_combo.addItem("Vendedor B", 20)
+    dialogo.vendedor_combo.setCurrentIndex(0)
+    dialogo.vendedor_combo.setEnabled(True)
+    return dialogo
+
+
+def _cliente_con_vendedor(id_cliente, nombre, vendedor_cliente):
+    return SimpleNamespace(
+        id_cliente=id_cliente,
+        nombre_razon_social=nombre,
+        dias_credito=0,
+        vendedor_cliente=vendedor_cliente,
+        limite_credito=Decimal("0"),
+    )
+
+
+def test_al_elegir_un_cliente_se_selecciona_su_vendedor_y_se_bloquea_el_combo(qtbot, monkeypatch):
+    dialogo = _dialogo_con_clientes_y_vendedores(
+        qtbot, monkeypatch, [_cliente_con_vendedor(1, "Cliente Uno", vendedor_cliente=20)]
+    )
+
+    dialogo.cliente_combo.setCurrentIndex(dialogo.cliente_combo.findData(1))
+
+    assert dialogo.vendedor_combo.currentData() == 20
+    assert not dialogo.vendedor_combo.isEnabled()
+
+
+def test_al_volver_a_sin_cliente_el_combo_de_vendedor_se_habilita(qtbot, monkeypatch):
+    dialogo = _dialogo_con_clientes_y_vendedores(
+        qtbot, monkeypatch, [_cliente_con_vendedor(1, "Cliente Uno", vendedor_cliente=20)]
+    )
+    dialogo.cliente_combo.setCurrentIndex(dialogo.cliente_combo.findData(1))
+
+    dialogo.cliente_combo.setCurrentIndex(0)
+
+    assert dialogo.vendedor_combo.isEnabled()
+
+
+def test_cambiar_de_cliente_cambia_el_vendedor_asignado(qtbot, monkeypatch):
+    dialogo = _dialogo_con_clientes_y_vendedores(
+        qtbot,
+        monkeypatch,
+        [
+            _cliente_con_vendedor(1, "Cliente Uno", vendedor_cliente=20),
+            _cliente_con_vendedor(2, "Cliente Dos", vendedor_cliente=10),
+        ],
+    )
+
+    dialogo.cliente_combo.setCurrentIndex(dialogo.cliente_combo.findData(1))
+    assert dialogo.vendedor_combo.currentData() == 20
+
+    dialogo.cliente_combo.setCurrentIndex(dialogo.cliente_combo.findData(2))
+    assert dialogo.vendedor_combo.currentData() == 10
+
+
+def test_cliente_con_vendedor_que_no_esta_en_el_combo_conserva_la_seleccion_previa(qtbot, monkeypatch):
+    """Vendedor inactivo / no listado: findData devuelve -1 y no debe romper ni dejar el
+    combo en blanco."""
+    dialogo = _dialogo_con_clientes_y_vendedores(
+        qtbot, monkeypatch, [_cliente_con_vendedor(1, "Cliente Uno", vendedor_cliente=999)]
+    )
+
+    dialogo.cliente_combo.setCurrentIndex(dialogo.cliente_combo.findData(1))
+
+    assert dialogo.vendedor_combo.currentData() == 10
+
+
+def test_cliente_sin_vendedor_asignado_no_cambia_la_seleccion_ni_revienta(qtbot, monkeypatch):
+    dialogo = _dialogo_con_clientes_y_vendedores(
+        qtbot, monkeypatch, [_cliente_con_vendedor(1, "Cliente Uno", vendedor_cliente=None)]
+    )
+    dialogo.vendedor_combo.setCurrentIndex(1)
+
+    dialogo.cliente_combo.setCurrentIndex(dialogo.cliente_combo.findData(1))
+
+    assert dialogo.vendedor_combo.currentData() == 20

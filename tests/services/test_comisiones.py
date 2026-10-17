@@ -563,3 +563,113 @@ def test_pagar_con_ids_ya_pagados_falla(db_session):
             id_usuario=admin.id_usuario,
             ids_comision=[comisiones[0].id_comision],
         )
+
+
+# --- Filtro por porcentaje BCV (comisiones en Bs/BCV vs en $) -----------------------
+
+
+def _factura_credito_con_comision(session, vendedor, admin, porcentaje_bcv: Decimal | None):
+    """Factura a credito (opcionalmente con porcentaje BCV) cuya unica linea genera una
+    comision de 1.00. Devuelve la ComisionFactura."""
+    producto = crear_producto(session, cantidad_unidad=50)
+    crear_precio_producto(session, producto, "1.00")
+    cliente = crear_cliente(session, limite_credito=Decimal("1000.00"))
+    factura = VentaService.emitir_factura(
+        session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "2.00"}],
+        porcentaje_bcv=porcentaje_bcv,
+    )
+    detalle = session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).one()
+    return session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
+
+
+def _dos_facturas_una_bcv_y_una_en_dolares(session):
+    admin = crear_usuario_admin(session)
+    vendedor = crear_vendedor(session)
+    comision_bcv = _factura_credito_con_comision(session, vendedor, admin, Decimal("10"))
+    comision_usd = _factura_credito_con_comision(session, vendedor, admin, None)
+    return admin, vendedor, comision_bcv, comision_usd
+
+
+def test_listar_comisiones_vendedor_sin_filtro_bcv_trae_todas(db_session):
+    admin, vendedor, bcv, usd = _dos_facturas_una_bcv_y_una_en_dolares(db_session)
+
+    comisiones = ComisionService.listar_comisiones_vendedor(
+        db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario
+    )
+
+    assert {c.id_comision for c in comisiones} == {bcv.id_comision, usd.id_comision}
+
+
+def test_listar_comisiones_vendedor_solo_con_porcentaje_bcv(db_session):
+    admin, vendedor, bcv, _usd = _dos_facturas_una_bcv_y_una_en_dolares(db_session)
+
+    comisiones = ComisionService.listar_comisiones_vendedor(
+        db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, solo_con_porcentaje_bcv=True
+    )
+
+    assert [c.id_comision for c in comisiones] == [bcv.id_comision]
+
+
+def test_listar_comisiones_vendedor_solo_sin_porcentaje_bcv(db_session):
+    admin, vendedor, _bcv, usd = _dos_facturas_una_bcv_y_una_en_dolares(db_session)
+
+    comisiones = ComisionService.listar_comisiones_vendedor(
+        db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, solo_sin_porcentaje_bcv=True
+    )
+
+    assert [c.id_comision for c in comisiones] == [usd.id_comision]
+
+
+def test_listar_comisiones_vendedor_filtro_bcv_se_combina_con_estado_pago(db_session):
+    """Las comisiones de credito nacen 'pendiente': con estado 'liberada' no queda ninguna,
+    con o sin el filtro BCV."""
+    admin, vendedor, bcv, _usd = _dos_facturas_una_bcv_y_una_en_dolares(db_session)
+
+    pendientes_bcv = ComisionService.listar_comisiones_vendedor(
+        db_session,
+        vendedor.id_vendedor,
+        estado_pago="pendiente",
+        id_usuario=admin.id_usuario,
+        solo_con_porcentaje_bcv=True,
+    )
+    liberadas_bcv = ComisionService.listar_comisiones_vendedor(
+        db_session,
+        vendedor.id_vendedor,
+        estado_pago="liberada",
+        id_usuario=admin.id_usuario,
+        solo_con_porcentaje_bcv=True,
+    )
+
+    assert [c.id_comision for c in pendientes_bcv] == [bcv.id_comision]
+    assert liberadas_bcv == []
+
+
+def test_listar_comisiones_vendedor_filtro_bcv_no_incluye_comisiones_de_otro_vendedor(db_session):
+    admin, vendedor, bcv, _usd = _dos_facturas_una_bcv_y_una_en_dolares(db_session)
+    otro_vendedor = crear_vendedor(db_session)
+    _factura_credito_con_comision(db_session, otro_vendedor, admin, Decimal("10"))
+
+    comisiones = ComisionService.listar_comisiones_vendedor(
+        db_session, vendedor.id_vendedor, id_usuario=admin.id_usuario, solo_con_porcentaje_bcv=True
+    )
+
+    assert [c.id_comision for c in comisiones] == [bcv.id_comision]
+
+
+def test_listar_mis_comisiones_filtra_por_porcentaje_bcv(db_session):
+    admin, vendedor, bcv, usd = _dos_facturas_una_bcv_y_una_en_dolares(db_session)
+    admin.id_vendedor_usuario = vendedor.id_vendedor
+    db_session.commit()
+
+    todas = ComisionService.listar_mis_comisiones(db_session, admin.id_usuario)
+    con_bcv = ComisionService.listar_mis_comisiones(db_session, admin.id_usuario, solo_con_porcentaje_bcv=True)
+    sin_bcv = ComisionService.listar_mis_comisiones(db_session, admin.id_usuario, solo_sin_porcentaje_bcv=True)
+
+    assert {c.id_comision for c in todas} == {bcv.id_comision, usd.id_comision}
+    assert [c.id_comision for c in con_bcv] == [bcv.id_comision]
+    assert [c.id_comision for c in sin_bcv] == [usd.id_comision]

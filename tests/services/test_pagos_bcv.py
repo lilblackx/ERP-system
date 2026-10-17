@@ -1,7 +1,7 @@
 """Pagos de cuentas por cobrar BCV: deben dejar fila de pago, ingreso en la caja/cuenta de
 destino y aparecer en el historial del cliente (antes solo bajaban el saldo de la cuenta)."""
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -313,3 +313,90 @@ def test_historial_muestra_el_pago_bcv_y_el_saldo_real_de_la_factura(db_session)
     # La cuenta normal queda en 0 a proposito: el saldo de la factura es el de la cuenta BCV.
     assert facturas[0]["saldo_corrido"] == cuenta.saldo_pendiente
     assert cuenta.saldo_pendiente > 0
+
+
+# ── Saldo vencido en el listado agrupado por cliente ──────────────────────────────────
+
+
+def _agrupado(session, admin):
+    return PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(session, id_usuario=admin.id_usuario)["items"]
+
+
+def test_agrupado_bcv_saldo_vencido_suma_solo_las_cuentas_vencidas(db_session):
+    admin = crear_usuario_admin(db_session)
+    _, vencida, cliente = _emitir_credito_bcv(db_session, admin, precio="100.00")
+    _, vigente, _ = _emitir_credito_bcv(db_session, admin, cliente=cliente, precio="60.00")
+    vencida.fecha_vencimiento = date.today() - timedelta(days=3)
+    vigente.fecha_vencimiento = date.today() + timedelta(days=10)
+    db_session.commit()
+
+    fila = next(f for f in _agrupado(db_session, admin) if f.id_cliente == cliente.id_cliente)
+
+    assert fila.saldo_pendiente == vencida.saldo_pendiente + vigente.saldo_pendiente
+    assert fila.saldo_vencido_bcv == vencida.saldo_pendiente
+
+
+def test_agrupado_bcv_sin_cuentas_vencidas_saldo_vencido_es_cero(db_session):
+    admin = crear_usuario_admin(db_session)
+    _, cuenta, cliente = _emitir_credito_bcv(db_session, admin)
+    cuenta.fecha_vencimiento = date.today() + timedelta(days=5)
+    db_session.commit()
+
+    fila = next(f for f in _agrupado(db_session, admin) if f.id_cliente == cliente.id_cliente)
+
+    assert fila.saldo_vencido_bcv == Decimal("0.00")
+
+
+def test_agrupado_bcv_el_vencimiento_hoy_no_cuenta_como_vencido(db_session):
+    admin = crear_usuario_admin(db_session)
+    _, cuenta, cliente = _emitir_credito_bcv(db_session, admin)
+    cuenta.fecha_vencimiento = date.today()
+    db_session.commit()
+
+    fila = next(f for f in _agrupado(db_session, admin) if f.id_cliente == cliente.id_cliente)
+
+    assert fila.saldo_vencido_bcv == Decimal("0.00")
+
+
+def test_agrupado_bcv_cobro_parcial_reduce_el_saldo_vencido(db_session):
+    admin = crear_usuario_admin(db_session)
+    _, cuenta, cliente = _emitir_credito_bcv(db_session, admin)
+    cuenta.fecha_vencimiento = date.today() - timedelta(days=1)
+    db_session.commit()
+    saldo_inicial = cuenta.saldo_pendiente
+    caja = _caja_abierta(db_session, admin)
+
+    PagoBCVService.registrar_pago_cobro_bcv(
+        db_session,
+        id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
+        monto=Decimal("4.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    fila = next(f for f in _agrupado(db_session, admin) if f.id_cliente == cliente.id_cliente)
+    assert fila.saldo_vencido_bcv == saldo_inicial - Decimal("4.00")
+
+
+def test_agrupado_bcv_cuenta_pagada_no_aporta_saldo_vencido(db_session):
+    admin = crear_usuario_admin(db_session)
+    _, cuenta, cliente = _emitir_credito_bcv(db_session, admin)
+    _, otra, _ = _emitir_credito_bcv(db_session, admin, cliente=cliente, precio="50.00")
+    cuenta.fecha_vencimiento = date.today() - timedelta(days=2)
+    otra.fecha_vencimiento = date.today() - timedelta(days=2)
+    db_session.commit()
+    caja = _caja_abierta(db_session, admin)
+    PagoBCVService.registrar_pago_cobro_bcv(
+        db_session,
+        id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
+        monto=cuenta.saldo_pendiente,
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    db_session.refresh(otra)
+
+    fila = next(f for f in _agrupado(db_session, admin) if f.id_cliente == cliente.id_cliente)
+
+    assert fila.saldo_vencido_bcv == otra.saldo_pendiente

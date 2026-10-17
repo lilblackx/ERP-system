@@ -15,6 +15,9 @@ def _crear_panel(qtbot, monkeypatch, gestion=False):
     monkeypatch.setattr(comp.UsuarioService, "verificar_permiso", staticmethod(lambda *a, **k: gestion))
     monkeypatch.setattr(comp.MessageBox, "critical", lambda *a, **k: None)
     monkeypatch.setattr(comp.MessageBox, "warning", lambda *a, **k: None)
+    # El QTimer.singleShot(100, cargar_datos) del constructor correria contra la Session mockeada
+    # en medio de otro test (de cualquier archivo) y pytest-qt lo reportaria como falla suya.
+    monkeypatch.setattr(comp.QTimer, "singleShot", staticmethod(lambda *a, **k: None))
     panel = comp.ComisionesPanel(MagicMock(), SimpleNamespace(id_usuario=1, id_vendedor_usuario=None))
     qtbot.addWidget(panel)
     return panel
@@ -117,3 +120,88 @@ def test_dialogo_de_pago_envia_ids_y_monto_confirmado_al_servicio(qtbot, monkeyp
     assert llamada["ids_comision"] == [10, 11]
     assert llamada["monto_esperado"] == Decimal("7.00")
     assert llamada["id_vendedor"] == 7
+
+
+# ── Filtros "Solo con porcentaje BCV" / "Solo en $" ──────────────────────────
+
+
+def _panel_con_servicio_espia(qtbot, monkeypatch, gestion):
+    """Panel en el modo pedido con ComisionService reemplazado por un espia que registra los
+    flags BCV con que se lo llama y devuelve una comision distinta segun el filtro."""
+    panel = _crear_panel(qtbot, monkeypatch, gestion=gestion)
+    panel.id_vendedor_actual = 7
+    llamadas = []
+
+    def espia(*args, solo_con_porcentaje_bcv=False, solo_sin_porcentaje_bcv=False, **kwargs):
+        llamadas.append((solo_con_porcentaje_bcv, solo_sin_porcentaje_bcv))
+        return []
+
+    monkeypatch.setattr(comp.ComisionService, "listar_comisiones_vendedor", staticmethod(espia))
+    monkeypatch.setattr(comp.ComisionService, "listar_mis_comisiones", staticmethod(espia))
+    return panel, llamadas
+
+
+def test_marcar_solo_en_dolares_recarga_con_el_filtro_sin_bcv(qtbot, monkeypatch):
+    panel, llamadas = _panel_con_servicio_espia(qtbot, monkeypatch, gestion=True)
+
+    panel.chk_sin_porcentaje_bcv.setChecked(True)
+
+    assert llamadas == [(False, True)]
+    assert panel.solo_sin_porcentaje_bcv is True
+    assert panel.solo_porcentaje_bcv is False
+
+
+def test_marcar_solo_con_porcentaje_bcv_recarga_con_el_filtro_con_bcv(qtbot, monkeypatch):
+    panel, llamadas = _panel_con_servicio_espia(qtbot, monkeypatch, gestion=True)
+
+    panel.chk_porcentaje_bcv.setChecked(True)
+
+    assert llamadas == [(True, False)]
+
+
+def test_los_dos_filtros_bcv_son_mutuamente_excluyentes(qtbot, monkeypatch):
+    panel, llamadas = _panel_con_servicio_espia(qtbot, monkeypatch, gestion=True)
+
+    panel.chk_porcentaje_bcv.setChecked(True)
+    panel.chk_sin_porcentaje_bcv.setChecked(True)
+
+    assert panel.chk_sin_porcentaje_bcv.isChecked()
+    assert not panel.chk_porcentaje_bcv.isChecked()
+    assert llamadas[-1] == (False, True)
+
+    panel.chk_porcentaje_bcv.setChecked(True)
+
+    assert panel.chk_porcentaje_bcv.isChecked()
+    assert not panel.chk_sin_porcentaje_bcv.isChecked()
+    assert llamadas[-1] == (True, False)
+
+
+def test_desmarcar_el_filtro_vuelve_a_pedir_todas_las_comisiones(qtbot, monkeypatch):
+    panel, llamadas = _panel_con_servicio_espia(qtbot, monkeypatch, gestion=True)
+    panel.chk_sin_porcentaje_bcv.setChecked(True)
+
+    panel.chk_sin_porcentaje_bcv.setChecked(False)
+
+    assert llamadas == [(False, True), (False, False)]
+
+
+def test_en_mis_comisiones_el_filtro_en_dolares_usa_listar_mis_comisiones(qtbot, monkeypatch):
+    panel, llamadas = _panel_con_servicio_espia(qtbot, monkeypatch, gestion=False)
+
+    panel.chk_sin_porcentaje_bcv.setChecked(True)
+
+    assert llamadas == [(False, True)]
+
+
+def test_exportar_indica_el_filtro_activo(qtbot, monkeypatch):
+    panel, _ = _panel_con_servicio_espia(qtbot, monkeypatch, gestion=True)
+    panel.usuario.nombre_usuario = "admin"
+    panel.vendedor_combo.addItem("Vendedor Uno", 7)
+
+    assert "Filtro" not in panel._filtros_para_exportar()
+
+    panel.chk_sin_porcentaje_bcv.setChecked(True)
+    assert panel._filtros_para_exportar()["Filtro"] == "Solo en $"
+
+    panel.chk_porcentaje_bcv.setChecked(True)
+    assert panel._filtros_para_exportar()["Filtro"] == "Solo con porcentaje BCV"
