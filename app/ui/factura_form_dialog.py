@@ -1233,9 +1233,10 @@ class FacturaFormDialog(QDialog):
             self.lbl_autorizacion_dias.hide()
             self._actualizar_vencimiento_calculado()
         # Asignar automáticamente el vendedor del cliente seleccionado
-        if cliente is not None and cliente.vendedor_cliente is not None:
+        cliente_vendedor = getattr(cliente, "vendedor_cliente", None)
+        if cliente is not None and cliente_vendedor is not None:
             self.vendedor_combo.blockSignals(True)
-            indice = self.vendedor_combo.findData(cliente.vendedor_cliente)
+            indice = self.vendedor_combo.findData(cliente_vendedor)
             if indice >= 0:
                 self.vendedor_combo.setCurrentIndex(indice)
             self.vendedor_combo.blockSignals(False)

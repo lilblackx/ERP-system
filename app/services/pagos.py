@@ -401,6 +401,8 @@ class PagoService:
         # Query base para obtener todas las cuentas por cobrar
         # Las cuentas por cobrar se generan tanto para facturas de crédito como de contado
         query = session.query(CuentaPorCobrar).join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+        # Excluir facturas de contado (solo mostrar las de crédito)
+        query = query.filter(FacturaVenta.condicion_pago == "credito")
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if estado == "vencida":
