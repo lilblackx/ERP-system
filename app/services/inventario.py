@@ -31,7 +31,7 @@ class ProductoService:
         if excluir_id is not None:
             query = query.filter(Inventario.id_producto != excluir_id)
         if query.first() is not None:
-            raise ValueError(f"El codigo de producto '{cod_producto}' ya esta en uso")
+            raise ValueError(f"El código de producto '{cod_producto}' ya está en uso")
 
     @staticmethod
     def obtener(session: Session, id_producto: int, id_usuario: int | None = None) -> Inventario | None:
@@ -392,7 +392,7 @@ class PrecioService:
         if producto is None:
             raise ValueError("Producto no encontrado")
         if producto.estado_producto != "ACTIVO":
-            raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo, no se puede modificar su precio")
+            raise ValueError(f"El producto '{producto.nombre_producto}' está inactivo, no se puede modificar su precio")
 
         precio_1 = to_decimal(precio_1)
         precio_2 = to_decimal(precio_2) if precio_2 is not None else Decimal("0.00")

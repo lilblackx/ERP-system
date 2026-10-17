@@ -237,7 +237,7 @@ class AutorizacionDialog(QDialog):
             return
 
         if usuario is None:
-            MessageBox.warning(self, "Credenciales invalidas", "Usuario o clave incorrectos.")
+            MessageBox.warning(self, "Credenciales inválidas", "Usuario o clave incorrectos.")
             return
 
         try:

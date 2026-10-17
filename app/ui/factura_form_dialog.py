@@ -1309,8 +1309,8 @@ class FacturaFormDialog(QDialog):
         total_carrito = self._total_factura_actual()
         if total_carrito > float(info["disponible"]):
             self.lbl_alerta_credito.setText(
-                f"Este cliente tiene ${float(info['disponible']):,.2f} disponibles de credito y la "
-                f"factura suma ${total_carrito:,.2f}. No se podra emitir a credito."
+                f"Este cliente tiene ${float(info['disponible']):,.2f} disponibles de crédito y la "
+                f"factura suma ${total_carrito:,.2f}. No se podrá emitir a crédito."
             )
             self.lbl_alerta_credito.show()
             self.btn_emitir.setEnabled(False)

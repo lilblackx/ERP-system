@@ -574,7 +574,7 @@ def _post(ruta: str, cuerpo: dict) -> tuple[int, dict]:
         except ValueError:
             cuerpo_error = {}
         if exc.code >= 500:
-            raise LicenciaRedError("El servidor de licencias no esta disponible. Intente mas tarde.") from exc
+            raise LicenciaRedError("El servidor de licencias no está disponible. Intente más tarde.") from exc
         return exc.code, cuerpo_error
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         raise LicenciaRedError("No se pudo conectar con el servidor de licencias. Revise su internet.") from exc
@@ -671,11 +671,11 @@ class LicenciaService:
             # se usa ella para decidir el vencimiento.
             ahora = max(ahora, piso_ancla)
         if payload.get("expira") and ahora > payload["expira"]:
-            return EstadoLicencia(ESTADO_VENCIDA, "La licencia esta vencida. Renuevela para seguir operando.", **info)
+            return EstadoLicencia(ESTADO_VENCIDA, "La licencia está vencida. Renuévela para seguir operando.", **info)
         if ahora > payload["valido_hasta"]:
             return EstadoLicencia(
                 ESTADO_VALIDAR_EN_LINEA,
-                "El servidor lleva demasiado tiempo sin validar la licencia. Revise su conexion a internet "
+                "El servidor lleva demasiado tiempo sin validar la licencia. Revise su conexión a internet "
                 "y el servicio de licencia.",
                 **info,
             )

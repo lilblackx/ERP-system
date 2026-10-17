@@ -5957,7 +5957,7 @@ class ReportesPanel(QWidget):
 
     def _exportar_excel(self) -> None:
         if self._ultimo_resultado is None:
-            MessageBox.information(self, "Sin datos", "Generá un reporte antes de exportarlo.")
+            MessageBox.information(self, "Sin datos", "Genere un reporte antes de exportarlo.")
             return
         # Mismo guard que _generar(): reasignar self._worker_export a un QThread nuevo
         # mientras el viejo sigue corriendo lo destruye a mitad de ejecucion.
@@ -5993,7 +5993,7 @@ class ReportesPanel(QWidget):
 
     def _exportar_pdf(self) -> None:
         if self._ultimo_resultado is None:
-            MessageBox.information(self, "Sin datos", "Generá un reporte antes de exportarlo.")
+            MessageBox.information(self, "Sin datos", "Genere un reporte antes de exportarlo.")
             return
         if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return

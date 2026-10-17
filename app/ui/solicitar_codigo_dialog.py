@@ -230,7 +230,7 @@ class SolicitarCodigoDialog(QDialog):
         MessageBox.critical(
             self,
             "Error",
-            "No se pudo enviar el codigo. Intente nuevamente mas tarde.",
+            "No se pudo enviar el código. Intente nuevamente más tarde.",
         )
 
     def reject(self) -> None:
@@ -306,7 +306,7 @@ class SolicitarCodigoDialog(QDialog):
     def _verificar_codigo(self) -> None:
         codigo = self.codigo_input.text().strip()
         if not codigo:
-            MessageBox.warning(self, "Dato requerido", "Ingrese el codigo recibido.")
+            MessageBox.warning(self, "Dato requerido", "Ingrese el código recibido.")
             return
 
         if self.tipo == TIPO_RECUPERAR_CLAVE:
@@ -336,7 +336,7 @@ class SolicitarCodigoDialog(QDialog):
                 self.tipo,
                 self._nombre_usuario_confirmado,
             )
-            MessageBox.critical(self, "Error", "Ocurrio un error inesperado. Intente nuevamente.")
+            MessageBox.critical(self, "Error", "Ocurrió un error inesperado. Intente nuevamente.")
             return
         finally:
             session.close()

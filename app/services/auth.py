@@ -36,7 +36,7 @@ class CuentaBloqueadaError(Exception):
 
     def __init__(self, bloqueado_desde: datetime):
         self.bloqueado_desde = bloqueado_desde
-        super().__init__("Cuenta bloqueada por intentos fallidos. Solicite un codigo de desbloqueo a su correo.")
+        super().__init__("Cuenta bloqueada por intentos fallidos. Solicite un código de desbloqueo a su correo.")
 
 
 def hash_password(plain: str) -> str:

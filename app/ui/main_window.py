@@ -232,7 +232,7 @@ class MainWindow(QMainWindow):
             self.banner_licencia.setVisible(False)
             return
         self.banner_licencia.setText(
-            f"  {estado.mensaje} La app esta en modo solo lectura: puede consultar, pero no registrar "
+            f"  {estado.mensaje} La app está en modo solo lectura: puede consultar, pero no registrar "
             "operaciones. Gestione la licencia en Configuración > Licencia."
         )
         self.banner_licencia.setStyleSheet(

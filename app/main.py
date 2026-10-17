@@ -68,7 +68,7 @@ def _manejar_excepcion_no_capturada(tipo, valor, tb):
         MessageBox.critical(
             None,
             "Error inesperado",
-            "Ocurrio un error inesperado. Revise logs/app.log o contacte a soporte.",
+            "Ocurrió un error inesperado. Revise logs/app.log o contacte a soporte.",
         )
 
 

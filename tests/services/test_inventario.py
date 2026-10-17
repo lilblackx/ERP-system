@@ -60,7 +60,7 @@ def test_crear_producto_codigo_duplicado(db_session):
         **_datos_producto(categoria.id_categoria, creado_por=admin.id_usuario),
     )
 
-    with pytest.raises(ValueError, match="ya esta en uso"):
+    with pytest.raises(ValueError, match="ya está en uso"):
         ProductoService.crear(
             db_session,
             **_datos_producto(
@@ -132,7 +132,7 @@ def test_actualizar_producto_codigo_duplicado(db_session):
         ),
     )
 
-    with pytest.raises(ValueError, match="ya esta en uso"):
+    with pytest.raises(ValueError, match="ya está en uso"):
         ProductoService.actualizar(
             db_session,
             otro.id_producto,

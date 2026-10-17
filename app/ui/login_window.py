@@ -131,7 +131,7 @@ class LoginWindow(QDialog):
         right_layout.setSpacing(20)
         right_layout.setContentsMargins(80, 40, 80, 40)
 
-        lbl_titulo = QLabel("Iniciar Sesion")
+        lbl_titulo = QLabel("Iniciar Sesión")
         lbl_titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_titulo.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 36px; font-weight: bold;")
         right_layout.addWidget(lbl_titulo)
@@ -190,8 +190,8 @@ class LoginWindow(QDialog):
         mensaje_layout.addWidget(self.mensaje_texto)
         right_layout.addWidget(self.mensaje)
 
-        # Botón Iniciar Sesion
-        self.btn_login = QPushButton("Iniciar Sesion")
+        # Botón Iniciar Sesión
+        self.btn_login = QPushButton("Iniciar Sesión")
         self.btn_login.setFixedHeight(46)
         self.btn_login.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.btn_login.setStyleSheet(f"""
@@ -273,7 +273,7 @@ class LoginWindow(QDialog):
             return
         finally:
             session.close()
-            self.btn_login.setText("Iniciar Sesion")
+            self.btn_login.setText("Iniciar Sesión")
             self.btn_login.setEnabled(True)
 
         if usuario is None:

@@ -205,17 +205,17 @@ def _consumir_codigo(session: Session, usuario: Usuario, tipo: str, codigo_ingre
         .first()
     )
     if registro is None:
-        raise ValueError("No hay un codigo pendiente para este usuario. Solicite uno nuevo.")
+        raise ValueError("No hay un código pendiente para este usuario. Solicite uno nuevo.")
 
     if registro.fecha_expiracion < datetime.now():
         registro.usado = True
         session.commit()
-        raise ValueError("El codigo vencio. Solicite uno nuevo.")
+        raise ValueError("El código venció. Solicite uno nuevo.")
 
     if registro.intentos_verificacion >= MAX_INTENTOS_VERIFICACION:
         registro.usado = True
         session.commit()
-        raise ValueError("Se agotaron los intentos para este codigo. Solicite uno nuevo.")
+        raise ValueError("Se agotaron los intentos para este código. Solicite uno nuevo.")
 
     if not hmac.compare_digest(_hash_codigo(codigo_ingresado), registro.codigo_hash):
         registro.intentos_verificacion += 1
