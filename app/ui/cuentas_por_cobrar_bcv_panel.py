@@ -1572,6 +1572,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
             "CLIENTE",
             "SALDO PENDIENTE",
             "SALDO A FAVOR",
+            "SALDO VENCIDO BCV",
             "DÍAS",
             "FECHA FACTURA",
             "ESTADO",
@@ -1583,9 +1584,10 @@ class CuentasPorCobrarBCVPanel(QWidget):
                 1: Qt.AlignmentFlag.AlignLeft,  # CLIENTE
                 2: Qt.AlignmentFlag.AlignRight,  # SALDO PENDIENTE
                 3: Qt.AlignmentFlag.AlignRight,  # SALDO A FAVOR
-                4: Qt.AlignmentFlag.AlignCenter,  # DÍAS
-                5: Qt.AlignmentFlag.AlignCenter,  # FECHA FACTURA
-                6: Qt.AlignmentFlag.AlignCenter,  # ESTADO
+                4: Qt.AlignmentFlag.AlignRight,  # SALDO VENCIDO BCV
+                5: Qt.AlignmentFlag.AlignCenter,  # DÍAS
+                6: Qt.AlignmentFlag.AlignCenter,  # FECHA FACTURA
+                7: Qt.AlignmentFlag.AlignCenter,  # ESTADO
             },
         )
         return self.tabla
@@ -1605,9 +1607,10 @@ class CuentasPorCobrarBCVPanel(QWidget):
         tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # CLIENTE
         tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # SALDO PENDIENTE
         tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # SALDO A FAVOR
-        tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # DÍAS
-        tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # FECHA FACTURA
-        tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # ESTADO
+        tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # SALDO VENCIDO BCV
+        tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # DÍAS
+        tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # FECHA FACTURA
+        tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)  # ESTADO
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
         tabla.setColumnHidden(0, True)
@@ -1616,7 +1619,8 @@ class CuentasPorCobrarBCVPanel(QWidget):
         # Establecer anchos mínimos para columnas que muestran datos largos
         tabla.setColumnWidth(2, 150)  # SALDO PENDIENTE - mínimo 150px
         tabla.setColumnWidth(3, 150)  # SALDO A FAVOR - mínimo 150px
-        tabla.setColumnWidth(6, 100)  # ESTADO - mínimo 100px
+        tabla.setColumnWidth(4, 150)  # SALDO VENCIDO BCV - mínimo 150px
+        tabla.setColumnWidth(7, 100)  # ESTADO - mínimo 100px
         return tabla
 
     def _make_footer(self) -> QWidget:
@@ -1774,18 +1778,26 @@ class CuentasPorCobrarBCVPanel(QWidget):
                 saldo_favor_text = f"${float(saldo_favor):,.2f} / Bs {float(saldo_favor * Decimal(str(tasa_bcv))):,.2f}"
             self.tabla.setItem(fila, 3, QTableWidgetItem(saldo_favor_text))
 
+            # SALDO VENCIDO BCV (acumulado de facturas vencidas)
+            saldo_vencido = _as_decimal(getattr(item, "saldo_vencido_bcv", Decimal("0.00")))
+            saldo_vencido_text = f"${float(saldo_vencido):,.2f}"
+            if self._tasa_bcv:
+                tasa_bcv = float(self._tasa_bcv) if not isinstance(self._tasa_bcv, float) else self._tasa_bcv
+                saldo_vencido_text = f"${float(saldo_vencido):,.2f} / Bs {float(saldo_vencido * Decimal(str(tasa_bcv))):,.2f}"
+            self.tabla.setItem(fila, 4, QTableWidgetItem(saldo_vencido_text))
+
             # DÍAS (días de crédito)
             dias_text = str(item.dias_credito) if item.dias_credito is not None else "N/A"
-            self.tabla.setItem(fila, 4, QTableWidgetItem(dias_text))
+            self.tabla.setItem(fila, 5, QTableWidgetItem(dias_text))
 
             # FECHA FACTURA (fecha de emisión más antigua)
             fecha_factura_text = item.fecha_emision.strftime("%d/%m/%Y") if item.fecha_emision else "N/A"
-            self.tabla.setItem(fila, 5, QTableWidgetItem(fecha_factura_text))
+            self.tabla.setItem(fila, 6, QTableWidgetItem(fecha_factura_text))
 
             # ESTADO
             estado = getattr(item, "estado_visual", item.estado)
             badge = EstadoBadge(estado, COLORES_ESTADO_CXC_BCV.get(estado, COLOR_TEXT_MEDIUM))
-            self.tabla.setCellWidget(fila, 6, badge)
+            self.tabla.setCellWidget(fila, 7, badge)
 
         # Actualizar paginación
         self.total_paginas = (total + por_pagina - 1) // por_pagina if total > 0 else 1
@@ -1915,6 +1927,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
                     "CLIENTE",
                     "SALDO PENDIENTE",
                     "SALDO A FAVOR",
+                    "SALDO VENCIDO BCV",
                     "DÍAS",
                     "FECHA FACTURA",
                     "ESTADO",
@@ -1925,6 +1938,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
                         item.nombre_cliente,
                         float(item.saldo_pendiente),
                         float(item.saldo_favor),
+                        float(getattr(item, "saldo_vencido_bcv", Decimal("0.00"))),
                         (str(item.dias_credito) if item.dias_credito is not None else "N/A"),
                         (item.fecha_emision.strftime("%d/%m/%Y") if item.fecha_emision else "N/A"),
                         item.estado,
@@ -1968,6 +1982,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
                     "CLIENTE",
                     "SALDO PENDIENTE",
                     "SALDO A FAVOR",
+                    "SALDO VENCIDO BCV",
                     "DÍAS",
                     "FECHA FACTURA",
                     "ESTADO",
@@ -1978,6 +1993,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
                         item.nombre_cliente,
                         float(item.saldo_pendiente),
                         float(item.saldo_favor),
+                        float(getattr(item, "saldo_vencido_bcv", Decimal("0.00"))),
                         (str(item.dias_credito) if item.dias_credito is not None else "N/A"),
                         (item.fecha_emision.strftime("%d/%m/%Y") if item.fecha_emision else "N/A"),
                         item.estado,

@@ -161,7 +161,7 @@ def _bloque_totales_html(filas_totales: str, bloque_bs: str) -> str:
     """
 
 
-def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str:
+def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None, es_copia: bool = False) -> str:
     factura: FacturaVenta = datos["factura"]
     detalles: list[FacturaDetalle] = datos["detalles"]
     cliente = factura.cliente
@@ -171,7 +171,12 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     razon_social = config_empresa.razon_social_empresa if config_empresa else None
     rif = formatear_rif(config_empresa.rif_empresa, "J") if config_empresa else None
     direccion = config_empresa.direccion_empresa if config_empresa else None
-    telefono = config_empresa.telefono_empresa if config_empresa else None
+    # Usar el teléfono del vendedor asignado al cliente en lugar del teléfono de la empresa
+    telefono = None
+    if cliente and cliente.vendedor:
+        telefono = cliente.vendedor.telefono_vendedor
+    if not telefono and config_empresa:
+        telefono = config_empresa.telefono_empresa
     pie_pagina = config_empresa.pie_pagina_empresa if config_empresa else None
     logo_tag = _logo_img_tag(config_empresa.logotipo_empresa if config_empresa else None)
 
@@ -239,6 +244,14 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
             f"{_esc(pie_pagina)}</td></tr></table>"
         )
 
+    # Texto "Copia del Cliente" para la segunda impresión
+    copia_texto = ""
+    if es_copia:
+        copia_texto = (
+            f'<p style="color:{COLOR_DANGER};font-weight:bold;font-size:16pt;text-align:center;margin:10pt 0;">'
+            f"*** COPIA DEL CLIENTE ***</p>"
+        )
+
     encabezado_empresa = (
         f'<div style="font-size:13pt;font-weight:bold;color:{_PRIMARY};{_MB}">'
         f"{_esc(razon_social) or 'Mi Empresa'}</div>"
@@ -288,9 +301,11 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
 
         {watermark}
 
+        {copia_texto}
+
         <table width="100%" style="border-collapse:collapse;margin-top:10pt;"><tr>
             <td style="background-color:{_PRIMARY};color:#FFFFFF;padding:5pt 8pt;font-size:10pt;font-weight:bold;">
-                Datos
+                Datos del Cliente
             </td>
         </tr></table>
         <table width="100%" style="border-collapse:collapse;border:1pt solid {_BORDER};border-top:none;"><tr>
@@ -325,9 +340,9 @@ def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> str
     """
 
 
-def _documento(datos: dict, config_empresa: ConfiguracionEmpresa | None) -> QTextDocument:
+def _documento(datos: dict, config_empresa: ConfiguracionEmpresa | None, es_copia: bool = False) -> QTextDocument:
     documento = QTextDocument()
-    documento.setHtml(_armar_html(datos, config_empresa))
+    documento.setHtml(_armar_html(datos, config_empresa, es_copia))
     return documento
 
 
@@ -377,8 +392,17 @@ def imprimir_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, n
         generar_pdf_factura(datos, config_empresa, ruta)
         return ruta
 
+    # Imprimir 2 copias de la factura
+    # Primera copia (original)
+    documento_original = _documento(datos, config_empresa)
     impresora = QPrinter(info, QPrinter.PrinterMode.HighResolution)
     _configurar_pagina(impresora)
+    documento_original.print_(impresora)
 
-    _documento(datos, config_empresa).print_(impresora)
+    # Segunda copia (con texto "Copia del Cliente")
+    documento_copia = _documento(datos, config_empresa, es_copia=True)
+    impresora_copia = QPrinter(info, QPrinter.PrinterMode.HighResolution)
+    _configurar_pagina(impresora_copia)
+    documento_copia.print_(impresora_copia)
+
     return None

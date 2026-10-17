@@ -16,7 +16,7 @@ from decimal import Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QShowEvent
+from PySide6.QtGui import QColor, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -526,6 +526,229 @@ class PagoProveedorDialog(QDialog):
         self.accept()
 
 
+class DetalleCuentaPorPagarDialog(QDialog):
+    """Diálogo para mostrar el detalle de una cuenta por pagar con los pagos realizados."""
+
+    def __init__(
+        self,
+        session: Session,
+        cuenta: CuentaPorPagar,
+        id_usuario: int | None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.session = session
+        self.cuenta = cuenta
+        self.id_usuario = id_usuario
+
+        self.setWindowTitle("Detalle de Cuenta por Pagar")
+        ajustar_tamano(self, 900, 600)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self._build_ui()
+        hacer_desplazable(self)
+        self._cargar_datos()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        # Header con información de la compra
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        lbl_titulo = QLabel("Detalle de Pagos")
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        header_layout.addWidget(lbl_titulo)
+        header_layout.addStretch()
+
+        root.addWidget(header)
+
+        # Información de la compra
+        card_info = QWidget()
+        card_info.setObjectName("SectionCard")
+        aplicar_sombra(card_info)
+        layout_info = QVBoxLayout(card_info)
+        layout_info.setContentsMargins(16, 14, 16, 14)
+        layout_info.setSpacing(8)
+
+        compra = self.cuenta.compra
+        proveedor = compra.proveedor if compra else None
+
+        # Número de compra
+        lbl_compra = QLabel(f"Compra: {compra.numero_compra if compra else 'N/A'}")
+        lbl_compra.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_MUTED};")
+        layout_info.addWidget(lbl_compra)
+
+        # Proveedor
+        lbl_proveedor = QLabel(f"Proveedor: {proveedor.nombre_razon_social if proveedor else 'N/A'}")
+        lbl_proveedor.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        layout_info.addWidget(lbl_proveedor)
+
+        # Saldo pendiente
+        saldo_pendiente = _as_decimal(self.cuenta.saldo_pendiente)
+        lbl_saldo = QLabel(f"Saldo pendiente: ${float(saldo_pendiente):,.2f}")
+        lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_WARNING};")
+        layout_info.addWidget(lbl_saldo)
+
+        # Fecha de vencimiento
+        if self.cuenta.fecha_vencimiento:
+            vencimiento = self.cuenta.fecha_vencimiento.strftime("%d/%m/%Y")
+        else:
+            vencimiento = "Sin definir"
+        lbl_vencimiento = QLabel(f"Vencimiento: {vencimiento}")
+        lbl_vencimiento.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_MUTED};")
+        layout_info.addWidget(lbl_vencimiento)
+
+        root.addWidget(card_info)
+
+        # Tabla de pagos
+        self.tabla_pagos = self._crear_tabla_pagos()
+        root.addWidget(self.tabla_pagos)
+
+        # Footer con botones
+        footer = QHBoxLayout()
+        footer.addStretch()
+
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.setObjectName("BtnSecondary")
+        btn_cerrar.setFixedHeight(34)
+        btn_cerrar.setAutoDefault(False)
+        btn_cerrar.clicked.connect(self.accept)
+        footer.addWidget(btn_cerrar)
+
+        root.addLayout(footer)
+
+    def _crear_tabla_pagos(self) -> QTableWidget:
+        columnas = [
+            "ID",
+            "Fecha",
+            "Monto $",
+            "Monto Bs",
+            "Tasa",
+            "Método",
+            "Origen",
+            "Referencia",
+        ]
+        tabla = QTableWidget(0, len(columnas))
+        tabla.setHorizontalHeaderLabels(columnas)
+        tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        tabla.setAlternatingRowColors(True)
+        tabla.setShowGrid(False)
+        tabla.verticalHeader().setVisible(False)
+        tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(tabla)
+        tabla.setColumnHidden(0, True)
+        tabla.verticalHeader().setDefaultSectionSize(40)
+
+        alinear_encabezados(
+            tabla,
+            {
+                1: Qt.AlignmentFlag.AlignCenter,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignLeft,
+                6: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignLeft,
+            },
+        )
+
+        return tabla
+
+    def _cargar_datos(self) -> None:
+        """Carga los pagos realizados a esta cuenta por pagar."""
+        try:
+            pagos = PagoService.listar_pagos_proveedor(
+                self.session,
+                id_cuenta_por_pagar=self.cuenta.id_cuenta,
+                id_usuario=self.id_usuario,
+            )
+
+            self.tabla_pagos.setRowCount(len(pagos))
+            total_pagado = Decimal("0.00")
+
+            for fila, pago in enumerate(pagos):
+                self.tabla_pagos.setItem(fila, 0, QTableWidgetItem(str(pago.id_pago_proveedor)))
+
+                # Fecha de pago
+                fecha_pago = pago.fecha_pago.strftime("%d/%m/%Y %H:%M") if pago.fecha_pago else "Sin definir"
+                item_fecha = QTableWidgetItem(fecha_pago)
+                item_fecha.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_pagos.setItem(fila, 1, item_fecha)
+
+                # Monto en USD
+                monto = _as_decimal(pago.monto)
+                item_monto = QTableWidgetItem(f"${float(monto):,.2f}")
+                item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_pagos.setItem(fila, 2, item_monto)
+                total_pagado += monto
+
+                # Monto en Bs (si existe)
+                monto_bs = _as_decimal(pago.monto_bolivares) if pago.monto_bolivares else Decimal("0.00")
+                if monto_bs > 0:
+                    item_monto_bs = QTableWidgetItem(f"{float(monto_bs):,.2f}")
+                else:
+                    item_monto_bs = QTableWidgetItem("-")
+                item_monto_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_pagos.setItem(fila, 3, item_monto_bs)
+
+                # Tasa de cambio (si existe)
+                tasa = _as_decimal(pago.tasa_cambio) if pago.tasa_cambio else None
+                if tasa and tasa > 0:
+                    item_tasa = QTableWidgetItem(f"{float(tasa):,.2f}")
+                else:
+                    item_tasa = QTableWidgetItem("-")
+                item_tasa.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_pagos.setItem(fila, 4, item_tasa)
+
+                # Método de pago
+                metodo_pago = pago.metodo_pago or "N/A"
+                item_metodo = QTableWidgetItem(metodo_pago.capitalize())
+                item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_pagos.setItem(fila, 5, item_metodo)
+
+                # Origen (caja o cuenta bancaria)
+                origen = "N/A"
+                if pago.caja:
+                    origen = f"Caja: {pago.caja.nombre_caja or f'Caja {pago.caja.id_caja}'}"
+                elif pago.cuenta_bancaria:
+                    banco = pago.cuenta_bancaria.banco.nombre_banco if pago.cuenta_bancaria.banco else "Banco"
+                    origen = f"{banco} - ...{pago.cuenta_bancaria.numero_cuenta[-4:]}"
+                item_origen = QTableWidgetItem(origen)
+                item_origen.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_pagos.setItem(fila, 6, item_origen)
+
+                # Referencia
+                referencia = pago.referencia or ""
+                item_referencia = QTableWidgetItem(referencia)
+                item_referencia.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla_pagos.setItem(fila, 7, item_referencia)
+
+            # Si no hay pagos, mostrar mensaje
+            if len(pagos) == 0:
+                self.tabla_pagos.setRowCount(1)
+                item = QTableWidgetItem("No hay pagos registrados")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+                item.setForeground(QColor(COLOR_TEXT_MUTED))
+                self.tabla_pagos.setItem(0, 0, item)
+                self.tabla_pagos.setSpan(0, 0, 1, 8)
+
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver los pagos.")
+        except Exception as e:
+            logger.exception("Error al cargar pagos de la cuenta por pagar")
+            MessageBox.warning(self, "Error", f"No se pudo cargar los pagos: {str(e)}")
+
+
 class CuentasPorPagarPanel(QWidget):
     """Panel principal del modulo Cuentas por Pagar: listado con filtro por estado,
     paginacion y pago contra PagoService.registrar_pago_proveedor."""
@@ -871,10 +1094,21 @@ class CuentasPorPagarPanel(QWidget):
             btn_odc.setToolTip("Exportar ODC a PDF")
             btn_odc.clicked.connect(lambda checked, id_oc=id_oc: self._exportar_odc_pdf(id_oc))
 
+            # Botón de acción: Ver detalle de pagos
+            btn_detalle = QPushButton()
+            btn_detalle.setIcon(qta.icon("fa5s.list", color=COLOR_TEXT_DARK))
+            btn_detalle.setFixedHeight(28)
+            btn_detalle.setFixedWidth(28)
+            btn_detalle.setStyleSheet(BUTTON_SECONDARY_QSS)
+            btn_detalle.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_detalle.setToolTip("Ver detalle de pagos")
+            btn_detalle.clicked.connect(lambda checked, id_cuenta=cuenta.id_cuenta: self._ver_detalle_pagos(id_cuenta))
+
             widget_acciones = QWidget()
             layout_acciones = QHBoxLayout(widget_acciones)
             layout_acciones.setContentsMargins(5, 2, 5, 2)
             layout_acciones.addWidget(btn_odc)
+            layout_acciones.addWidget(btn_detalle)
             layout_acciones.addStretch()
             self.tabla.setCellWidget(fila, 8, widget_acciones)
 
@@ -926,6 +1160,30 @@ class CuentasPorPagarPanel(QWidget):
                 MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar pagos.")
+        finally:
+            session.close()
+
+    def _ver_detalle_pagos(self, id_cuenta: int) -> None:
+        """Abre el diálogo de detalle de pagos para una cuenta por pagar."""
+        session = self.session_factory()
+        try:
+            cuenta = session.get(CuentaPorPagar, id_cuenta)
+            if cuenta is None:
+                MessageBox.warning(self, "Cuenta no encontrada", "La cuenta por pagar no existe.")
+                return
+
+            dialogo = DetalleCuentaPorPagarDialog(
+                session,
+                cuenta,
+                self.usuario.id_usuario,
+                parent=self,
+            )
+            dialogo.exec()
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de pagos.")
+        except Exception as e:
+            logger.exception("Error al abrir detalle de pagos")
+            MessageBox.warning(self, "Error", f"No se pudo abrir el detalle de pagos: {str(e)}")
         finally:
             session.close()
 

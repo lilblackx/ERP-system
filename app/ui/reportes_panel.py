@@ -89,6 +89,7 @@ REPORTE_VENTAS_CLIENTE = "ventas_cliente"
 REPORTE_VENTAS_VENDEDOR = "ventas_vendedor"
 REPORTE_VENTAS_RUTA = "ventas_ruta"
 REPORTE_ACTIVACION_CLIENTES = "activacion_clientes"
+REPORTE_VENTAS_PRODUCTOS_CLIENTES = "ventas_productos_clientes"
 REPORTE_PRODUCTOS_VENDIDOS = "productos_vendidos"
 REPORTE_FACTURAS_ANULADAS = "facturas_anuladas"
 REPORTE_NC_EMITIDAS = "nc_emitidas"
@@ -167,6 +168,7 @@ COLS_VENTAS_PERIODO = ["Fecha", "Facturas", "Total"]
 COLS_VENTAS_CLIENTE = ["Cliente", "Facturas", "Total"]
 COLS_VENTAS_VENDEDOR = ["Vendedor", "Facturas", "Total", "Ticket Promedio"]
 COLS_VENTAS_RUTA = ["Ruta", "Facturas", "Total", "Ticket Promedio"]
+COLS_VENTAS_PRODUCTOS_CLIENTES = ["Producto", "Código", "Cantidad Total", "Monto Total", "Clientes"]
 COLS_ACTIVACION_CLIENTES = ["Cliente", "Vendedor", "Facturas", "Meta", "Efectividad %"]
 COLS_PRODUCTOS_VENDIDOS = ["Producto", "Cantidad", "Total"]
 COLS_FACTURAS_ANULADAS = ["N° Factura", "Cliente", "Vendedor", "Fecha", "Motivo"]
@@ -623,6 +625,17 @@ def _tarea_ventas_ruta(session, id_usuario, fecha_desde, fecha_hasta):
     )
 
 
+def _tarea_ventas_productos_clientes(session, id_usuario, fecha_desde, fecha_hasta, id_vendedor, id_producto):
+    return ReporteService.ventas_productos_clientes(
+        session,
+        id_usuario=id_usuario,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        id_vendedor=id_vendedor,
+        id_producto=id_producto,
+    )
+
+
 def _tarea_activacion_clientes(session, id_usuario, fecha_desde, fecha_hasta, id_vendedor):
     return ReporteService.activacion_clientes(
         session,
@@ -1024,6 +1037,7 @@ class ReportesPanel(QWidget):
         self.tipo_combo.addItem("Ventas por Vendedor", REPORTE_VENTAS_VENDEDOR)
         self.tipo_combo.addItem("Ventas por Ruta", REPORTE_VENTAS_RUTA)
         self.tipo_combo.addItem("Activación de Clientes", REPORTE_ACTIVACION_CLIENTES)
+        self.tipo_combo.addItem("Ventas a Clientes por Producto", REPORTE_VENTAS_PRODUCTOS_CLIENTES)
         self.tipo_combo.addItem("Productos Más/Menos Vendidos", REPORTE_PRODUCTOS_VENDIDOS)
         self.tipo_combo.addItem("Facturas Anuladas", REPORTE_FACTURAS_ANULADAS)
         self.tipo_combo.addItem("Notas de Crédito Emitidas", REPORTE_NC_EMITIDAS)
@@ -1100,6 +1114,7 @@ class ReportesPanel(QWidget):
             REPORTE_VENTAS_VENDEDOR: self._make_filtros_ventas_vendedor(),
             REPORTE_VENTAS_RUTA: self._make_filtros_ventas_ruta(),
             REPORTE_ACTIVACION_CLIENTES: self._make_filtros_activacion_clientes(),
+            REPORTE_VENTAS_PRODUCTOS_CLIENTES: self._make_filtros_ventas_productos_clientes(),
             REPORTE_PRODUCTOS_VENDIDOS: self._make_filtros_productos_vendidos(),
             REPORTE_FACTURAS_ANULADAS: self._make_filtros_facturas_anuladas(),
             REPORTE_NC_EMITIDAS: self._make_filtros_nc_emitidas(),
@@ -1390,6 +1405,43 @@ class ReportesPanel(QWidget):
         h.addWidget(self.fecha_desde_vc_input)
         h.addWidget(lbl_hasta)
         h.addWidget(self.fecha_hasta_vc_input)
+        return w
+
+    def _make_filtros_ventas_productos_clientes(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+
+        lbl_desde = QLabel("Desde:")
+        lbl_desde.setStyleSheet(LABEL_QSS)
+        self.fecha_desde_vpc_input = _crear_fecha_edit(dias_atras=30)
+
+        lbl_hasta = QLabel("Hasta:")
+        lbl_hasta.setStyleSheet(LABEL_QSS)
+        self.fecha_hasta_vpc_input = _crear_fecha_edit()
+
+        lbl_producto = QLabel("Producto:")
+        lbl_producto.setStyleSheet(LABEL_QSS)
+        self.producto_combo_vpc = _crear_combo()
+        self.producto_combo_vpc.setFixedWidth(250)
+        self.producto_combo_vpc.addItem("Todos los productos", None)
+
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(LABEL_QSS)
+        self.vendedor_combo_vpc = _crear_combo()
+        self.vendedor_combo_vpc.setFixedWidth(200)
+        self.vendedor_combo_vpc.addItem("Todos los vendedores", None)
+
+        h.addWidget(lbl_desde)
+        h.addWidget(self.fecha_desde_vpc_input)
+        h.addWidget(lbl_hasta)
+        h.addWidget(self.fecha_hasta_vpc_input)
+        h.addWidget(lbl_producto)
+        h.addWidget(self.producto_combo_vpc)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_vpc)
         return w
 
     def _make_filtros_ventas_vendedor(self) -> QWidget:
@@ -2394,9 +2446,10 @@ class ReportesPanel(QWidget):
                 self.vendedor_combo_ac,
                 self.vendedor_combo_aging,
                 self.vendedor_combo_bcv,
+                self.vendedor_combo_vpc,
             ):
                 combo.clear()
-                combo.addItem("Todos los vendedores")
+                combo.addItem("Todos los vendedores", None)
                 for vendedor in vendedores:
                     combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
         finally:
@@ -2422,11 +2475,12 @@ class ReportesPanel(QWidget):
                 .order_by(Inventario.nombre_producto)
                 .all()
             )
-            # Dos combos independientes (kardex, historico de precios) -- mismo motivo que
-            # _cargar_clientes: un QWidget no puede pertenecer a dos layouts. Sin opcion
-            # "Todos": ambos reportes son por un producto especifico.
-            for combo in (self.producto_combo_kardex, self.producto_combo_hp):
+            # Combos independientes (kardex, historico de precios, ventas productos clientes)
+            # -- mismo motivo que _cargar_clientes: un QWidget no puede pertenecer a dos layouts.
+            for combo in (self.producto_combo_kardex, self.producto_combo_hp, self.producto_combo_vpc):
                 combo.clear()
+                if combo == self.producto_combo_vpc:
+                    combo.addItem("Todos los productos", None)
                 for producto in productos:
                     combo.addItem(
                         f"{producto.cod_producto} - {producto.nombre_producto}",
@@ -2603,6 +2657,25 @@ class ReportesPanel(QWidget):
                 id_usuario=self.usuario.id_usuario,
                 fecha_desde=fecha_desde,
                 fecha_hasta=fecha_hasta,
+            )
+        elif modo == REPORTE_VENTAS_PRODUCTOS_CLIENTES:
+            fecha_desde = self.fecha_desde_vpc_input.date().toPython()
+            fecha_hasta = self.fecha_hasta_vpc_input.date().toPython()
+            if fecha_desde > fecha_hasta:
+                MessageBox.warning(
+                    self,
+                    "Rango inválido",
+                    "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
+                )
+                return
+            self._worker = QueryWorker(
+                self.session_factory,
+                _tarea_ventas_productos_clientes,
+                id_usuario=self.usuario.id_usuario,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+                id_vendedor=self.vendedor_combo_vpc.currentData(),
+                id_producto=self.producto_combo_vpc.currentData(),
             )
         elif modo == REPORTE_ACTIVACION_CLIENTES:
             fecha_desde = self.fecha_desde_ac_input.date().toPython()
@@ -3181,6 +3254,8 @@ class ReportesPanel(QWidget):
             self._mostrar_ventas_vendedor(resultado)
         elif self._ultimo_modo == REPORTE_VENTAS_RUTA:
             self._mostrar_ventas_ruta(resultado)
+        elif self._ultimo_modo == REPORTE_VENTAS_PRODUCTOS_CLIENTES:
+            self._mostrar_ventas_productos_clientes(resultado)
         elif self._ultimo_modo == REPORTE_ACTIVACION_CLIENTES:
             self._mostrar_activacion_clientes(resultado)
         elif self._ultimo_modo == REPORTE_PRODUCTOS_VENDIDOS:
@@ -3422,11 +3497,12 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 7, self._item_num(f"${float(f['monto_iva']):,.2f}"))
             self.tabla.setItem(row, 8, self._item_num(f"${float(f['total']):,.2f}"))
 
-        self.lbl_total.setText(f"{len(filas)} factura{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{resultado['cantidad_facturas']} factura{'s' if resultado['cantidad_facturas'] != 1 else ''}")
         self._mostrar_resumen_libro_ventas(resultado)
 
     def _mostrar_resumen_libro_ventas(self, resultado: dict) -> None:
         self._limpiar_resumen()
+        self.resumen_layout.addWidget(self._chip(f"Ventas: {resultado['cantidad_facturas']}"))
         self.resumen_layout.addWidget(self._chip(f"Base imponible: ${float(resultado['total_base_imponible']):,.2f}"))
         self.resumen_layout.addWidget(self._chip(f"IVA: ${float(resultado['total_iva']):,.2f}"))
         self.resumen_layout.addWidget(
@@ -3541,6 +3617,74 @@ class ReportesPanel(QWidget):
             "cantidad_facturas",
             clave_promedio="ticket_promedio",
         )
+
+    def _mostrar_ventas_productos_clientes(self, resultado: dict) -> None:
+        """Muestra el reporte de ventas de productos a clientes.
+        - Si se seleccionó un producto específico: muestra tabla de clientes con cantidades
+        - Si no se seleccionó producto: muestra tabla de productos con lista de clientes"""
+        id_producto = resultado.get("id_producto")
+
+        if id_producto:
+            # Vista detallada: tabla de clientes para el producto seleccionado
+            self._reset_tabla(
+                ["Cliente", "Identificación", "Cantidad Vendida"],
+                {
+                    0: Qt.AlignmentFlag.AlignLeft,
+                    1: Qt.AlignmentFlag.AlignLeft,
+                    2: Qt.AlignmentFlag.AlignRight,
+                },
+            )
+            if resultado["filas"]:
+                clientes = resultado["filas"][0]["clientes"]
+                self.tabla.setRowCount(len(clientes))
+                for row, c in enumerate(clientes):
+                    self.tabla.setItem(row, 0, QTableWidgetItem(c["cliente"]))
+                    self.tabla.setItem(row, 1, QTableWidgetItem(c["identificacion_cliente"]))
+                    self.tabla.setItem(row, 2, self._item_num(f"{float(c['cantidad_total']):,.2f}"))
+                self.lbl_total.setText(f"{len(clientes)} cliente{'s' if len(clientes) != 1 else ''}")
+            else:
+                self.lbl_total.setText("0 clientes")
+        else:
+            # Vista general: tabla de productos con lista de clientes
+            self._reset_tabla(
+                COLS_VENTAS_PRODUCTOS_CLIENTES,
+                {
+                    0: Qt.AlignmentFlag.AlignLeft,
+                    1: Qt.AlignmentFlag.AlignLeft,
+                    2: Qt.AlignmentFlag.AlignRight,
+                    3: Qt.AlignmentFlag.AlignRight,
+                    4: Qt.AlignmentFlag.AlignLeft,
+                },
+            )
+            filas = resultado["filas"]
+            self.tabla.setRowCount(len(filas))
+            for row, f in enumerate(filas):
+                # Crear lista de clientes con formato: "Cliente1 ($X), Cliente2 ($Y)"
+                clientes_texto = ", ".join(
+                    [
+                        f"{c['cliente']} (${float(c['monto_total']):,.2f})"
+                        for c in f["clientes"][:5]  # Limitar a 5 clientes principales
+                    ]
+                )
+                if len(f["clientes"]) > 5:
+                    clientes_texto += f" (+{len(f['clientes']) - 5} más)"
+
+                self.tabla.setItem(row, 0, QTableWidgetItem(f["producto"]))
+                self.tabla.setItem(row, 1, QTableWidgetItem(f["cod_producto"]))
+                self.tabla.setItem(row, 2, self._item_num(f"{float(f['cantidad_total']):,.2f}"))
+                self.tabla.setItem(row, 3, self._item_num(f"${float(f['monto_total']):,.2f}"))
+                self.tabla.setItem(row, 4, QTableWidgetItem(clientes_texto))
+
+            self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
+
+        self._mostrar_resumen_ventas_productos_clientes(resultado)
+
+    def _mostrar_resumen_ventas_productos_clientes(self, resultado: dict) -> None:
+        self._limpiar_resumen()
+        self.resumen_layout.addWidget(self._chip(f"Productos: {len(resultado['filas'])}"))
+        self.resumen_layout.addWidget(self._chip(f"Cantidad total: {float(resultado['cantidad_general']):,.2f}"))
+        self.resumen_layout.addWidget(self._chip(f"Monto total: ${float(resultado['total_general']):,.2f}"))
+        self.resumen_layout.addStretch()
 
     def _mostrar_activacion_clientes(self, resultado: dict) -> None:
         """Forma distinta a _mostrar_ranking: sin columnas en $ (facturas/meta son
@@ -4875,6 +5019,19 @@ class ReportesPanel(QWidget):
             ]
             return "ventas_ruta", COLS_VENTAS_RUTA, filas
 
+        if self._ultimo_modo == REPORTE_VENTAS_PRODUCTOS_CLIENTES:
+            filas = [
+                [
+                    f["producto"],
+                    f["cod_producto"],
+                    float(f["cantidad_total"]),
+                    float(f["monto_total"]),
+                    ", ".join([c["cliente"] for c in f["clientes"][:5]]),
+                ]
+                for f in self._ultimo_resultado["filas"]
+            ]
+            return "ventas_productos_clientes", COLS_VENTAS_PRODUCTOS_CLIENTES, filas
+
         if self._ultimo_modo == REPORTE_ACTIVACION_CLIENTES:
             filas = [
                 [
@@ -5420,6 +5577,15 @@ class ReportesPanel(QWidget):
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
             return "Ventas por Ruta", filtros, [2.0, 1.0, 1.2, 1.3]
+
+        if self._ultimo_modo == REPORTE_VENTAS_PRODUCTOS_CLIENTES:
+            filtros = {
+                "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
+                "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
+                "Vendedor": self.vendedor_combo_vpc.currentText(),
+                "Total general": f"${float(resultado['total_general']):,.2f}",
+            }
+            return "Ventas a Clientes por Producto", filtros, [2.0, 1.0, 1.0, 1.2, 2.5]
 
         if self._ultimo_modo == REPORTE_ACTIVACION_CLIENTES:
             efectividad_promedio = resultado["efectividad_promedio"]

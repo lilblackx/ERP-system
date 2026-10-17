@@ -260,9 +260,11 @@ class HistorialMovimientosDialog(QDialog):
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.setWordWrap(True)  # Permitir ajuste de texto
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         alinear_encabezados(
@@ -270,9 +272,9 @@ class HistorialMovimientosDialog(QDialog):
             {
                 0: Qt.AlignmentFlag.AlignLeft,
                 1: Qt.AlignmentFlag.AlignLeft,
-                2: Qt.AlignmentFlag.AlignLeft,
-                3: Qt.AlignmentFlag.AlignRight,
-                4: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                3: Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                4: Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
             },
         )
         root.addWidget(self.tabla, stretch=1)
@@ -388,6 +390,9 @@ class HistorialMovimientosDialog(QDialog):
                     elif mov.id_pago_comision:
                         origen = "Pago Comisión"
                     self.tabla.setItem(fila, 4, QTableWidgetItem(origen))
+
+                    # Ajustar altura de la fila para mostrar toda la descripción
+                    self.tabla.resizeRowToContents(fila)
 
                     if es_entrada:
                         total_entradas += monto

@@ -354,6 +354,7 @@ class ReporteService:
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
+            "cantidad_facturas": len(facturas),
             "total_base_imponible": total_base,
             "total_iva": total_iva,
             "total_general": total_base + total_iva,
@@ -542,6 +543,110 @@ class ReporteService:
             "fecha_hasta": fecha_hasta,
             "filas": filas,
             "total_general": sum((f["total"] for f in filas), Decimal("0.00")),
+        }
+
+    @staticmethod
+    def ventas_productos_clientes(
+        session: Session,
+        id_usuario: int | None,
+        fecha_desde: date,
+        fecha_hasta: date,
+        id_vendedor: int | None = None,
+        id_producto: int | None = None,
+    ) -> dict:
+        """Reporte de ventas de productos a clientes: muestra por cada producto a qué
+        clientes fue vendido, con cantidad y monto total. Permite filtrar por vendedor
+        para ver solo las ventas realizadas por un vendedor específico, y por producto
+        para ver solo las ventas de un producto específico."""
+        require_permiso(session, id_usuario, "reportes", "ver")
+        if fecha_desde > fecha_hasta:
+            raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
+        desde_dt = datetime.combine(fecha_desde, time.min)
+        hasta_dt = datetime.combine(fecha_hasta, time.max)
+
+        query = (
+            session.query(FacturaDetalle)
+            .join(FacturaVenta, FacturaDetalle.id_factura == FacturaVenta.id_factura)
+            .options(
+                joinedload(FacturaDetalle.producto),
+                joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente),
+                joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.vendedor),
+            )
+            .filter(FacturaVenta.estado_factura != "ANULADA")
+            .filter(FacturaVenta.fecha_emision >= desde_dt)
+            .filter(FacturaVenta.fecha_emision <= hasta_dt)
+        )
+        if id_vendedor:
+            query = query.filter(FacturaVenta.id_vendedor == id_vendedor)
+        if id_producto:
+            query = query.filter(FacturaDetalle.id_producto_factura == id_producto)
+
+        detalles = query.all()
+
+        # Agrupar por producto, luego por cliente
+        grupos: dict[int, dict] = {}
+        for detalle in detalles:
+            id_producto = detalle.id_producto_factura
+            id_cliente = detalle.factura.id_cliente_factura
+
+            grupo_producto = grupos.setdefault(
+                id_producto,
+                {
+                    "producto": detalle.producto.nombre_producto if detalle.producto else "N/A",
+                    "cod_producto": detalle.producto.cod_producto if detalle.producto else "N/A",
+                    "clientes": {},
+                },
+            )
+
+            grupo_cliente = grupo_producto["clientes"].setdefault(
+                id_cliente,
+                {
+                    "cliente": detalle.factura.cliente.nombre_razon_social if detalle.factura.cliente else "N/A",
+                    "identificacion_cliente": (
+                        detalle.factura.cliente.identificacion_cliente if detalle.factura.cliente else "N/A"
+                    ),
+                    "cantidad_total": Decimal("0.00"),
+                    "monto_total": Decimal("0.00"),
+                },
+            )
+
+            cantidad = detalle.cantidad_producto or Decimal("0")
+            monto = cantidad * detalle.precio_unitario
+            grupo_cliente["cantidad_total"] += cantidad
+            grupo_cliente["monto_total"] += monto
+
+        # Convertir a lista de filas (producto + lista de clientes)
+        filas = []
+        for id_producto, grupo in grupos.items():
+            clientes_lista = sorted(
+                grupo["clientes"].values(), key=lambda c: c["monto_total"], reverse=True
+            )
+            total_producto = sum(c["monto_total"] for c in clientes_lista)
+            cantidad_producto = sum(c["cantidad_total"] for c in clientes_lista)
+            filas.append(
+                {
+                    "producto": grupo["producto"],
+                    "cod_producto": grupo["cod_producto"],
+                    "cantidad_total": cantidad_producto,
+                    "monto_total": total_producto,
+                    "clientes": clientes_lista,
+                }
+            )
+
+        # Ordenar por monto total descendente
+        filas = sorted(filas, key=lambda f: f["monto_total"], reverse=True)
+
+        total_general = sum(f["monto_total"] for f in filas)
+        cantidad_general = sum(f["cantidad_total"] for f in filas)
+
+        return {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "id_vendedor": id_vendedor,
+            "id_producto": id_producto,
+            "filas": filas,
+            "total_general": total_general,
+            "cantidad_general": cantidad_general,
         }
 
     @staticmethod

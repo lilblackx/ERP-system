@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select, case
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -398,18 +398,11 @@ class PagoService:
         """
         require_permiso(session, id_usuario, "pagos", "ver")
         hoy = date.today()
-        # Desde migrations/0024_pagos_contado_multimetodo.sql, trg_factura_venta_cxc abre
-        # una CuentaPorCobrar tambien para facturas de CONTADO -- no porque haya algo que
-        # cobrar (nace con saldo_pendiente=0 / estado='pagada' en la misma transaccion),
-        # sino como vehiculo tecnico para poder registrar los PagoCobro de esa venta
-        # (requieren un id_cuenta_por_cobrar, ver app/db/models.py). Ese registro es
-        # relevante en el detalle de la factura (VentaService.obtener_factura), no en este
-        # listado de gestion de cobros -- filtrar por 'credito' evita que facturas de
-        # contado, sin nada pendiente de cobrar, aparezcan aca como si lo tuvieran.
+        # Query base para obtener todas las cuentas por cobrar
+        # Las cuentas por cobrar se generan tanto para facturas de crédito como de contado
         query = (
             session.query(CuentaPorCobrar)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
-            .filter(FacturaVenta.condicion_pago == "credito")
         )
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
@@ -745,11 +738,11 @@ class PagoService:
         hoy = date.today()
 
         # Query base para obtener todas las cuentas relevantes
+        # Las cuentas por cobrar se generan tanto para facturas de crédito como de contado
         query = (
             session.query(CuentaPorCobrar)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
-            .filter(FacturaVenta.condicion_pago == "credito")
         )
 
         if id_cliente:
@@ -796,6 +789,7 @@ class PagoService:
                         "cliente": cliente,
                         "saldo_total": Decimal("0.00"),
                         "saldo_favor": saldo_favor,
+                        "saldo_vencido": Decimal("0.00"),
                         "cuentas": [],
                         "fecha_vencimiento_mas_antigua": None,
                         "fecha_emision_mas_antigua_pendiente": None,
@@ -803,6 +797,10 @@ class PagoService:
 
                 clientes_deuda[id_cliente_key]["saldo_total"] += cuenta.saldo_pendiente
                 clientes_deuda[id_cliente_key]["cuentas"].append(cuenta)
+
+                # Calcular saldo vencido (solo cuentas vencidas)
+                if cuenta.fecha_vencimiento and cuenta.fecha_vencimiento < hoy and cuenta.estado in ("pendiente", "parcial"):
+                    clientes_deuda[id_cliente_key]["saldo_vencido"] += cuenta.saldo_pendiente
 
                 # Actualizar saldo_favor con el valor más alto encontrado (por si hay inconsistencias)
                 try:

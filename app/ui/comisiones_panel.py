@@ -557,6 +557,7 @@ class ComisionesPanel(QWidget):
         self.total_pendiente = Decimal("0.00")
         self.total_liberada = Decimal("0.00")
         self.solo_porcentaje_bcv = False
+        self.solo_sin_porcentaje_bcv = False
         # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
@@ -630,12 +631,17 @@ class ComisionesPanel(QWidget):
         self.chk_porcentaje_bcv.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.chk_porcentaje_bcv.stateChanged.connect(self._aplicar_filtro_estado)
 
+        self.chk_sin_porcentaje_bcv = QCheckBox("Solo en $")
+        self.chk_sin_porcentaje_bcv.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        self.chk_sin_porcentaje_bcv.stateChanged.connect(self._aplicar_filtro_estado)
+
         self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
 
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel, on_pdf=self.exportar_pdf)
 
         h.addStretch()
         h.addWidget(self.chk_porcentaje_bcv)
+        h.addWidget(self.chk_sin_porcentaje_bcv)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -752,10 +758,12 @@ class ComisionesPanel(QWidget):
     def _cargar_comisiones_propias(self, session: Session) -> None:
         try:
             self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+            self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
             comisiones = ComisionService.listar_mis_comisiones(
                 session,
                 self.usuario.id_usuario,
                 solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
             )
             self.comisiones_cargadas = comisiones
             self._aplicar_filtro_estado()
@@ -770,11 +778,13 @@ class ComisionesPanel(QWidget):
             session = self.session_factory()
             try:
                 self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+                self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
                 comisiones = ComisionService.listar_comisiones_vendedor(
                     session,
                     self.id_vendedor_actual,
                     id_usuario=self.usuario.id_usuario,
                     solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                    solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
                 )
                 self.comisiones_cargadas = comisiones
                 self._aplicar_filtro_estado()
@@ -785,9 +795,22 @@ class ComisionesPanel(QWidget):
                 session.close()
 
     def _aplicar_filtro_estado(self) -> None:
-        # Si el checkbox de porcentaje BCV cambió, recargar desde BD
-        if self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv:
+        # Los checkboxes son mutuamente excluyentes
+        if self.chk_porcentaje_bcv.isChecked() and self.chk_sin_porcentaje_bcv.isChecked():
+            # Si ambos están marcados, desmarcar el que cambió
+            if self.solo_porcentaje_bcv != self.chk_porcentaje_bcv.isChecked():
+                self.chk_sin_porcentaje_bcv.blockSignals(True)
+                self.chk_sin_porcentaje_bcv.setChecked(False)
+                self.chk_sin_porcentaje_bcv.blockSignals(False)
+            else:
+                self.chk_porcentaje_bcv.blockSignals(True)
+                self.chk_porcentaje_bcv.setChecked(False)
+                self.chk_porcentaje_bcv.blockSignals(False)
+
+        # Si algún checkbox de porcentaje BCV cambió, recargar desde BD
+        if self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv or self.chk_sin_porcentaje_bcv.isChecked() != self.solo_sin_porcentaje_bcv:
             self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+            self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
             session = self.session_factory()
             try:
                 if self.modo_gestion and self.id_vendedor_actual is not None:
@@ -796,6 +819,7 @@ class ComisionesPanel(QWidget):
                         self.id_vendedor_actual,
                         id_usuario=self.usuario.id_usuario,
                         solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                        solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
                     )
                 else:
                     # Modo "Mis Comisiones" - recargar con filtro de porcentaje BCV
@@ -803,6 +827,7 @@ class ComisionesPanel(QWidget):
                         session,
                         self.usuario.id_usuario,
                         solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                        solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
                     )
                 self.comisiones_cargadas = comisiones
             except Exception:
@@ -947,6 +972,10 @@ class ComisionesPanel(QWidget):
             "Por cobrar": f"${float(self.total_pendiente):,.2f}",
             "Liberada": f"${float(self.total_liberada):,.2f}",
         }
+        if self.solo_porcentaje_bcv:
+            filtros["Filtro"] = "Solo con porcentaje BCV"
+        elif self.solo_sin_porcentaje_bcv:
+            filtros["Filtro"] = "Solo en $"
         return filtros
 
     def _obtener_config_empresa(self, session: Session):

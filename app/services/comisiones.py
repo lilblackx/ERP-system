@@ -182,6 +182,7 @@ class ComisionService:
         estado_pago: str | None = None,
         id_usuario: int | None = None,
         solo_con_porcentaje_bcv: bool = False,
+        solo_sin_porcentaje_bcv: bool = False,
     ) -> list[ComisionFactura]:
         require_permiso(session, id_usuario, "comisiones", "ver")
         query = (
@@ -208,11 +209,21 @@ class ComisionService:
             )
             query = query.join(ComisionFactura.detalle).filter(subquery)
 
+        if solo_sin_porcentaje_bcv:
+            # Filtrar solo facturas que NO tienen cuenta BCV con porcentaje > 0 (comisiones en $)
+            from sqlalchemy import exists
+
+            subquery = exists().where(
+                CuentaPorCobrarBCV.id_factura == FacturaDetalle.id_factura,
+                CuentaPorCobrarBCV.porcentaje > 0,
+            )
+            query = query.join(ComisionFactura.detalle).filter(~subquery)
+
         return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
 
     @staticmethod
     def listar_mis_comisiones(
-        session: Session, id_usuario: int | None, solo_con_porcentaje_bcv: bool = False
+        session: Session, id_usuario: int | None, solo_con_porcentaje_bcv: bool = False, solo_sin_porcentaje_bcv: bool = False
     ) -> list[ComisionFactura]:
         """Retorna las comisiones del vendedor logueado. Requiere permiso reportes_comisiones:ver
         (distinto de comisiones:ver, que es para gestion/pago). El usuario debe tener un vendedor
@@ -244,6 +255,16 @@ class ComisionService:
                 CuentaPorCobrarBCV.porcentaje > 0,
             )
             query = query.join(ComisionFactura.detalle).filter(subquery)
+
+        if solo_sin_porcentaje_bcv:
+            # Filtrar solo facturas que NO tienen cuenta BCV con porcentaje > 0 (comisiones en $)
+            from sqlalchemy import exists
+
+            subquery = exists().where(
+                CuentaPorCobrarBCV.id_factura == FacturaDetalle.id_factura,
+                CuentaPorCobrarBCV.porcentaje > 0,
+            )
+            query = query.join(ComisionFactura.detalle).filter(~subquery)
 
         return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
 

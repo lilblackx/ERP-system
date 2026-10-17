@@ -1232,6 +1232,15 @@ class FacturaFormDialog(QDialog):
             self.dias_credito_custom_input.hide()
             self.lbl_autorizacion_dias.hide()
             self._actualizar_vencimiento_calculado()
+        # Asignar automáticamente el vendedor del cliente seleccionado
+        if cliente is not None and cliente.vendedor_cliente is not None:
+            self.vendedor_combo.blockSignals(True)
+            indice = self.vendedor_combo.findData(cliente.vendedor_cliente)
+            if indice >= 0:
+                self.vendedor_combo.setCurrentIndex(indice)
+            self.vendedor_combo.blockSignals(False)
+        # Deshabilitar el campo de vendedor cuando se selecciona un cliente
+        self.vendedor_combo.setEnabled(cliente is None)
         self._actualizar_alerta_credito()
 
     def _on_toggle_dias_configurados(self, checked: bool) -> None:

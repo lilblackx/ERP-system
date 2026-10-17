@@ -23,6 +23,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -238,8 +239,11 @@ class PagoCobroDialog(QDialog):
         layout.addWidget(lbl_saldo)
 
         # Mostrar saldo a favor del cliente (desde la tabla cuentas_por_cobrar)
-        if cliente and self.cuenta.saldo_favor > 0:
-            lbl_saldo_favor = QLabel(f"Saldo a favor: ${float(self.cuenta.saldo_favor):,.2f}")
+        saldo_favor_cuenta = getattr(self.cuenta, "saldo_favor", Decimal("0.00"))
+        if saldo_favor_cuenta is None:
+            saldo_favor_cuenta = Decimal("0.00")
+        if cliente and saldo_favor_cuenta > 0:
+            lbl_saldo_favor = QLabel(f"Saldo a favor: ${float(saldo_favor_cuenta):,.2f}")
             lbl_saldo_favor.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
             layout.addWidget(lbl_saldo_favor)
 
@@ -1086,7 +1090,7 @@ class DetalleClienteDialog(QDialog):
         session: Session,
         cliente,
         cuentas: list,
-        tasa_bcv: float | None,
+        tasa_paralelo: float | None,
         id_usuario: int | None,
         parent=None,
     ):
@@ -1094,9 +1098,12 @@ class DetalleClienteDialog(QDialog):
         self.session = session
         self.cliente = cliente
         self.cuentas = cuentas
-        self.tasa_bcv = tasa_bcv
+        self.tasa_paralelo = tasa_paralelo
         self.id_usuario = id_usuario
         self.se_realizo_cobro = False
+        self.ver_todas_facturas = False
+        self.pagina_actual = 0
+        self.filas_por_pagina = 20
 
         self.setWindowTitle(f"Detalle de Cuentas - {cliente.nombre_razon_social if cliente else 'Cliente'}")
         ajustar_tamano(self, 900, 600)
@@ -1133,9 +1140,52 @@ class DetalleClienteDialog(QDialog):
 
         root.addWidget(header)
 
+        # Filtros
+        filtros = QWidget()
+        filtros.setStyleSheet("background: transparent;")
+        filtros_layout = QHBoxLayout(filtros)
+        filtros_layout.setContentsMargins(0, 0, 0, 0)
+        filtros_layout.setSpacing(12)
+
+        self.chk_ver_todas = QCheckBox("Ver todas las facturas")
+        self.chk_ver_todas.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_DARK};")
+        self.chk_ver_todas.toggled.connect(self._on_ver_todas_toggled)
+        filtros_layout.addWidget(self.chk_ver_todas)
+        filtros_layout.addStretch()
+
+        root.addWidget(filtros)
+
         # Tabla de facturas
         self.tabla = self._crear_tabla_detalle()
         root.addWidget(self.tabla)
+
+        # Controles de paginación
+        paginacion = QWidget()
+        paginacion.setStyleSheet("background: transparent;")
+        paginacion_layout = QHBoxLayout(paginacion)
+        paginacion_layout.setContentsMargins(0, 0, 0, 0)
+        paginacion_layout.setSpacing(8)
+
+        self.lbl_paginacion = QLabel("Página 1 de 1")
+        self.lbl_paginacion.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        paginacion_layout.addWidget(self.lbl_paginacion)
+        paginacion_layout.addStretch()
+
+        self.btn_anterior = QPushButton("Anterior")
+        self.btn_anterior.setObjectName("BtnSecondary")
+        self.btn_anterior.setFixedHeight(30)
+        self.btn_anterior.setEnabled(False)
+        self.btn_anterior.clicked.connect(self._pagina_anterior)
+        paginacion_layout.addWidget(self.btn_anterior)
+
+        self.btn_siguiente = QPushButton("Siguiente")
+        self.btn_siguiente.setObjectName("BtnSecondary")
+        self.btn_siguiente.setFixedHeight(30)
+        self.btn_siguiente.setEnabled(False)
+        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+        paginacion_layout.addWidget(self.btn_siguiente)
+
+        root.addWidget(paginacion)
 
         # Footer con botones
         footer = QHBoxLayout()
@@ -1199,10 +1249,29 @@ class DetalleClienteDialog(QDialog):
         return tabla
 
     def _poblar_tabla_detalle(self) -> None:
-        self.tabla.setRowCount(len(self.cuentas))
+        # Filtrar cuentas: si no se marcan "ver todas", ocultar las pagadas
+        cuentas_a_mostrar = self.cuentas
+        if not self.ver_todas_facturas:
+            # Mostrar solo pendientes, parciales y vencidas (no pagadas)
+            cuentas_a_mostrar = [c for c in self.cuentas if c.estado in ("pendiente", "parcial", "vencida")]
+
+        # Calcular paginación
+        total_filas = len(cuentas_a_mostrar)
+        total_paginas = (total_filas + self.filas_por_pagina - 1) // self.filas_por_pagina if total_filas > 0 else 1
+
+        # Ajustar página actual si es necesario
+        if self.pagina_actual >= total_paginas:
+            self.pagina_actual = max(0, total_paginas - 1)
+
+        # Calcular índices de la página actual
+        inicio = self.pagina_actual * self.filas_por_pagina
+        fin = min(inicio + self.filas_por_pagina, total_filas)
+        cuentas_pagina = cuentas_a_mostrar[inicio:fin]
+
+        self.tabla.setRowCount(len(cuentas_pagina))
 
         hoy = date.today()
-        for fila, cuenta in enumerate(self.cuentas):
+        for fila, cuenta in enumerate(cuentas_pagina):
             factura = cuenta.factura
             self.tabla.setItem(fila, 0, QTableWidgetItem(str(cuenta.id_cuenta_por_cobrar)))
             self.tabla.setItem(fila, 1, QTableWidgetItem(factura.numero_factura if factura else ""))
@@ -1234,6 +1303,11 @@ class DetalleClienteDialog(QDialog):
             color = COLORES_ESTADO_CXC.get(estado_visual, COLOR_TEXT_MUTED)
             self.tabla.setCellWidget(fila, 5, EstadoBadge(estado_visual.capitalize(), color))
 
+        # Actualizar controles de paginación
+        self.lbl_paginacion.setText(f"Página {self.pagina_actual + 1} de {total_paginas}")
+        self.btn_anterior.setEnabled(self.pagina_actual > 0)
+        self.btn_siguiente.setEnabled(self.pagina_actual < total_paginas - 1)
+
         # Calcular y mostrar saldo a favor del cliente (desde la primera cuenta por cobrar)
         saldo_favor = Decimal("0.00")
         if self.cliente:
@@ -1259,6 +1333,29 @@ class DetalleClienteDialog(QDialog):
         else:
             self.lbl_saldo_favor.setText("")
 
+    def _on_ver_todas_toggled(self, checked: bool) -> None:
+        """Maneja el cambio del checkbox 'Ver todas las facturas'."""
+        self.ver_todas_facturas = checked
+        self.pagina_actual = 0  # Reiniciar a la primera página
+        # Actualizar el título según el estado del checkbox
+        nombre_cliente = self.cliente.nombre_razon_social if self.cliente else "Cliente"
+        if checked:
+            self.setWindowTitle(f"Detalle de Cuentas - {nombre_cliente} (Todas las facturas)")
+        else:
+            self.setWindowTitle(f"Detalle de Cuentas - {nombre_cliente}")
+        self._poblar_tabla_detalle()
+
+    def _pagina_anterior(self) -> None:
+        """Navega a la página anterior."""
+        if self.pagina_actual > 0:
+            self.pagina_actual -= 1
+            self._poblar_tabla_detalle()
+
+    def _pagina_siguiente(self) -> None:
+        """Navega a la página siguiente."""
+        self.pagina_actual += 1
+        self._poblar_tabla_detalle()
+
     def _on_double_click_cuenta(self) -> None:
         """Maneja el doble clic en una cuenta para abrir el diálogo de cobro."""
         filas = self.tabla.selectionModel().selectedRows()
@@ -1274,7 +1371,7 @@ class DetalleClienteDialog(QDialog):
         self._cobrar_cuenta(id_cuenta)
 
     def _on_double_click_factura_detalle(self) -> None:
-        """Maneja el doble clic en una factura para mostrar el detalle de la factura."""
+        """Maneja el doble clic en una factura para abrir el diálogo de pago/abono."""
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
             return
@@ -1285,26 +1382,7 @@ class DetalleClienteDialog(QDialog):
             return
 
         id_cuenta = int(item.text())
-        cuenta = self.session.get(CuentaPorCobrar, id_cuenta)
-        if cuenta and cuenta.factura:
-            from app.services.ventas import VentaService
-            from app.ui.factura_detalle_dialog import FacturaDetalleDialog
-
-            try:
-                # Usar la sesión existente para obtener los datos
-                datos = VentaService.obtener_factura(self.session, cuenta.factura.id_factura, self.id_usuario)
-                dialogo = FacturaDetalleDialog(
-                    datos,
-                    self.session,
-                    self.id_usuario,
-                    parent=self,
-                )
-                dialogo.exec()
-            except PermisoDenegadoError:
-                MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
-            except Exception as e:
-                logger.exception("Error al mostrar detalle de factura")
-                MessageBox.warning(self, "Error", f"No se pudo mostrar el detalle de la factura: {str(e)}")
+        self._cobrar_cuenta(id_cuenta)
 
     def _cobrar_cuenta(self, id_cuenta: int) -> None:
         """Abre el diálogo de cobro para una cuenta específica."""
@@ -1321,7 +1399,7 @@ class DetalleClienteDialog(QDialog):
                 self.session,
                 self.id_usuario,
                 cuenta,
-                tasa_bcv=self.tasa_bcv,
+                tasa_bcv=self.tasa_paralelo,
                 parent=self,
             )
             if dialogo.exec() and dialogo.pago_creado is not None:
@@ -1358,7 +1436,7 @@ class DetalleClienteDialog(QDialog):
                 self.session,
                 self.cliente,
                 self.id_usuario,
-                tasa_bcv=self.tasa_bcv,
+                tasa_bcv=self.tasa_paralelo,
                 parent=self,
             )
             if dialogo.exec() and dialogo.abono_aplicado is not None:
@@ -1385,7 +1463,7 @@ class CuentasPorCobrarPanel(QWidget):
         self.total_paginas = 1
         self.texto_busqueda = ""
         self.filtro_vendedor = None
-        self._tasa_bcv: float | None = None
+        self._tasa_paralelo: float | None = None
         self.setObjectName("ContentArea")
         self._setup_ui()
         self._cargar_vendedores()
@@ -1432,7 +1510,7 @@ class CuentasPorCobrarPanel(QWidget):
             " padding: 3px 10px;"
         )
 
-        # Tasa BCV vigente -- mismo patron informativo que factura_form_dialog.py: se
+        # Tasa paralelo vigente -- mismo patron informativo que factura_form_dialog.py: se
         # oculta si el usuario no tiene 'tasas'/'ver' o no hay ninguna tasa registrada,
         # nunca bloquea el panel. Da contexto a los montos en Bs que se agregan a la
         # tabla/dialogo de cobro mas abajo.
@@ -1497,6 +1575,7 @@ class CuentasPorCobrarPanel(QWidget):
             "Cliente",
             "Saldo Pendiente",
             "Saldo a Favor",
+            "Saldo Vencido",
             "Días",
             "Fecha Factura",
             "Estado",
@@ -1509,8 +1588,9 @@ class CuentasPorCobrarPanel(QWidget):
                 2: Qt.AlignmentFlag.AlignRight,
                 3: Qt.AlignmentFlag.AlignRight,
                 4: Qt.AlignmentFlag.AlignRight,
-                5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignCenter,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignCenter,
             },
         )
         return self.tabla
@@ -1610,7 +1690,7 @@ class CuentasPorCobrarPanel(QWidget):
     # ── Logica de datos ────────────────────────────────────────────────────
 
     def _cargar_tasa_actual(self, session) -> float | None:
-        """Tasa BCV vigente, solo para mostrar el equivalente en Bs -- nunca bloquea el
+        """Tasa paralelo vigente, solo para mostrar el equivalente en Bs -- nunca bloquea el
         panel. Mismo patron que factura_form_dialog.py::_cargar_tasa_vigente(): si el
         usuario no tiene 'tasas'/'ver' o no hay ninguna tasa registrada, se oculta el
         indicador y las columnas en Bs quedan vacías en vez de romper la carga."""
@@ -1623,17 +1703,17 @@ class CuentasPorCobrarPanel(QWidget):
             self.lbl_tasa.setVisible(False)
             return None
         fecha = tasa["fecha_tasa"].strftime("%d/%m/%Y")
-        tasa_bcv = _as_decimal(tasa["tasa_bcv"])
-        self.lbl_tasa.setText(f"Tasa BCV: {float(tasa_bcv):,.2f} Bs/USD ({fecha})")
+        tasa_paralelo = _as_decimal(tasa["tasa_paralelo"])
+        self.lbl_tasa.setText(f"Tasa paralelo: {float(tasa_paralelo):,.2f} Bs/USD ({fecha})")
         self.lbl_tasa.setVisible(True)
-        return float(tasa_bcv)
+        return float(tasa_paralelo)
 
     def cargar_cuentas(self) -> None:
         session = self.session_factory()
         try:
             self.texto_busqueda = self.buscar_input.text().strip()
             self.filtro_vendedor = self.vendedor_combo.currentData()
-            self._tasa_bcv = self._cargar_tasa_actual(session)
+            self._tasa_paralelo = self._cargar_tasa_actual(session)
 
             resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(
                 session,
@@ -1719,21 +1799,32 @@ class CuentasPorCobrarPanel(QWidget):
                 item_saldo_favor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 3, item_saldo_favor)
 
+            # Saldo vencido del cliente
+            saldo_vencido = cliente_data.get("saldo_vencido", Decimal("0.00"))
+            saldo_vencido_decimal = _as_decimal(saldo_vencido)
+            item_saldo_vencido = QTableWidgetItem(f"${float(saldo_vencido_decimal):,.2f}")
+            if saldo_vencido_decimal > 0:
+                item_saldo_vencido.setForeground(QColor(COLOR_DANGER))
+            else:
+                item_saldo_vencido.setForeground(QColor(COLOR_TEXT_MUTED))
+            item_saldo_vencido.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 4, item_saldo_vencido)
+
             # Días transcurridos desde la factura más vieja pendiente
             item_dias = QTableWidgetItem(str(dias_transcurridos))
             item_dias.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(fila, 4, item_dias)
+            self.tabla.setItem(fila, 5, item_dias)
 
             # Fecha de la factura más vieja pendiente
             fecha_factura = (
                 fecha_emision_mas_antigua.strftime("%d/%m/%Y") if fecha_emision_mas_antigua else "Sin definir"
             )
-            self.tabla.setItem(fila, 5, QTableWidgetItem(fecha_factura))
+            self.tabla.setItem(fila, 6, QTableWidgetItem(fecha_factura))
 
             # Determinar estado general del cliente basado en sus cuentas
             estado_general = self._determinar_estado_cliente(cuentas)
             color = COLORES_ESTADO_CXC.get(estado_general, COLOR_TEXT_MUTED)
-            self.tabla.setCellWidget(fila, 6, EstadoBadge(estado_general.capitalize(), color))
+            self.tabla.setCellWidget(fila, 7, EstadoBadge(estado_general.capitalize(), color))
 
             saldo_total += float(saldo_total_cliente)
 
@@ -1809,10 +1900,12 @@ class CuentasPorCobrarPanel(QWidget):
         """Muestra el diálogo con el detalle de facturas del cliente."""
         session = self.session_factory()
         try:
-            # Obtener todas las cuentas por cobrar del cliente
+            # Obtener todas las cuentas por cobrar del cliente (sin paginación)
             resultado = PagoService.listar_cuentas_por_cobrar(
                 session,
                 id_cliente=id_cliente,
+                pagina=1,
+                por_pagina=10000,  # Traer todas las facturas
                 id_usuario=self.usuario.id_usuario,
             )
 
@@ -1830,7 +1923,7 @@ class CuentasPorCobrarPanel(QWidget):
                 session,
                 cliente,
                 cuentas,
-                self._tasa_bcv,
+                self._tasa_paralelo,
                 self.usuario.id_usuario,
                 parent=self,
             )

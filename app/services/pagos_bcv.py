@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, case
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
@@ -397,6 +397,13 @@ class PagoBCVService:
                 func.min(CuentaPorCobrarBCV.fecha_vencimiento).label("fecha_vencimiento_min"),
                 func.min(CuentaPorCobrarBCV.fecha_emision).label("fecha_emision_min"),
                 func.min(CuentaPorCobrarBCV.dias_credito).label("dias_credito_min"),
+                # Suma de saldos vencidos (solo cuentas vencidas)
+                func.sum(
+                    case(
+                        (CuentaPorCobrarBCV.fecha_vencimiento < hoy, CuentaPorCobrarBCV.saldo_pendiente),
+                        else_=0,
+                    )
+                ).label("saldo_vencido_bcv"),
             )
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
@@ -454,6 +461,7 @@ class PagoBCVService:
             # Crear objeto simple con los datos agrupados
             saldo_pendiente = Decimal(str(row.saldo_pendiente_total)) if row.saldo_pendiente_total else Decimal("0.00")
             saldo_favor = Decimal(str(row.saldo_favor_total)) if row.saldo_favor_total else Decimal("0.00")
+            saldo_vencido = Decimal(str(row.saldo_vencido_bcv)) if row.saldo_vencido_bcv else Decimal("0.00")
 
             item = type(
                 "obj",
@@ -463,6 +471,7 @@ class PagoBCVService:
                     "nombre_cliente": row.nombre_razon_social,
                     "saldo_pendiente": saldo_pendiente,
                     "saldo_favor": saldo_favor,
+                    "saldo_vencido_bcv": saldo_vencido,
                     "cantidad_cuentas": row.cantidad_cuentas,
                     "fecha_vencimiento": fecha_venc_min,
                     "fecha_emision": row.fecha_emision_min,

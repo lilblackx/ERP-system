@@ -266,8 +266,10 @@ class CajaCierreDialog(QDialog):
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.setWordWrap(True)  # Permitir ajuste de texto
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         alinear_encabezados(
@@ -275,8 +277,8 @@ class CajaCierreDialog(QDialog):
             {
                 0: Qt.AlignmentFlag.AlignLeft,
                 1: Qt.AlignmentFlag.AlignLeft,
-                2: Qt.AlignmentFlag.AlignLeft,
-                3: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                3: Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
             },
         )
         return self.tabla
@@ -315,6 +317,9 @@ class CajaCierreDialog(QDialog):
             item_monto = QTableWidgetItem(f"$ {mov.monto_movimiento or 0:,.2f}")
             item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_monto)
+
+            # Ajustar altura de la fila para mostrar toda la descripción
+            self.tabla.resizeRowToContents(fila)
 
         if not movimientos:
             self.btn_cerrar.setText("Confirmar Cierre de Turno (sin movimientos)")
