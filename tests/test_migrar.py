@@ -147,3 +147,57 @@ def test_verificar_migraciones_al_dia_no_modifica_nada(test_engine, tmp_path):
     with test_engine.connect() as connection:
         existe = connection.execute(text("SELECT OBJECT_ID(N'dbo.schema_migrations', N'U')")).scalar()
     assert existe is None
+
+
+# --- errores dentro de un batch ----------------------------------------------------------
+
+
+def test_un_error_despues_de_un_print_aborta_la_migracion_y_no_la_registra(test_engine, tmp_path):
+    """Con connection.execute(text(...)) un error posterior a un PRINT no llegaba como excepcion:
+    la migracion quedaba marcada como aplicada con el schema a medias (le paso a la 0073)."""
+    _limpiar_schema_migrations(test_engine)
+    (tmp_path / "0001_falla_despues_de_print.sql").write_text(
+        "PRINT 'empezando';\nSELECT 1 / 0;\nPRINT 'no deberia llegar aca';\nGO\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Exception, match="zero"):
+        aplicar_migraciones(motor=test_engine, migrations_dir=tmp_path)
+
+    with test_engine.connect() as connection:
+        versiones = {fila[0] for fila in connection.execute(text("SELECT [version] FROM dbo.schema_migrations"))}
+    assert "0001_falla_despues_de_print.sql" not in versiones
+
+
+def test_un_error_en_un_statement_intermedio_del_batch_tambien_se_propaga(test_engine, tmp_path):
+    _limpiar_schema_migrations(test_engine)
+    (tmp_path / "0001_falla_en_el_medio.sql").write_text(
+        "ALTER TABLE dbo.tabla_que_no_existe DROP CONSTRAINT nombre_que_no_existe;\nPRINT 'sigue';\nGO\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Exception, match="tabla_que_no_existe"):
+        aplicar_migraciones(motor=test_engine, migrations_dir=tmp_path)
+
+
+def test_la_secuencia_barra_dos_puntos_llega_como_dos_puntos_literal(test_engine, tmp_path):
+    """Varias migraciones escriben \: para que SQLAlchemy no lo tome por un parametro; el
+    servidor debe recibir ':' sin la barra."""
+    _limpiar_schema_migrations(test_engine)
+    (tmp_path / "0001_dos_puntos.sql").write_text(
+        "CREATE TABLE dbo.zz_dos_puntos ([valor] VARCHAR(20) NOT NULL);\nGO\n"
+        "INSERT INTO dbo.zz_dos_puntos ([valor]) VALUES ('12\:30');\nGO\n",
+        encoding="utf-8",
+    )
+    try:
+        aplicar_migraciones(motor=test_engine, migrations_dir=tmp_path)
+
+        with test_engine.connect() as connection:
+            valor = connection.execute(text("SELECT [valor] FROM dbo.zz_dos_puntos")).scalar()
+        assert valor == "12:30"
+    finally:
+        with test_engine.connect() as connection:
+            connection.execute(
+                text("IF OBJECT_ID(N'dbo.zz_dos_puntos', N'U') IS NOT NULL DROP TABLE dbo.zz_dos_puntos")
+            )
+            connection.commit()

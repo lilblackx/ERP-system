@@ -33,10 +33,29 @@ def _contiene_alter_database(contenido_sql: str) -> bool:
 
 
 def _ejecutar_batches(connection, contenido_sql: str) -> None:
+    """Corre cada batch (separados por GO) por el cursor del driver y lo recorre completo.
+
+    No se usa connection.execute(text(batch)): cuando un batch emite un PRINT (o cualquier
+    resultado) antes de fallar, pyodbc solo levanta el error del statement que fallo al avanzar
+    de result set, cosa que SQLAlchemy no hace -- el error se perdia sin excepcion, la migracion
+    se registraba como aplicada y el schema quedaba a medias (asi paso con la 0073). Aca se
+    avanza con nextset() hasta el final para que cualquier error del batch llegue como excepcion.
+    text() ademas convertia la secuencia barra-invertida + ':' de los archivos en un ':' literal
+    (para no confundirlo con un parametro); se replica eso para no cambiar el SQL que llega al
+    servidor."""
+    if not connection.in_transaction():
+        connection.begin()
     for batch in re.split(r"(?im)^\s*GO\s*$", contenido_sql):
         batch = batch.strip()
-        if batch:
-            connection.execute(text(batch))
+        if not batch:
+            continue
+        cursor = connection.connection.cursor()
+        try:
+            cursor.execute(batch.replace("\\:", ":"))
+            while cursor.nextset():
+                pass
+        finally:
+            cursor.close()
 
 
 def _ejecutar_archivo_alter_database(motor, contenido_sql: str):

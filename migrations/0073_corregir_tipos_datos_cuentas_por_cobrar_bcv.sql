@@ -62,7 +62,14 @@ BEGIN
         -- Cambiar tipo de id_cuenta_por_cobrar (requiere recrear la PK)
         IF @id_cuenta_tipo = 'int'
         BEGIN
-            ALTER TABLE dbo.cuentas_por_cobrar_bcv DROP CONSTRAINT PK_cuentas_por_cobrar_bcv;
+            -- La PK se creo sin nombre en la 0071 (SQL Server le pone uno generado, p. ej.
+            -- PK__cuentas___988EC4DB...), asi que se busca el nombre real en vez de asumirlo.
+            DECLARE @pk_nombre SYSNAME = (
+                SELECT name FROM sys.key_constraints
+                WHERE parent_object_id = OBJECT_ID('dbo.cuentas_por_cobrar_bcv') AND type = 'PK'
+            );
+            DECLARE @pk_sql NVARCHAR(400) = N'ALTER TABLE dbo.cuentas_por_cobrar_bcv DROP CONSTRAINT ' + QUOTENAME(@pk_nombre);
+            EXEC (@pk_sql);
             PRINT 'Primary key eliminada para modificar id_cuenta_por_cobrar.';
             
             ALTER TABLE dbo.cuentas_por_cobrar_bcv ALTER COLUMN id_cuenta_por_cobrar BIGINT NOT NULL;

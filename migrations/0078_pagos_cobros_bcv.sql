@@ -12,92 +12,79 @@
 --   banco_movimientos/caja_movimientos   id_pago_cobro_bcv: de que pago BCV viene el movimiento,
 --                                        para mostrarlo como "Cliente" y no como "Manual"
 
--- Eliminar tabla pagos_cobros_bcv si existe (por si falló anteriormente)
-IF OBJECT_ID(N'dbo.pagos_cobros_bcv', N'U') IS NOT NULL
+-- Reparacion previa: cuentas_por_cobrar_bcv con columnas INT en vez de BIGINT.
+--
+-- La 0071 se creo primero con INT y despues se edito a BIGINT; las bases que aplicaron la
+-- version vieja quedaron en INT y la 0073 debia corregirlas. Pero la 0073 asumia que la PK se
+-- llamaba PK_cuentas_por_cobrar_bcv cuando es anonima (nombre generado por SQL Server), el
+-- DROP CONSTRAINT fallaba sin que el runner se enterara, la 0073 quedaba registrada como
+-- aplicada y la tabla seguia en INT. Aca la FK de pagos_cobros_bcv no se puede crear contra
+-- una columna INT, asi que se repara antes. Es idempotente y no hace nada si ya esta en
+-- BIGINT: tolera tambien un estado intermedio (FKs o indices ya borrados o ya recreados).
+IF OBJECT_ID(N'dbo.cuentas_por_cobrar_bcv', N'U') IS NOT NULL
+AND EXISTS (
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'cuentas_por_cobrar_bcv'
+      AND COLUMN_NAME IN ('id_cuenta_por_cobrar', 'id_factura', 'creado_por')
+      AND DATA_TYPE = 'int'
+)
 BEGIN
-    -- Eliminar foreign keys que apunten a esta tabla
-    IF EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_banco_movimientos_pago_cobro_bcv')
-        ALTER TABLE dbo.banco_movimientos DROP CONSTRAINT FK_banco_movimientos_pago_cobro_bcv;
+    IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_cuentas_por_cobrar_bcv_factura')
+        ALTER TABLE dbo.cuentas_por_cobrar_bcv DROP CONSTRAINT FK_cuentas_por_cobrar_bcv_factura;
 
-    IF EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_caja_movimientos_pago_cobro_bcv')
-        ALTER TABLE dbo.caja_movimientos DROP CONSTRAINT FK_caja_movimientos_pago_cobro_bcv;
+    IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_cuentas_por_cobrar_bcv_usuario')
+        ALTER TABLE dbo.cuentas_por_cobrar_bcv DROP CONSTRAINT FK_cuentas_por_cobrar_bcv_usuario;
 
-    DROP TABLE dbo.pagos_cobros_bcv;
-    PRINT 'Tabla pagos_cobros_bcv eliminada para recrearla correctamente.';
-END
-GO
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_cuentas_por_cobrar_bcv_factura' AND object_id = OBJECT_ID('dbo.cuentas_por_cobrar_bcv'))
+        DROP INDEX IX_cuentas_por_cobrar_bcv_factura ON dbo.cuentas_por_cobrar_bcv;
 
--- Asegurar que cuentas_por_cobrar_bcv tiene el tipo de datos correcto antes de crear pagos_cobros_bcv
--- Esto es necesario porque algunas instancias pueden tener la tabla con INT en lugar de BIGINT
-IF EXISTS (SELECT * FROM sys.tables WHERE name = 'cuentas_por_cobrar_bcv')
-BEGIN
-    DECLARE @id_cuenta_tipo VARCHAR(50)
-    DECLARE @id_factura_tipo VARCHAR(50)
-    DECLARE @creado_por_tipo VARCHAR(50)
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_cuentas_por_cobrar_bcv_estado' AND object_id = OBJECT_ID('dbo.cuentas_por_cobrar_bcv'))
+        DROP INDEX IX_cuentas_por_cobrar_bcv_estado ON dbo.cuentas_por_cobrar_bcv;
 
-    SELECT @id_cuenta_tipo = DATA_TYPE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'cuentas_por_cobrar_bcv' AND COLUMN_NAME = 'id_cuenta_por_cobrar'
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_cuentas_por_cobrar_bcv_vencimiento' AND object_id = OBJECT_ID('dbo.cuentas_por_cobrar_bcv'))
+        DROP INDEX IX_cuentas_por_cobrar_bcv_vencimiento ON dbo.cuentas_por_cobrar_bcv;
 
-    SELECT @id_factura_tipo = DATA_TYPE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'cuentas_por_cobrar_bcv' AND COLUMN_NAME = 'id_factura'
-
-    SELECT @creado_por_tipo = DATA_TYPE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'cuentas_por_cobrar_bcv' AND COLUMN_NAME = 'creado_por'
-
-    IF @id_cuenta_tipo = 'int' OR @id_factura_tipo = 'int' OR @creado_por_tipo = 'int'
+    IF EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'cuentas_por_cobrar_bcv'
+          AND COLUMN_NAME = 'id_cuenta_por_cobrar' AND DATA_TYPE = 'int'
+    )
     BEGIN
-        PRINT 'Corrigiendo tipos de datos en cuentas_por_cobrar_bcv antes de crear pagos_cobros_bcv...';
-
-        IF EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_cuentas_por_cobrar_bcv_factura')
-            ALTER TABLE dbo.cuentas_por_cobrar_bcv DROP CONSTRAINT FK_cuentas_por_cobrar_bcv_factura;
-
-        IF EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_cuentas_por_cobrar_bcv_usuario')
-            ALTER TABLE dbo.cuentas_por_cobrar_bcv DROP CONSTRAINT FK_cuentas_por_cobrar_bcv_usuario;
-
-        IF EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_cuentas_por_cobrar_bcv_factura' AND object_id = OBJECT_ID('dbo.cuentas_por_cobrar_bcv'))
-            DROP INDEX IX_cuentas_por_cobrar_bcv_factura ON dbo.cuentas_por_cobrar_bcv;
-
-        IF EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_cuentas_por_cobrar_bcv_estado' AND object_id = OBJECT_ID('dbo.cuentas_por_cobrar_bcv'))
-            DROP INDEX IX_cuentas_por_cobrar_bcv_estado ON dbo.cuentas_por_cobrar_bcv;
-
-        IF EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_cuentas_por_cobrar_bcv_vencimiento' AND object_id = OBJECT_ID('dbo.cuentas_por_cobrar_bcv'))
-            DROP INDEX IX_cuentas_por_cobrar_bcv_vencimiento ON dbo.cuentas_por_cobrar_bcv;
-
-        IF @id_cuenta_tipo = 'int'
-        BEGIN
-            ALTER TABLE dbo.cuentas_por_cobrar_bcv DROP CONSTRAINT PK_cuentas_por_cobrar_bcv;
-            ALTER TABLE dbo.cuentas_por_cobrar_bcv ALTER COLUMN id_cuenta_por_cobrar BIGINT NOT NULL;
-            ALTER TABLE dbo.cuentas_por_cobrar_bcv ADD CONSTRAINT PK_cuentas_por_cobrar_bcv PRIMARY KEY (id_cuenta_por_cobrar);
-        END
-
-        IF @id_factura_tipo = 'int'
-            ALTER TABLE dbo.cuentas_por_cobrar_bcv ALTER COLUMN id_factura BIGINT NOT NULL;
-
-        IF @creado_por_tipo = 'int'
-            ALTER TABLE dbo.cuentas_por_cobrar_bcv ALTER COLUMN creado_por BIGINT NOT NULL;
-
-        ALTER TABLE dbo.cuentas_por_cobrar_bcv
-        ADD CONSTRAINT FK_cuentas_por_cobrar_bcv_factura
-            FOREIGN KEY (id_factura) REFERENCES dbo.factura_venta(id_factura);
-
-        ALTER TABLE dbo.cuentas_por_cobrar_bcv
-        ADD CONSTRAINT FK_cuentas_por_cobrar_bcv_usuario
-            FOREIGN KEY (creado_por) REFERENCES dbo.usuarios(id_usuario);
-
-        CREATE INDEX IX_cuentas_por_cobrar_bcv_factura
-            ON dbo.cuentas_por_cobrar_bcv(id_factura);
-
-        CREATE INDEX IX_cuentas_por_cobrar_bcv_estado
-            ON dbo.cuentas_por_cobrar_bcv(estado);
-
-        CREATE INDEX IX_cuentas_por_cobrar_bcv_vencimiento
-            ON dbo.cuentas_por_cobrar_bcv(fecha_vencimiento);
-
-        PRINT 'Tipos de datos corregidos en cuentas_por_cobrar_bcv.';
+        DECLARE @pk_nombre SYSNAME = (
+            SELECT name FROM sys.key_constraints
+            WHERE parent_object_id = OBJECT_ID('dbo.cuentas_por_cobrar_bcv') AND type = 'PK'
+        );
+        DECLARE @pk_sql NVARCHAR(400) = N'ALTER TABLE dbo.cuentas_por_cobrar_bcv DROP CONSTRAINT ' + QUOTENAME(@pk_nombre);
+        EXEC (@pk_sql);
+        ALTER TABLE dbo.cuentas_por_cobrar_bcv ALTER COLUMN id_cuenta_por_cobrar BIGINT NOT NULL;
+        ALTER TABLE dbo.cuentas_por_cobrar_bcv ADD CONSTRAINT PK_cuentas_por_cobrar_bcv PRIMARY KEY (id_cuenta_por_cobrar);
     END
+
+    IF EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'cuentas_por_cobrar_bcv'
+          AND COLUMN_NAME = 'id_factura' AND DATA_TYPE = 'int'
+    )
+        ALTER TABLE dbo.cuentas_por_cobrar_bcv ALTER COLUMN id_factura BIGINT NOT NULL;
+
+    IF EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'cuentas_por_cobrar_bcv'
+          AND COLUMN_NAME = 'creado_por' AND DATA_TYPE = 'int'
+    )
+        ALTER TABLE dbo.cuentas_por_cobrar_bcv ALTER COLUMN creado_por BIGINT NOT NULL;
+
+    ALTER TABLE dbo.cuentas_por_cobrar_bcv
+    ADD CONSTRAINT FK_cuentas_por_cobrar_bcv_factura
+        FOREIGN KEY (id_factura) REFERENCES dbo.factura_venta(id_factura);
+
+    ALTER TABLE dbo.cuentas_por_cobrar_bcv
+    ADD CONSTRAINT FK_cuentas_por_cobrar_bcv_usuario
+        FOREIGN KEY (creado_por) REFERENCES dbo.usuarios(id_usuario);
+
+    CREATE INDEX IX_cuentas_por_cobrar_bcv_factura ON dbo.cuentas_por_cobrar_bcv(id_factura);
+    CREATE INDEX IX_cuentas_por_cobrar_bcv_estado ON dbo.cuentas_por_cobrar_bcv(estado);
+    CREATE INDEX IX_cuentas_por_cobrar_bcv_vencimiento ON dbo.cuentas_por_cobrar_bcv(fecha_vencimiento);
 END
 GO
 
@@ -132,24 +119,6 @@ BEGIN
 END
 GO
 
--- Eliminar columnas de pagos_cobros_bcv si ya existen (por si falló anteriormente)
-IF COL_LENGTH('dbo.banco_movimientos', 'id_pago_cobro_bcv') IS NOT NULL
-BEGIN
-    IF EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_banco_movimientos_pago_cobro_bcv')
-        ALTER TABLE dbo.banco_movimientos DROP CONSTRAINT FK_banco_movimientos_pago_cobro_bcv;
-    ALTER TABLE dbo.banco_movimientos DROP COLUMN id_pago_cobro_bcv;
-END
-GO
-
-IF COL_LENGTH('dbo.caja_movimientos', 'id_pago_cobro_bcv') IS NOT NULL
-BEGIN
-    IF EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_caja_movimientos_pago_cobro_bcv')
-        ALTER TABLE dbo.caja_movimientos DROP CONSTRAINT FK_caja_movimientos_pago_cobro_bcv;
-    ALTER TABLE dbo.caja_movimientos DROP COLUMN id_pago_cobro_bcv;
-END
-GO
-
--- Agregar columnas de pagos_cobros_bcv
 IF COL_LENGTH('dbo.banco_movimientos', 'id_pago_cobro_bcv') IS NULL
 	ALTER TABLE dbo.banco_movimientos ADD [id_pago_cobro_bcv] BIGINT NULL
 		CONSTRAINT FK_banco_movimientos_pago_cobro_bcv REFERENCES dbo.pagos_cobros_bcv([id_pago_cobro_bcv]);
