@@ -808,7 +808,10 @@ class ComisionesPanel(QWidget):
                 self.chk_porcentaje_bcv.blockSignals(False)
 
         # Si algún checkbox de porcentaje BCV cambió, recargar desde BD
-        if self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv or self.chk_sin_porcentaje_bcv.isChecked() != self.solo_sin_porcentaje_bcv:
+        if (
+            self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv
+            or self.chk_sin_porcentaje_bcv.isChecked() != self.solo_sin_porcentaje_bcv
+        ):
             self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
             self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
             session = self.session_factory()

@@ -1783,7 +1783,9 @@ class CuentasPorCobrarBCVPanel(QWidget):
             saldo_vencido_text = f"${float(saldo_vencido):,.2f}"
             if self._tasa_bcv:
                 tasa_bcv = float(self._tasa_bcv) if not isinstance(self._tasa_bcv, float) else self._tasa_bcv
-                saldo_vencido_text = f"${float(saldo_vencido):,.2f} / Bs {float(saldo_vencido * Decimal(str(tasa_bcv))):,.2f}"
+                saldo_vencido_text = (
+                    f"${float(saldo_vencido):,.2f} / Bs {float(saldo_vencido * Decimal(str(tasa_bcv))):,.2f}"
+                )
             self.tabla.setItem(fila, 4, QTableWidgetItem(saldo_vencido_text))
 
             # DÍAS (días de crédito)

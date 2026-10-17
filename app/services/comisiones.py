@@ -223,7 +223,10 @@ class ComisionService:
 
     @staticmethod
     def listar_mis_comisiones(
-        session: Session, id_usuario: int | None, solo_con_porcentaje_bcv: bool = False, solo_sin_porcentaje_bcv: bool = False
+        session: Session,
+        id_usuario: int | None,
+        solo_con_porcentaje_bcv: bool = False,
+        solo_sin_porcentaje_bcv: bool = False,
     ) -> list[ComisionFactura]:
         """Retorna las comisiones del vendedor logueado. Requiere permiso reportes_comisiones:ver
         (distinto de comisiones:ver, que es para gestion/pago). El usuario debe tener un vendedor

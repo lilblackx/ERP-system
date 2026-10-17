@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select, case
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -400,10 +400,7 @@ class PagoService:
         hoy = date.today()
         # Query base para obtener todas las cuentas por cobrar
         # Las cuentas por cobrar se generan tanto para facturas de crédito como de contado
-        query = (
-            session.query(CuentaPorCobrar)
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
-        )
+        query = session.query(CuentaPorCobrar).join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if estado == "vencida":
@@ -799,7 +796,11 @@ class PagoService:
                 clientes_deuda[id_cliente_key]["cuentas"].append(cuenta)
 
                 # Calcular saldo vencido (solo cuentas vencidas)
-                if cuenta.fecha_vencimiento and cuenta.fecha_vencimiento < hoy and cuenta.estado in ("pendiente", "parcial"):
+                if (
+                    cuenta.fecha_vencimiento
+                    and cuenta.fecha_vencimiento < hoy
+                    and cuenta.estado in ("pendiente", "parcial")
+                ):
                     clientes_deuda[id_cliente_key]["saldo_vencido"] += cuenta.saldo_pendiente
 
                 # Actualizar saldo_favor con el valor más alto encontrado (por si hay inconsistencias)

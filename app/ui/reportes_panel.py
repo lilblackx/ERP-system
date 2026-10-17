@@ -3497,7 +3497,9 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 7, self._item_num(f"${float(f['monto_iva']):,.2f}"))
             self.tabla.setItem(row, 8, self._item_num(f"${float(f['total']):,.2f}"))
 
-        self.lbl_total.setText(f"{resultado['cantidad_facturas']} factura{'s' if resultado['cantidad_facturas'] != 1 else ''}")
+        cantidad = resultado["cantidad_facturas"]
+        plural = "s" if cantidad != 1 else ""
+        self.lbl_total.setText(f"{cantidad} factura{plural}")
         self._mostrar_resumen_libro_ventas(resultado)
 
     def _mostrar_resumen_libro_ventas(self, resultado: dict) -> None:

@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select, case
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (

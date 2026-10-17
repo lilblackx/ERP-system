@@ -617,10 +617,8 @@ class ReporteService:
 
         # Convertir a lista de filas (producto + lista de clientes)
         filas = []
-        for id_producto, grupo in grupos.items():
-            clientes_lista = sorted(
-                grupo["clientes"].values(), key=lambda c: c["monto_total"], reverse=True
-            )
+        for _id_producto, grupo in grupos.items():
+            clientes_lista = sorted(grupo["clientes"].values(), key=lambda c: c["monto_total"], reverse=True)
             total_producto = sum(c["monto_total"] for c in clientes_lista)
             cantidad_producto = sum(c["cantidad_total"] for c in clientes_lista)
             filas.append(

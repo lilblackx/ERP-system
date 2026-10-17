@@ -1,7 +1,9 @@
 """Script para verificar los constraints e índices de cuentas_por_cobrar_bcv."""
 
 from sqlalchemy import text
+
 from app.db.session import engine
+
 
 def verificar_constraints():
     """Verifica los constraints e índices de la tabla."""
@@ -39,6 +41,7 @@ def verificar_constraints():
         results = connection.execute(text(query_indices))
         for row in results:
             print(f"  {row[1]} ({row[2]}, PK: {row[3]}, Unique: {row[4]})")
+
 
 if __name__ == "__main__":
     verificar_constraints()
