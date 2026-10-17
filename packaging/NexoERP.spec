@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Especificacion de PyInstaller. Genera UNA carpeta (onedir) con dos ejecutables que comparten
 # las mismas librerias:
-#   DistribuidoraDJ.exe  la aplicacion (con ventana)
-#   DJ-Servicio.exe      servicio de Windows de licencia (solo en el servidor)
-# Las utilidades del instalador (DJ-Herramientas.exe) van aparte: ver Herramientas.spec.
+#   NexoERP.exe  la aplicacion (con ventana)
+#   Nexo-Servicio.exe      servicio de Windows de licencia (solo en el servidor)
+# Las utilidades del instalador (Nexo-Herramientas.exe) van aparte: ver Herramientas.spec.
 # Construir con packaging\construir.ps1 (no llamar a pyinstaller a mano: antes hay que generar
 # app/licencia_embebida.py).
 from pathlib import Path
@@ -44,8 +44,8 @@ a_app = analisis("app_gui.py")
 a_servicio = analisis("servicio.py")
 
 MERGE(
-    (a_app, "DistribuidoraDJ", "DistribuidoraDJ"),
-    (a_servicio, "DJ-Servicio", "DJ-Servicio"),
+    (a_app, "NexoERP", "NexoERP"),
+    (a_servicio, "Nexo-Servicio", "Nexo-Servicio"),
 )
 
 exe_app = EXE(
@@ -53,7 +53,7 @@ exe_app = EXE(
     a_app.scripts,
     [],
     exclude_binaries=True,
-    name="DistribuidoraDJ",
+    name="NexoERP",
     console=False,
     icon=str(RAIZ / "app" / "assets" / "icono.ico"),
 )
@@ -62,8 +62,8 @@ exe_servicio = EXE(
     a_servicio.scripts,
     [],
     exclude_binaries=True,
-    name="DJ-Servicio",
-    console=True,  # consola: permite `DJ-Servicio.exe debug`; como servicio no se muestra
+    name="Nexo-Servicio",
+    console=True,  # consola: permite `Nexo-Servicio.exe debug`; como servicio no se muestra
 )
 COLLECT(
     exe_app,
@@ -72,5 +72,5 @@ COLLECT(
     exe_servicio,
     a_servicio.binaries,
     a_servicio.datas,
-    name="DistribuidoraDJ",
+    name="NexoERP",
 )

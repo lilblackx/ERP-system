@@ -15,10 +15,10 @@
   #define Version "1.0.0"
 #endif
 #ifndef Origen
-  #define Origen "..\build\dist\DistribuidoraDJ"
+  #define Origen "..\build\dist\NexoERP"
 #endif
 #ifndef Herramientas
-  #define Herramientas "..\build\herramientas\DJ-Herramientas.exe"
+  #define Herramientas "..\build\herramientas\Nexo-Herramientas.exe"
 #endif
 #ifndef Salida
   #define Salida "..\build\instalador"
@@ -28,10 +28,13 @@
 #define Nombre "Nexo ERP"
 ; Nombre anterior: solo para limpiar los accesos directos de versiones previas (ver [InstallDelete]).
 #define NombreAnterior "Distribuidora DJ"
-; Nombres INTERNOS: no se renombran a proposito. Cambiarlos dejaria huerfanos el servicio, la regla de
-; firewall y el certificado ya instalados en los equipos que se actualizan.
-#define Servicio "DistribuidoraDJLicencia"
-#define ReglaFirewall "Distribuidora DJ - SQL Server"
+; Nombres del servicio y de la regla de firewall. Los "Anterior" son los de versiones previas: al
+; actualizar, el instalador migra el servicio y la regla (ver InstalarServicioYFirewall).
+#define Servicio "NexoERPLicencia"
+#define ServicioAnterior "DistribuidoraDJLicencia"
+#define ReglaFirewall "Nexo ERP - SQL Server"
+#define ReglaFirewallAnterior "Distribuidora DJ - SQL Server"
+; INTERNO: el certificado ya instalado en los equipos que se actualizan se identifica por este nombre.
 #define CertNombre "Distribuidora DJ"
 
 [Setup]
@@ -41,7 +44,7 @@ AppVersion={#Version}
 AppVerName={#Nombre} {#Version}
 AppPublisher={#Nombre}
 #ifdef PruebaSinAdmin
-DefaultDirName={userappdata}\DJ-Prueba
+DefaultDirName={userappdata}\Nexo-Prueba
 #else
 DefaultDirName={autopf}\{#Nombre}
 #endif
@@ -67,7 +70,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; (ICU del sistema, desde Windows 10 1703). En versiones anteriores la app no arranca ("DLL load failed
 ; while importing QtCore"), asi que mejor negarse a instalar.
 MinVersion=10.0.17763
-UninstallDisplayIcon={app}\DistribuidoraDJ.exe
+UninstallDisplayIcon={app}\NexoERP.exe
 ; Icono del propio instalador (ruta relativa a este .iss).
 SetupIconFile=..\app\assets\icono.ico
 CloseApplications=yes
@@ -103,20 +106,27 @@ Source: "{#Cer}"; DestDir: "{tmp}"; DestName: "dj-firma.cer"; Flags: dontcopy
 ; que no queden duplicados junto a los de "{#Nombre}".
 Type: files; Name: "{autodesktop}\{#NombreAnterior}.lnk"
 Type: filesandordirs; Name: "{autoprograms}\{#NombreAnterior}"
+; Ejecutables con el nombre anterior (la actualizacion los reemplaza por los de Nexo ERP).
+Type: files; Name: "{app}\DistribuidoraDJ.exe"
+Type: files; Name: "{app}\DJ-Servicio.exe"
+Type: files; Name: "{app}\herramientas\DJ-Herramientas.exe"
 
 [Icons]
-Name: "{group}\{#Nombre}"; Filename: "{app}\DistribuidoraDJ.exe"
+Name: "{group}\{#Nombre}"; Filename: "{app}\NexoERP.exe"
 Name: "{group}\Desinstalar {#Nombre}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#Nombre}"; Filename: "{app}\DistribuidoraDJ.exe"; Tasks: desktopicon
+Name: "{autodesktop}\{#Nombre}"; Filename: "{app}\NexoERP.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "notepad.exe"; Parameters: """{code:DirDatos}\datos_estaciones.txt"""; Description: "Ver los datos para instalar las estaciones"; Flags: postinstall shellexec skipifsilent unchecked; Check: MostrarDatosEstaciones
-Filename: "{app}\DistribuidoraDJ.exe"; Description: "Abrir {#Nombre}"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\NexoERP.exe"; Description: "Abrir {#Nombre}"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\sc.exe"; Parameters: "stop {#Servicio}"; Flags: runhidden; RunOnceId: "DetenerServicio"
 Filename: "{sys}\sc.exe"; Parameters: "delete {#Servicio}"; Flags: runhidden; RunOnceId: "BorrarServicio"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#ReglaFirewall}"""; Flags: runhidden; RunOnceId: "BorrarFirewall"
+Filename: "{sys}\sc.exe"; Parameters: "stop {#ServicioAnterior}"; Flags: runhidden; RunOnceId: "DetenerServicioAnterior"
+Filename: "{sys}\sc.exe"; Parameters: "delete {#ServicioAnterior}"; Flags: runhidden; RunOnceId: "BorrarServicioAnterior"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#ReglaFirewallAnterior}"""; Flags: runhidden; RunOnceId: "BorrarFirewallAnterior"
 #ifdef Cer
 Filename: "{sys}\certutil.exe"; Parameters: "-delstore Root ""{#CertNombre}"""; Flags: runhidden; RunOnceId: "QuitarCertRaiz"
 Filename: "{sys}\certutil.exe"; Parameters: "-delstore TrustedPublisher ""{#CertNombre}"""; Flags: runhidden; RunOnceId: "QuitarCertEditor"
@@ -125,7 +135,9 @@ Filename: "{sys}\certutil.exe"; Parameters: "-delstore TrustedPublisher ""{#Cert
 [Code]
 const
   NOMBRE_SERVICIO = '{#Servicio}';
+  NOMBRE_SERVICIO_ANTERIOR = '{#ServicioAnterior}';
   REGLA_FIREWALL = '{#ReglaFirewall}';
+  REGLA_FIREWALL_ANTERIOR = '{#ReglaFirewallAnterior}';
   BM_CLICK = $00F5;
 
 var
@@ -234,19 +246,19 @@ end;
 
 function RutaHerramientas: String;
 begin
-  Result := ExpandConstant('{tmp}\DJ-Herramientas.exe');
+  Result := ExpandConstant('{tmp}\Nexo-Herramientas.exe');
 end;
 
 procedure ExtraerHerramientas;
 begin
   if not ToolExtraida then
   begin
-    ExtractTemporaryFile('DJ-Herramientas.exe');
+    ExtractTemporaryFile('Nexo-Herramientas.exe');
     ToolExtraida := True;
   end;
 end;
 
-{ Ejecuta DJ-Herramientas.exe <comando>. Los datos viajan en un JSON temporal (no por la linea de
+{ Ejecuta Nexo-Herramientas.exe <comando>. Los datos viajan en un JSON temporal (no por la linea de
   comandos, donde otros procesos podrian leer las claves) que se borra al terminar. }
 function EjecutarTool(const Comando, Json: String; var Mensaje: String): Boolean;
 var
@@ -476,7 +488,7 @@ begin
 
   PgEstacion := CreateInputQueryPage(PgClavesApp.ID, 'Conexion con el servidor',
     'Esta estacion se conectara a la base de datos del servidor.',
-    'Use los datos que el instalador del servidor guardo en "datos_estaciones.txt" (carpeta ProgramData\DistribuidoraDJ del servidor).');
+    'Use los datos que el instalador del servidor guardo en "datos_estaciones.txt" (en la carpeta de datos de Nexo ERP del servidor).');
   PgEstacion.Add('Servidor SQL (nombre o IP del servidor, coma y puerto; ej. SERVIDOR,1433):', False);
   PgEstacion.Add('Nombre de la base de datos:', False);
   PgEstacion.Add('Usuario SQL de la aplicacion:', False);
@@ -644,6 +656,7 @@ begin
   InstalarCertificado;
   { En una actualizacion el servicio mantiene bloqueados sus archivos: se detiene antes de copiar. }
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop ' + NOMBRE_SERVICIO, '', SW_HIDE, ewWaitUntilTerminated, Res);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop ' + NOMBRE_SERVICIO_ANTERIOR, '', SW_HIDE, ewWaitUntilTerminated, Res);
   Sleep(2500);
   if EsServidor and (not EsActualizacion) and (not SqlServerInstalado) then
   begin
@@ -658,15 +671,22 @@ var
   Res: Integer;
   Exe, Puerto: String;
 begin
-  Exe := ExpandConstant('{app}\DJ-Servicio.exe');
-  { Si ya existe (actualizacion) se conserva; si no, se crea con inicio automatico. }
+  Exe := ExpandConstant('{app}\Nexo-Servicio.exe');
+  { Actualizacion desde una version que lo llamaba "Distribuidora DJ": se quita el servicio anterior
+    (apuntaba a un ejecutable que ya no existe) y mas abajo se crea el nuevo. Si no existe, no pasa nada. }
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop ' + NOMBRE_SERVICIO_ANTERIOR, '', SW_HIDE, ewWaitUntilTerminated, Res);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'delete ' + NOMBRE_SERVICIO_ANTERIOR, '', SW_HIDE, ewWaitUntilTerminated, Res);
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+       'advfirewall firewall set rule name="' + REGLA_FIREWALL_ANTERIOR + '" new name="' + REGLA_FIREWALL + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, Res);
+  { Si ya existe se conserva; si no, se crea con inicio automatico. }
   if not Exec(ExpandConstant('{sys}\sc.exe'), 'query ' + NOMBRE_SERVICIO, '', SW_HIDE, ewWaitUntilTerminated, Res) or (Res <> 0) then
   begin
     Exec(ExpandConstant('{sys}\sc.exe'),
-         'create ' + NOMBRE_SERVICIO + ' binPath= "\"' + Exe + '\"" start= auto DisplayName= "Distribuidora DJ - Licencia"',
+         'create ' + NOMBRE_SERVICIO + ' binPath= "\"' + Exe + '\"" start= auto DisplayName= "Nexo ERP - Licencia"',
          '', SW_HIDE, ewWaitUntilTerminated, Res);
     Exec(ExpandConstant('{sys}\sc.exe'),
-         'description ' + NOMBRE_SERVICIO + ' "Mantiene validada la licencia de Distribuidora DJ para el servidor y todas sus estaciones."',
+         'description ' + NOMBRE_SERVICIO + ' "Mantiene validada la licencia de Nexo ERP para el servidor y todas sus estaciones."',
          '', SW_HIDE, ewWaitUntilTerminated, Res);
     { Si el proceso se cae, Windows lo reinicia a los 60 s (3 veces; el contador se limpia a las 24 h). }
     Exec(ExpandConstant('{sys}\sc.exe'),

@@ -1,8 +1,8 @@
-"""Punto de entrada de DJ-Servicio.exe: el servicio de Windows de licencia (solo en el servidor).
+"""Punto de entrada de Nexo-Servicio.exe: el servicio de Windows de licencia (solo en el servidor).
 
 Sin argumentos, lo arranca el Administrador de servicios de Windows (SCM). Con argumentos
 (`debug`, `ciclo`) sirve para diagnosticar desde una consola. El instalador lo registra con
-`sc.exe create ... binPath= "...\\DJ-Servicio.exe"` en vez de `pywin32 install`: asi el
+`sc.exe create ... binPath= "...\\Nexo-Servicio.exe"` en vez de `pywin32 install`: asi el
 registro no depende de pythonservice.exe, que no existe en una app empaquetada.
 """
 

@@ -1,4 +1,4 @@
-"""Punto de entrada de DistribuidoraDJ.exe (la aplicacion con ventana)."""
+"""Punto de entrada de NexoERP.exe (la aplicacion con ventana)."""
 
 import multiprocessing
 

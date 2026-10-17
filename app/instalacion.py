@@ -1,12 +1,12 @@
 """
 Herramientas que ejecuta el instalador (Inno Setup, packaging/instalador.iss), empaquetadas
-como DJ-Herramientas.exe. Inno no puede hablar con SQL Server, asi que cada paso de base de
+como Nexo-Herramientas.exe. Inno no puede hablar con SQL Server, asi que cada paso de base de
 datos es un subcomando de este modulo.
 
 Contrato con el instalador (para no pasar claves por la linea de comandos, que otros procesos
 pueden ver):
 
-    DJ-Herramientas.exe <comando> --entrada entrada.json --salida resultado.txt
+    Nexo-Herramientas.exe <comando> --entrada entrada.json --salida resultado.txt
 
 `entrada.json` lleva los datos y las claves; el instalador lo borra al terminar.
 `resultado.txt` empieza con "OK" o "ERROR" en la primera linea y sigue con un mensaje para
@@ -110,7 +110,7 @@ def _escribir_config(destino: Path, valores: dict[str, str]) -> None:
                 existentes[clave.strip()] = valor
     existentes.update(valores)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    cuerpo = "# Generado por el instalador de Distribuidora DJ. Editar con cuidado.\n"
+    cuerpo = "# Generado por el instalador de Nexo ERP. Editar con cuidado.\n"
     cuerpo += "".join(f"{k}={v}\n" for k, v in existentes.items())
     destino.write_text(cuerpo, encoding="utf-8")
 

@@ -81,19 +81,19 @@ $embebida = Join-Path $raiz "app\licencia_embebida.py"
 # 2. PyInstaller -------------------------------------------------------------------------
 $build = Join-Path $raiz "build"
 Write-Host "==> PyInstaller (puede tardar varios minutos)..." -ForegroundColor Cyan
-& $python -m PyInstaller --noconfirm --clean --distpath (Join-Path $build "dist") --workpath (Join-Path $build "work") (Join-Path $PSScriptRoot "DistribuidoraDJ.spec")
+& $python -m PyInstaller --noconfirm --clean --distpath (Join-Path $build "dist") --workpath (Join-Path $build "work") (Join-Path $PSScriptRoot "NexoERP.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller fallo (aplicacion)." }
 Write-Host "==> PyInstaller (herramientas del instalador)..." -ForegroundColor Cyan
 & $python -m PyInstaller --noconfirm --distpath (Join-Path $build "herramientas") --workpath (Join-Path $build "work-herramientas") (Join-Path $PSScriptRoot "Herramientas.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller fallo (herramientas)." }
-$dist = Join-Path $build "dist\DistribuidoraDJ"
-$herramientas = Join-Path $build "herramientas\DJ-Herramientas.exe"
-foreach ($ruta in (Join-Path $dist "DistribuidoraDJ.exe"), (Join-Path $dist "DJ-Servicio.exe"), $herramientas) {
+$dist = Join-Path $build "dist\NexoERP"
+$herramientas = Join-Path $build "herramientas\Nexo-Herramientas.exe"
+foreach ($ruta in (Join-Path $dist "NexoERP.exe"), (Join-Path $dist "Nexo-Servicio.exe"), $herramientas) {
     if (-not (Test-Path $ruta)) { throw "Falta $ruta" }
 }
 
 if ($firmar) { Write-Host "==> Firmando ejecutables..." -ForegroundColor Cyan }
-Firmar @((Join-Path $dist "DistribuidoraDJ.exe"), (Join-Path $dist "DJ-Servicio.exe"), $herramientas)
+Firmar @((Join-Path $dist "NexoERP.exe"), (Join-Path $dist "Nexo-Servicio.exe"), $herramientas)
 
 if ($SoloEmpaquetar) { Write-Host "Listo (solo empaquetado): $dist" -ForegroundColor Green; return }
 

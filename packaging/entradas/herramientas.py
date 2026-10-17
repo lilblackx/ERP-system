@@ -1,4 +1,4 @@
-"""Punto de entrada de DJ-Herramientas.exe: lo que el instalador ejecuta contra SQL Server
+"""Punto de entrada de Nexo-Herramientas.exe: lo que el instalador ejecuta contra SQL Server
 (ver app/instalacion.py). Es una aplicacion de consola; el instalador la corre oculta."""
 
 import multiprocessing

@@ -20,7 +20,7 @@ Requisitos en la PC de construcción: el entorno virtual (`.venv`) con `requirem
 Genera `build\instalador\NexoERP-Setup-1.0.0.exe` (≈ 250 MB). Pasos:
 
 1. Lee `LICENCIA_URL` y `LICENCIA_PUBLIC_KEY` del `.env` y los **hornea** en `app/licencia_embebida.py` (el programa instalado ignora cualquier `.env` para esto).
-2. PyInstaller → `build\dist\DistribuidoraDJ\` (`DistribuidoraDJ.exe` y `DJ-Servicio.exe`) y `build\herramientas\DJ-Herramientas.exe` (16 MB, sin Qt).
+2. PyInstaller → `build\dist\NexoERP\` (`NexoERP.exe` y `Nexo-Servicio.exe`) y `build\herramientas\Nexo-Herramientas.exe` (16 MB, sin Qt).
 3. Descarga `packaging\redist\msodbcsql.msi` (ODBC Driver 18, enlace oficial de Microsoft) si falta.
 4. Compila `packaging\instalador.iss`.
 
@@ -35,7 +35,7 @@ Es gratis, pero solo es "de confianza" en las PCs que tienen instalado el certif
 1. **Primera vez**: crea el certificado en `packaging\firma\` (`crear-certificado.ps1`) con la contraseña que se le pida:
    - `dj-firma.pfx`: clave **privada**, ignorada por git. **Hacer copia de respaldo y no compartirla**: quien la tenga puede firmar programas que las PCs configuradas aceptarán. Si se pierde o se regenera hay que reinstalar el `.cer` en todas las PCs.
    - `dj-firma.cer`: clave pública (válida 5 años).
-2. Firma `DistribuidoraDJ.exe`, `DJ-Servicio.exe`, `DJ-Herramientas.exe` y el instalador (con sello de tiempo: la firma sigue válida después de que venza el certificado). Contraseña: se pide, o la variable `DJ_FIRMA_CLAVE`. Requiere el Windows SDK (`signtool.exe`).
+2. Firma `NexoERP.exe`, `Nexo-Servicio.exe`, `Nexo-Herramientas.exe` y el instalador (con sello de tiempo: la firma sigue válida después de que venza el certificado). Contraseña: se pide, o la variable `DJ_FIRMA_CLAVE`. Requiere el Windows SDK (`signtool.exe`).
 3. Mete el `.cer` dentro del instalador: al instalar, la PC pasa a confiar en él (*Raíz de confianza* y *Editores de confianza*; se quita al desinstalar). Así las actualizaciones posteriores ya salen como "Distribuidora DJ".
 4. Deja en `build\instalador\` lo necesario para desplegar: `NexoERP-Setup-<version>.exe`, `dj-firma.cer` e `Instalar.bat`.
 
@@ -47,7 +47,7 @@ El desinstalador que genera Inno Setup no se firma.
 
 El instalador, los accesos directos y el editor que aparece en *Programas y características* usan el nombre **Nexo ERP** (`#define Nombre` en `instalador.iss`). Los accesos directos de versiones que se llamaban «Distribuidora DJ» se eliminan al actualizar.
 
-Los nombres **internos** no se renombran a propósito, para no dejar huérfanos el servicio, la regla de firewall o el certificado ya instalados al actualizar: la carpeta de datos `ProgramData\DistribuidoraDJ`, el servicio `DistribuidoraDJLicencia`, la regla de firewall, el certificado (`CN=Distribuidora DJ`) y el ejecutable `DistribuidoraDJ.exe`. Ojo: el *editor verificado* que muestra Windows (UAC/SmartScreen) sale del certificado de firma, no del instalador; cambiarlo implica generar un certificado nuevo.
+El servicio (`NexoERPLicencia`), la regla de firewall (`Nexo ERP - SQL Server`) y los ejecutables (`NexoERP.exe`, `Nexo-Servicio.exe`, `Nexo-Herramientas.exe`) usan el nombre nuevo; al actualizar desde una versión que se llamaba «Distribuidora DJ», el instalador quita el servicio anterior (`DistribuidoraDJLicencia`), renombra la regla de firewall y borra los ejecutables viejos. Los nombres **internos** que guardan estado no se renombran a propósito, para no perder configuración ni licencia al actualizar: la carpeta de datos `ProgramData\DistribuidoraDJ`, la clave de registro de la licencia, la base propuesta `distribuidora_dj` y el certificado (`CN=Distribuidora DJ`). Ojo: el *editor verificado* que muestra Windows (UAC/SmartScreen) sale del certificado de firma, no del instalador; cambiarlo implica generar un certificado nuevo.
 
 ## Dónde queda cada cosa en el equipo del cliente
 
@@ -56,8 +56,8 @@ Los nombres **internos** no se renombran a propósito, para no dejar huérfanos 
 | Programa | `C:\Program Files\Nexo ERP\` (en instalaciones nuevas; una actualización conserva la carpeta anterior, p. ej. `Distribuidora DJ`) |
 | Configuración (`config.env`), logs, estado del reloj | `C:\ProgramData\DistribuidoraDJ\` |
 | Datos para instalar estaciones (solo servidor) | `C:\ProgramData\DistribuidoraDJ\datos_estaciones.txt` |
-| Servicio de Windows (solo servidor) | `DistribuidoraDJLicencia` (inicio automático, se reinicia si se cae) |
-| Regla de firewall (solo servidor) | `Distribuidora DJ - SQL Server` (TCP, el puerto indicado) |
+| Servicio de Windows (solo servidor) | `NexoERPLicencia` (inicio automático, se reinicia si se cae) |
+| Regla de firewall (solo servidor) | `Nexo ERP - SQL Server` (TCP, el puerto indicado) |
 
 ## Requisitos del equipo
 
@@ -90,7 +90,7 @@ Código de salida 0 = instalado. Si los datos de conexión son inválidos el ins
 
 ## Herramientas de línea de comandos
 
-`DJ-Herramientas.exe` (en `{app}\herramientas`) lo usa el instalador; también sirve para soporte. Contrato y comandos: `app/instalacion.py`.
+`Nexo-Herramientas.exe` (en `{app}\herramientas`) lo usa el instalador; también sirve para soporte. Contrato y comandos: `app/instalacion.py`.
 
 ## Seguridad: lo que conviene saber
 

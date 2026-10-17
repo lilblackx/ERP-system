@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# DJ-Herramientas.exe: ejecutable unico (onefile) y liviano -- sin Qt -- con las utilidades que el
+# Nexo-Herramientas.exe: ejecutable unico (onefile) y liviano -- sin Qt -- con las utilidades que el
 # instalador corre contra SQL Server (app/instalacion.py). Va aparte de la aplicacion porque el
 # instalador lo necesita ANTES de copiar nada (probar la conexion en las paginas del asistente).
 from pathlib import Path
@@ -23,7 +23,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="DJ-Herramientas",
+    name="Nexo-Herramientas",
     console=True,
     upx=False,
 )

@@ -40,10 +40,10 @@ from app.services.licencia import (  # noqa: E402
 
 logger = logging.getLogger("servicio_licencia")
 
-NOMBRE_SERVICIO = "DistribuidoraDJLicencia"
-NOMBRE_VISIBLE = "Distribuidora DJ - Licencia"
+NOMBRE_SERVICIO = "NexoERPLicencia"
+NOMBRE_VISIBLE = "Nexo ERP - Licencia"
 DESCRIPCION = (
-    "Mantiene validada la licencia de Distribuidora DJ para el servidor y todas sus estaciones. "
+    "Mantiene validada la licencia de Nexo ERP para el servidor y todas sus estaciones. "
     "Si se detiene, las estaciones pasan a solo lectura al agotarse el periodo de gracia."
 )
 # Cada cuanto valida. La revocacion de una licencia llega a las estaciones en <= este intervalo
