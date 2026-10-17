@@ -30,6 +30,7 @@ def _datos(tipo_venta):
             telefono=None,
             email=None,
             direccion="Maracaibo",
+            vendedor=None,
         ),
         vendedor=NS(nombre_vendedor="Vendedor"),
         tasa=None,
