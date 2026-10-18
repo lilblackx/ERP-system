@@ -174,6 +174,12 @@ class InventarioPanel(QWidget):
         self._cargar_categorias_filtro()
         self.cargar_productos()
 
+    def focusInEvent(self, event) -> None:
+        # Refrescar datos cuando el panel gana foco (ej: despues de crear
+        # una recepcion en el modulo de compras y volver aqui)
+        super().focusInEvent(event)
+        self.cargar_productos()
+
     # ── Construcción de la UI ─────────────────────────────────────────────
 
     def _setup_ui(self) -> None:
@@ -275,6 +281,13 @@ class InventarioPanel(QWidget):
 
         self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_productos, on_pdf=self.exportar_pdf_productos)
 
+        self.btn_refresh = QPushButton()
+        self.btn_refresh.setIcon(qta.icon("fa5s.sync", color=COLOR_PRIMARY))
+        self.btn_refresh.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_refresh.setFixedWidth(36)
+        self.btn_refresh.setToolTip("Refrescar inventario")
+        self.btn_refresh.clicked.connect(self.cargar_productos)
+
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         # Solo mostrar botones de creación y auditoría si no es vendedor
@@ -282,6 +295,7 @@ class InventarioPanel(QWidget):
             h.addWidget(self.btn_nuevo)
             h.addWidget(self.btn_auditoria)
         h.addWidget(self.btn_filtrar)
+        h.addWidget(self.btn_refresh)
         h.addWidget(self.btn_exportar)
         return w
 
