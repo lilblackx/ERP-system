@@ -3,7 +3,7 @@ app/ui/cliente_form_dialog.py (paleta y tipografia de app/ui/styles.py, layout d
 columnas con tarjetas, Font Awesome via qtawesome) para mantener consistencia entre
 modulos."""
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import qtawesome as qta
 from PySide6.QtCore import QDate, QSize, Qt
@@ -415,6 +415,7 @@ class ProductoFormDialog(QDialog):
         self.cantidad_unidad_input = NumericLineEdit(NumericFieldType.QUANTITY)
         self.cantidad_unidad_input.setFixedHeight(32)
         self.cantidad_unidad_input.valueChanged.connect(self._calcular_cajas_unidades)
+        self.cantidad_unidad_input.textChanged.connect(self._calcular_cajas_unidades)
         grid.addWidget(lbl_unidad, 5, 0, 1, 2)
         grid.addWidget(self.cantidad_unidad_input, 6, 0, 1, 2)
 
@@ -434,6 +435,7 @@ class ProductoFormDialog(QDialog):
         self.cantidad_caja_input.setFixedHeight(32)
         self.cantidad_caja_input.setPlaceholderText("Ej: 12")
         self.cantidad_caja_input.valueChanged.connect(self._calcular_cajas_unidades)
+        self.cantidad_caja_input.textChanged.connect(self._calcular_cajas_unidades)
         grid.addWidget(lbl_caja, 9, 0, 1, 2)
         grid.addWidget(self.cantidad_caja_input, 10, 0, 1, 2)
 
@@ -528,6 +530,21 @@ class ProductoFormDialog(QDialog):
         """Calcula cajas y unidades sueltas basado en cantidad total y unidades por caja."""
         cantidad_total = self.cantidad_unidad_input.get_value()
         unidades_por_caja = self.cantidad_caja_input.get_value()
+
+        # Si los valores son None, intentar parsear del texto actual
+        if cantidad_total is None:
+            try:
+                texto = self.cantidad_unidad_input.text().replace(".", "").replace(",", ".")
+                cantidad_total = Decimal(texto) if texto else Decimal("0")
+            except (ValueError, InvalidOperation):
+                cantidad_total = Decimal("0")
+
+        if unidades_por_caja is None or unidades_por_caja == 0:
+            try:
+                texto = self.cantidad_caja_input.text().replace(".", "").replace(",", ".")
+                unidades_por_caja = Decimal(texto) if texto else Decimal("0")
+            except (ValueError, InvalidOperation):
+                unidades_por_caja = Decimal("0")
 
         if unidades_por_caja and unidades_por_caja > 0:
             cajas = int(cantidad_total // unidades_por_caja)

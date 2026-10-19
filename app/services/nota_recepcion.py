@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     CompraOC,
     CompraOCDetalle,
+    Inventario,
     NotaDevolucion,
     NotaDevolucionDetalle,
     NotaRecepcion,
@@ -128,6 +129,23 @@ class NotaRecepcionService:
 
         session.commit()
         session.refresh(nr)
+
+        # Registrar auditoría de inventario para cada producto recibido
+        for detalle_oc, cantidad_recibida, _cantidad_rechazada in lineas_validadas:
+            producto = session.get(Inventario, detalle_oc.id_producto)
+            if producto:
+                detalle_texto = (
+                    f"Recepción OC {oc.numero_oc} - NR {nr.numero_nr}: "
+                    f"{cantidad_recibida} unidades de {producto.nombre_producto} "
+                    f"(ID: {detalle_oc.id_producto})"
+                )
+                AuditoriaService.registrar_evento(
+                    session,
+                    id_usuario=id_usuario,
+                    accion="MOVIMIENTO_STOCK",
+                    modulo="INVENTARIO",
+                    detalle=detalle_texto,
+                )
 
         logger.info("NR %s registrada: OC=%s usuario=%s", nr.numero_nr, oc.numero_oc, id_usuario)
         AuditoriaService.registrar_evento(

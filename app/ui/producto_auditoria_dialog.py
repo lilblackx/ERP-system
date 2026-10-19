@@ -135,6 +135,7 @@ class ProductoAuditoriaDialog(QDialog):
         self.accion_combo.addItem("Cambio de Estado", "CAMBIAR_ESTADO_PRODUCTO")
         self.accion_combo.addItem("Cambio de Precio", "CAMBIO_PRECIO")
         self.accion_combo.addItem("Movimiento de Stock", "MOVIMIENTO_STOCK")
+        self.accion_combo.addItem("Recepción OC", "RECEPCION_OC")
         self.accion_combo.addItem("Cambio de Descripción", "CAMBIO_DESCRIPCION")
         self.accion_combo.addItem("Cambio de Nombre", "CAMBIO_NOMBRE")
         self.accion_combo.addItem("Eliminación de Precio", "ELIMINAR_PRECIO")
