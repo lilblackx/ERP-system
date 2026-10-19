@@ -1,0 +1,488 @@
+"""
+MainWindow — Ventana principal del ERP moderno.
+Arquitectura:
+    ┌─────────────────────────────────────────────┐
+    │  Sidebar (fijo)  │  TopBar                  │
+    │                  ├──────────────────────────│
+    │                  │  ContentArea (QStackedWidget) │
+    └─────────────────────────────────────────────┘
+
+La sidebar emite la señal `modulo_seleccionado` → MainWindow conmuta la vista
+en el QStackedWidget.  Los paneles se crean con lazy-loading la primera vez
+que se accede a cada módulo para minimizar el tiempo de arranque.
+"""
+
+import logging
+
+from PySide6.QtCore import QEvent, QTimer
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.db.models import ConfiguracionEmpresa, Usuario
+from app.db.session import SessionLocal
+from app.rutas import NOMBRE_APP
+from app.services.licencia import EstadoLicencia, LicenciaService
+from app.services.notificaciones import NotificacionesService
+from app.services.permisos import PermisoDenegadoError
+from app.services.usuarios import UsuarioService
+from app.ui.auditoria_panel import AuditoriaPanel
+from app.ui.bancos_panel import BancosPanel
+from app.ui.cajas_panel import CajasPanel
+from app.ui.clientes_panel import ClientesPanel
+from app.ui.comisiones_panel import ComisionesPanel
+from app.ui.compras import ComprasView
+from app.ui.config_licencia_panel import color_estado
+from app.ui.configuracion_panel import ConfiguracionPanel
+from app.ui.cuentas_bancarias_panel import CuentasBancariasPanel
+from app.ui.cuentas_por_cobrar_bcv_panel import CuentasPorCobrarBCVPanel
+from app.ui.cuentas_por_cobrar_panel import CuentasPorCobrarPanel
+from app.ui.cuentas_por_pagar_panel import CuentasPorPagarPanel
+from app.ui.dashboard_panel import DashboardPanel
+from app.ui.facturacion_panel import FacturacionPanel
+from app.ui.inventario_panel import InventarioPanel
+from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano
+from app.ui.placeholder_view import PlaceholderView
+from app.ui.proveedores_panel import ProveedoresPanel
+from app.ui.reportes_panel import ReportesPanel
+from app.ui.sidebar import Sidebar
+from app.ui.styles import GLOBAL_QSS
+from app.ui.tasa_ticker import TasaTicker
+from app.ui.tasas_panel import TasasPanel
+from app.ui.topbar import TopBar
+from app.ui.usuarios_panel import UsuariosPanel
+from app.ui.vendedores_panel import VendedoresPanel
+from app.ui.workers import QueryWorker
+
+logger = logging.getLogger(__name__)
+
+# Configuración de cada módulo: (clave, nombre_display, icono, clase_panel|None)
+# Si clase_panel es None → se usa PlaceholderView automáticamente.
+MODULOS_CONFIG = {
+    "panel_general": ("Panel General", DashboardPanel),
+    "clientes": ("Clientes", ClientesPanel),
+    "proveedores": ("Proveedores", ProveedoresPanel),
+    "inventario": ("Inventario", InventarioPanel),
+    "facturacion": ("Facturación", FacturacionPanel),
+    "compras": ("Compras", ComprasView),
+    "bancos": ("Bancos", BancosPanel),
+    "cuentas_bancarias": ("Cuentas Bancarias", CuentasBancariasPanel),
+    "cuentas_por_cobrar": ("Cuentas por Cobrar", CuentasPorCobrarPanel),
+    "cuentas_por_cobrar_bcv": ("Cuentas por Cobrar BCV", CuentasPorCobrarBCVPanel),
+    "cuentas_por_pagar": ("Cuentas por Pagar", CuentasPorPagarPanel),
+    "cajas": ("Cajas", CajasPanel),
+    "vendedores": ("Vendedores", VendedoresPanel),
+    "comisiones": ("Comisiones", ComisionesPanel),
+    "control_tasas": ("Control de Tasas", TasasPanel),
+    # ReportesPanel arranca con los dos reportes ya resueltos en ReporteService (aging CxC
+    # + arqueo de caja); el resto del catalogo (aging CxP, libro de ventas SENIAT, kardex,
+    # etc.) se agrega en pasos siguientes sobre esta misma pantalla. El recurso 'reportes'
+    # ya existe en el catalogo de permisos desde migrations/0016, sin asignar a ningun rol
+    # todavia -- un ADMIN lo otorga explicitamente por rol cuando corresponda (ADMIN mismo
+    # bypassa el RBAC, ver UsuarioService.verificar_permiso).
+    "reportes": ("Reportes", ReportesPanel),
+    "config_empresa": ("Configuración", ConfiguracionPanel),
+    "usuarios": ("Usuarios", UsuariosPanel),
+    "auditoria": ("Auditoría", AuditoriaPanel),
+}
+
+# Permiso (recurso, accion) que un usuario necesita para VER cada modulo en el sidebar --
+# separado del RBAC real que ya protegen los servicios (require_permiso, la unica barrera
+# de seguridad de verdad): esto es solo para no mostrar en el menu un modulo al que el
+# usuario va a chocar con un "sin permiso" apenas entre (2026-08-27, a raiz del rol
+# CAJERO). 'ver' en todos los casos porque lo minimo para que un modulo tenga sentido en
+# el menu es poder consultarlo -- un rol con 'crear' pero no 'ver' sobre algo no existe en
+# ningun caso real hoy.
+MODULO_PERMISO: dict[str, tuple[str, str]] = {
+    "panel_general": ("dashboard", "ver"),
+    "clientes": ("clientes", "ver"),
+    "proveedores": ("proveedores", "ver"),
+    "inventario": ("inventario", "ver"),
+    "facturacion": ("ventas", "ver"),
+    "compras": ("compras", "ver"),
+    "bancos": ("bancos", "ver"),
+    "cuentas_bancarias": ("bancos", "ver"),
+    # CuentasPorCobrarPanel usa 'pagos'/'ver' porque PagoService.listar_cuentas_por_cobrar
+    # exige ese mismo permiso -- simetrico a cuentas_por_pagar mas abajo.
+    "cuentas_por_cobrar": ("pagos", "ver"),
+    # CuentasPorCobrarBCVPanel usa 'pagos'/'ver' por simetria con cuentas_por_cobrar
+    "cuentas_por_cobrar_bcv": ("pagos", "ver"),
+    # CuentasPorPagarPanel -- usa 'pagos'/'ver' porque PagoService.listar_cuentas_por_pagar
+    # exige ese mismo permiso.
+    "cuentas_por_pagar": ("pagos", "ver"),
+    "cajas": ("cajas", "ver"),
+    "vendedores": ("vendedores", "ver"),
+    "comisiones": ("comisiones", "ver"),
+    "control_tasas": ("tasas", "ver"),
+    "reportes": ("reportes", "ver"),
+    "config_empresa": ("empresa", "ver"),
+    "usuarios": ("usuarios", "ver"),
+    "auditoria": ("auditoria", "ver"),
+}
+
+# Acciones de la busqueda global (busqueda_global.ACCIONES) -> (modulo, metodo del panel que abre el
+# formulario) o, para Configuracion, el indice de su pestana.
+ACCIONES_PANEL: dict[str, tuple[str, str]] = {
+    "nueva_factura": ("facturacion", "nueva_factura"),
+    "nuevo_cliente": ("clientes", "nuevo_cliente"),
+    "nuevo_producto": ("inventario", "nuevo_producto"),
+    "nuevo_proveedor": ("proveedores", "nuevo_proveedor"),
+    "nuevo_vendedor": ("vendedores", "nuevo_vendedor"),
+    "nueva_compra": ("compras", "nueva_oc"),
+    "registrar_tasa": ("control_tasas", "registrar_tasa"),
+}
+ACCIONES_CONFIG: dict[str, int] = {"config_empresa": 0, "config_correo": 1, "config_licencia": 2}
+
+# Hallazgo 4.1 (auditoria 2026-09-05): sin esto, una sesion de escritorio abierta y
+# olvidada quedaba operable indefinidamente -- el chequeo de estado/bloqueo en
+# require_permiso() solo corta el acceso si OTRO admin desactiva al usuario mientras
+# tanto (C17), no por simple inactividad. 30 min es el mismo criterio de espera "normal"
+# ya usado para LOCK_TIMEOUT_MS en db_utils.py, reutilizado aca por consistencia.
+TIMEOUT_INACTIVIDAD_MS = 30 * 60 * 1000
+
+# Tipos de evento que cuentan como "el usuario sigue ahi" -- deliberadamente NO se incluye
+# QEvent.Type.Timer/Paint/etc: esos disparan solos aunque nadie este frente a la pantalla
+# (QueryWorker terminando, un repintado del ticker de tasas) y reiniciarian el timer sin
+# actividad real.
+_EVENTOS_ACTIVIDAD = frozenset(
+    {
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseMove,
+        QEvent.Type.KeyPress,
+        QEvent.Type.Wheel,
+    }
+)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, usuario: Usuario):
+        super().__init__()
+        self.usuario = usuario
+        self._paneles: dict[str, QWidget] = {}  # cache lazy de paneles
+
+        self.setWindowTitle(f"{NOMBRE_APP} — Sistema de gestión")
+        ajustar_tamano(self, 1200, 720, 900, 600)
+
+        # Aplicar estilos globales
+        self.setStyleSheet(GLOBAL_QSS)
+
+        self._modulos_visibles = self._calcular_modulos_visibles()
+        empresa = self._obtener_nombre_empresa()
+        self._setup_ui(empresa)
+        # "panel_general" es el destino por defecto, pero un rol futuro sin 'dashboard'/
+        # 'ver' no deberia aterrizar en un modulo que ni siquiera ve en el sidebar --
+        # cae al primero que si tenga visible (ADMIN/CAJERO/VENDEDOR de hoy siempre lo
+        # incluyen, asi que en la practica esto no cambia nada todavia).
+        destino_inicial = (
+            "panel_general"
+            if "panel_general" in self._modulos_visibles
+            else next(iter(self._modulos_visibles), "panel_general")
+        )
+        self._ir_a_modulo(destino_inicial)
+
+        # Timeout de sesion por inactividad (hallazgo 4.1) -- instalado al final del
+        # __init__, despues de que la ventana ya esta armada, para no contar como
+        # "actividad" ningun evento sintetico que Qt dispare mientras se construye la UI.
+        self._timer_inactividad = QTimer(self)
+        self._timer_inactividad.setInterval(TIMEOUT_INACTIVIDAD_MS)
+        self._timer_inactividad.setSingleShot(True)
+        self._timer_inactividad.timeout.connect(self._cerrar_por_inactividad)
+        self._timer_inactividad.start()
+        # A nivel de QApplication (no self.installEventFilter) porque la actividad puede
+        # ocurrir dentro de un dialogo modal (ej. facturando) -- esos son ventanas
+        # top-level propias, no hijos de MainWindow, y no le llegarian eventos si el
+        # filtro estuviera instalado solo aca.
+        QApplication.instance().installEventFilter(self)
+
+        # Licencia: el banner se recalcula cada minuto con el token local (sin red) y la
+        # validacion contra el servidor corre al abrir y luego cada hora, en segundo plano.
+        self._worker_licencia: QueryWorker | None = None
+        self._refrescar_banner_licencia()
+        self._timer_banner_licencia = QTimer(self)
+        self._timer_banner_licencia.setInterval(60_000)
+        self._timer_banner_licencia.timeout.connect(self._refrescar_banner_licencia)
+        self._timer_banner_licencia.start()
+        self._timer_validacion_licencia = QTimer(self)
+        self._timer_validacion_licencia.setInterval(3_600_000)
+        self._timer_validacion_licencia.timeout.connect(self._validar_licencia_en_segundo_plano)
+        self._timer_validacion_licencia.start()
+        QTimer.singleShot(2_000, self._validar_licencia_en_segundo_plano)
+
+        # Campana de la barra superior: alertas vigentes (cuentas vencidas, stock, tasa,
+        # licencia), al abrir y luego cada 5 minutos, en segundo plano.
+        self._worker_notificaciones: QueryWorker | None = None
+        self._timer_notificaciones = QTimer(self)
+        self._timer_notificaciones.setInterval(300_000)
+        self._timer_notificaciones.timeout.connect(self._refrescar_notificaciones)
+        self._timer_notificaciones.start()
+        QTimer.singleShot(1_000, self._refrescar_notificaciones)
+
+    def _refrescar_banner_licencia(self, estado: EstadoLicencia | None = None) -> None:
+        estado = estado or LicenciaService.estado_actual()
+        if estado.permite_escritura:
+            self.banner_licencia.setVisible(False)
+            return
+        self.banner_licencia.setText(
+            f"  {estado.mensaje} La app está en modo solo lectura: puede consultar, pero no registrar "
+            "operaciones. Gestione la licencia en Configuración > Licencia."
+        )
+        self.banner_licencia.setStyleSheet(
+            f"background-color: {color_estado(estado.estado)}; color: white; font-weight: bold; padding: 8px;"
+        )
+        self.banner_licencia.setVisible(True)
+
+    def _validar_licencia_en_segundo_plano(self) -> None:
+        if not LicenciaService.habilitada():
+            return
+        if self._worker_licencia is not None and self._worker_licencia.isRunning():
+            return
+        # Servidor: renueva el token (ademas de registrarse como estacion). Estacion: se registra
+        # y relee el estado que el servidor dejo en SQL Server.
+        self._worker_licencia = QueryWorker(SessionLocal, lambda session: LicenciaService.refrescar_periodico())
+        self._worker_licencia.resultado.connect(self._refrescar_banner_licencia)
+        # Sin internet/servidor caido no pasa nada: el token guardado sigue valiendo durante
+        # su periodo de gracia. QueryWorker ya registra la excepcion en el log.
+        self._worker_licencia.error.connect(lambda _mensaje: self._refrescar_banner_licencia())
+        self._worker_licencia.start()
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() in _EVENTOS_ACTIVIDAD:
+            self._timer_inactividad.start()  # reinicia la cuenta regresiva
+        return super().eventFilter(watched, event)
+
+    def _cerrar_por_inactividad(self) -> None:
+        if QApplication.activeModalWidget() is not None:
+            # Hay un dialogo modal abierto (ej. FacturaFormDialog) -- cerrar MainWindow
+            # ahora lo dejaria a mitad de una operacion con datos sin guardar. Se pospone
+            # en vez de forzar el cierre; si de verdad no hay actividad, el modal mismo
+            # tampoco genera eventos y esto se repite hasta que se cierre o se retome.
+            self._timer_inactividad.start()
+            return
+        logger.info("Sesion de usuario %s cerrada por inactividad", self.usuario.id_usuario)
+        MessageBox.information(
+            self,
+            "Sesión cerrada",
+            "Tu sesión se cerró automáticamente por inactividad.",
+        )
+        self.close()
+
+    # ── RBAC del sidebar ───────────────────────────────────────────────────
+
+    def _calcular_modulos_visibles(self) -> set[str]:
+        """Que modulos mostrar en el sidebar segun el rol del usuario logueado -- ver
+        MODULO_PERMISO. Es solo una comodidad de UX (no repetir el paseo de "entrar y
+        chocar con un mensaje de sin permiso"): la barrera de seguridad real sigue siendo
+        require_permiso() en cada servicio, que no depende de esto para nada."""
+        session = SessionLocal()
+        try:
+            visibles = set()
+            for clave, (recurso, accion) in MODULO_PERMISO.items():
+                if UsuarioService.verificar_permiso(session, self.usuario.id_usuario, recurso, accion):
+                    visibles.add(clave)
+                    continue
+                if clave == "comisiones":
+                    try:
+                        if UsuarioService.verificar_permiso(
+                            session,
+                            self.usuario.id_usuario,
+                            "reportes_comisiones",
+                            "ver",
+                        ):
+                            visibles.add(clave)
+                    except PermisoDenegadoError:
+                        pass
+            return visibles
+        except Exception:
+            logger.exception("No se pudo calcular los modulos visibles del sidebar; se muestran todos")
+            return set(MODULO_PERMISO.keys())
+        finally:
+            session.close()
+
+    # ── Construcción del layout principal ────────────────────────────────
+
+    def _setup_ui(self, empresa_nombre: str) -> None:
+        central = QWidget()
+        self.setCentralWidget(central)
+
+        outer_v = QVBoxLayout(central)
+        outer_v.setContentsMargins(0, 0, 0, 0)
+        outer_v.setSpacing(0)
+
+        fila = QWidget()
+        main_h = QHBoxLayout(fila)
+        main_h.setContentsMargins(0, 0, 0, 0)
+        main_h.setSpacing(0)
+
+        # Sidebar (full height, a la izquierda -- el ticker de tasas ya NO va arriba de
+        # esto, va solo arriba del area derecha, pedido del usuario 2026-08-27).
+        self.sidebar = Sidebar(empresa_nombre, self.usuario, modulos_visibles=self._modulos_visibles)
+        self.sidebar.modulo_seleccionado.connect(self._ir_a_modulo)
+        self.sidebar.cerrar_sesion.connect(self._confirmar_cerrar_sesion)
+        main_h.addWidget(self.sidebar)
+
+        # Área derecha: franja de tasas + TopBar + contenido
+        right_w = QWidget()
+        right_v = QVBoxLayout(right_w)
+        right_v.setContentsMargins(0, 0, 0, 0)
+        right_v.setSpacing(0)
+
+        # Aviso de licencia (solo visible si la licencia no permite escribir, ver
+        # app/services/licencia.py): sin esto el usuario solo veria errores genericos al
+        # intentar guardar algo.
+        self.banner_licencia = QLabel()
+        self.banner_licencia.setWordWrap(True)
+        self.banner_licencia.setVisible(False)
+        right_v.addWidget(self.banner_licencia)
+
+        self.ticker_tasas = TasaTicker(SessionLocal, self.usuario)
+        right_v.addWidget(self.ticker_tasas)
+
+        self.topbar = TopBar(self.usuario, SessionLocal, self._modulos_visibles)
+        self.topbar.modulo_solicitado.connect(self._abrir_desde_topbar)
+        self.topbar.accion_solicitada.connect(self._ejecutar_accion)
+        right_v.addWidget(self.topbar)
+
+        self.stack = QStackedWidget()
+        right_v.addWidget(self.stack)
+
+        main_h.addWidget(right_w)
+        outer_v.addWidget(fila)
+
+    # ── Conmutador de vistas ─────────────────────────────────────────────
+
+    def _ir_a_modulo(self, clave: str) -> None:
+        panel = self._obtener_o_crear_panel(clave)
+        self.stack.setCurrentWidget(panel)
+        self.topbar.actualizar_modulo(clave)
+
+    def _abrir_desde_topbar(self, clave: str, texto_busqueda: str) -> None:
+        """Destino elegido en la búsqueda global o en la campana: navega al módulo y, si
+        viene de un resultado concreto (un cliente, una factura...), deja su texto en la caja
+        de búsqueda de ese módulo para que la lista quede filtrada a lo que se buscaba."""
+        if clave not in MODULOS_CONFIG:
+            return
+        self.navegar_a(clave)
+        if texto_busqueda:
+            panel = self._paneles.get(clave)
+            # CuentasBancariasPanel llama a su caja `search_input`, el resto `buscar_input`.
+            campo = getattr(panel, "buscar_input", None) or getattr(panel, "search_input", None)
+            if campo is not None:
+                campo.setText(texto_busqueda)
+
+    def _ejecutar_accion(self, accion: str) -> None:
+        """Accion elegida en la busqueda global (ver busqueda_global.ACCIONES): lleva al modulo y
+        abre su formulario, o la pestana de Configuracion. El formulario se abre con singleShot(0)
+        para que el modulo ya este visible detras del dialogo; los permisos y requisitos (ej.
+        caja abierta para facturar) los sigue validando cada panel al abrirse."""
+        if accion in ACCIONES_CONFIG:
+            self.navegar_a("config_empresa")
+            self._paneles["config_empresa"].tabs.setCurrentIndex(ACCIONES_CONFIG[accion])
+            return
+        destino = ACCIONES_PANEL.get(accion)
+        if destino is None:
+            return
+        modulo, metodo = destino
+        self.navegar_a(modulo)
+        abrir = getattr(self._paneles.get(modulo), metodo, None)
+        if abrir is not None:
+            QTimer.singleShot(0, abrir)
+
+    def _refrescar_notificaciones(self) -> None:
+        if self._worker_notificaciones is not None and self._worker_notificaciones.isRunning():
+            return
+        id_usuario = self.usuario.id_usuario
+        self._worker_notificaciones = QueryWorker(
+            SessionLocal, lambda session: NotificacionesService.obtener(session, id_usuario)
+        )
+        self._worker_notificaciones.resultado.connect(self.topbar.set_notificaciones)
+        # La campana es informativa: si falla (QueryWorker ya lo registra en el log) queda
+        # como estaba, sin interrumpir al usuario con un diálogo.
+        self._worker_notificaciones.start()
+
+    def navegar_a(self, clave: str) -> None:
+        """Navegación disparada desde dentro de un panel (ej. botón "Nueva
+        factura" del Panel General) -- también refleja la selección en la sidebar."""
+        self.sidebar.seleccionar(clave)
+        self._ir_a_modulo(clave)
+
+    def _obtener_o_crear_panel(self, clave: str) -> QWidget:
+        """Lazy-load: crea el panel solo la primera vez que se solicita."""
+        if clave not in self._paneles:
+            nombre, clase_panel = MODULOS_CONFIG.get(clave, (clave.title(), None))
+            if clase_panel is not None:
+                panel = clase_panel(SessionLocal, self.usuario)
+            else:
+                panel = PlaceholderView(nombre)
+
+            if isinstance(panel, DashboardPanel):
+                panel.nueva_factura_solicitada.connect(lambda: self.navegar_a("facturacion"))
+                panel.ver_facturas_solicitado.connect(lambda: self.navegar_a("facturacion"))
+            if isinstance(panel, TasasPanel):
+                panel.tasa_registrada.connect(self.ticker_tasas.cargar_tasa)
+            if isinstance(panel, ConfiguracionPanel):
+                panel.licencia_panel.estado_cambiado.connect(self._refrescar_banner_licencia)
+
+            self._paneles[clave] = panel
+            self.stack.addWidget(panel)
+
+        return self._paneles[clave]
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        # El filtro de eventFilter() esta instalado sobre la QApplication (persiste entre
+        # logins, ver __init__), no sobre self -- sin sacarlo aca, el siguiente login
+        # (nueva MainWindow, misma QApplication) dejaria dos filtros activos, y Qt seguiria
+        # invocando eventFilter() de esta instancia ya cerrada.
+        QApplication.instance().removeEventFilter(self)
+        self._timer_inactividad.stop()
+        self._timer_notificaciones.stop()
+        # Hilos propios del shell (campana, licencia, búsqueda global de la barra superior):
+        # mismo motivo que el bloque de abajo.
+        for worker in (self._worker_notificaciones, self._worker_licencia, *self.topbar._workers):
+            if worker is not None and worker.isRunning():
+                worker.quit()
+                worker.wait(3000)
+        # DashboardPanel y TasaTicker cargan datos en un QThread aparte
+        # (QueryWorker) que puede seguir corriendo al cerrar la ventana --
+        # destruir esos widgets con el hilo todavia activo aborta el proceso
+        # ("QThread: Destroyed while thread is still running"). quit()+wait()
+        # es un no-op si ya termino; si no, espera a que la consulta actual
+        # cierre su propia sesion antes de dejar avanzar el cierre.
+        candidatos = [*self._paneles.values(), self.ticker_tasas]
+        for widget in candidatos:
+            worker = getattr(widget, "_worker", None)
+            if worker is not None and worker.isRunning():
+                worker.quit()
+                worker.wait(3000)
+        super().closeEvent(event)
+
+    def _confirmar_cerrar_sesion(self) -> None:
+        respuesta = MessageBox.question(self, "Cerrar sesión", "¿Cerrar la sesión actual?")
+        if respuesta == QMessageBox.StandardButton.Yes:
+            # Cerrar esta ventana hace que app.exec() retorne en app/main.py (es la unica
+            # ventana top-level abierta) -- el bucle de main() vuelve a mostrar LoginWindow,
+            # mismo mecanismo que ya dispara el boton "X" de la ventana.
+            self.close()
+
+    # ── Helpers ──────────────────────────────────────────────────────────
+
+    def _obtener_nombre_empresa(self) -> str:
+        """Obtiene el nombre de la empresa desde la tabla configuracion_empresa."""
+        session = SessionLocal()
+        try:
+            config = session.query(ConfiguracionEmpresa).first()
+            if config and config.razon_social_empresa:
+                return config.razon_social_empresa
+        except Exception:
+            logger.exception("No se pudo cargar el nombre de la empresa")
+        finally:
+            session.close()
+        return "Mi Empresa"

@@ -1,0 +1,610 @@
+"""Dialogo de una sola linea de "forma de pago" para una factura de contado (ver
+FacturaFormDialog._make_card_pagos): metodo + moneda + monto + origen (caja o cuenta
+bancaria, segun el metodo) + referencia opcional. Puede agregarse mas de una linea a la
+misma factura -- ver VentaService.emitir_factura(pagos=[...]).
+
+No ofrece abrir un turno de caja desde aca: FacturacionPanel exige una caja con turno
+abierto para poder entrar a facturar (ver FacturacionPanel._verificar_caja_abierta /
+CajaAperturaDialog), asi que si se llego hasta este dialogo ya deberia existir una."""
+
+from decimal import ROUND_HALF_UP, Decimal
+
+import qtawesome as qta
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+from sqlalchemy.orm import Session
+
+from app.services.permisos import PermisoDenegadoError
+from app.services.tesoreria import BancoService, CajaService
+from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_CONTENT_BG,
+    COLOR_FIELD_BG,
+    COLOR_INFO_BG,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_DARK,
+    COLOR_PRIMARY_LIGHT,
+    COLOR_TABLE_HEADER,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
+    COLOR_WHITE,
+    FONT_FAMILY,
+    ICON_CHEVRON_DOWN_URL,
+    aplicar_sombra,
+)
+
+DIALOG_STYLE = f"""
+QDialog {{
+    background-color: {COLOR_CONTENT_BG};
+    font-family: '{FONT_FAMILY}', Arial, sans-serif;
+}}
+QWidget#SectionCard {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 10px;
+}}
+QLabel.FormLabel {{
+    font-size: 12px;
+    font-weight: 600;
+    color: {COLOR_TEXT_DARK_SLATE};
+    margin-bottom: 2px;
+}}
+QLineEdit, QComboBox {{
+    background-color: {COLOR_WHITE};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+    color: {COLOR_TEXT_DARK};
+    min-height: 20px;
+}}
+QLineEdit:focus, QComboBox:focus {{
+    border: 1.5px solid {COLOR_PRIMARY};
+}}
+QLineEdit:disabled, QComboBox:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    color: {COLOR_TEXT_LIGHT};
+}}
+QComboBox {{
+    padding-right: 24px;
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QComboBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+}}
+QPushButton#BtnPrimary {{
+    background-color: {COLOR_PRIMARY};
+    color: {COLOR_WHITE};
+    border: none;
+    border-radius: 6px;
+    padding: 8px 22px;
+    font-size: 13px;
+    font-weight: bold;
+}}
+QPushButton#BtnPrimary:hover {{
+    background-color: {COLOR_PRIMARY_LIGHT};
+}}
+QPushButton#BtnPrimary:pressed {{
+    background-color: {COLOR_PRIMARY_DARK};
+}}
+QPushButton#BtnSecondary {{
+    background-color: {COLOR_FIELD_BG};
+    color: {COLOR_TEXT_MEDIUM};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton#BtnSecondary:hover {{
+    background-color: {COLOR_TABLE_HEADER};
+    color: {COLOR_TEXT_DARK};
+}}
+"""
+
+METODOS_PAGO = [
+    ("Efectivo", "efectivo"),
+    ("Transferencia", "transferencia"),
+    ("Zelle", "zelle"),
+    ("Binance (USDT)", "binance"),
+    ("Punto de Venta", "punto_de_venta"),
+]
+MONEDAS = [
+    ("Dólares (USD)", "USD"),
+    ("Bolívares (VES)", "VES"),
+    ("Pesos colombianos (COP)", "COP"),
+    ("USDT", "USDT"),
+]
+METODOS_MONEDA_SUGERIDA = {
+    "zelle": "USD",
+    "binance": "USDT",
+}
+# Metodos que muestran el bloque "Monto (Bs) + Tasa". Ahi el campo "Monto" es SIEMPRE el
+# equivalente en USD (lo calcula el bloque Bs, o se escribe directo en USD), asi que la
+# moneda queda fija en USD. Antes se sugeria VES: el dialogo devolvia moneda="VES" con un
+# monto que ya estaba en USD, y emitir_factura lo dividia otra vez por la tasa
+# (Bs 4.000 a tasa 40 = $100 contaban como $2,50) -- doble conversion.
+METODOS_CON_BLOQUE_BS = ("transferencia", "punto_de_venta")
+METODOS_QUE_REQUIEREN_CAJA = {"efectivo"}
+
+
+def _enmascarar(numero: str | None) -> str:
+    if not numero:
+        return "s/n"
+    visibles = numero[-4:]
+    return "*" * max(len(numero) - len(visibles), 0) + visibles
+
+
+class PagoLineaDialog(QDialog):
+    """Al aceptar, get_data() devuelve el dict listo para VentaService.emitir_factura
+    (pagos=[...]): metodo_pago, moneda, monto_moneda_origen, id_cuenta_bancaria/id_caja
+    (exactamente uno), referencia."""
+
+    def __init__(
+        self,
+        session: Session,
+        id_usuario: int | None,
+        monto_sugerido: float | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.session = session
+        self.id_usuario = id_usuario
+        self._cajas_abiertas: list = []
+        self._cuentas_activas: list = []
+        # Saldo pendiente de la factura, siempre en USD. Se convierte a la moneda elegida
+        # (ver _aplicar_monto_sugerido) mientras el cajero no haya tecleado un monto propio.
+        self._saldo_usd = (
+            Decimal(f"{monto_sugerido:.2f}") if monto_sugerido is not None and monto_sugerido > 0.005 else None
+        )
+        self._monto_editado = False
+        self._tasa_bcv: Decimal | None = None
+        self._tasa_cop: Decimal | None = None
+
+        self.setWindowTitle("Agregar Forma de Pago")
+        ajustar_tamano(self, 420, 500, 420, 500)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        self._build_ui()
+        hacer_desplazable(self)
+        self._cargar_origenes()
+        self._cargar_tasas()
+        self._toggle_origen()
+        self._toggle_campos_bolivares()
+        self.moneda_combo.currentIndexChanged.connect(self._aplicar_monto_sugerido)
+        self.monto_input.textEdited.connect(self._marcar_monto_editado)
+        self.bolivares_input.textEdited.connect(self._marcar_monto_editado)
+
+        # Precarga el saldo pendiente de la factura (auditoria UX de facturacion,
+        # cajero): sin esto, el caso mas comun -- un solo pago en efectivo por el total
+        # exacto -- igual obligaba a recordar y tipear el monto a mano. Preseleccionado
+        # (selectAll) para poder sobreescribirlo de un tiro si el cajero va a repartir el
+        # pago entre varias formas/monedas.
+        if self._saldo_usd is not None:
+            self._aplicar_monto_sugerido()
+            self.monto_input.setFocus()
+            self.monto_input.selectAll()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(qta.icon("fa5s.money-bill-wave", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
+        icon_lbl.setStyleSheet(
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
+        )
+        icon_lbl.setFixedSize(34, 34)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_titulo = QLabel("Agregar Forma de Pago")
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        header.addWidget(icon_lbl)
+        header.addWidget(lbl_titulo)
+        header.addStretch()
+        root.addLayout(header)
+
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 14, 16, 14)
+        card_layout.setSpacing(8)
+
+        lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
+        lbl_metodo.setProperty("class", "FormLabel")
+        self.metodo_combo = QComboBox()
+        self.metodo_combo.setFixedHeight(32)
+        for etiqueta, valor in METODOS_PAGO:
+            self.metodo_combo.addItem(etiqueta, valor)
+        self.metodo_combo.currentIndexChanged.connect(self._on_metodo_cambiado)
+        card_layout.addWidget(lbl_metodo)
+        card_layout.addWidget(self.metodo_combo)
+
+        fila_monto = QHBoxLayout()
+        fila_monto.setSpacing(8)
+
+        col_moneda = QVBoxLayout()
+        lbl_moneda = QLabel("Moneda")
+        lbl_moneda.setProperty("class", "FormLabel")
+        self.moneda_combo = QComboBox()
+        self.moneda_combo.setFixedHeight(32)
+        for etiqueta, valor in MONEDAS:
+            self.moneda_combo.addItem(etiqueta, valor)
+        col_moneda.addWidget(lbl_moneda)
+        col_moneda.addWidget(self.moneda_combo)
+
+        col_monto = QVBoxLayout()
+        self.lbl_monto = QLabel(f"Monto {ASTERISCO_REQUERIDO}")
+        self.lbl_monto.setProperty("class", "FormLabel")
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"))
+        self.monto_input.setFixedHeight(32)
+        # Con el monto ya precargado (ver __init__/monto_sugerido) y seleccionado, Enter
+        # aca confirma de una -- para el caso comun (efectivo, monto sugerido correcto)
+        # el flujo completo queda en "Agregar forma de pago" + Enter, sin mouse
+        # (auditoria UX de facturacion, cajero).
+        self.monto_input.returnPressed.connect(self._validar_y_aceptar)
+        self.monto_input.valueChanged.connect(self._on_monto_usd_cambiado)
+        col_monto.addWidget(self.lbl_monto)
+        col_monto.addWidget(self.monto_input)
+
+        fila_monto.addLayout(col_moneda, stretch=1)
+        fila_monto.addLayout(col_monto, stretch=1)
+        card_layout.addLayout(fila_monto)
+
+        # Campos para cálculo en bolivares (visible solo para transferencia y punto de venta)
+        self.campos_bolivares_widget = QWidget()
+        self.campos_bolivares_widget.setVisible(False)
+        campos_bolivares_layout = QVBoxLayout(self.campos_bolivares_widget)
+        campos_bolivares_layout.setContentsMargins(0, 0, 0, 0)
+        campos_bolivares_layout.setSpacing(8)
+
+        fila_bolivares = QHBoxLayout()
+        fila_bolivares.setSpacing(8)
+
+        col_bolivares = QVBoxLayout()
+        lbl_bolivares = QLabel("Monto (Bs)")
+        lbl_bolivares.setProperty("class", "FormLabel")
+        self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
+        self.bolivares_input.setFixedHeight(32)
+        self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
+        col_bolivares.addWidget(lbl_bolivares)
+        col_bolivares.addWidget(self.bolivares_input)
+
+        col_tasa = QVBoxLayout()
+        lbl_tasa = QLabel("Tasa del día (Bs/USD)")
+        lbl_tasa.setProperty("class", "FormLabel")
+        self.tasa_input = NumericLineEdit(NumericFieldType.RATE)
+        self.tasa_input.setFixedHeight(32)
+        self.tasa_input.valueChanged.connect(self._calcular_monto_usd)
+        col_tasa.addWidget(lbl_tasa)
+        col_tasa.addWidget(self.tasa_input)
+
+        fila_bolivares.addLayout(col_bolivares, stretch=1)
+        fila_bolivares.addLayout(col_tasa, stretch=1)
+        campos_bolivares_layout.addLayout(fila_bolivares)
+
+        # Espacio antes del selector de tasas
+        campos_bolivares_layout.addSpacing(10)
+
+        # Selector de tasas disponibles
+        fila_tasa_selector = QHBoxLayout()
+        fila_tasa_selector.setSpacing(8)
+        lbl_usar_tasa = QLabel("Usar tasa:")
+        lbl_usar_tasa.setStyleSheet("font-size: 12px; color: #64748B;")
+        self.tasa_combo = QComboBox()
+        self.tasa_combo.setFixedHeight(16)
+        self.tasa_combo.addItem("-- Seleccionar --")
+        self.tasa_combo.currentIndexChanged.connect(self._on_tasa_seleccionada)
+        fila_tasa_selector.addWidget(lbl_usar_tasa)
+        fila_tasa_selector.addWidget(self.tasa_combo)
+        fila_tasa_selector.addStretch()
+        campos_bolivares_layout.addLayout(fila_tasa_selector)
+
+        card_layout.addWidget(self.campos_bolivares_widget)
+
+        lbl_origen = QLabel(f"Origen {ASTERISCO_REQUERIDO}")
+        lbl_origen.setProperty("class", "FormLabel")
+        self.origen_combo = QComboBox()
+        self.origen_combo.setFixedHeight(32)
+        card_layout.addWidget(lbl_origen)
+        card_layout.addWidget(self.origen_combo)
+
+        lbl_ref = QLabel("Referencia")
+        lbl_ref.setProperty("class", "FormLabel")
+        self.referencia_input = QLineEdit()
+        self.referencia_input.setPlaceholderText("Opcional (confirmación, últimos dígitos, etc.)")
+        self.referencia_input.setFixedHeight(32)
+        self.referencia_input.setMaxLength(100)  # columna referencia VARCHAR(100)
+        card_layout.addWidget(lbl_ref)
+        card_layout.addWidget(self.referencia_input)
+
+        root.addWidget(card, stretch=1)
+
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 4, 0, 0)
+        footer.setSpacing(10)
+        footer.addStretch()
+
+        self.btn_cancelar = QPushButton("Cancelar")
+        self.btn_cancelar.setIcon(qta.icon("fa5s.times", color="#475569"))
+        self.btn_cancelar.setObjectName("BtnSecondary")
+        self.btn_cancelar.setFixedHeight(34)
+        self.btn_cancelar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancelar.setAutoDefault(False)
+        self.btn_cancelar.clicked.connect(self.reject)
+
+        self.btn_agregar = QPushButton("Agregar")
+        self.btn_agregar.setIcon(qta.icon("fa5s.check", color="#FFFFFF"))
+        self.btn_agregar.setObjectName("BtnPrimary")
+        self.btn_agregar.setFixedHeight(34)
+        self.btn_agregar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_agregar.setAutoDefault(False)
+        self.btn_agregar.clicked.connect(self._validar_y_aceptar)
+
+        footer.addWidget(self.btn_cancelar)
+        footer.addWidget(self.btn_agregar)
+        root.addLayout(footer)
+
+    # ── Origen (caja/cuenta bancaria segun metodo) ───────────────────────────
+
+    def _cargar_origenes(self) -> None:
+        try:
+            cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cajas = []
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+
+        try:
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cuentas = []
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
+
+    def _on_metodo_cambiado(self) -> None:
+        metodo = self.metodo_combo.currentData()
+        con_bloque_bs = metodo in METODOS_CON_BLOQUE_BS
+        moneda_sugerida = "USD" if con_bloque_bs else METODOS_MONEDA_SUGERIDA.get(metodo)
+        if moneda_sugerida:
+            indice = self.moneda_combo.findData(moneda_sugerida)
+            if indice >= 0:
+                self.moneda_combo.setCurrentIndex(indice)
+        # Con el bloque Bs la moneda no se elige: el monto es USD (ver METODOS_CON_BLOQUE_BS).
+        self.moneda_combo.setEnabled(not con_bloque_bs)
+        self.moneda_combo.setToolTip(
+            "Con este método el monto se ingresa en Bs y la tasa; el equivalente en USD se calcula."
+            if con_bloque_bs
+            else ""
+        )
+        etiqueta_monto = "Monto (USD)" if con_bloque_bs else "Monto"
+        self.lbl_monto.setText(f"{etiqueta_monto} {ASTERISCO_REQUERIDO}")
+        self._toggle_origen()
+        self._toggle_campos_bolivares()
+        self._aplicar_monto_sugerido()
+        if con_bloque_bs:
+            self._calcular_bolivares_desde_usd()
+        # Un pago en efectivo no tiene "referencia" que registrar (a diferencia de una
+        # transferencia/Zelle/Binance/punto de venta, donde suele ser la confirmacion o
+        # los ultimos digitos) -- se deshabilita y limpia para no dejar un valor cargado
+        # que no aplica si el usuario cambia de metodo despues.
+        es_efectivo = metodo == "efectivo"
+        self.referencia_input.setEnabled(not es_efectivo)
+        if es_efectivo:
+            self.referencia_input.clear()
+
+    def _toggle_origen(self) -> None:
+        metodo = self.metodo_combo.currentData()
+        requiere_caja = metodo in METODOS_QUE_REQUIEREN_CAJA
+        self.origen_combo.blockSignals(True)
+        self.origen_combo.clear()
+        if requiere_caja:
+            if not self._cajas_abiertas:
+                self.origen_combo.addItem("Sin cajas abiertas")
+                self.origen_combo.setEnabled(False)
+            else:
+                self.origen_combo.setEnabled(True)
+                for caja in self._cajas_abiertas:
+                    self.origen_combo.addItem(
+                        caja.nombre_caja or f"Caja {caja.id_caja}",
+                        ("caja", caja.id_caja),
+                    )
+        else:
+            if not self._cuentas_activas:
+                self.origen_combo.addItem("Sin cuentas bancarias activas")
+                self.origen_combo.setEnabled(False)
+            else:
+                self.origen_combo.setEnabled(True)
+                for cuenta in self._cuentas_activas:
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
+                    etiqueta = f"{nombre_banco} - {_enmascarar(cuenta.numero_cuenta)}"
+                    self.origen_combo.addItem(etiqueta, ("banco", cuenta.id_cuenta))
+        self.origen_combo.blockSignals(False)
+
+    # ── Campos de cálculo en bolivares ───────────────────────────────────
+
+    def _cargar_tasas(self) -> None:
+        """Carga las tasas actuales (BCV, paralelo y COP) en el combo."""
+        try:
+            from app.db.models import ControlDeTasa
+
+            # Obtener la tasa más reciente
+            tasa_registro = (
+                self.session.query(ControlDeTasa)
+                .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
+                .first()
+            )
+        except Exception:
+            tasa_registro = None
+
+        self.tasa_combo.blockSignals(True)
+        self.tasa_combo.clear()
+        self.tasa_combo.addItem("-- Seleccionar --")
+
+        if tasa_registro:
+            # Agregar tasa BCV
+            if tasa_registro.tasa_dolar_bcv:
+                etiqueta_bcv = f"BCV: {tasa_registro.tasa_dolar_bcv:,.2f}"
+                self.tasa_combo.addItem(
+                    etiqueta_bcv,
+                    (tasa_registro.id_tasa, float(tasa_registro.tasa_dolar_bcv)),
+                )
+            # Agregar tasa paralelo
+            if tasa_registro.tasa_dolar_paralelo:
+                etiqueta_paralelo = f"Paralelo: {tasa_registro.tasa_dolar_paralelo:,.2f}"
+                self.tasa_combo.addItem(
+                    etiqueta_paralelo,
+                    (tasa_registro.id_tasa, float(tasa_registro.tasa_dolar_paralelo)),
+                )
+            # Agregar tasa COP
+            if tasa_registro.tasa_cop:
+                etiqueta_cop = f"COP: {tasa_registro.tasa_cop:,.2f}"
+                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_registro.tasa_cop)))
+
+            self._tasa_bcv = Decimal(str(tasa_registro.tasa_dolar_bcv)) if tasa_registro.tasa_dolar_bcv else None
+            self._tasa_cop = Decimal(str(tasa_registro.tasa_cop)) if tasa_registro.tasa_cop else None
+
+        # BCV preseleccionada: es la que usa VentaService para convertir pagos en VES, y
+        # con ella el "Monto (Bs)" de transferencia/punto de venta sale ya calculado con el
+        # saldo pendiente. Si se cobra a otra tasa, el cajero la cambia en el combo.
+        if self._tasa_bcv is not None:
+            self.tasa_combo.setCurrentIndex(1)
+            self.tasa_input.set_value(self._tasa_bcv)
+
+        self.tasa_combo.blockSignals(False)
+
+    def _on_tasa_seleccionada(self) -> None:
+        """Cuando se selecciona una tasa del combo, actualiza el campo de tasa."""
+        datos_tasa = self.tasa_combo.currentData()
+        if datos_tasa:
+            _, tasa_valor = datos_tasa
+            self.tasa_input.set_value(Decimal(str(tasa_valor)))
+            self._calcular_monto_usd()
+
+    def _marcar_monto_editado(self) -> None:
+        self._monto_editado = True
+
+    def _aplicar_monto_sugerido(self) -> None:
+        """Precarga el saldo pendiente convertido a la moneda elegida: VES con la tasa
+        BCV y COP con la tasa COP (las mismas que usa VentaService._convertir_a_usd, asi
+        que el monto sugerido cubre exacto el faltante). No pisa un monto que el cajero ya
+        tecleo, ni sugiere nada si falta la tasa de esa moneda."""
+        if self._saldo_usd is None or self._monto_editado:
+            return
+        moneda = self.moneda_combo.currentData()
+        if moneda == "VES":
+            tasa = self._tasa_bcv
+        elif moneda == "COP":
+            tasa = self._tasa_cop
+        else:
+            tasa = Decimal(1)
+        if tasa is None:
+            return
+        self.monto_input.set_value((self._saldo_usd * tasa).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        if self.metodo_combo.currentData() in METODOS_CON_BLOQUE_BS:
+            self._calcular_bolivares_desde_usd()
+
+    def _toggle_campos_bolivares(self) -> None:
+        """Muestra/oculta los campos de cálculo en bolivares según el método de pago."""
+        metodo = self.metodo_combo.currentData()
+        # Solo mostrar para transferencia y punto de venta
+        mostrar_bolivares = metodo in METODOS_CON_BLOQUE_BS
+        self.campos_bolivares_widget.setVisible(mostrar_bolivares)
+
+    def _on_monto_usd_cambiado(self) -> None:
+        """Cuando el monto en USD cambia, calcula el equivalente en Bs si aplica."""
+        metodo = self.metodo_combo.currentData()
+        if metodo in METODOS_CON_BLOQUE_BS:
+            self._calcular_bolivares_desde_usd()
+
+    def _calcular_monto_usd(self) -> None:
+        """Calcula el monto en USD a partir del monto en Bs y la tasa."""
+        monto_bs = self.bolivares_input.get_value()
+        tasa = self.tasa_input.get_value()
+        if monto_bs > 0 and tasa > 0:
+            monto_usd = monto_bs / tasa
+            self.monto_input.set_value(monto_usd)
+
+    def _calcular_bolivares_desde_usd(self) -> None:
+        """Calcula el monto en Bs a partir del monto en USD y la tasa."""
+        monto_usd = self.monto_input.get_value()
+        tasa = self.tasa_input.get_value()
+        if monto_usd > 0 and tasa > 0:
+            monto_bs = monto_usd * tasa
+            self.bolivares_input.set_value(monto_bs)
+
+    # ── Validación / datos ────────────────────────────────────────────────
+
+    def _validar_y_aceptar(self) -> None:
+        if self.monto_input.get_value() <= 0:
+            MessageBox.warning(self, "Monto requerido", "Ingrese un monto mayor a cero.")
+            return
+        origen = self.origen_combo.currentData()
+        if origen is None:
+            metodo = self.metodo_combo.currentData()
+            if metodo in METODOS_QUE_REQUIEREN_CAJA:
+                MessageBox.warning(
+                    self,
+                    "Caja requerida",
+                    "No hay ninguna caja con turno abierto. Cierre este formulario y verifique el turno de caja.",
+                )
+            else:
+                MessageBox.warning(
+                    self,
+                    "Cuenta requerida",
+                    "No hay ninguna cuenta bancaria activa para este método de pago.",
+                )
+            return
+        self.accept()
+
+    def get_data(self) -> dict:
+        tipo_origen, id_origen = self.origen_combo.currentData()
+        metodo = self.metodo_combo.currentData()
+
+        # Incluir monto_bolivares y tasa_cambio para transferencia y punto de venta
+        monto_bolivares = None
+        tasa_cambio = None
+        # Con el bloque Bs el monto ya esta en USD: la moneda se fuerza a USD aunque el combo
+        # diga otra cosa, para que el servicio nunca lo convierta una segunda vez.
+        moneda = self.moneda_combo.currentData()
+        if metodo in METODOS_CON_BLOQUE_BS:
+            monto_bolivares = self.bolivares_input.get_value()
+            tasa_cambio = self.tasa_input.get_value()
+            moneda = "USD"
+
+        return {
+            "metodo_pago": metodo,
+            "moneda": moneda,
+            "monto_moneda_origen": self.monto_input.get_value(),
+            "monto_bolivares": monto_bolivares,
+            "tasa_cambio": tasa_cambio,
+            "id_caja": id_origen if tipo_origen == "caja" else None,
+            "id_cuenta_bancaria": id_origen if tipo_origen == "banco" else None,
+            "referencia": self.referencia_input.text().strip() or None,
+        }

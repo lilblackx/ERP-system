@@ -1,0 +1,217 @@
+"""Dialogo minimo para registrar la tasa de cambio del dia -- mismo patron que
+caja_apertura_dialog.py (tarjeta unica + footer). A diferencia de otros formularios de
+alta, TasaService no tiene actualizar/eliminar: cada registro es un snapshot historico
+inmutable (ver app/services/tasas.py), asi que este dialogo tampoco tiene modo edicion.
+"""
+
+from decimal import Decimal
+
+import qtawesome as qta
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_CONTENT_BG,
+    COLOR_FIELD_BG,
+    COLOR_INFO_BG,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_DARK,
+    COLOR_PRIMARY_LIGHT,
+    COLOR_TABLE_HEADER,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
+    COLOR_TEXT_MUTED,
+    COLOR_WHITE,
+    FONT_FAMILY,
+    aplicar_sombra,
+)
+
+DIALOG_STYLE = f"""
+QDialog {{
+    background-color: {COLOR_CONTENT_BG};
+    font-family: '{FONT_FAMILY}', Arial, sans-serif;
+}}
+QWidget#SectionCard {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 10px;
+}}
+QLabel.FormLabel {{
+    font-size: 12px;
+    font-weight: 600;
+    color: {COLOR_TEXT_DARK_SLATE};
+    margin-bottom: 2px;
+}}
+QPushButton#BtnPrimary {{
+    background-color: {COLOR_PRIMARY};
+    color: {COLOR_WHITE};
+    border: none;
+    border-radius: 6px;
+    padding: 8px 22px;
+    font-size: 13px;
+    font-weight: bold;
+}}
+QPushButton#BtnPrimary:hover {{
+    background-color: {COLOR_PRIMARY_LIGHT};
+}}
+QPushButton#BtnPrimary:pressed {{
+    background-color: {COLOR_PRIMARY_DARK};
+}}
+QPushButton#BtnSecondary {{
+    background-color: {COLOR_FIELD_BG};
+    color: {COLOR_TEXT_MEDIUM};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton#BtnSecondary:hover {{
+    background-color: {COLOR_TABLE_HEADER};
+    color: {COLOR_TEXT_DARK};
+}}
+"""
+
+
+class TasaRegistroDialog(QDialog):
+    """Tras exec() == Accepted, `get_data()` devuelve los 3 valores listos para pasar a
+    TasaService.registrar_tasa(). Paralelo/COP quedan en None si se dejan en 0 -- son
+    opcionales (no toda venta se cobra en esas monedas)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Registrar Tasa del Día")
+        ajustar_tamano(self, 420, 380)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        self._build_ui()
+        hacer_desplazable(self)
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(qta.icon("fa5s.exchange-alt", color=COLOR_PRIMARY).pixmap(QSize(20, 20)))
+        icon_lbl.setStyleSheet(
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
+        )
+        icon_lbl.setFixedSize(34, 34)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        titulos = QVBoxLayout()
+        titulos.setSpacing(1)
+        lbl_titulo = QLabel("Registrar Tasa del Día")
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_subtitulo = QLabel("Queda como un registro histórico nuevo, no reemplaza el anterior.")
+        lbl_subtitulo.setWordWrap(True)
+        lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        titulos.addWidget(lbl_titulo)
+        titulos.addWidget(lbl_subtitulo)
+        header.addWidget(icon_lbl)
+        header.addLayout(titulos, stretch=1)
+        root.addLayout(header)
+
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        lbl_bcv = QLabel(f"Tasa BCV (Bs./USD) {ASTERISCO_REQUERIDO}")
+        lbl_bcv.setProperty("class", "FormLabel")
+        self.bcv_input = NumericLineEdit(
+            NumericFieldType.RATE,
+            min_value=Decimal("0"),
+            max_value=Decimal("9999999.99"),
+        )
+        self.bcv_input.setFixedHeight(32)
+        layout.addWidget(lbl_bcv)
+        layout.addWidget(self.bcv_input)
+
+        lbl_paralelo = QLabel("Dólar paralelo (Bs./USD)")
+        lbl_paralelo.setProperty("class", "FormLabel")
+        self.paralelo_input = NumericLineEdit(
+            NumericFieldType.RATE,
+            min_value=Decimal("0"),
+            max_value=Decimal("9999999.99"),
+        )
+        self.paralelo_input.setFixedHeight(32)
+        layout.addWidget(lbl_paralelo)
+        layout.addWidget(self.paralelo_input)
+
+        lbl_cop = QLabel("Peso colombiano (COP/USD)")
+        lbl_cop.setProperty("class", "FormLabel")
+        self.cop_input = NumericLineEdit(
+            NumericFieldType.RATE,
+            min_value=Decimal("0"),
+            max_value=Decimal("99999999.99"),
+        )
+        self.cop_input.setFixedHeight(32)
+        layout.addWidget(lbl_cop)
+        layout.addWidget(self.cop_input)
+
+        root.addWidget(card, stretch=1)
+
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 4, 0, 0)
+        footer.setSpacing(10)
+        footer.addStretch()
+
+        btn_cancelar = QPushButton("Cancelar")
+        btn_cancelar.setIcon(qta.icon("fa5s.times", color="#475569"))
+        btn_cancelar.setObjectName("BtnSecondary")
+        btn_cancelar.setFixedHeight(36)
+        btn_cancelar.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancelar.setAutoDefault(False)
+        btn_cancelar.clicked.connect(self.reject)
+
+        btn_guardar = QPushButton("Registrar")
+        btn_guardar.setIcon(qta.icon("fa5s.save", color="#FFFFFF"))
+        btn_guardar.setObjectName("BtnPrimary")
+        btn_guardar.setFixedHeight(36)
+        btn_guardar.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_guardar.setAutoDefault(False)
+        btn_guardar.clicked.connect(self._validar_y_aceptar)
+
+        footer.addWidget(btn_cancelar)
+        footer.addWidget(btn_guardar)
+        root.addLayout(footer)
+
+    def _validar_y_aceptar(self) -> None:
+        if self.bcv_input.get_value() <= 0:
+            MessageBox.warning(
+                self,
+                "Dato requerido",
+                "La tasa BCV es obligatoria y debe ser mayor a cero.",
+            )
+            self.bcv_input.setFocus()
+            return
+        self.accept()
+
+    def get_data(self) -> dict:
+        return {
+            "tasa_bcv": self.bcv_input.get_value(),
+            "tasa_paralelo": self.paralelo_input.get_value() or None,
+            "tasa_cop": self.cop_input.get_value() or None,
+        }

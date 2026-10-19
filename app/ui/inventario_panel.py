@@ -1,0 +1,762 @@
+"""
+Panel completo del módulo Inventario.
+Mismo patrón visual y de interacción que app/ui/clientes_panel.py (paleta y tipografía
+de app/ui/styles.py) para mantener consistencia entre módulos: barra de herramientas,
+tabla estilizada, paginación (D-01) y exportación a Excel (R-02/R-10).
+"""
+
+import logging
+from datetime import date, timedelta
+from decimal import Decimal
+
+import qtawesome as qta
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QShowEvent
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSpacerItem,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+from sqlalchemy.exc import IntegrityError
+
+from app.db.models import Inventario, ProductoPrecio, Usuario
+from app.services.categorias import CategoriaService
+from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.inventario import PrecioService, ProductoService
+from app.services.permisos import PermisoDenegadoError
+from app.ui.message_box import MessageBox
+from app.ui.producto_auditoria_dialog import ProductoAuditoriaDialog
+from app.ui.producto_form_dialog import ProductoFormDialog
+from app.ui.styles import (
+    BUTTON_PRIMARY_QSS,
+    BUTTON_SECONDARY_QSS,
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_CONTENT_BG,
+    COLOR_DANGER,
+    COLOR_PRIMARY,
+    COLOR_SUCCESS,
+    COLOR_TABLE_HEADER,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MUTED,
+    COLOR_WARNING,
+    SEARCH_QSS,
+    TABLE_QSS,
+    EstadoBadge,
+    alinear_encabezados,
+    aplicar_sombra,
+)
+from app.ui.toolbar_popups import BotonExportar, BotonFiltros
+from app.ui.workers import QueryWorker
+
+logger = logging.getLogger(__name__)
+
+COLS_VISIBLES = [
+    "ID",
+    "CÓDIGO",
+    "NOMBRE",
+    "CATEGORÍA",
+    "CANTIDAD",
+    "CAJAS",
+    "AGRANEL",
+    "COSTO",
+    "PRECIO 1",
+    "PRECIO 2",
+    "PRECIO 3",
+    "ESTADO",
+]
+COL_ID_INTERNO = 0  # oculto
+POR_PAGINA = 25
+# Mismo horizonte que ProductoService.obtener_alertas_stock(dias_vencimiento=30) --
+# mantener sincronizado si ese default cambia.
+DIAS_VENCIMIENTO_ALERTA = 30
+
+
+def _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario) -> list[list]:
+    resultado = ProductoService.buscar(
+        session,
+        texto=texto,
+        id_categoria=id_categoria,
+        solo_con_stock=solo_con_stock,
+        pagina=1,
+        por_pagina=1_000_000,
+        id_usuario=id_usuario,
+    )
+    precios = InventarioPanel._obtener_precios(session, [p.id_producto for p in resultado["items"]])
+
+    filas = []
+    for p in resultado["items"]:
+        cantidad_unidad = Decimal(str(p.cantidad_unidad)) if p.cantidad_unidad is not None else Decimal("0")
+
+        # Calcular cajas y unidades sueltas dinámicamente usando Decimal
+        if p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
+            cajas = cantidad_unidad // Decimal(str(p.cantidad_caja))
+            unidades_sueltas = cantidad_unidad % Decimal(str(p.cantidad_caja))
+        else:
+            cajas = Decimal("0")
+            unidades_sueltas = cantidad_unidad
+
+        filas.append(
+            [
+                p.id_producto,
+                p.cod_producto,
+                p.nombre_producto,
+                p.categoria.nombre if p.categoria else None,
+                float(cantidad_unidad),
+                float(cajas),
+                float(unidades_sueltas),
+                float(p.costo_producto) if p.costo_producto is not None else 0.0,
+                precios.get(p.id_producto, {}).get("precio_1"),
+                precios.get(p.id_producto, {}).get("precio_2"),
+                precios.get(p.id_producto, {}).get("precio_3"),
+                p.estado_producto,
+            ]
+        )
+
+    return filas
+
+
+def _tarea_exportar_productos_excel(
+    session, ruta: str, texto, id_categoria, solo_con_stock, id_usuario
+) -> tuple[str, int]:
+    """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el catalogo
+    completo de inventario a un archivo (openpyxl) es lo bastante lento como para
+    congelar la ventana si se hace en el hilo de GUI."""
+    filas = _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario)
+    exportar_excel(ruta, COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+def _tarea_exportar_productos_pdf(
+    session, ruta: str, texto, id_categoria, solo_con_stock, id_usuario
+) -> tuple[str, int]:
+    filas = _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario)
+    exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
+    return ruta, len(filas)
+
+
+class InventarioPanel(QWidget):
+    """Panel principal del módulo Inventario: catálogo de productos con búsqueda,
+    filtro por categoría, paginación, alta/edición (con precio de venta) y export."""
+
+    def __init__(self, session_factory, usuario: Usuario, parent=None):
+        super().__init__(parent)
+        self.session_factory = session_factory
+        self.usuario = usuario
+        self.pagina_actual = 1
+        self.total_paginas = 1
+        self.es_vendedor = usuario.id_vendedor_usuario is not None
+        self.setObjectName("ContentArea")
+        self._setup_ui()
+        QTimer.singleShot(100, self._cargar_categorias_filtro)
+        QTimer.singleShot(100, self.cargar_productos)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        # Mismo problema que DashboardPanel/FacturacionPanel/ClientesPanel:
+        # MainWindow cachea el panel y lo reutiliza via QStackedWidget.
+        # _cargar_categorias_filtro preserva la categoria seleccionada al
+        # reconstruir el combo, asi que es seguro repetirla en cada revisita.
+        super().showEvent(event)
+        self._cargar_categorias_filtro()
+        self.cargar_productos()
+
+    def focusInEvent(self, event) -> None:
+        # Refrescar datos cuando el panel gana foco (ej: despues de crear
+        # una recepcion en el modulo de compras y volver aqui)
+        super().focusInEvent(event)
+        self.cargar_productos()
+
+    # ── Construcción de la UI ─────────────────────────────────────────────
+
+    def _setup_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(16)
+
+        root.addWidget(self._make_header())
+        root.addWidget(self._make_toolbar())
+        root.addWidget(self._make_table())
+        root.addWidget(self._make_footer())
+
+        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+
+    def _make_header(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+
+        lbl = QLabel("CATÁLOGO DE PRODUCTOS")
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+
+        self.lbl_total = QLabel("Cargando…")
+        self.lbl_total.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 13px;"
+            f" background-color: {COLOR_TABLE_HEADER}; border-radius: 10px;"
+            " padding: 3px 10px;"
+        )
+
+        # Icono real (qtawesome) + texto en vez de un caracter "⚠" suelto en el string --
+        # ver GUIA_ESTILO_UI.md 3.1 (todo icono de la app es qtawesome, ninguno un emoji).
+        self.lbl_alertas = QWidget()
+        self.lbl_alertas.setStyleSheet("background-color: #FEF3C7; border-radius: 10px;")
+        alertas_layout = QHBoxLayout(self.lbl_alertas)
+        alertas_layout.setContentsMargins(8, 3, 10, 3)
+        alertas_layout.setSpacing(5)
+        icon_alertas = QLabel()
+        icon_alertas.setPixmap(qta.icon("fa5s.exclamation-triangle", color=COLOR_WARNING).pixmap(QSize(12, 12)))
+        icon_alertas.setStyleSheet("background: transparent;")
+        self.lbl_alertas_texto = QLabel()
+        self.lbl_alertas_texto.setStyleSheet(
+            f"color: {COLOR_WARNING}; font-size: 13px; font-weight: bold; background: transparent;"
+        )
+        alertas_layout.addWidget(icon_alertas)
+        alertas_layout.addWidget(self.lbl_alertas_texto)
+        self.lbl_alertas.setVisible(False)
+
+        h.addWidget(lbl)
+        h.addWidget(self.lbl_total)
+        h.addWidget(self.lbl_alertas)
+        h.addStretch()
+        return w
+
+    def _make_toolbar(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet(
+            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
+        )
+        h = QHBoxLayout(w)
+        h.setContentsMargins(12, 8, 12, 8)
+        h.setSpacing(10)
+
+        self.buscar_input = QLineEdit()
+        self.buscar_input.setPlaceholderText("Buscar por código o nombre…")
+        self.buscar_input.addAction(
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        self.buscar_input.setObjectName("SearchInput")
+        self.buscar_input.setStyleSheet(SEARCH_QSS)
+        self.buscar_input.setFixedWidth(220)
+        self.buscar_input.returnPressed.connect(self._buscar_desde_inicio)
+        self.buscar_input.textChanged.connect(self._busqueda_dinamica)
+
+        self.categoria_filtro_combo = QComboBox()
+        self.categoria_filtro_combo.addItem("Todas las categorías")
+        self.categoria_filtro_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
+
+        self.solo_stock_check = QCheckBox("Solo con stock")
+        self.solo_stock_check.toggled.connect(self._buscar_desde_inicio)
+
+        self.btn_filtrar = BotonFiltros(
+            [
+                ("Categoría", self.categoria_filtro_combo),
+                ("", self.solo_stock_check),
+            ]
+        )
+
+        self.btn_nuevo = QPushButton("Nuevo Producto")
+        self.btn_nuevo.setIcon(qta.icon("fa5s.plus", color="white"))
+        self.btn_nuevo.setStyleSheet(BUTTON_PRIMARY_QSS)
+        self.btn_nuevo.clicked.connect(self.nuevo_producto)
+
+        self.btn_auditoria = QPushButton("Auditoría")
+        self.btn_auditoria.setIcon(qta.icon("fa5s.history", color=COLOR_PRIMARY))
+        self.btn_auditoria.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_auditoria.clicked.connect(self.abrir_auditoria)
+
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel_productos, on_pdf=self.exportar_pdf_productos)
+
+        self.btn_refresh = QPushButton()
+        self.btn_refresh.setIcon(qta.icon("fa5s.sync", color=COLOR_PRIMARY))
+        self.btn_refresh.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_refresh.setFixedWidth(36)
+        self.btn_refresh.setToolTip("Refrescar inventario")
+        self.btn_refresh.clicked.connect(self.cargar_productos)
+
+        h.addWidget(self.buscar_input)
+        h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        # Solo mostrar botones de creación y auditoría si no es vendedor
+        if not self.es_vendedor:
+            h.addWidget(self.btn_nuevo)
+            h.addWidget(self.btn_auditoria)
+        h.addWidget(self.btn_filtrar)
+        h.addWidget(self.btn_refresh)
+        h.addWidget(self.btn_exportar)
+        return w
+
+    def _make_table(self) -> QTableWidget:
+        self.tabla = QTableWidget(0, len(COLS_VISIBLES))
+        self.tabla.setHorizontalHeaderLabels(COLS_VISIBLES)
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignRight,
+                9: Qt.AlignmentFlag.AlignRight,
+                10: Qt.AlignmentFlag.AlignRight,
+                11: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.setShowGrid(False)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(11, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(11, 110)
+        self.tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.tabla)
+        self.tabla.setColumnHidden(COL_ID_INTERNO, True)
+        self.tabla.verticalHeader().setDefaultSectionSize(48)
+        return self.tabla
+
+    def _make_footer(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+
+        self.lbl_pagina = QLabel("Página 1")
+        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
+
+        self.btn_anterior = QPushButton()
+        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
+        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_anterior.setFixedWidth(40)
+        self.btn_anterior.clicked.connect(self._pagina_anterior)
+
+        self.btn_siguiente = QPushButton()
+        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_siguiente.setFixedWidth(40)
+        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+
+        h.addWidget(self.lbl_pagina)
+        h.addWidget(self.btn_anterior)
+        h.addWidget(self.btn_siguiente)
+        h.addStretch()
+        # Solo mostrar botones de edición y cambio de estado si no es vendedor
+        if not self.es_vendedor:
+            btn_editar = QPushButton("Editar seleccionado")
+            btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
+            btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
+            btn_editar.clicked.connect(self.editar_producto)
+            h.addWidget(btn_editar)
+
+            btn_estado = QPushButton("Cambiar estado")
+            btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
+            btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
+            btn_estado.clicked.connect(self.cambiar_estado_producto_seleccionado)
+            h.addWidget(btn_estado)
+        return w
+
+    # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
+
+    def _busqueda_dinamica(self) -> None:
+        if not hasattr(self, "_timer_busqueda"):
+            self._timer_busqueda = QTimer()
+            self._timer_busqueda.setSingleShot(True)
+            self._timer_busqueda.timeout.connect(self._buscar_desde_inicio)
+        self._timer_busqueda.start(400)
+
+    def _buscar_desde_inicio(self) -> None:
+        self.pagina_actual = 1
+        self.cargar_productos()
+
+    def _pagina_anterior(self) -> None:
+        if self.pagina_actual > 1:
+            self.pagina_actual -= 1
+            self.cargar_productos()
+
+    def _pagina_siguiente(self) -> None:
+        if self.pagina_actual < self.total_paginas:
+            self.pagina_actual += 1
+            self.cargar_productos()
+
+    # ── Lógica de datos ───────────────────────────────────────────────────
+
+    def _cargar_categorias_filtro(self) -> None:
+        session = self.session_factory()
+        try:
+            actual = self.categoria_filtro_combo.currentData()
+            self.categoria_filtro_combo.blockSignals(True)
+            self.categoria_filtro_combo.clear()
+            self.categoria_filtro_combo.addItem("Todas las categorías")
+            for categoria in CategoriaService.listar(session, id_usuario=self.usuario.id_usuario):
+                self.categoria_filtro_combo.addItem(categoria.nombre, categoria.id_categoria)
+            idx = self.categoria_filtro_combo.findData(actual)
+            self.categoria_filtro_combo.setCurrentIndex(idx if idx >= 0 else 0)
+            self.categoria_filtro_combo.blockSignals(False)
+        except Exception:
+            logger.exception("Fallo al cargar categorías para el filtro de inventario")
+        finally:
+            session.close()
+
+    def cargar_productos(self) -> None:
+        session = self.session_factory()
+        try:
+            resultado = ProductoService.buscar(
+                session,
+                texto=self.buscar_input.text().strip() or None,
+                id_categoria=self.categoria_filtro_combo.currentData(),
+                solo_con_stock=self.solo_stock_check.isChecked(),
+                pagina=self.pagina_actual,
+                por_pagina=POR_PAGINA,
+                id_usuario=self.usuario.id_usuario,
+            )
+            precios = self._obtener_precios(session, [p.id_producto for p in resultado["items"]])
+            self._poblar_tabla(resultado, precios)
+            self._actualizar_alertas(session)
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
+        except Exception as e:
+            logger.exception("Fallo al cargar el catálogo de inventario")
+            MessageBox.critical(
+                self,
+                "Error de conexión",
+                f"No se pudo cargar el catálogo de inventario.\n\nError: {str(e)}",
+            )
+        finally:
+            session.close()
+
+    @staticmethod
+    def _obtener_precios(session, ids_producto: list[int]) -> dict[int, dict[str, float]]:
+        """Lookup de solo-lectura directo (mismo criterio que cliente_form_dialog.py
+        consultando Vendedor/CategoriaCliente sin pasar por un servicio): evita N
+        consultas de PrecioService.obtener_precio(), una por fila de la tabla."""
+        if not ids_producto:
+            return {}
+        filas = session.query(ProductoPrecio).filter(ProductoPrecio.id_producto.in_(ids_producto)).all()
+        return {
+            fila.id_producto: {
+                "precio_1": float(fila.precio_1) if fila.precio_1 is not None else None,
+                "precio_2": float(fila.precio_2) if fila.precio_2 is not None else None,
+                "precio_3": float(fila.precio_3) if fila.precio_3 is not None else None,
+            }
+            for fila in filas
+        }
+
+    def _actualizar_alertas(self, session) -> None:
+        alertas = ProductoService.obtener_alertas_stock(session, id_usuario=self.usuario.id_usuario)
+        n_bajo_stock = len(alertas["bajo_stock"])
+        n_proximos_vencer = len(alertas["proximos_vencer"])
+        # Antes se sumaban ambos conteos en un solo numero ("3 productos con alerta")
+        # sin decir de que se trataba -- confuso para el usuario, que veia stock de sobra
+        # y no entendia por que el producto estaba marcado (la alerta real era por
+        # vencimiento proximo, no por stock).
+        partes = []
+        if n_bajo_stock:
+            partes.append(f"{n_bajo_stock} con stock bajo")
+        if n_proximos_vencer:
+            partes.append(f"{n_proximos_vencer} por vencer")
+        if partes:
+            self.lbl_alertas_texto.setText(" · ".join(partes))
+            self.lbl_alertas.setVisible(True)
+        else:
+            self.lbl_alertas.setVisible(False)
+
+    def _poblar_tabla(self, resultado: dict, precios: dict[int, dict[str, float]]) -> None:
+        productos: list[Inventario] = resultado["items"]
+        self.tabla.setRowCount(len(productos))
+        limite_vencimiento = date.today() + timedelta(days=DIAS_VENCIMIENTO_ALERTA)
+        for fila, p in enumerate(productos):
+            self.tabla.setItem(fila, 0, QTableWidgetItem(str(p.id_producto)))
+            self.tabla.setItem(fila, 1, QTableWidgetItem(p.cod_producto or ""))
+
+            # Indicador sutil de alerta (icono + tooltip) en la misma fila del producto --
+            # antes la unica senal era el contador agregado del encabezado ("N con
+            # alerta"), sin decir CUAL producto ni por que (stock bajo vs. por vencer).
+            item_nombre = QTableWidgetItem(p.nombre_producto or "")
+            motivos = []
+            cantidad_minima = Decimal(str(p.cantidad_minima)) if p.cantidad_minima is not None else Decimal("0")
+            if cantidad_minima > 0 and p.cantidad_unidad is not None and p.cantidad_unidad < cantidad_minima:
+                motivos.append(f"Stock bajo (mínimo configurado: {float(cantidad_minima):,.2f})")
+            if p.fecha_vencimiento is not None and p.fecha_vencimiento <= limite_vencimiento:
+                motivos.append(f"Vence el {p.fecha_vencimiento.strftime('%d/%m/%Y')}")
+            if motivos:
+                item_nombre.setIcon(qta.icon("fa5s.exclamation-triangle", color=COLOR_WARNING))
+                item_nombre.setToolTip(" · ".join(motivos))
+            self.tabla.setItem(fila, 2, item_nombre)
+
+            self.tabla.setItem(fila, 3, QTableWidgetItem(p.categoria.nombre if p.categoria else ""))
+
+            cantidad_unidad = Decimal(str(p.cantidad_unidad)) if p.cantidad_unidad is not None else Decimal("0")
+            item_cant = QTableWidgetItem(f"{float(cantidad_unidad):,.2f}")
+            item_cant.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 4, item_cant)
+
+            # Calcular cajas y unidades sueltas usando Decimal
+            if p.cantidad_caja_total is not None and p.cantidad_caja_total > 0:
+                cajas = int(p.cantidad_caja_total)
+            elif p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
+                cajas = int(cantidad_unidad // Decimal(str(p.cantidad_caja)))
+            else:
+                cajas = 0
+
+            if p.cantidad_caja_unidad is not None and p.cantidad_caja_unidad > 0:
+                unidades_sueltas = int(p.cantidad_caja_unidad)
+            elif p.cantidad_caja is not None and p.cantidad_caja > 0 and cantidad_unidad > 0:
+                unidades_sueltas = int(cantidad_unidad % Decimal(str(p.cantidad_caja)))
+            else:
+                unidades_sueltas = int(cantidad_unidad)
+
+            item_cajas = QTableWidgetItem(str(cajas))
+            item_cajas.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 5, item_cajas)
+
+            item_unidades_sueltas = QTableWidgetItem(str(unidades_sueltas))
+            item_unidades_sueltas.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 6, item_unidades_sueltas)
+
+            costo_producto = Decimal(str(p.costo_producto)) if p.costo_producto is not None else Decimal("0")
+            item_costo = QTableWidgetItem(f"${float(costo_producto):,.2f}")
+            item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 7, item_costo)
+
+            precio_venta = precios.get(p.id_producto, {}).get("precio_1")
+            item_precio = QTableWidgetItem(f"${precio_venta:,.2f}" if precio_venta is not None else "Sin precio")
+            item_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 8, item_precio)
+
+            precio_2 = precios.get(p.id_producto, {}).get("precio_2")
+            item_precio_2 = QTableWidgetItem(f"${precio_2:,.2f}" if precio_2 is not None and precio_2 > 0 else "-")
+            item_precio_2.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 9, item_precio_2)
+
+            precio_3 = precios.get(p.id_producto, {}).get("precio_3")
+            item_precio_3 = QTableWidgetItem(f"${precio_3:,.2f}" if precio_3 is not None and precio_3 > 0 else "-")
+            item_precio_3.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 10, item_precio_3)
+
+            estado_producto = p.estado_producto or "ACTIVO"
+            color_estado = COLOR_SUCCESS if estado_producto.upper() == "ACTIVO" else COLOR_DANGER
+            badge = EstadoBadge(estado_producto.capitalize(), color_estado)
+            self.tabla.setCellWidget(fila, 11, badge)
+
+        total = resultado["total"]
+        self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math
+        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+
+        self.lbl_total.setText(f"{total} producto{'s' if total != 1 else ''}")
+        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
+        self.btn_anterior.setEnabled(self.pagina_actual > 1)
+        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
+
+    def _fila_seleccionada_id(self) -> int | None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            MessageBox.information(self, "Selección requerida", "Selecciona un producto de la lista.")
+            return None
+        item = self.tabla.item(filas[0].row(), 0)
+        if item is None:
+            MessageBox.information(
+                self,
+                "Error de selección",
+                "No se pudo obtener el ID del producto seleccionado.",
+            )
+            return None
+        return int(item.text())
+
+    def nuevo_producto(self) -> None:
+        session = self.session_factory()
+        try:
+            dialogo = ProductoFormDialog(session, self.usuario.id_usuario, parent=self)
+            if dialogo.exec():
+                datos = dialogo.get_data()
+                datos["creado_por"] = self.usuario.id_usuario
+                producto = ProductoService.crear(session, **datos)
+                precio_1, precio_2, precio_3 = dialogo.get_precios()
+                if precio_1 > 0:
+                    PrecioService.establecer_precio(
+                        session,
+                        producto.id_producto,
+                        precio_1,
+                        precio_2,
+                        precio_3,
+                        id_usuario=self.usuario.id_usuario,
+                    )
+                self._cargar_categorias_filtro()
+                self.cargar_productos()
+        except IntegrityError:
+            session.rollback()
+            MessageBox.warning(self, "Dato duplicado", "El código de producto ya está registrado.")
+        except ValueError as exc:
+            session.rollback()
+            MessageBox.warning(self, "Error de validación", str(exc))
+        finally:
+            session.close()
+
+    def abrir_auditoria(self) -> None:
+        """Abre el diálogo de auditoría de productos."""
+        session = self.session_factory()
+        try:
+            dialogo = ProductoAuditoriaDialog(session, self.usuario, None, parent=self)
+            dialogo.exec()
+        except Exception as exc:
+            logger.exception("Error al abrir auditoría de productos")
+            MessageBox.critical(self, "Error", f"No se pudo abrir la auditoría: {str(exc)}")
+        finally:
+            session.close()
+
+    def editar_producto(self) -> None:
+        id_producto = self._fila_seleccionada_id()
+        if id_producto is None:
+            return
+
+        session = self.session_factory()
+        try:
+            producto = session.get(Inventario, id_producto)
+            dialogo = ProductoFormDialog(session, self.usuario.id_usuario, producto, parent=self)
+            if dialogo.exec():
+                datos = dialogo.get_data()
+                motivo = dialogo.get_motivo_cambio_stock()
+                if motivo:
+                    datos["motivo_cambio_stock"] = motivo
+                ProductoService.actualizar(session, id_producto, id_usuario=self.usuario.id_usuario, **datos)
+                precio_1, precio_2, precio_3 = dialogo.get_precios()
+                if precio_1 > 0:
+                    PrecioService.establecer_precio(
+                        session,
+                        id_producto,
+                        precio_1,
+                        precio_2,
+                        precio_3,
+                        id_usuario=self.usuario.id_usuario,
+                    )
+                self._cargar_categorias_filtro()
+                self.cargar_productos()
+        except IntegrityError:
+            session.rollback()
+            MessageBox.warning(self, "Dato duplicado", "El código de producto ya está registrado.")
+        except ValueError as exc:
+            session.rollback()
+            MessageBox.warning(self, "Dato inválido", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar productos.")
+        except Exception:
+            session.rollback()
+            logger.exception("Fallo al editar producto")
+            MessageBox.critical(self, "Error", "No se pudo guardar los cambios del producto.")
+        finally:
+            session.close()
+
+    def cambiar_estado_producto_seleccionado(self) -> None:
+        id_producto = self._fila_seleccionada_id()
+        if id_producto is None:
+            return
+
+        session = self.session_factory()
+        try:
+            producto = session.get(Inventario, id_producto)
+            estado_actual = producto.estado_producto or "ACTIVO"
+            nuevo_estado = "INACTIVO" if estado_actual == "ACTIVO" else "ACTIVO"
+
+            respuesta = MessageBox.question(
+                self,
+                "Confirmar",
+                f"¿Cambiar el estado del producto '{producto.nombre_producto}' a {nuevo_estado}?",
+            )
+            if respuesta != QMessageBox.StandardButton.Yes:
+                return
+
+            ProductoService.cambiar_estado(session, id_producto, nuevo_estado, id_usuario=self.usuario.id_usuario)
+            self.cargar_productos()
+        except PermisoDenegadoError:
+            session.rollback()
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para cambiar el estado de productos.",
+            )
+        except Exception:
+            session.rollback()
+            logger.exception("Fallo al cambiar el estado del producto %s", id_producto)
+            MessageBox.critical(self, "Error", "No se pudo cambiar el estado del producto.")
+        finally:
+            session.close()
+
+    def _filtros_actuales_exportar(self) -> dict:
+        return {
+            "texto": self.buscar_input.text().strip() or None,
+            "id_categoria": self.categoria_filtro_combo.currentData(),
+            "solo_con_stock": self.solo_stock_check.isChecked(),
+            "id_usuario": self.usuario.id_usuario,
+        }
+
+    def exportar_excel_productos(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
+        # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
+        # nunca a un temporal.
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", "inventario.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_productos_excel,
+            ruta=ruta,
+            **self._filtros_actuales_exportar(),
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def exportar_pdf_productos(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", "inventario.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_productos_pdf,
+            ruta=ruta,
+            **self._filtros_actuales_exportar(),
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
+        self.btn_exportar.setEnabled(True)
+        ruta, cantidad = resultado
+        MessageBox.information(
+            self,
+            "Exportación completa",
+            f"Se exportaron {cantidad} productos a:\n{ruta}",
+        )
+
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar el catálogo de inventario: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")

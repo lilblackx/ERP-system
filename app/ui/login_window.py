@@ -1,0 +1,291 @@
+"""
+LoginWindow — Pantalla de inicio de sesión moderna del ERP.
+Diseño: Split-screen (izquierda azul con bienvenida, derecha blanca con formulario).
+"""
+
+import logging
+
+import qtawesome as qta
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QCursor, QPixmap
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.db.models import ConfiguracionEmpresa
+from app.db.session import SessionLocal
+from app.rutas import ARCHIVO_LOGO, NOMBRE_APP
+from app.services.auth import CuentaBloqueadaError, authenticate
+from app.services.recuperacion_acceso import TIPO_DESBLOQUEO, TIPO_RECUPERAR_CLAVE
+from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano
+from app.ui.solicitar_codigo_dialog import SolicitarCodigoDialog
+from app.ui.styles import (
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_DANGER,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_DARK,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_MUTED,
+    FONT_FAMILY,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class LoginWindow(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f"{NOMBRE_APP} — Iniciar sesión")
+        ajustar_tamano(self, 850, 500)
+        self.usuario_autenticado = None
+
+        # Obtener nombre de empresa
+        empresa = "Mi Empresa"
+        session = SessionLocal()
+        try:
+            config = session.query(ConfiguracionEmpresa).first()
+            if config and config.razon_social_empresa:
+                empresa = config.razon_social_empresa
+        except Exception:
+            logger.exception("No se pudo cargar el nombre de la empresa para la pantalla de login")
+        finally:
+            session.close()
+
+        # Eliminar márgenes del QDialog base
+        self.setStyleSheet(f"QDialog {{ background-color: {COLOR_CARD_BG}; font-family: '{FONT_FAMILY}', Arial; }}")
+
+        self._build_ui(empresa)
+
+    # ── Construcción de la UI ─────────────────────────────────────────────
+
+    def _build_ui(self, empresa_nombre: str) -> None:
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Panel Izquierdo (Azul) ──
+        left_panel = QWidget()
+        left_panel.setObjectName("LeftPanel")
+        left_panel.setFixedWidth(400)
+        left_panel.setStyleSheet(f"""
+            QWidget#LeftPanel {{
+                background-color: {COLOR_PRIMARY};
+                border-top-right-radius: 60px;
+                border-bottom-right-radius: 60px;
+            }}
+        """)
+
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.setSpacing(16)
+        left_layout.setContentsMargins(40, 40, 40, 40)
+
+        lbl_hola = QLabel("Hola, Bienvenido")
+        lbl_hola.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_hola.setStyleSheet("color: white; font-size: 32px; font-weight: bold; background: transparent;")
+
+        lbl_empresa = QLabel(empresa_nombre)
+        lbl_empresa.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_empresa.setStyleSheet("color: white; font-size: 24px; font-weight: normal; background: transparent;")
+        lbl_empresa.setWordWrap(True)
+
+        lbl_logo = QLabel()
+        lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_logo.setStyleSheet("background: transparent;")
+        logo = QPixmap(str(ARCHIVO_LOGO))
+        if not logo.isNull():
+            lbl_logo.setPixmap(
+                logo.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            )
+
+        lbl_marca = QLabel(NOMBRE_APP)
+        lbl_marca.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_marca.setStyleSheet("color: white; font-size: 20px; font-weight: bold; background: transparent;")
+
+        left_layout.addStretch()
+        left_layout.addWidget(lbl_logo)
+        left_layout.addWidget(lbl_marca)
+        left_layout.addWidget(lbl_hola)
+        left_layout.addWidget(lbl_empresa)
+        left_layout.addStretch()
+
+        # ── Panel Derecho (Blanco) ──
+        right_panel = QWidget()
+        right_panel.setObjectName("RightPanel")
+        right_panel.setStyleSheet(f"""
+            QWidget#RightPanel {{
+                background-color: {COLOR_CARD_BG};
+            }}
+        """)
+
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.setSpacing(20)
+        right_layout.setContentsMargins(80, 40, 80, 40)
+
+        lbl_titulo = QLabel("Iniciar Sesión")
+        lbl_titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_titulo.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 36px; font-weight: bold;")
+        right_layout.addWidget(lbl_titulo)
+        right_layout.addSpacing(20)
+
+        # Input Usuario
+        self.usuario_input = QLineEdit()
+        self.usuario_input.setPlaceholderText("Usuario")
+        self.usuario_input.setStyleSheet(self._campo_qss())
+        self.usuario_input.setFixedHeight(40)
+
+        user_layout = QHBoxLayout()
+        user_layout.addWidget(self.usuario_input)
+        lbl_user_icon = QLabel()
+        lbl_user_icon.setPixmap(qta.icon("fa5s.user", color=COLOR_TEXT_MUTED).pixmap(18, 18))
+        lbl_user_icon.setStyleSheet("background: transparent;")
+        user_layout.addWidget(lbl_user_icon)
+        right_layout.addLayout(user_layout)
+
+        # Input Password
+        self.clave_input = QLineEdit()
+        self.clave_input.setPlaceholderText("Password")
+        self.clave_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.clave_input.setStyleSheet(self._campo_qss())
+        self.clave_input.setFixedHeight(40)
+        self.clave_input.returnPressed.connect(self.intentar_login)
+
+        pass_layout = QHBoxLayout()
+        pass_layout.addWidget(self.clave_input)
+        lbl_pass_icon = QLabel()
+        lbl_pass_icon.setPixmap(qta.icon("fa5s.lock", color=COLOR_TEXT_MUTED).pixmap(18, 18))
+        lbl_pass_icon.setStyleSheet("background: transparent;")
+        pass_layout.addWidget(lbl_pass_icon)
+        right_layout.addLayout(pass_layout)
+
+        # Olvidaste tu contraseña
+        lbl_olvidaste = QLabel("¿Olvidaste tu contraseña?")
+        lbl_olvidaste.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_olvidaste.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        lbl_olvidaste.setStyleSheet(f"color: {COLOR_PRIMARY}; font-size: 13px; text-decoration: underline;")
+        lbl_olvidaste.mousePressEvent = lambda event: self._abrir_recuperar_clave()
+        right_layout.addWidget(lbl_olvidaste)
+
+        # Mensaje de error (oculto por defecto) -- icono real (qtawesome) en vez de "⚠"/
+        # "✖" sueltos en el texto, ver GUIA_ESTILO_UI.md 3.1.
+        self.mensaje = QWidget()
+        self.mensaje.setFixedHeight(20)
+        mensaje_layout = QHBoxLayout(self.mensaje)
+        mensaje_layout.setContentsMargins(0, 0, 0, 0)
+        mensaje_layout.setSpacing(4)
+        mensaje_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_mensaje = QLabel()
+        self.mensaje_texto = QLabel("")
+        self.mensaje_texto.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 12px;")
+        mensaje_layout.addWidget(self.icon_mensaje)
+        mensaje_layout.addWidget(self.mensaje_texto)
+        right_layout.addWidget(self.mensaje)
+
+        # Botón Iniciar Sesión
+        self.btn_login = QPushButton("Iniciar Sesión")
+        self.btn_login.setFixedHeight(46)
+        self.btn_login.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.btn_login.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_PRIMARY};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_PRIMARY_DARK};
+            }}
+        """)
+        self.btn_login.clicked.connect(self.intentar_login)
+        right_layout.addWidget(self.btn_login)
+
+        # Redes sociales (eliminadas a petición)
+        right_layout.addStretch()
+
+        # Ensamblar
+        root.addWidget(left_panel)
+        root.addWidget(right_panel)
+
+    def _campo_qss(self) -> str:
+        return f"""
+            QLineEdit {{
+                background-color: transparent;
+                border: none;
+                border-bottom: 2px solid {COLOR_BORDER};
+                padding: 0 4px;
+                font-size: 14px;
+                color: {COLOR_TEXT_DARK};
+            }}
+            QLineEdit:focus {{
+                border-bottom: 2px solid {COLOR_PRIMARY};
+            }}
+        """
+
+    # ── Lógica de autenticación ───────────────────────────────────────────
+
+    def _mostrar_mensaje(self, texto: str, icono: str | None = None) -> None:
+        if icono:
+            self.icon_mensaje.setPixmap(qta.icon(icono, color=COLOR_DANGER).pixmap(QSize(12, 12)))
+        else:
+            self.icon_mensaje.clear()
+        self.mensaje_texto.setText(texto)
+
+    def intentar_login(self) -> None:
+        nombre_usuario = self.usuario_input.text().strip()
+        clave = self.clave_input.text()
+        self._mostrar_mensaje("")
+
+        if not nombre_usuario or not clave:
+            self._mostrar_mensaje("Ingrese usuario y contraseña", "fa5s.exclamation-triangle")
+            return
+
+        self.btn_login.setText("Verificando…")
+        self.btn_login.setEnabled(False)
+
+        session = SessionLocal()
+        try:
+            usuario = authenticate(session, nombre_usuario, clave)
+        except CuentaBloqueadaError:
+            self._mostrar_mensaje("Cuenta bloqueada por intentos fallidos", "fa5s.exclamation-triangle")
+            self.clave_input.clear()
+            self.clave_input.setFocus()
+            dialogo = SolicitarCodigoDialog(SessionLocal, TIPO_DESBLOQUEO, nombre_usuario, parent=self)
+            dialogo.exec()
+            return
+        except Exception:
+            logger.exception("Fallo al autenticar al usuario '%s'", nombre_usuario)
+            MessageBox.critical(
+                self,
+                "Error de conexión",
+                "No se pudo conectar con el servidor. Intente nuevamente.",
+            )
+            return
+        finally:
+            session.close()
+            self.btn_login.setText("Iniciar Sesión")
+            self.btn_login.setEnabled(True)
+
+        if usuario is None:
+            self._mostrar_mensaje("Usuario o contraseña incorrectos", "fa5s.times-circle")
+            self.clave_input.clear()
+            self.clave_input.setFocus()
+            return
+
+        self.usuario_autenticado = usuario
+        self.accept()
+
+    def _abrir_recuperar_clave(self) -> None:
+        nombre_usuario = self.usuario_input.text().strip()
+        dialogo = SolicitarCodigoDialog(SessionLocal, TIPO_RECUPERAR_CLAVE, nombre_usuario, parent=self)
+        dialogo.exec()

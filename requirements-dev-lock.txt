@@ -1,0 +1,24 @@
+# Igual que requirements-lock.txt pero agrega el cierre transitivo de pytest (ver
+# requirements-dev.txt). Regenerar con el mismo procedimiento que requirements-lock.txt
+# pero instalando requirements-dev.txt en vez de requirements.txt.
+#
+# Uso: pip install -r requirements-dev-lock.txt
+
+-r requirements-lock.txt
+cfgv==3.5.0
+colorama==0.4.6
+distlib==0.4.3
+filelock==3.32.4
+identify==2.6.19
+iniconfig==2.3.0
+nodeenv==1.10.0
+platformdirs==4.11.3
+pluggy==1.6.0
+pre_commit==4.6.2
+Pygments==2.21.0
+pytest==9.1.1
+pytest-qt==4.5.0
+python-discovery==1.5.2
+PyYAML==6.0.3
+ruff==0.16.4
+virtualenv==21.7.4

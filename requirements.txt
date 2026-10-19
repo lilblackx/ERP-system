@@ -1,0 +1,23 @@
+# Pines exactos (C9, checklist de produccion): dos instalaciones en fechas distintas
+# deben traer las mismas versiones. Para reproducibilidad total (incluye dependencias
+# transitivas), usar requirements-lock.txt en vez de este archivo -- ver README.md.
+PySide6==6.11.2
+SQLAlchemy==2.0.52
+pyodbc==5.3.0
+python-dotenv==1.2.3
+bcrypt==5.0.0
+qtawesome==1.4.2
+# Verificacion de firmas Ed25519 de las licencias (app/services/licencia.py)
+cryptography==50.0.2
+openpyxl==3.1.5
+reportlab==4.2.0
+# Geolocalizacion precisa nativa de Windows (app/ui/geo_windows.py, boton "Mi ubicacion"
+# de app/ui/mapa_widget.py) -- solo Windows, marcador de entorno para que `pip install`
+# no falle en Linux/Mac/CI (esta app corre solo en Windows de todos modos, ver README).
+# winrt-Windows.Foundation/Collections son dependencias transitivas de WinRT que pip no
+# resuelve solas (paquetes por namespace, sin declararse entre si).
+# Servicio de Windows de licencia del servidor (app/servicio_licencia.py)
+pywin32==312; sys_platform == "win32"
+winrt-Windows.Devices.Geolocation==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"

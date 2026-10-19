@@ -1,0 +1,129 @@
+from datetime import datetime, time
+from decimal import Decimal
+
+from sqlalchemy.orm import Session
+
+from app.db.models import ControlDeTasa
+from app.services.auditoria import AuditoriaService
+from app.services.permisos import require_permiso
+
+
+def _calcular_porcentaje(valor_actual, valor_anterior) -> float | None:
+    if not valor_anterior:
+        return None
+    return round(float((valor_actual - valor_anterior) / valor_anterior * 100), 2)
+
+
+def _calcular_brecha(tasa_paralelo, tasa_bcv) -> float | None:
+    if not tasa_bcv or tasa_paralelo is None:
+        return None
+    return round(float((tasa_paralelo - tasa_bcv) / tasa_bcv * 100), 2)
+
+
+class TasaService:
+    @staticmethod
+    def registrar_tasa(
+        session: Session,
+        tasa_bcv,
+        tasa_paralelo=None,
+        tasa_cop=None,
+        creado_por: int | None = None,
+    ) -> ControlDeTasa:
+        require_permiso(session, creado_por, "tasas", "crear")
+        if Decimal(str(tasa_bcv)) <= 0:
+            raise ValueError("tasa_bcv debe ser mayor a cero")
+        # tasa_paralelo/tasa_cop no tenian ninguna validacion (ni aca ni en la base --
+        # DECIMAL(10,2) sin CHECK) -- la UI ya impide negativos y convierte 0 a None, pero
+        # un caller directo del servicio podia insertar un valor negativo sin aviso
+        # (auditoria de Tasas, 2026-08-27).
+        if tasa_paralelo is not None and Decimal(str(tasa_paralelo)) <= 0:
+            raise ValueError("tasa_paralelo debe ser mayor a cero")
+        if tasa_cop is not None and Decimal(str(tasa_cop)) <= 0:
+            raise ValueError("tasa_cop debe ser mayor a cero")
+
+        tasa = ControlDeTasa(
+            fecha_tasa=datetime.now(),
+            tasa_dolar_bcv=tasa_bcv,
+            tasa_dolar_paralelo=tasa_paralelo,
+            tasa_cop=tasa_cop,
+            creado_por=creado_por,
+        )
+        session.add(tasa)
+        session.commit()
+        session.refresh(tasa)
+
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=creado_por,
+            accion="CAMBIO_TASA",
+            modulo="TASAS",
+            detalle={
+                "id_tasa": tasa.id_tasa,
+                "tasa_bcv": str(tasa.tasa_dolar_bcv),
+                "tasa_paralelo": (str(tasa.tasa_dolar_paralelo) if tasa.tasa_dolar_paralelo is not None else None),
+                "tasa_cop": str(tasa.tasa_cop) if tasa.tasa_cop is not None else None,
+            },
+        )
+        return tasa
+
+    @staticmethod
+    def obtener_tasa_actual(session: Session, id_usuario: int | None = None) -> dict | None:
+        require_permiso(session, id_usuario, "tasas", "ver")
+        actual = (
+            session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc()).first()
+        )
+        if actual is None:
+            return None
+
+        inicio_dia_actual = datetime.combine(actual.fecha_tasa.date(), time.min)
+        anterior = (
+            session.query(ControlDeTasa)
+            .filter(ControlDeTasa.fecha_tasa < inicio_dia_actual)
+            .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
+            .first()
+        )
+        # "vs. ayer" solo es honesto si `anterior` es literalmente del dia calendario
+        # anterior -- sin este chequeo, un hueco de varios dias sin registrar (fin de
+        # semana, feriado) comparaba igual contra lo ultimo que hubiera, sin importar
+        # cuantos dias atras fuera, y la UI lo etiquetaba "vs. ayer" de todos modos
+        # (auditoria de Tasas, 2026-08-27).
+        anterior_es_de_ayer = anterior is not None and (actual.fecha_tasa.date() - anterior.fecha_tasa.date()).days == 1
+        anterior_valido = anterior if anterior_es_de_ayer else None
+
+        return {
+            "id_tasa": actual.id_tasa,
+            "fecha_tasa": actual.fecha_tasa,
+            "tasa_bcv": actual.tasa_dolar_bcv,
+            "tasa_paralelo": actual.tasa_dolar_paralelo,
+            "tasa_cop": actual.tasa_cop,
+            "porcentaje_vs_ayer_bcv": _calcular_porcentaje(
+                actual.tasa_dolar_bcv,
+                anterior_valido.tasa_dolar_bcv if anterior_valido else None,
+            ),
+            "porcentaje_vs_ayer_paralelo": _calcular_porcentaje(
+                actual.tasa_dolar_paralelo,
+                anterior_valido.tasa_dolar_paralelo if anterior_valido else None,
+            ),
+        }
+
+    @staticmethod
+    def obtener_historico_tasas(session: Session, limite: int = 30, id_usuario: int | None = None) -> list[dict]:
+        require_permiso(session, id_usuario, "tasas", "ver")
+        tasas = (
+            session.query(ControlDeTasa)
+            .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
+            .limit(limite)
+            .all()
+        )
+        tasas.reverse()  # cronologico ascendente (mas antiguo -> mas reciente)
+
+        return [
+            {
+                "id_tasa": tasa.id_tasa,
+                "fecha": tasa.fecha_tasa,
+                "tasa_bcv": tasa.tasa_dolar_bcv,
+                "tasa_paralelo": tasa.tasa_dolar_paralelo,
+                "brecha_porcentual": _calcular_brecha(tasa.tasa_dolar_paralelo, tasa.tasa_dolar_bcv),
+            }
+            for tasa in tasas
+        ]

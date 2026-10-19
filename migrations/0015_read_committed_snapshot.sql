@@ -1,0 +1,26 @@
+-- R-08 (docs/CHECKLIST_PRODUCCION.md): sin esto, un reporte largo (aging de CxC, arqueo
+-- de caja sobre un rango extenso) toma bloqueos compartidos (S-locks) fila por fila
+-- mientras lee, y puede quedar esperando o bloquear a su vez a la facturacion/pagos que
+-- estan escribiendo esas mismas tablas al mismo tiempo. READ_COMMITTED_SNAPSHOT hace que
+-- las lecturas en READ COMMITTED (el default, no se cambia en ningun lado del codigo) usen
+-- versionado de filas (row versioning en tempdb) en vez de bloqueos compartidos -- un
+-- reporte ve una foto consistente de los datos ya commiteados sin bloquear ni ser
+-- bloqueado por escrituras concurrentes. No se justifica una replica de lectura ni vistas
+-- materializadas al volumen de este sistema.
+--
+-- CURRENT (no un nombre de base hardcodeado) para que la migracion funcione igual contra
+-- distribuidora_dj (dev/prod) y distribuidora_dj_test (suite de tests) sin parametrizar el
+-- nombre.
+--
+-- WITH ROLLBACK IMMEDIATE: ALTER DATABASE SET READ_COMMITTED_SNAPSHOT necesita acceso
+-- exclusivo a la base (nadie mas conectado) -- ROLLBACK IMMEDIATE aborta transacciones en
+-- curso de otras conexiones y las desconecta para poder aplicar el cambio ya, en vez de
+-- quedarse esperando indefinidamente a que cierren solas. Aplicar esta migracion con la
+-- app cerrada en todas las maquinas (o fuera de horario), igual que cualquier cambio de
+-- schema en un entorno con datos reales (ver migrations/README.md y docs/BACKUP_RESTORE.md).
+--
+-- El runner (app/db/migrar.py::_ejecutar_batches) enruta este batch por una conexion
+-- AUTOCOMMIT aparte -- SQL Server rechaza ALTER DATABASE dentro de una transaccion abierta
+-- (Msg 226), y la conexion normal del runner esta en modo manual-commit.
+ALTER DATABASE CURRENT SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+GO

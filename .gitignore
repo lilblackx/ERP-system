@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+logs/
+.claude/settings.local.json
+.pytest_cache/
+CLAUDE.md
+FASE_*.md
+ROADMAP_*.md
+keep_wsl_running.bat
+
+licencias/worker/.dev.vars
+licencias/worker/.wrangler/
+licencias/worker/node_modules/
+
+# Instalador
+build/
+app/licencia_embebida.py
+packaging/redist/
+packaging/firma/*.pfx
+packaging/firma/*.cer
+
+# Local
+/Logo.png
+notificaciones_leidas.json
+
+# Embedded git repository
+ERP-system/

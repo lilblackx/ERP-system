@@ -1,0 +1,457 @@
+"""Dialogo de alta/edicion de usuarios -- mismo patron visual que
+VendedorFormDialog (app/ui/vendedor_form_dialog.py), pero necesita sesion/actor porque
+puebla los combos de rol (RolService.listar_roles) y vendedor vinculado
+(VendedorService.listar) desde la base, a diferencia de un form sin dependencias
+externas."""
+
+import qtawesome as qta
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtWidgets import (
+    QDialog,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+from sqlalchemy.orm import Session
+
+from app.db.models import Usuario
+from app.services.auth import PASSWORD_MAX_BYTES
+from app.services.permisos import PermisoDenegadoError, RolService
+from app.services.usuarios import (
+    APELLIDO_MAX,
+    EMAIL_MAX,
+    NOMBRE_MAX,
+    NOMBRE_USUARIO_MAX,
+)
+from app.services.vendedores import VendedorService
+from app.ui.message_box import MessageBox
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    COLOR_BLUE_LIGHTER,
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_CONTENT_BG,
+    COLOR_FIELD_BG,
+    COLOR_INFO_BG,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_DARK,
+    COLOR_PRIMARY_LIGHT,
+    COLOR_TABLE_HEADER,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_MEDIUM,
+    COLOR_TEXT_MUTED,
+    COLOR_WHITE,
+    FONT_FAMILY,
+    ICON_CHEVRON_DOWN_URL,
+    ComboBoxSinScroll,
+    aplicar_sombra,
+)
+
+DIALOG_STYLE = f"""
+QDialog {{
+    background-color: {COLOR_CONTENT_BG};
+    font-family: '{FONT_FAMILY}', Arial, sans-serif;
+}}
+QWidget#SectionCard {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 10px;
+}}
+QLabel.FormLabel {{
+    font-size: 12px;
+    font-weight: 600;
+    color: {COLOR_TEXT_DARK_SLATE};
+    margin-bottom: 2px;
+}}
+QLabel.SectionTitle {{
+    font-size: 11px;
+    font-weight: bold;
+    color: {COLOR_PRIMARY};
+    letter-spacing: 0.8px;
+    padding-bottom: 2px;
+}}
+QLabel.Hint {{
+    font-size: 11px;
+    color: {COLOR_TEXT_MUTED};
+}}
+QLineEdit, QComboBox {{
+    background-color: {COLOR_WHITE};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+    color: {COLOR_TEXT_DARK};
+    min-height: 20px;
+}}
+QLineEdit:focus, QComboBox:focus {{
+    border: 1.5px solid {COLOR_PRIMARY};
+}}
+QComboBox {{
+    padding-right: 24px;
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QComboBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+}}
+QPushButton#BtnPrimary {{
+    background-color: {COLOR_PRIMARY};
+    color: {COLOR_WHITE};
+    border: none;
+    border-radius: 6px;
+    padding: 8px 22px;
+    font-size: 13px;
+    font-weight: bold;
+}}
+QPushButton#BtnPrimary:hover {{
+    background-color: {COLOR_PRIMARY_LIGHT};
+}}
+QPushButton#BtnPrimary:pressed {{
+    background-color: {COLOR_PRIMARY_DARK};
+}}
+QPushButton#BtnSecondary {{
+    background-color: {COLOR_FIELD_BG};
+    color: {COLOR_TEXT_MEDIUM};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton#BtnSecondary:hover {{
+    background-color: {COLOR_TABLE_HEADER};
+    color: {COLOR_TEXT_DARK};
+}}
+"""
+
+
+class UsuarioFormDialog(QDialog):
+    """Alta/edicion de un usuario. `get_data()` devuelve los campos planos (sin clave,
+    para poder pasarlos tal cual a UsuarioService.editar_usuario(datos=...)) y
+    `get_clave()` devuelve la clave por separado -- obligatoria al crear, opcional
+    ("dejar en blanco para no cambiarla") al editar, mismo contrato que
+    UsuarioService.editar_usuario(nueva_clave=...)."""
+
+    def __init__(
+        self,
+        session: Session,
+        id_usuario_actor: int | None,
+        usuario: Usuario | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.session = session
+        self.id_usuario_actor = id_usuario_actor
+        self.usuario = usuario
+        self.setWindowTitle("Editar Usuario" if usuario else "Nuevo Usuario")
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        self._roles = []
+        self._vendedores = []
+
+        self._build_ui()
+        self._cargar_combos()
+
+        # Alto fijo calculado DESPUES de construir el grid, no antes: antes era un
+        # 545 a ojo que no contaba la fila "Vendedor vinculado" (solo visible con rol
+        # VENDEDOR) -- al mostrarla, el QGridLayout no tenia margen dentro del alto fijo y
+        # comprimia TODAS las filas para que entraran, montando cada etiqueta sobre el
+        # campo de arriba (hallazgo del usuario, 2026-08-28). retainSizeWhenHidden en esa
+        # fila (ver mas abajo) hace que sizeHint() ya reserve su espacio aunque este oculta
+        # -- fijar el alto sobre ese sizeHint elimina la compresion sin necesidad de
+        # adivinar un numero de pixeles.
+        ajustar_tamano(self, 480, self.sizeHint().height())
+        hacer_desplazable(self)
+
+        if usuario:
+            self._precargar(usuario)
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(12)
+
+        icon_lbl = QLabel()
+        fa_icon_name = "fa5s.user-edit" if self.usuario else "fa5s.user-plus"
+        icon_lbl.setPixmap(qta.icon(fa_icon_name, color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
+        icon_lbl.setStyleSheet(
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid "
+            f"{COLOR_BLUE_LIGHTER}; border-radius: 8px; padding: 6px;"
+        )
+        icon_lbl.setFixedSize(38, 38)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        titles_layout = QVBoxLayout()
+        titles_layout.setSpacing(1)
+        titles_layout.setContentsMargins(0, 0, 0, 0)
+
+        titulo_text = "Editar Usuario" if self.usuario else "Nuevo Usuario"
+        lbl_titulo = QLabel(titulo_text)
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+
+        lbl_subtitulo = QLabel("Cuenta de acceso al sistema y el rol que determina sus permisos.")
+        lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+
+        titles_layout.addWidget(lbl_titulo)
+        titles_layout.addWidget(lbl_subtitulo)
+
+        header_layout.addWidget(icon_lbl)
+        header_layout.addLayout(titles_layout)
+        header_layout.addStretch()
+
+        root.addWidget(header_widget)
+
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 12, 16, 14)
+        card_layout.setSpacing(8)
+
+        titulo_card = QLabel("DATOS DEL USUARIO")
+        titulo_card.setProperty("class", "SectionTitle")
+        card_layout.addWidget(titulo_card)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+
+        lbl_usuario = QLabel(f"Nombre de usuario {ASTERISCO_REQUERIDO}")
+        lbl_usuario.setProperty("class", "FormLabel")
+        self.nombre_usuario_input = QLineEdit()
+        self.nombre_usuario_input.setPlaceholderText("Ej: jperez")
+        self.nombre_usuario_input.setFixedHeight(32)
+        self.nombre_usuario_input.setMaxLength(NOMBRE_USUARIO_MAX)
+        grid.addWidget(lbl_usuario, 0, 0, 1, 2)
+        grid.addWidget(self.nombre_usuario_input, 1, 0, 1, 2)
+
+        lbl_nombre = QLabel("Nombre")
+        lbl_nombre.setProperty("class", "FormLabel")
+        self.nombre_input = QLineEdit()
+        self.nombre_input.setFixedHeight(32)
+        self.nombre_input.setMaxLength(NOMBRE_MAX)
+        grid.addWidget(lbl_nombre, 2, 0)
+        grid.addWidget(self.nombre_input, 3, 0)
+
+        lbl_apellido = QLabel("Apellido")
+        lbl_apellido.setProperty("class", "FormLabel")
+        self.apellido_input = QLineEdit()
+        self.apellido_input.setFixedHeight(32)
+        self.apellido_input.setMaxLength(APELLIDO_MAX)
+        grid.addWidget(lbl_apellido, 2, 1)
+        grid.addWidget(self.apellido_input, 3, 1)
+
+        lbl_email = QLabel(f"Correo electrónico {ASTERISCO_REQUERIDO}")
+        lbl_email.setProperty("class", "FormLabel")
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("Ej: usuario@empresa.com")
+        self.email_input.setFixedHeight(32)
+        self.email_input.setMaxLength(EMAIL_MAX)
+        grid.addWidget(lbl_email, 4, 0, 1, 2)
+        grid.addWidget(self.email_input, 5, 0, 1, 2)
+
+        lbl_hint_email = QLabel("A este correo se envían los códigos de desbloqueo y recuperación de clave.")
+        lbl_hint_email.setProperty("class", "Hint")
+        lbl_hint_email.setWordWrap(True)
+        grid.addWidget(lbl_hint_email, 6, 0, 1, 2)
+
+        lbl_clave = QLabel("Clave {ASTERISCO_REQUERIDO}" if not self.usuario else "Nueva clave (opcional)")
+        lbl_clave.setProperty("class", "FormLabel")
+        self.clave_input = QLineEdit()
+        self.clave_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.clave_input.setPlaceholderText("Dejar en blanco para no cambiarla" if self.usuario else "")
+        self.clave_input.setFixedHeight(32)
+        # Tope por caracteres, no bytes -- bcrypt exige <=72 BYTES utf-8 (validar_password_
+        # policy() en auth.py es la version exacta por bytes); esto es solo un techo
+        # razonable en la UI, la validacion real sigue siendo server-side.
+        self.clave_input.setMaxLength(PASSWORD_MAX_BYTES)
+        grid.addWidget(lbl_clave, 7, 0, 1, 2)
+        grid.addWidget(self.clave_input, 8, 0, 1, 2)
+
+        lbl_hint_clave = QLabel("Mínimo 8 caracteres, con mayúscula, minúscula, número y carácter especial.")
+        lbl_hint_clave.setProperty("class", "Hint")
+        lbl_hint_clave.setWordWrap(True)
+        grid.addWidget(lbl_hint_clave, 9, 0, 1, 2)
+
+        # Confirmar clave: sin esto, un typo al crear/editar un usuario deja una clave que
+        # nadie conoce hasta el primer intento de login fallido (auditoria de hallazgos
+        # medios, 2026-09-01) -- mismo campo que ya pide solicitar_codigo_dialog.py al
+        # restablecer, ausente aca hasta ahora.
+        texto_lbl_confirmar = "Confirmar clave" if self.usuario else "Confirmar clave {ASTERISCO_REQUERIDO}"
+        lbl_confirmar_clave = QLabel(texto_lbl_confirmar)
+        lbl_confirmar_clave.setProperty("class", "FormLabel")
+        self.confirmar_clave_input = QLineEdit()
+        self.confirmar_clave_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirmar_clave_input.setPlaceholderText("Repita la clave" if self.usuario else "")
+        self.confirmar_clave_input.setFixedHeight(32)
+        self.confirmar_clave_input.setMaxLength(PASSWORD_MAX_BYTES)
+        grid.addWidget(lbl_confirmar_clave, 10, 0, 1, 2)
+        grid.addWidget(self.confirmar_clave_input, 11, 0, 1, 2)
+
+        lbl_rol = QLabel(f"Rol {ASTERISCO_REQUERIDO}")
+        lbl_rol.setProperty("class", "FormLabel")
+        self.rol_combo = ComboBoxSinScroll()
+        self.rol_combo.setFixedHeight(32)
+        self.rol_combo.currentIndexChanged.connect(self._toggle_vendedor)
+        grid.addWidget(lbl_rol, 12, 0, 1, 2)
+        grid.addWidget(self.rol_combo, 13, 0, 1, 2)
+
+        self.lbl_vendedor = QLabel("Vendedor vinculado")
+        self.lbl_vendedor.setProperty("class", "FormLabel")
+        self.vendedor_combo = ComboBoxSinScroll()
+        self.vendedor_combo.setFixedHeight(32)
+        # retainSizeWhenHidden: sin esto, ocultar esta fila (rol != VENDEDOR) le resta su
+        # alto al sizeHint() del dialogo -- y como el alto fijo se calcula una sola vez en
+        # __init__ sobre ese sizeHint, mostrarla despues (el usuario cambia a VENDEDOR)
+        # comprimiria el resto del formulario otra vez. Reservar el espacio siempre (quede
+        # en blanco cuando no aplica) evita recalcular el tamaño del dialogo en cada cambio
+        # de rol.
+        for widget in (self.lbl_vendedor, self.vendedor_combo):
+            politica = widget.sizePolicy()
+            politica.setRetainSizeWhenHidden(True)
+            widget.setSizePolicy(politica)
+        grid.addWidget(self.lbl_vendedor, 14, 0, 1, 2)
+        grid.addWidget(self.vendedor_combo, 15, 0, 1, 2)
+
+        card_layout.addLayout(grid)
+        card_layout.addStretch()
+        root.addWidget(card, stretch=1)
+
+        footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(0, 4, 0, 0)
+        footer_layout.setSpacing(10)
+        footer_layout.addStretch()
+
+        self.btn_cancelar = QPushButton("Cancelar")
+        self.btn_cancelar.setIcon(qta.icon("fa5s.times", color="#475569"))
+        self.btn_cancelar.setObjectName("BtnSecondary")
+        self.btn_cancelar.setFixedHeight(36)
+        self.btn_cancelar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancelar.setAutoDefault(False)
+        self.btn_cancelar.clicked.connect(self.reject)
+
+        self.btn_guardar = QPushButton("Guardar Usuario")
+        self.btn_guardar.setIcon(qta.icon("fa5s.save", color="#FFFFFF"))
+        self.btn_guardar.setObjectName("BtnPrimary")
+        self.btn_guardar.setFixedHeight(36)
+        self.btn_guardar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_guardar.setAutoDefault(False)
+        self.btn_guardar.clicked.connect(self._validar_y_aceptar)
+
+        footer_layout.addWidget(self.btn_cancelar)
+        footer_layout.addWidget(self.btn_guardar)
+        root.addLayout(footer_layout)
+
+    def _cargar_combos(self) -> None:
+        try:
+            self._roles = RolService.listar_roles(self.session, id_usuario=self.id_usuario_actor)
+        except PermisoDenegadoError:
+            self._roles = []
+        for rol in self._roles:
+            self.rol_combo.addItem(rol.nombre, rol.id_rol)
+
+        try:
+            # por_pagina alto: este combo necesita TODOS los vendedores activos, no un
+            # recorte de pagina (VendedorService.listar() pagina desde 2026-08-27, ver
+            # auditoria Vendedores/Clientes).
+            self._vendedores = VendedorService.listar(
+                self.session,
+                id_usuario=self.id_usuario_actor,
+                estado_vendedor="ACTIVO",
+                por_pagina=1000,
+            )["items"]
+        except PermisoDenegadoError:
+            self._vendedores = []
+        self.vendedor_combo.addItem("Sin vincular")
+        for vendedor in self._vendedores:
+            self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
+
+        self._toggle_vendedor()
+
+    def _toggle_vendedor(self) -> None:
+        rol_id = self.rol_combo.currentData()
+        rol = next((r for r in self._roles if r.id_rol == rol_id), None)
+        es_vendedor = rol is not None and rol.nombre == "VENDEDOR"
+        self.lbl_vendedor.setVisible(es_vendedor)
+        self.vendedor_combo.setVisible(es_vendedor)
+        if not es_vendedor:
+            self.vendedor_combo.setCurrentIndex(0)
+
+    def _precargar(self, usuario: Usuario) -> None:
+        self.nombre_usuario_input.setText(usuario.nombre_usuario or "")
+        self.nombre_input.setText(usuario.nombre or "")
+        self.apellido_input.setText(usuario.apellido or "")
+        self.email_input.setText(usuario.email or "")
+        if usuario.id_rol is not None:
+            idx = self.rol_combo.findData(usuario.id_rol)
+            if idx >= 0:
+                self.rol_combo.setCurrentIndex(idx)
+        if usuario.id_vendedor_usuario is not None:
+            idx = self.vendedor_combo.findData(usuario.id_vendedor_usuario)
+            if idx >= 0:
+                self.vendedor_combo.setCurrentIndex(idx)
+
+    def _validar_y_aceptar(self) -> None:
+        if not self.nombre_usuario_input.text().strip():
+            MessageBox.warning(self, "Dato requerido", "El nombre de usuario es obligatorio.")
+            self.nombre_usuario_input.setFocus()
+            return
+        if not self.email_input.text().strip():
+            MessageBox.warning(
+                self,
+                "Dato requerido",
+                "El correo electrónico es obligatorio: es a donde se envían los códigos de "
+                "desbloqueo y recuperación de clave.",
+            )
+            self.email_input.setFocus()
+            return
+        if self.rol_combo.currentData() is None:
+            MessageBox.warning(self, "Dato requerido", "Selecciona un rol.")
+            return
+        if not self.usuario and not self.clave_input.text():
+            MessageBox.warning(self, "Dato requerido", "La clave es obligatoria para un usuario nuevo.")
+            self.clave_input.setFocus()
+            return
+        if self.clave_input.text() and self.clave_input.text() != self.confirmar_clave_input.text():
+            MessageBox.warning(
+                self,
+                "Las claves no coinciden",
+                "La clave y su confirmación deben ser iguales.",
+            )
+            self.confirmar_clave_input.setFocus()
+            return
+        self.accept()
+
+    def get_data(self) -> dict:
+        rol_id = self.rol_combo.currentData()
+        rol = next((r for r in self._roles if r.id_rol == rol_id), None)
+        es_vendedor = rol is not None and rol.nombre == "VENDEDOR"
+        return {
+            "nombre_usuario": self.nombre_usuario_input.text().strip(),
+            "nombre": self.nombre_input.text().strip() or None,
+            "apellido": self.apellido_input.text().strip() or None,
+            "email": self.email_input.text().strip() or None,
+            "id_rol": rol_id,
+            "id_vendedor_usuario": (self.vendedor_combo.currentData() if es_vendedor else None),
+        }
+
+    def get_clave(self) -> str | None:
+        return self.clave_input.text() or None

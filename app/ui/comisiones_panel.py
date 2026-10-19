@@ -1,0 +1,1103 @@
+"""
+Panel del modulo Comisiones: gestion de comisiones de vendedores (listar, pagar).
+Dos modos en el mismo panel:
+  - Modo gestion (comisiones:ver/crear): ADMIN/CAJERO elige un vendedor y paga comisiones.
+  - Modo "Mis Comisiones" (reportes_comisiones:ver): VENDEDOR ve solo sus propias comisiones.
+Mismo patron visual que app/ui/cuentas_por_pagar_panel.py.
+"""
+
+import logging
+from decimal import Decimal
+from functools import partial
+
+import qtawesome as qta
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QShowEvent
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+from sqlalchemy.orm import Session
+
+from app.db.models import ComisionFactura, Usuario
+from app.services.comisiones import ComisionService, PagoComisionService
+from app.services.empresa import EmpresaService
+from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.permisos import PermisoDenegadoError
+from app.services.tesoreria import BancoService, CajaService
+from app.services.usuarios import UsuarioService
+from app.services.vendedores import VendedorService
+from app.services.ventas import VentaService
+from app.ui.factura_detalle_dialog import FacturaDetalleDialog
+from app.ui.message_box import MessageBox
+from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    BUTTON_SECONDARY_QSS,
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_CONTENT_BG,
+    COLOR_FIELD_BG,
+    COLOR_INFO,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_DARK,
+    COLOR_PRIMARY_LIGHT,
+    COLOR_SUCCESS,
+    COLOR_TABLE_HEADER,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
+    COLOR_TEXT_MUTED,
+    COLOR_WHITE,
+    FONT_FAMILY,
+    ICON_CHEVRON_DOWN_URL,
+    TABLE_QSS,
+    EstadoBadge,
+    alinear_encabezados,
+    aplicar_sombra,
+)
+from app.ui.toolbar_popups import BotonExportar, BotonFiltros
+from app.ui.workers import QueryWorker
+
+logger = logging.getLogger(__name__)
+
+COLORES_ESTADO_COMISION = {
+    "pendiente": COLOR_PRIMARY,
+    "liberada": COLOR_INFO,
+    "pagada": COLOR_SUCCESS,
+}
+
+ESTADOS_FILTRO = [
+    ("Todos los estados", None),
+    ("Pendiente", "pendiente"),
+    ("Liberada", "liberada"),
+    ("Pagada", "pagada"),
+]
+
+LIMITE_CATALOGO = 50
+
+
+def _tarea_exportar_excel(session, ruta: str, encabezados: list[str], filas: list[list], config_empresa) -> str:
+    """Corre en un QThread (ver QueryWorker) para no bloquear la ventana mientras
+    openpyxl genera el archivo -- `session` no se usa (config_empresa ya se resolvio
+    de forma sincrona antes de lanzar el worker), pero es parte del contrato de
+    QueryWorker.run()."""
+    exportar_excel(ruta, encabezados, filas, titulo="Comisiones", config_empresa=config_empresa)
+    return ruta
+
+
+def _tarea_exportar_pdf(
+    session,
+    ruta: str,
+    encabezados: list[str],
+    filas: list[list],
+    filtros: dict,
+    col_widths: list,
+    config_empresa,
+) -> str:
+    exportar_pdf(
+        ruta,
+        "Comisiones",
+        encabezados,
+        filas,
+        filtros=filtros,
+        col_widths=col_widths,
+        config_empresa=config_empresa,
+    )
+    return ruta
+
+
+DIALOG_STYLE = f"""
+QDialog {{
+    background-color: {COLOR_CONTENT_BG};
+    font-family: '{FONT_FAMILY}', Arial, sans-serif;
+}}
+QWidget#SectionCard {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 10px;
+}}
+QLabel.FormLabel {{
+    font-size: 12px;
+    font-weight: 600;
+    color: {COLOR_TEXT_DARK_SLATE};
+    margin-bottom: 2px;
+}}
+QLineEdit, QComboBox {{
+    background-color: {COLOR_WHITE};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+    color: {COLOR_TEXT_DARK};
+    min-height: 20px;
+}}
+QLineEdit:focus, QComboBox:focus {{
+    border: 1.5px solid {COLOR_PRIMARY};
+}}
+QLineEdit:disabled, QComboBox:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    color: {COLOR_TEXT_LIGHT};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QComboBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+}}
+QPushButton#BtnPrimary {{
+    background-color: {COLOR_PRIMARY};
+    color: {COLOR_WHITE};
+    border: none;
+    border-radius: 6px;
+    padding: 8px 22px;
+    font-size: 13px;
+    font-weight: bold;
+}}
+QPushButton#BtnPrimary:hover {{
+    background-color: {COLOR_PRIMARY_LIGHT};
+}}
+QPushButton#BtnPrimary:pressed {{
+    background-color: {COLOR_PRIMARY_DARK};
+}}
+QPushButton#BtnSecondary {{
+    background-color: {COLOR_FIELD_BG};
+    color: {COLOR_TEXT_MEDIUM};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton#BtnSecondary:hover {{
+    background-color: {COLOR_TABLE_HEADER};
+    color: {COLOR_TEXT_DARK};
+}}
+"""
+
+
+class PagarComisionesDialog(QDialog):
+    """Dialogo para pagar todas las comisiones pendientes de un vendedor en un batch."""
+
+    def __init__(
+        self,
+        session: Session,
+        id_usuario: int | None,
+        id_vendedor: int,
+        monto_pendiente: Decimal,
+        nombre_vendedor: str,
+        parent=None,
+        ids_comision: list[int] | None = None,
+    ):
+        super().__init__(parent)
+        self.session = session
+        self.id_usuario = id_usuario
+        self.id_vendedor = id_vendedor
+        self.monto_pendiente = monto_pendiente
+        # Las comisiones que suman `monto_pendiente`: con la lista filtrada (ej. "Solo con
+        # porcentaje BCV") es un subconjunto de lo liberado del vendedor, y el pago tiene que
+        # liquidar exactamente esas -- no todas.
+        self.ids_comision = ids_comision
+        self.nombre_vendedor = nombre_vendedor
+        self.pago_creado = None
+        self._cajas_abiertas: list = []
+        self._cuentas_activas: list = []
+
+        self.setWindowTitle("Pagar Comisiones")
+        ajustar_tamano(self, 420, 380)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self._build_ui()
+        hacer_desplazable(self)
+        self._cargar_origenes()
+        self._toggle_origen()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        lbl_titulo = QLabel(f"Pagar comisiones a {self.nombre_vendedor}")
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        root.addWidget(lbl_titulo)
+
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+
+        lbl_monto = QLabel(f"Total pendiente: ${float(self.monto_pendiente):,.2f}")
+        lbl_monto.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
+        layout.addWidget(lbl_monto)
+
+        lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
+        lbl_metodo.setProperty("class", "FormLabel")
+        self.metodo_combo = QComboBox()
+        for etiqueta, valor in METODOS_PAGO:
+            self.metodo_combo.addItem(etiqueta, valor)
+        self.metodo_combo.setFixedHeight(32)
+        self.metodo_combo.currentIndexChanged.connect(self._toggle_origen)
+        layout.addWidget(lbl_metodo)
+        layout.addWidget(self.metodo_combo)
+
+        lbl_origen = QLabel(f"Origen {ASTERISCO_REQUERIDO}")
+        lbl_origen.setProperty("class", "FormLabel")
+        self.origen_combo = QComboBox()
+        self.origen_combo.setFixedHeight(32)
+        layout.addWidget(lbl_origen)
+        layout.addWidget(self.origen_combo)
+
+        lbl_ref = QLabel("Referencia")
+        lbl_ref.setProperty("class", "FormLabel")
+        self.referencia_input = QLineEdit()
+        self.referencia_input.setPlaceholderText("Opcional")
+        self.referencia_input.setFixedHeight(32)
+        self.referencia_input.setMaxLength(100)  # columna referencia VARCHAR(100)
+        layout.addWidget(lbl_ref)
+        layout.addWidget(self.referencia_input)
+
+        root.addWidget(card, stretch=1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        btn_cancelar = QPushButton("Cancelar")
+        btn_cancelar.setObjectName("BtnSecondary")
+        btn_cancelar.setFixedHeight(34)
+        btn_cancelar.setAutoDefault(False)
+        btn_cancelar.clicked.connect(self.reject)
+        self.btn_pagar = QPushButton("Pagar")
+        self.btn_pagar.setObjectName("BtnPrimary")
+        self.btn_pagar.setFixedHeight(34)
+        self.btn_pagar.setAutoDefault(False)
+        self.btn_pagar.clicked.connect(self._validar_y_aceptar)
+        footer.addWidget(btn_cancelar)
+        footer.addWidget(self.btn_pagar)
+        root.addLayout(footer)
+
+    def _cargar_origenes(self) -> None:
+        try:
+            cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cajas = []
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        try:
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cuentas = []
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
+
+    def _toggle_origen(self) -> None:
+        metodo = self.metodo_combo.currentData()
+        requiere_caja = metodo in METODOS_QUE_REQUIEREN_CAJA
+        self.origen_combo.blockSignals(True)
+        self.origen_combo.clear()
+        if requiere_caja:
+            if not self._cajas_abiertas:
+                self.origen_combo.addItem("Sin cajas abiertas")
+                self.origen_combo.setEnabled(False)
+            else:
+                self.origen_combo.setEnabled(True)
+                for caja in self._cajas_abiertas:
+                    self.origen_combo.addItem(
+                        caja.nombre_caja or f"Caja {caja.id_caja}",
+                        ("caja", caja.id_caja),
+                    )
+        else:
+            if not self._cuentas_activas:
+                self.origen_combo.addItem("Sin cuentas bancarias activas")
+                self.origen_combo.setEnabled(False)
+            else:
+                self.origen_combo.setEnabled(True)
+                for cuenta in self._cuentas_activas:
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
+                    self.origen_combo.addItem(
+                        f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
+                        ("banco", cuenta.id_cuenta),
+                    )
+        self.origen_combo.blockSignals(False)
+
+    def _validar_y_aceptar(self) -> None:
+        origen = self.origen_combo.currentData()
+        if origen is None:
+            MessageBox.warning(
+                self,
+                "Origen requerido",
+                "No hay ninguna caja/cuenta disponible para este método.",
+            )
+            return
+        tipo_origen, id_origen = origen
+
+        respuesta = MessageBox.question(
+            self,
+            "Confirmar pago",
+            f"¿Confirma el pago de ${float(self.monto_pendiente):,.2f} a {self.nombre_vendedor}?\n"
+            "Esta acción no se puede deshacer.",
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self.pago_creado = PagoComisionService.pagar_comisiones_vendedor(
+                self.session,
+                id_vendedor=self.id_vendedor,
+                metodo_pago=self.metodo_combo.currentData(),
+                id_caja=id_origen if tipo_origen == "caja" else None,
+                id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
+                referencia=self.referencia_input.text().strip() or None,
+                id_usuario=self.id_usuario,
+                ids_comision=self.ids_comision,
+                monto_esperado=self.monto_pendiente,
+            )
+        except ValueError as exc:
+            self.session.rollback()
+            MessageBox.warning(self, "No se pudo registrar el pago", str(exc))
+            return
+        except PermisoDenegadoError:
+            self.session.rollback()
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para pagar comisiones.")
+            return
+        except Exception:
+            self.session.rollback()
+            logger.exception("Fallo al pagar comisiones")
+            MessageBox.critical(self, "Error", "No se pudo registrar el pago.")
+            return
+
+        self.accept()
+
+
+def _agrupar_comisiones_por_factura(comisiones: list[ComisionFactura]) -> list[dict]:
+    """Agrupa comisiones (una fila por producto facturado) en una fila por factura para
+    la vista principal -- el desglose por producto queda disponible como drill-down
+    (DetalleComisionFacturaDialog). Seguro sin tocar reglas de negocio: dentro de una
+    misma factura todas sus ComisionFactura comparten siempre el mismo estado_pago --
+    trg_cxc_libera_comisiones (migrations/0045) las libera todas juntas cuando la cuenta
+    por cobrar de la factura llega a 'pagada', y VentaService.anular_factura() bloquea la
+    anulacion si CUALQUIER linea esta liberada/pagada o borra TODAS juntas si ninguna lo
+    esta -- nunca hay estados mixtos dentro de una factura, asi que tomar el estado de la
+    primera linea del grupo es siempre correcto."""
+    grupos: dict[object, dict] = {}
+    orden: list[object] = []
+    for comision in comisiones:
+        factura_num = ""
+        cliente_nombre = ""
+        clave: object = id(comision)
+        try:
+            if comision.detalle and comision.detalle.factura:
+                factura = comision.detalle.factura
+                clave = factura.id_factura
+                factura_num = factura.numero_factura or ""
+                cliente_nombre = factura.cliente.nombre_razon_social if factura.cliente else "Consumidor final"
+        except Exception:
+            pass
+
+        if clave not in grupos:
+            grupos[clave] = {
+                "id_factura": clave if isinstance(clave, int) else None,
+                "numero_factura": factura_num,
+                "cliente_nombre": cliente_nombre,
+                "fecha_calculo": comision.fecha_calculo,
+                "estado_pago": comision.estado_pago or "pendiente",
+                "cantidad_lineas": 0,
+                "monto_base": Decimal("0.00"),
+                "monto_venta": Decimal("0.00"),
+                "monto_comision": Decimal("0.00"),
+                "lineas": [],
+            }
+            orden.append(clave)
+
+        grupo = grupos[clave]
+        grupo["cantidad_lineas"] += 1
+        grupo["monto_base"] += comision.monto_base_comision or Decimal("0.00")
+        grupo["monto_venta"] += comision.monto_venta_comision or Decimal("0.00")
+        grupo["monto_comision"] += comision.monto_comision
+        grupo["lineas"].append(comision)
+
+    return [grupos[clave] for clave in orden]
+
+
+class DetalleComisionFacturaDialog(QDialog):
+    """Desglose de comisiones por producto de una sola factura -- todo en memoria, sin
+    consultar la BD: el grupo ya trae las ComisionFactura originales cargadas (con
+    detalle.producto precargado, ver ComisionService.listar_comisiones_vendedor/
+    listar_mis_comisiones)."""
+
+    def __init__(self, grupo: dict, parent=None):
+        super().__init__(parent)
+        self.grupo = grupo
+        self.setWindowTitle(f"Detalle de comisión - Factura {grupo['numero_factura']}")
+        ajustar_tamano(self, 560, 420)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self._build_ui()
+        hacer_desplazable(self)
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        fecha_str = self.grupo["fecha_calculo"].strftime("%d/%m/%Y") if self.grupo["fecha_calculo"] else ""
+        estado = (self.grupo["estado_pago"] or "pendiente").capitalize()
+        lbl_titulo = QLabel(f"Factura {self.grupo['numero_factura']} · {self.grupo['cliente_nombre']}")
+        lbl_titulo.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        root.addWidget(lbl_titulo)
+
+        lbl_sub = QLabel(f"Fecha: {fecha_str}  ·  Estado: {estado}")
+        lbl_sub.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        root.addWidget(lbl_sub)
+
+        tabla = QTableWidget(len(self.grupo["lineas"]), 5)
+        tabla.setHorizontalHeaderLabels(["Producto", "Cantidad", "Monto Base", "Monto Venta", "Comisión"])
+        tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        tabla.setAlternatingRowColors(True)
+        tabla.setShowGrid(False)
+        tabla.verticalHeader().setVisible(False)
+        tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        tabla.setStyleSheet(TABLE_QSS)
+        alinear_encabezados(
+            tabla,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+            },
+        )
+        for fila, linea in enumerate(self.grupo["lineas"]):
+            nombre_producto = ""
+            try:
+                if linea.detalle and linea.detalle.producto:
+                    nombre_producto = linea.detalle.producto.nombre_producto or ""
+            except Exception:
+                pass
+            cantidad = linea.detalle.cantidad_producto if linea.detalle else None
+            tabla.setItem(fila, 0, QTableWidgetItem(nombre_producto))
+
+            item_cantidad = QTableWidgetItem(f"{float(cantidad):,.2f}" if cantidad is not None else "")
+            item_cantidad.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tabla.setItem(fila, 1, item_cantidad)
+
+            item_base = QTableWidgetItem(f"${float(linea.monto_base_comision or 0):,.2f}")
+            item_base.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tabla.setItem(fila, 2, item_base)
+
+            item_venta = QTableWidgetItem(f"${float(linea.monto_venta_comision or 0):,.2f}")
+            item_venta.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tabla.setItem(fila, 3, item_venta)
+
+            item_comision = QTableWidgetItem(f"${float(linea.monto_comision):,.2f}")
+            item_comision.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tabla.setItem(fila, 4, item_comision)
+        root.addWidget(tabla, stretch=1)
+
+        lbl_total = QLabel(f"Total comisión: ${float(self.grupo['monto_comision']):,.2f}")
+        lbl_total.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
+        root.addWidget(lbl_total)
+
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.setObjectName("BtnSecondary")
+        btn_cerrar.clicked.connect(self.accept)
+        fila_botones = QHBoxLayout()
+        fila_botones.addStretch()
+        fila_botones.addWidget(btn_cerrar)
+        root.addLayout(fila_botones)
+
+
+class ComisionesPanel(QWidget):
+    """Panel del modulo Comisiones: dos modos segun el permiso del usuario.
+    - Modo gestion (comisiones:ver): selector de vendedor + tabla + pagar.
+    - Modo "Mis Comisiones" (reportes_comisiones:ver): solo lectura de propias."""
+
+    def __init__(self, session_factory, usuario: Usuario, parent=None):
+        super().__init__(parent)
+        self.session_factory = session_factory
+        self.usuario = usuario
+        self.setObjectName("ContentArea")
+
+        session = session_factory()
+        try:
+            # Si el usuario es vendedor (tiene id_vendedor_usuario), siempre usar modo "Mis Comisiones"
+            # para que solo vea sus propias comisiones, independientemente de otros permisos
+            if usuario.id_vendedor_usuario is not None:
+                self.modo_gestion = False
+            else:
+                self.modo_gestion = UsuarioService.verificar_permiso(session, usuario.id_usuario, "comisiones", "ver")
+        except Exception:
+            self.modo_gestion = False
+        finally:
+            session.close()
+
+        self.id_vendedor_actual: int | None = None
+        self.comisiones_cargadas: list[ComisionFactura] = []
+        self.grupos_filtrados: list[dict] = []
+        self.total_pendiente = Decimal("0.00")
+        self.total_liberada = Decimal("0.00")
+        self.solo_porcentaje_bcv = False
+        self.solo_sin_porcentaje_bcv = False
+        # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
+        # el motivo (hallazgo 3.3, auditoria 2026-09-05).
+        self._abriendo_dialogo = False
+
+        self._setup_ui()
+        QTimer.singleShot(100, self.cargar_datos)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.cargar_datos()
+
+    def _setup_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(16)
+
+        root.addWidget(self._make_header())
+        root.addWidget(self._make_toolbar())
+        root.addWidget(self._make_table())
+        if self.modo_gestion:
+            root.addWidget(self._make_footer())
+
+        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+
+    def _make_header(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+
+        titulo = "Comisiones" if self.modo_gestion else "Mis Comisiones"
+        lbl = QLabel(titulo)
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+
+        self.lbl_total = QLabel("Cargando…")
+        self.lbl_total.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 13px;"
+            f" background-color: {COLOR_TABLE_HEADER}; border-radius: 10px;"
+            " padding: 3px 10px;"
+        )
+
+        h.addWidget(lbl)
+        h.addWidget(self.lbl_total)
+        h.addStretch()
+        return w
+
+    def _make_toolbar(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet(
+            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
+        )
+        h = QHBoxLayout(w)
+        h.setContentsMargins(12, 8, 12, 8)
+        h.setSpacing(10)
+
+        if self.modo_gestion:
+            lbl_vendedor = QLabel("Vendedor:")
+            lbl_vendedor.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
+            self.vendedor_combo = QComboBox()
+            self.vendedor_combo.setFixedWidth(250)
+            self.vendedor_combo.currentIndexChanged.connect(self._on_vendedor_cambiado)
+            h.addWidget(lbl_vendedor)
+            h.addWidget(self.vendedor_combo)
+
+        self.estado_combo = QComboBox()
+        for etiqueta, valor in ESTADOS_FILTRO:
+            self.estado_combo.addItem(etiqueta, valor)
+        self.estado_combo.currentIndexChanged.connect(self._aplicar_filtro_estado)
+
+        self.chk_porcentaje_bcv = QCheckBox("Solo con porcentaje BCV")
+        self.chk_porcentaje_bcv.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        self.chk_porcentaje_bcv.stateChanged.connect(self._aplicar_filtro_estado)
+
+        self.chk_sin_porcentaje_bcv = QCheckBox("Solo en $")
+        self.chk_sin_porcentaje_bcv.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        self.chk_sin_porcentaje_bcv.stateChanged.connect(self._aplicar_filtro_estado)
+
+        self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
+
+        self.btn_exportar = BotonExportar(on_excel=self.exportar_excel, on_pdf=self.exportar_pdf)
+
+        h.addStretch()
+        h.addWidget(self.chk_porcentaje_bcv)
+        h.addWidget(self.chk_sin_porcentaje_bcv)
+        h.addWidget(self.btn_filtrar)
+        h.addWidget(self.btn_exportar)
+        return w
+
+    def _make_table(self) -> QTableWidget:
+        # Una fila por FACTURA (no por producto facturado): agrupa las ComisionFactura
+        # de cada factura -- ver _agrupar_comisiones_por_factura(). El desglose por
+        # producto queda en DetalleComisionFacturaDialog, vía el botón de la ultima
+        # columna.
+        self.tabla = QTableWidget(0, 10)
+        self.tabla.setHorizontalHeaderLabels(
+            [
+                "ID",
+                "Factura",
+                "Cliente",
+                "Fecha Cálculo",
+                "Líneas",
+                "Monto Base",
+                "Monto Venta",
+                "Comisión",
+                "Estado",
+                "",
+            ]
+        )
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
+                7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.setShowGrid(False)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabla.doubleClicked.connect(self.ver_detalle_factura)
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(8, 120)
+        self.tabla.setColumnWidth(9, 48)
+        self.tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.tabla)
+        self.tabla.setColumnHidden(0, True)
+        self.tabla.verticalHeader().setDefaultSectionSize(45)
+        return self.tabla
+
+    def _make_footer(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+
+        h.addStretch()
+        self.btn_pagar = QPushButton("Pagar Comisiones")
+        self.btn_pagar.setIcon(qta.icon("fa5s.money-bill-wave", color=COLOR_TEXT_DARK))
+        self.btn_pagar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_pagar.clicked.connect(self.pagar_comisiones)
+        self.btn_pagar.setEnabled(False)
+        h.addWidget(self.btn_pagar)
+        return w
+
+    def cargar_datos(self) -> None:
+        session = self.session_factory()
+        try:
+            if self.modo_gestion:
+                self._cargar_vendedores(session)
+            else:
+                self._cargar_comisiones_propias(session)
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar comisiones.")
+        except ValueError as exc:
+            MessageBox.warning(self, "Error", str(exc))
+        except Exception:
+            logger.exception("Fallo al cargar comisiones")
+            MessageBox.critical(self, "Error de conexión", "No se pudo cargar las comisiones.")
+        finally:
+            session.close()
+
+    def _cargar_vendedores(self, session: Session) -> None:
+        resultado = VendedorService.listar(
+            session,
+            id_usuario=self.usuario.id_usuario,
+            estado_vendedor="ACTIVO",
+            por_pagina=LIMITE_CATALOGO,
+        )
+        vendedores = resultado["items"]
+        self.vendedor_combo.blockSignals(True)
+        self.vendedor_combo.clear()
+        if not vendedores:
+            self.vendedor_combo.addItem("Sin vendedores activos")
+        for vendedor in vendedores:
+            self.vendedor_combo.addItem(
+                vendedor.nombre_vendedor or f"Vendedor {vendedor.id_vendedor}",
+                vendedor.id_vendedor,
+            )
+        self.vendedor_combo.blockSignals(False)
+        if vendedores:
+            self.vendedor_combo.setCurrentIndex(0)
+            self._on_vendedor_cambiado()
+
+    def _cargar_comisiones_propias(self, session: Session) -> None:
+        try:
+            self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+            self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
+            comisiones = ComisionService.listar_mis_comisiones(
+                session,
+                self.usuario.id_usuario,
+                solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
+            )
+            self.comisiones_cargadas = comisiones
+            self._aplicar_filtro_estado()
+        except ValueError:
+            self.tabla.setRowCount(0)
+            self.lbl_total.setText("Sin datos")
+            raise
+
+    def _on_vendedor_cambiado(self) -> None:
+        self.id_vendedor_actual = self.vendedor_combo.currentData()
+        if self.id_vendedor_actual is not None:
+            session = self.session_factory()
+            try:
+                self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+                self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
+                comisiones = ComisionService.listar_comisiones_vendedor(
+                    session,
+                    self.id_vendedor_actual,
+                    id_usuario=self.usuario.id_usuario,
+                    solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                    solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
+                )
+                self.comisiones_cargadas = comisiones
+                self._aplicar_filtro_estado()
+            except Exception:
+                logger.exception("Fallo al cargar comisiones del vendedor")
+                self.tabla.setRowCount(0)
+            finally:
+                session.close()
+
+    def _aplicar_filtro_estado(self) -> None:
+        # Los checkboxes son mutuamente excluyentes
+        if self.chk_porcentaje_bcv.isChecked() and self.chk_sin_porcentaje_bcv.isChecked():
+            # Si ambos están marcados, desmarcar el que cambió
+            if self.solo_porcentaje_bcv != self.chk_porcentaje_bcv.isChecked():
+                self.chk_sin_porcentaje_bcv.blockSignals(True)
+                self.chk_sin_porcentaje_bcv.setChecked(False)
+                self.chk_sin_porcentaje_bcv.blockSignals(False)
+            else:
+                self.chk_porcentaje_bcv.blockSignals(True)
+                self.chk_porcentaje_bcv.setChecked(False)
+                self.chk_porcentaje_bcv.blockSignals(False)
+
+        # Si algún checkbox de porcentaje BCV cambió, recargar desde BD
+        if (
+            self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv
+            or self.chk_sin_porcentaje_bcv.isChecked() != self.solo_sin_porcentaje_bcv
+        ):
+            self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+            self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
+            session = self.session_factory()
+            try:
+                if self.modo_gestion and self.id_vendedor_actual is not None:
+                    comisiones = ComisionService.listar_comisiones_vendedor(
+                        session,
+                        self.id_vendedor_actual,
+                        id_usuario=self.usuario.id_usuario,
+                        solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                        solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
+                    )
+                else:
+                    # Modo "Mis Comisiones" - recargar con filtro de porcentaje BCV
+                    comisiones = ComisionService.listar_mis_comisiones(
+                        session,
+                        self.usuario.id_usuario,
+                        solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
+                        solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
+                    )
+                self.comisiones_cargadas = comisiones
+            except Exception:
+                logger.exception("Fallo al recargar comisiones con filtro porcentaje BCV")
+            finally:
+                session.close()
+
+        estado_filtro = self.estado_combo.currentData()
+        if estado_filtro:
+            filtradas = [c for c in self.comisiones_cargadas if c.estado_pago == estado_filtro]
+        else:
+            filtradas = self.comisiones_cargadas
+        self._poblar_tabla(filtradas)
+
+    def _poblar_tabla(self, comisiones: list[ComisionFactura]) -> None:
+        grupos = _agrupar_comisiones_por_factura(comisiones)
+        self.tabla.setRowCount(len(grupos))
+        self.grupos_filtrados = grupos
+        total_pendiente = Decimal("0.00")
+        total_liberada = Decimal("0.00")
+
+        for fila, grupo in enumerate(grupos):
+            self.tabla.setItem(fila, 0, QTableWidgetItem(str(grupo["id_factura"] or "")))
+            self.tabla.setItem(fila, 1, QTableWidgetItem(grupo["numero_factura"]))
+            self.tabla.setItem(fila, 2, QTableWidgetItem(grupo["cliente_nombre"]))
+            fecha_str = grupo["fecha_calculo"].strftime("%d/%m/%Y") if grupo["fecha_calculo"] else ""
+            self.tabla.setItem(fila, 3, QTableWidgetItem(fecha_str))
+            item_lineas = QTableWidgetItem(str(grupo["cantidad_lineas"]))
+            item_lineas.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 4, item_lineas)
+
+            item_base = QTableWidgetItem(f"${float(grupo['monto_base']):,.2f}")
+            item_base.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 5, item_base)
+
+            item_venta = QTableWidgetItem(f"${float(grupo['monto_venta']):,.2f}")
+            item_venta.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 6, item_venta)
+
+            item_comision = QTableWidgetItem(f"${float(grupo['monto_comision']):,.2f}")
+            item_comision.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 7, item_comision)
+
+            estado = grupo["estado_pago"] or "pendiente"
+            color = COLORES_ESTADO_COMISION.get(estado, COLOR_TEXT_MUTED)
+            self.tabla.setCellWidget(fila, 8, EstadoBadge(estado.capitalize(), color))
+
+            btn_detalle = QPushButton()
+            btn_detalle.setIcon(qta.icon("fa5s.list-ul", color=COLOR_TEXT_MUTED))
+            btn_detalle.setToolTip("Ver desglose por producto")
+            btn_detalle.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_detalle.setFlat(True)
+            btn_detalle.clicked.connect(partial(self._ver_detalle_comision, grupo))
+            self.tabla.setCellWidget(fila, 9, btn_detalle)
+
+            if estado == "pendiente":
+                total_pendiente += grupo["monto_comision"]
+            elif estado == "liberada":
+                total_liberada += grupo["monto_comision"]
+
+        self.total_pendiente = total_pendiente
+        self.total_liberada = total_liberada
+        self.lbl_total.setText(
+            f"Por cobrar: ${float(total_pendiente):,.2f}  ·  Liberada: ${float(total_liberada):,.2f}"
+        )
+        if self.modo_gestion:
+            self.btn_pagar.setEnabled(self.id_vendedor_actual is not None and total_liberada > 0)
+
+    def _ver_detalle_comision(self, grupo: dict) -> None:
+        DetalleComisionFacturaDialog(grupo, parent=self).exec()
+
+    def pagar_comisiones(self) -> None:
+        if self.id_vendedor_actual is None:
+            MessageBox.information(self, "Selección requerida", "Selecciona un vendedor.")
+            return
+
+        # Lo que se muestra/confirma son las comisiones cargadas, que con el filtro "Solo con
+        # porcentaje BCV" activo son un subconjunto: se pagan exactamente esas (ver
+        # PagoComisionService.pagar_comisiones_vendedor).
+        liberadas = [c for c in self.comisiones_cargadas if c.estado_pago == "liberada" and c.monto_comision > 0]
+        total_liberada = sum((c.monto_comision for c in liberadas), Decimal("0.00"))
+        if total_liberada <= 0:
+            MessageBox.information(
+                self,
+                "Sin comisiones",
+                "No hay comisiones liberadas para pagar a este vendedor.",
+            )
+            return
+
+        nombre_vendedor = self.vendedor_combo.currentText()
+        self.btn_pagar.setEnabled(False)
+        session = self.session_factory()
+        try:
+            dialogo = PagarComisionesDialog(
+                session,
+                self.usuario.id_usuario,
+                self.id_vendedor_actual,
+                total_liberada,
+                nombre_vendedor,
+                parent=self,
+                ids_comision=[c.id_comision for c in liberadas],
+            )
+            if dialogo.exec() and dialogo.pago_creado is not None:
+                self._on_vendedor_cambiado()
+                MessageBox.information(self, "Pago registrado", "El pago se registró con éxito.")
+        except Exception:
+            logger.exception("Fallo al abrir dialogo de pago")
+        finally:
+            session.close()
+            self.btn_pagar.setEnabled(True)
+
+    def _datos_para_exportar(self) -> tuple[list[str], list[list]]:
+        encabezados = [
+            "Factura",
+            "Cliente",
+            "Fecha Cálculo",
+            "Líneas",
+            "Monto Base",
+            "Monto Venta",
+            "Comisión",
+            "Estado",
+        ]
+        filas = [
+            [
+                grupo["numero_factura"],
+                grupo["cliente_nombre"],
+                (grupo["fecha_calculo"].strftime("%d/%m/%Y") if grupo["fecha_calculo"] else ""),
+                grupo["cantidad_lineas"],
+                float(grupo["monto_base"]),
+                float(grupo["monto_venta"]),
+                float(grupo["monto_comision"]),
+                (grupo["estado_pago"] or "pendiente").capitalize(),
+            ]
+            for grupo in self.grupos_filtrados
+        ]
+        return encabezados, filas
+
+    def _filtros_para_exportar(self) -> dict:
+        filtros = {
+            "Vendedor": (self.vendedor_combo.currentText() if self.modo_gestion else self.usuario.nombre_usuario),
+            "Estado": self.estado_combo.currentText(),
+            "Por cobrar": f"${float(self.total_pendiente):,.2f}",
+            "Liberada": f"${float(self.total_liberada):,.2f}",
+        }
+        if self.solo_porcentaje_bcv:
+            filtros["Filtro"] = "Solo con porcentaje BCV"
+        elif self.solo_sin_porcentaje_bcv:
+            filtros["Filtro"] = "Solo en $"
+        return filtros
+
+    def _obtener_config_empresa(self, session: Session):
+        return EmpresaService.obtener_datos_documento(session)
+
+    def exportar_excel(self) -> None:
+        # Mismo guard que reportes_panel.py/facturacion_panel.py: reasignar
+        # self._worker_export a un QThread nuevo mientras el viejo sigue corriendo lo
+        # destruye a mitad de ejecucion.
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar comisiones", "comisiones.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            config_empresa = self._obtener_config_empresa(session)
+        except Exception:
+            logger.exception("Fallo al obtener configuracion de empresa para exportar")
+            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+            return
+        finally:
+            session.close()
+
+        encabezados, filas = self._datos_para_exportar()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_excel,
+            ruta=ruta,
+            encabezados=encabezados,
+            filas=filas,
+            config_empresa=config_empresa,
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def exportar_pdf(self) -> None:
+        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
+            return
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar comisiones", "comisiones.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        session = self.session_factory()
+        try:
+            config_empresa = self._obtener_config_empresa(session)
+        except Exception:
+            logger.exception("Fallo al obtener configuracion de empresa para exportar")
+            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
+            return
+        finally:
+            session.close()
+
+        encabezados, filas = self._datos_para_exportar()
+        self.btn_exportar.setEnabled(False)
+        self._worker_export = QueryWorker(
+            self.session_factory,
+            _tarea_exportar_pdf,
+            ruta=ruta,
+            encabezados=encabezados,
+            filas=filas,
+            filtros=self._filtros_para_exportar(),
+            col_widths=[1.4, 2.0, 1.0, 0.6, 1.0, 1.0, 1.0, 1.0],
+            config_empresa=config_empresa,
+        )
+        self._worker_export.resultado.connect(self._on_exportar_ok)
+        self._worker_export.error.connect(self._on_exportar_error)
+        self._worker_export.start()
+
+    def _on_exportar_ok(self, ruta: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        MessageBox.information(self, "Exportación completa", f"Se exportó a:\n{ruta}")
+
+    def _on_exportar_error(self, mensaje: str) -> None:
+        self.btn_exportar.setEnabled(True)
+        logger.error("Fallo al exportar comisiones: %s", mensaje)
+        MessageBox.critical(self, "Error", "No se pudo completar la exportación.")
+
+    def _fila_seleccionada_id_factura(self) -> int | None:
+        """Obtiene el ID de la factura de la fila (agrupada por factura) seleccionada."""
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            MessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
+            return None
+
+        fila = filas[0].row()
+        if fila < 0 or fila >= len(self.grupos_filtrados):
+            return None
+
+        return self.grupos_filtrados[fila]["id_factura"]
+
+    def ver_detalle_factura(self) -> None:
+        """Abre el diálogo de detalle de la factura seleccionada."""
+        id_factura = self._fila_seleccionada_id_factura()
+        if id_factura is None:
+            return
+        if self._abriendo_dialogo:
+            return
+        self._abriendo_dialogo = True
+
+        session = self.session_factory()
+        try:
+            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.usuario.id_usuario)
+            dialogo = FacturaDetalleDialog(datos, session, self.usuario.id_usuario, parent=self)
+            dialogo.exec()
+        except ValueError as exc:
+            MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
+        except PermisoDenegadoError:
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para ver el detalle de facturas.",
+            )
+        except Exception:
+            logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
+            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+        finally:
+            session.close()
+            self._abriendo_dialogo = False

@@ -1,0 +1,408 @@
+"""Generacion de la factura digital en PDF (punto 1 del pedido de facturacion: no hay
+impresora fiscal, es un documento digital con los datos de la empresa).
+
+Vive en app/ui/ y no en app/services/ a proposito: usa QTextDocument/QPrinter
+(PySide6.QtPrintSupport), que son clases de Qt -- meterlas en la capa de servicios
+rompería la separacion servicios (framework-agnostico) / UI (PySide6) que sigue el resto
+del proyecto (ver CLAUDE.md). No agrega ninguna dependencia nueva: QtPrintSupport ya
+viene incluido en el PySide6 instalado.
+
+`datos` es el dict que devuelve VentaService.obtener_factura() ({"factura":
+FacturaVenta, "detalles": [FacturaDetalle, ...]}); `config_empresa` el que devuelve
+EmpresaService.obtener_configuracion() (puede ser None si nunca se configuro)."""
+
+import base64
+import html
+import os
+
+from PySide6.QtCore import QMarginsF, QStandardPaths
+from PySide6.QtGui import QPageLayout, QPageSize, QTextDocument
+from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
+
+from app.db.models import ConfiguracionEmpresa, FacturaDetalle, FacturaVenta
+from app.ui.pago_linea_dialog import METODOS_PAGO
+from app.ui.styles import (
+    COLOR_BORDER,
+    COLOR_DANGER,
+    COLOR_PRIMARY,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_MUTED,
+)
+from app.utils.rif import formatear_identificacion, formatear_rif
+
+# Etiquetas de metodo de pago (venta) -- "mixto" es el sentinel que VentaService.
+# obtener_factura() usa cuando hubo mas de una forma de pago con metodo distinto (ver
+# tambien factura_detalle_dialog.py/facturacion_panel.py, mismo criterio). Metodo de
+# VUELTO es un catalogo aparte (efectivo/pago_movil/transferencia, ver METODOS_VUELTO en
+# factura_form_dialog.py) -- duplicado aca a proposito, 3 valores fijos.
+_ETIQUETAS_METODO_PAGO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO} | {"mixto": "Mixto"}
+_ETIQUETAS_METODO_VUELTO = {
+    "efectivo": "Efectivo",
+    "pago_movil": "Pago Móvil",
+    "transferencia": "Transferencia",
+}
+
+_PRIMARY = COLOR_PRIMARY
+_MUTED = COLOR_TEXT_MUTED
+_BORDER = COLOR_BORDER
+_TD = f'style="padding:5pt 6pt;border-bottom:1pt solid {_BORDER};"'
+_TD_R = f'style="padding:5pt 6pt;border-bottom:1pt solid {_BORDER};text-align:right;"'
+_TH = f'style="padding:5pt 6pt;text-align:left;color:#FFFFFF;background-color:{_PRIMARY};"'
+_TH_R = f'style="padding:5pt 6pt;text-align:right;color:#FFFFFF;background-color:{_PRIMARY};"'
+_INFO_LBL = f'style="padding:3pt 6pt;text-align:right;color:{_MUTED};font-size:9pt;white-space:nowrap;"'
+_INFO_VAL = 'style="padding:3pt 6pt;text-align:right;font-weight:bold;font-size:9pt;"'
+_MB = "margin-bottom:4pt;"
+
+
+def _esc(valor) -> str:
+    return html.escape(str(valor)) if valor is not None else ""
+
+
+def _money(valor) -> str:
+    return f"${float(valor):,.2f}"
+
+
+def _money_bs(valor) -> str:
+    # Convencion venezolana: "." para miles, "," para decimales (ej. 18.877,36).
+    return f"{float(valor):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def _logo_img_tag(logotipo: bytes | None) -> str:
+    if not logotipo:
+        return ""
+    b64 = base64.b64encode(logotipo).decode("ascii")
+    return f'<img src="data:image/png;base64,{b64}" width="70" />'
+
+
+def _fila_item(detalle: FacturaDetalle) -> str:
+    producto = detalle.producto
+    codigo = producto.cod_producto if producto else ""
+    nombre = producto.nombre_producto if producto else "Producto eliminado"
+    # Item facturado por unidad (no por bulto): se marca para distinguirlo en el documento.
+    if detalle.tipo_venta == "unidad":
+        nombre += " (und)"
+    cantidad = float(detalle.cantidad_producto)
+    precio = float(detalle.precio_unitario)
+    subtotal = cantidad * precio
+    nota = ""
+    if detalle.observaciones_item:
+        nota = f"<br/><span style='color:{_MUTED};font-size:8.5pt;'>{_esc(detalle.observaciones_item)}</span>"
+    return (
+        f"<tr><td {_TD}>{_esc(codigo)}</td>"
+        f"<td {_TD}>{_esc(nombre)}{nota}</td>"
+        f"<td {_TD_R}>{cantidad:,.2f}</td>"
+        f"<td {_TD_R}>{_money(precio)}</td>"
+        f"<td {_TD_R}>{_money(subtotal)}</td></tr>"
+    )
+
+
+def _filas_totales(factura: FacturaVenta) -> tuple[str, float]:
+    subtotal = float(factura.total_venta)
+    # padding:7pt (antes 3pt) -- con solo el margin-top de la tabla contenedora (ver
+    # _bloque_totales_html) el bloque de totales quedaba pegado visualmente contra la
+    # ultima fila de items: QTextDocument (el motor HTML/CSS de Qt, no un navegador
+    # real) respeta el margin-top de una <table> de forma inconsistente/insuficiente
+    # cuando sigue inmediatamente a otra tabla, asi que el espacio real hay que
+    # garantizarlo tambien con padding dentro de la propia fila.
+    td_lbl = f'style="padding:7pt 6pt;text-align:right;color:{_MUTED};"'
+    td_val = 'style="padding:7pt 6pt;text-align:right;width:120pt;"'
+    filas = f"<tr><td {td_lbl}>Subtotal:</td><td {td_val}>{_money(subtotal)}</td></tr>"
+
+    descuento = float(factura.monto_descuento or 0)
+    if descuento > 0:
+        filas += f"<tr><td {td_lbl}>Descuento:</td><td {td_val}>-{_money(descuento)}</td></tr>"
+
+    monto_iva = float(factura.monto_iva or 0)
+    if factura.iva_aplicado:
+        pct = factura.porcentaje_iva_aplicado
+        filas += f"<tr><td {td_lbl}>IVA ({pct:g}%):</td><td {td_val}>{_money(monto_iva)}</td></tr>"
+
+    total = subtotal - descuento + monto_iva
+    td_lbl_total = f'style="padding:8pt 6pt;text-align:right;font-weight:bold;border-top:2pt solid {_PRIMARY};"'
+    td_val_total = (
+        f'style="padding:8pt 6pt 8pt 16pt;text-align:right;font-weight:bold;font-size:14pt;'
+        f'color:{_PRIMARY};border-top:2pt solid {_PRIMARY};"'
+    )
+    filas += f"<tr><td {td_lbl_total}>Total a pagar:</td><td {td_val_total}>{_money(total)}</td></tr>"
+    return filas, total
+
+
+def _bloque_bolivares_html(tasa, total_usd: float) -> str:
+    """Equivalente en bolivares del total, solo informativo (la factura y sus totales
+    quedan siempre en USD -- ver docs/ESTADO_DEL_PROYECTO.md). No incluye IGTF: esa
+    retencion no esta modelada en el sistema (ni FacturaVenta ni ConfiguracionEmpresa
+    tienen un campo para ella) y no hay que inventarsela en un documento que se le
+    entrega al cliente.
+
+    Ancho 100% a proposito: el llamador la mete dentro de la misma columna fija que
+    _filas_totales (ver _bloque_totales_html) en vez de auto-alinearse con
+    align="right" -- eso fue lo que causaba que el monto se viera corrido del margen
+    derecho de la pagina."""
+    return ""
+
+
+def _bloque_totales_html(filas_totales: str, bloque_bs: str) -> str:
+    """Envuelve totales + equivalente en Bs en una columna de ancho fijo dentro de una
+    tabla al 100% del ancho de pagina -- el borde derecho de esa columna cae exacto
+    sobre el margen derecho de la pagina, igual que el resto de las barras del
+    documento (CLIENTE, tabla de items, pie de pagina). El truco anterior
+    (`<table align="right">` envolviendo el contenido con ancho auto-ajustado) es lo
+    que hacia que el monto se viera corrido/fuera del margen."""
+    return f"""
+    <table width="100%" style="border-collapse:collapse;margin-top:8pt;"><tr>
+        <td></td>
+        <td width="240" style="vertical-align:top;">
+            <table width="100%" style="border-collapse:collapse;">
+                {filas_totales}
+            </table>
+            {bloque_bs}
+        </td>
+    </tr></table>
+    """
+
+
+def _armar_html(datos: dict, config_empresa: ConfiguracionEmpresa | None, es_copia: bool = False) -> str:
+    factura: FacturaVenta = datos["factura"]
+    detalles: list[FacturaDetalle] = datos["detalles"]
+    cliente = factura.cliente
+    vendedor = factura.vendedor
+    tasa = factura.tasa
+
+    razon_social = config_empresa.razon_social_empresa if config_empresa else None
+    rif = formatear_rif(config_empresa.rif_empresa, "J") if config_empresa else None
+    direccion = config_empresa.direccion_empresa if config_empresa else None
+    # Usar el teléfono del vendedor asignado al cliente en lugar del teléfono de la empresa
+    telefono = None
+    if cliente and cliente.vendedor:
+        telefono = cliente.vendedor.telefono_vendedor
+    if not telefono and config_empresa:
+        telefono = config_empresa.telefono_empresa
+    pie_pagina = config_empresa.pie_pagina_empresa if config_empresa else None
+    logo_tag = _logo_img_tag(config_empresa.logotipo_empresa if config_empresa else None)
+
+    condicion = "Contado" if factura.condicion_pago == "contado" else "Crédito"
+    fecha = factura.fecha_emision.strftime("%d/%m/%Y") if factura.fecha_emision else ""
+    hora = factura.fecha_emision.strftime("%I:%M %p") if factura.fecha_emision else ""
+    vencimiento_row = ""
+    if factura.condicion_pago == "credito" and factura.fecha_vencimiento:
+        vencimiento = factura.fecha_vencimiento.strftime("%d/%m/%Y")
+        vencimiento_row = f"<tr><td {_INFO_LBL}>Fecha de Vencimiento:</td><td {_INFO_VAL}>{vencimiento}</td></tr>"
+
+    # Metodo de pago solo aplica a contado. Antes no se imprimia en absoluto (hallazgo de
+    # la auditoria de facturacion: el dato ya llegaba en `datos["metodo_pago"]` pero
+    # _armar_html() nunca lo usaba).
+    metodo_pago_row = ""
+    if factura.condicion_pago == "contado":
+        metodo_pago = datos.get("metodo_pago")
+        if metodo_pago:
+            etiqueta_metodo_pago = _ETIQUETAS_METODO_PAGO.get(metodo_pago, metodo_pago)
+        else:
+            etiqueta_metodo_pago = "—"
+        metodo_pago_row = (
+            f"<tr><td {_INFO_LBL}>Método de Pago:</td><td {_INFO_VAL}>{_esc(etiqueta_metodo_pago)}</td></tr>"
+        )
+
+    # Vuelto (cambio) entregado -- solo monto+metodo, igual criterio que el motivo/
+    # autorizador de descuento (ver comentario mas abajo): la referencia bancaria y quien
+    # autorizo son informacion de auditoria interna, no pertenecen al documento del
+    # cliente.
+    vuelto_row = ""
+    if factura.monto_vuelto and float(factura.monto_vuelto) > 0:
+        etiqueta_metodo_vuelto = _ETIQUETAS_METODO_VUELTO.get(factura.metodo_vuelto, factura.metodo_vuelto)
+        vuelto_row = (
+            f"<tr><td {_INFO_LBL}>Vuelto Entregado:</td>"
+            f"<td {_INFO_VAL}>{_money(float(factura.monto_vuelto))} ({_esc(etiqueta_metodo_vuelto)})</td></tr>"
+        )
+
+    filas_items = "".join(_fila_item(det) for det in detalles)
+    filas_totales, total_usd = _filas_totales(factura)
+    bloque_bs = _bloque_bolivares_html(tasa, total_usd)
+    bloque_totales = _bloque_totales_html(filas_totales, bloque_bs)
+
+    # El motivo/autorizador del descuento es informacion de auditoria interna (quien
+    # autorizo, por que) -- se sigue registrando en FacturaVenta.motivo_descuento /
+    # autorizado_por_descuento y en AuditoriaService (ver VentaService.emitir_factura),
+    # pero no pertenece al documento que recibe el cliente.
+
+    watermark = ""
+    if factura.estado_factura == "ANULADA":
+        watermark = (
+            f"<p style='color:{COLOR_DANGER};font-weight:bold;font-size:13pt;'>*** NOTA DE ENTREGA ANULADA ***</p>"
+        )
+
+    observaciones_html = ""
+    if factura.observaciones_factura:
+        observaciones_html = (
+            f"<p style='color:{_MUTED};'><b>Observaciones:</b> {_esc(factura.observaciones_factura)}</p>"
+        )
+
+    pie_html = ""
+    if pie_pagina:
+        pie_html = (
+            f'<table width="100%" style="border-collapse:collapse;margin-top:10pt;"><tr>'
+            f'<td style="background-color:{_PRIMARY};color:#FFFFFF;text-align:center;padding:6pt;font-size:9pt;">'
+            f"{_esc(pie_pagina)}</td></tr></table>"
+        )
+
+    # Texto "Copia del Cliente" para la segunda impresión
+    copia_texto = ""
+    if es_copia:
+        copia_texto = (
+            f'<p style="color:{COLOR_DANGER};font-weight:bold;font-size:16pt;text-align:center;margin:10pt 0;">'
+            f"*** COPIA DEL CLIENTE ***</p>"
+        )
+
+    encabezado_empresa = (
+        f'<div style="font-size:13pt;font-weight:bold;color:{_PRIMARY};{_MB}">'
+        f"{_esc(razon_social) or 'Mi Empresa'}</div>"
+        f'<div style="color:{_MUTED};font-size:9pt;{_MB}">{_esc(rif) or ""}</div>'
+        f'<div style="color:{_MUTED};font-size:9pt;{_MB}">{_esc(direccion) or ""}</div>'
+        f'<div style="color:{_MUTED};font-size:9pt;{_MB}">{_esc(telefono) or ""}</div>'
+    )
+
+    nombre_cliente = cliente.nombre_razon_social if cliente else "—"
+    if cliente:
+        identificacion_cliente = formatear_identificacion(cliente.id_legal, cliente.identificacion_cliente) or "—"
+    else:
+        identificacion_cliente = "—"
+    telefono_cliente = (cliente.telefono if cliente else None) or "—"
+    email_cliente = (cliente.email if cliente else None) or "—"
+    direccion_cliente = (cliente.direccion if cliente else None) or "—"
+
+    # Filas de información de factura
+    factura_info_rows = (
+        f"<tr><td {_INFO_LBL}>N° de Nota de Entrega:</td><td {_INFO_VAL}>{_esc(factura.numero_factura)}</td></tr>"
+        f"<tr><td {_INFO_LBL}>Fecha de Emisión:</td><td {_INFO_VAL}>{fecha}</td></tr>"
+        f"<tr><td {_INFO_LBL}>Hora de Emisión:</td><td {_INFO_VAL}>{hora}</td></tr>"
+        f"<tr><td {_INFO_LBL}>Condición de Pago:</td><td {_INFO_VAL}>{condicion}</td></tr>"
+        f"{metodo_pago_row}"
+        f"{vencimiento_row}"
+        f"<tr><td {_INFO_LBL}>Moneda:</td><td {_INFO_VAL}>$ (USD)</td></tr>"
+        f"{vuelto_row}"
+    )
+
+    return f"""
+    <html><body style="font-family: Arial, sans-serif; color:{COLOR_TEXT_DARK}; font-size:10pt;">
+        <table width="100%" style="border-collapse:collapse;"><tr>
+            <td width="62%" style="vertical-align:top;">
+                <table style="border-collapse:collapse;"><tr>
+                    <td width="76" style="vertical-align:top;">{logo_tag}</td>
+                    <td style="vertical-align:top;">{encabezado_empresa}</td>
+                </tr></table>
+            </td>
+            <td width="38%" style="vertical-align:top;">
+                <table width="100%" style="border-collapse:collapse;border:1pt solid {_BORDER};">
+                    <tr><td colspan="2" style="background-color:{_PRIMARY};color:#FFFFFF;text-align:center;
+                        font-size:12pt;font-weight:bold;padding:5pt;">NOTA DE ENTREGA</td></tr>
+                    {factura_info_rows}
+                </table>
+            </td>
+        </tr></table>
+
+        {watermark}
+
+        {copia_texto}
+
+        <table width="100%" style="border-collapse:collapse;margin-top:10pt;"><tr>
+            <td style="background-color:{_PRIMARY};color:#FFFFFF;padding:5pt 8pt;font-size:10pt;font-weight:bold;">
+                Datos del Cliente
+            </td>
+        </tr></table>
+        <table width="100%" style="border-collapse:collapse;border:1pt solid {_BORDER};border-top:none;"><tr>
+            <td width="58%" style="padding:10pt;vertical-align:top;">
+                <div style="{_MB}"><b>Razón social:</b> {_esc(nombre_cliente)}</div>
+                <div style="{_MB}"><b>RIF / C.I.:</b> {_esc(identificacion_cliente)}</div>
+                <div style="{_MB}"><b>Teléfono:</b> {_esc(telefono_cliente)}</div>
+                <div style="{_MB}"><b>Email:</b> {_esc(email_cliente)}</div>
+                <div><b>Vendedor:</b> {_esc(vendedor.nombre_vendedor) if vendedor else "—"}</div>
+            </td>
+            <td width="42%" style="padding:10pt;vertical-align:top;border-left:1pt solid {_BORDER};">
+                <div><b>Dirección fiscal:</b> {_esc(direccion_cliente)}</div>
+            </td>
+        </tr></table>
+
+        <table width="100%" style="border-collapse:collapse;margin-top:10pt;">
+            <tr>
+                <th {_TH}>Código</th>
+                <th {_TH}>Producto</th>
+                <th {_TH_R}>Cantidad</th>
+                <th {_TH_R}>Precio Unit.</th>
+                <th {_TH_R}>Subtotal</th>
+            </tr>
+            {filas_items}
+        </table>
+        <p style="margin:10pt 0 0 0;line-height:1pt;font-size:1pt;">&nbsp;</p>
+        {bloque_totales}
+        <div style="clear:both;"></div>
+        {observaciones_html}
+        {pie_html}
+    </body></html>
+    """
+
+
+def _documento(datos: dict, config_empresa: ConfiguracionEmpresa | None, es_copia: bool = False) -> QTextDocument:
+    documento = QTextDocument()
+    documento.setHtml(_armar_html(datos, config_empresa, es_copia))
+    return documento
+
+
+def _configurar_pagina(impresora: QPrinter) -> None:
+    impresora.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
+    impresora.setPageMargins(QMarginsF(-2, -2, -2, -2), QPageLayout.Unit.Millimeter)
+
+
+def generar_pdf_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, ruta_destino: str) -> None:
+    """Escribe la factura como PDF directo en ruta_destino (elegida por el caller, ver
+    patron ya usado en exportar_excel/app/services/exportacion.py -- se pide el destino
+    ANTES de generar, se escribe directo ahi)."""
+    impresora = QPrinter(QPrinter.PrinterMode.HighResolution)
+    impresora.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+    impresora.setOutputFileName(ruta_destino)
+    _configurar_pagina(impresora)
+
+    _documento(datos, config_empresa).print_(impresora)
+
+
+def _es_impresora_pdf(nombre_impresora: str) -> bool:
+    return "pdf" in nombre_impresora.lower()
+
+
+def imprimir_factura(datos: dict, config_empresa: ConfiguracionEmpresa | None, nombre_impresora: str) -> str | None:
+    """Envia la factura digital directo a una impresora instalada en el sistema (por
+    nombre, via QPrinterInfo) -- usada para el auto-print al emitir factura (ver
+    FacturacionPanel.nueva_factura).
+
+    Si la impresora es de tipo PDF ("Microsoft Print to PDF" u otra), NO se manda al
+    driver: su dialogo "Guardar impresion como" sale con el nombre vacio (QPrinter.
+    setDocName no se propaga) y bloquea cada factura. En su lugar se escribe el PDF
+    directo en la carpeta Descargas como Nota_Entrega_<numero_factura>.pdf, y se
+    devuelve esa ruta. Con una impresora fisica devuelve None.
+
+    Lanza ValueError si `nombre_impresora` ya no corresponde a ninguna impresora
+    instalada (se desconecto, se reinstalo con otro nombre, etc.) -- el caller decide
+    como mostrarselo al usuario sin que esto tumbe la emision de la factura, que ya
+    quedo commiteada en la base antes de llegar aca."""
+    info = QPrinterInfo.printerInfo(nombre_impresora)
+    if info.isNull():
+        raise ValueError(f"La impresora configurada '{nombre_impresora}' ya no está disponible en este equipo.")
+
+    if _es_impresora_pdf(nombre_impresora):
+        carpeta = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
+        ruta = os.path.join(carpeta, f"Nota_Entrega_{datos['factura'].numero_factura}.pdf")
+        generar_pdf_factura(datos, config_empresa, ruta)
+        return ruta
+
+    # Imprimir 2 copias de la factura
+    # Primera copia (original)
+    documento_original = _documento(datos, config_empresa)
+    impresora = QPrinter(info, QPrinter.PrinterMode.HighResolution)
+    _configurar_pagina(impresora)
+    documento_original.print_(impresora)
+
+    # Segunda copia (con texto "Copia del Cliente")
+    documento_copia = _documento(datos, config_empresa, es_copia=True)
+    impresora_copia = QPrinter(info, QPrinter.PrinterMode.HighResolution)
+    _configurar_pagina(impresora_copia)
+    documento_copia.print_(impresora_copia)
+
+    return None

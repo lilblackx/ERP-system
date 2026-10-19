@@ -1,0 +1,2080 @@
+"""
+Panel del modulo Cuentas por Cobrar (CxC): analogo a app/ui/cuentas_por_pagar_panel.py,
+mismo patron visual (paleta y tipografia de app/ui/styles.py) y misma relacion con su
+modulo de origen -- las cuentas por cobrar se generan solas (trigger trg_factura_venta_cxc
+al emitir una factura a credito o de contado, ver VentaService.emitir_factura), este panel
+es puramente de consulta + cobro, no crea/edita cuentas por cobrar directamente.
+
+PagoCobroDialog cobra en USD unicamente (sin conversion de moneda), mismo alcance que
+PagoProveedorDialog en el modulo CxP -- PagoService.registrar_pago_cobro SI acepta
+moneda/monto_moneda_origen como metadatos, pero la conversion real (_convertir_a_usd) hoy
+solo la resuelve VentaService.emitir_factura con la tasa vigente en el momento de facturar;
+agregarla aca duplicaria esa logica sin tests que la cubran. Cobrar una cuenta ya abierta
+en VES/COP sigue siendo posible calculando el equivalente USD a mano antes de escribirlo
+en el campo de monto.
+"""
+
+import logging
+from datetime import date
+from decimal import Decimal
+
+import qtawesome as qta
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QShowEvent
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+from sqlalchemy.orm import Session
+
+from app.db.models import ConfiguracionEmpresa, CuentaPorCobrar, FacturaVenta, Usuario
+from app.services.db_utils import reintentar_en_deadlock
+from app.services.empresa import EmpresaService
+from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.pagos import PagoService
+from app.services.permisos import PermisoDenegadoError
+from app.services.tasas import TasaService
+from app.services.tesoreria import BancoService, CajaService
+from app.ui.message_box import MessageBox
+from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
+from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
+from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.styles import (
+    ASTERISCO_REQUERIDO,
+    BUTTON_SECONDARY_QSS,
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_CONTENT_BG,
+    COLOR_DANGER,
+    COLOR_FIELD_BG,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_DARK,
+    COLOR_PRIMARY_LIGHT,
+    COLOR_SUCCESS,
+    COLOR_TABLE_HEADER,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_DARK_SLATE,
+    COLOR_TEXT_LIGHT,
+    COLOR_TEXT_MEDIUM,
+    COLOR_TEXT_MUTED,
+    COLOR_WARNING,
+    COLOR_WHITE,
+    FONT_FAMILY,
+    ICON_CHEVRON_DOWN_URL,
+    SEARCH_QSS,
+    TABLE_QSS,
+    EstadoBadge,
+    alinear_encabezados,
+    aplicar_sombra,
+)
+from app.ui.toolbar_popups import BotonExportar, BotonFiltros
+
+logger = logging.getLogger(__name__)
+
+POR_PAGINA = 20
+
+COLORES_ESTADO_CXC = {
+    "pendiente": COLOR_WARNING,
+    "parcial": COLOR_PRIMARY,
+    "pagada": COLOR_SUCCESS,
+    "vencida": COLOR_DANGER,
+}
+
+ESTADOS_FILTRO = [
+    ("Todos los estados", None),
+    ("Pendiente", "pendiente"),
+    ("Parcial", "parcial"),
+    ("Vencida", "vencida"),
+    ("Pagada", "pagada"),
+]
+
+DIALOG_STYLE = f"""
+QDialog {{
+    background-color: {COLOR_CONTENT_BG};
+    font-family: '{FONT_FAMILY}', Arial, sans-serif;
+}}
+QWidget#SectionCard {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 10px;
+}}
+QLabel.FormLabel {{
+    font-size: 12px;
+    font-weight: 600;
+    color: {COLOR_TEXT_DARK_SLATE};
+    margin-bottom: 2px;
+}}
+QLineEdit, QComboBox {{
+    background-color: {COLOR_WHITE};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+    color: {COLOR_TEXT_DARK};
+    min-height: 20px;
+}}
+QLineEdit:focus, QComboBox:focus {{
+    border: 1.5px solid {COLOR_PRIMARY};
+}}
+QLineEdit:disabled, QComboBox:disabled {{
+    background-color: {COLOR_CONTENT_BG};
+    color: {COLOR_TEXT_LIGHT};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QComboBox::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+}}
+QPushButton#BtnPrimary {{
+    background-color: {COLOR_PRIMARY};
+    color: {COLOR_WHITE};
+    border: none;
+    border-radius: 6px;
+    padding: 8px 22px;
+    font-size: 13px;
+    font-weight: bold;
+}}
+QPushButton#BtnPrimary:hover {{
+    background-color: {COLOR_PRIMARY_LIGHT};
+}}
+QPushButton#BtnPrimary:pressed {{
+    background-color: {COLOR_PRIMARY_DARK};
+}}
+QPushButton#BtnSecondary {{
+    background-color: {COLOR_FIELD_BG};
+    color: {COLOR_TEXT_MEDIUM};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton#BtnSecondary:hover {{
+    background-color: {COLOR_TABLE_HEADER};
+    color: {COLOR_TEXT_DARK};
+}}
+"""
+
+
+class PagoCobroDialog(QDialog):
+    """Un unico pago en USD contra el saldo_pendiente de una CuentaPorCobrar. Mismo patron
+    de origen caja/cuenta que PagoProveedorDialog (app/ui/cuentas_por_pagar_panel.py).
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        id_usuario: int | None,
+        cuenta: CuentaPorCobrar,
+        tasa_bcv: float | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.session = session
+        self.id_usuario = id_usuario
+        self.cuenta = cuenta
+        self.tasa_bcv = tasa_bcv
+        self.pago_creado = None
+        self._cajas_abiertas: list = []
+        self._cuentas_activas: list = []
+        self._tasas_disponibles: list = []
+        self._id_tasa_seleccionada: int | None = None
+
+        self.setWindowTitle("Registrar Cobro")
+        ajustar_tamano(self, 420, 550)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self._build_ui()
+        hacer_desplazable(self)
+        self._cargar_origenes()
+        self._cargar_tasas()
+        self._toggle_origen()
+        self._toggle_campos_bolivares()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        cliente = self.cuenta.factura.cliente if self.cuenta.factura else None
+        lbl_titulo = QLabel(f"Cobrar a {cliente.nombre_razon_social if cliente else 'cliente'}")
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        root.addWidget(lbl_titulo)
+
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+
+        numero_factura = self.cuenta.factura.numero_factura if self.cuenta.factura else ""
+        lbl_factura = QLabel(f"Factura: {numero_factura}")
+        lbl_factura.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        layout.addWidget(lbl_factura)
+
+        saldo_pendiente = _as_decimal(self.cuenta.saldo_pendiente)
+        texto_saldo = f"Saldo pendiente: ${float(saldo_pendiente):,.2f}"
+        if self.tasa_bcv:
+            texto_saldo += f"  (Bs {float(saldo_pendiente) * self.tasa_bcv:,.2f})"
+        lbl_saldo = QLabel(texto_saldo)
+        lbl_saldo.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
+        layout.addWidget(lbl_saldo)
+
+        # Mostrar saldo a favor del cliente (desde la tabla cuentas_por_cobrar)
+        saldo_favor_cuenta = getattr(self.cuenta, "saldo_favor", Decimal("0.00"))
+        if saldo_favor_cuenta is None:
+            saldo_favor_cuenta = Decimal("0.00")
+        if cliente and saldo_favor_cuenta > 0:
+            lbl_saldo_favor = QLabel(f"Saldo a favor: ${float(saldo_favor_cuenta):,.2f}")
+            lbl_saldo_favor.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
+            layout.addWidget(lbl_saldo_favor)
+
+        lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
+        lbl_metodo.setProperty("class", "FormLabel")
+        self.metodo_combo = QComboBox()
+        for etiqueta, valor in METODOS_PAGO:
+            self.metodo_combo.addItem(etiqueta, valor)
+        self.metodo_combo.setFixedHeight(32)
+        self.metodo_combo.currentIndexChanged.connect(self._on_metodo_cambiado)
+        layout.addWidget(lbl_metodo)
+        layout.addWidget(self.metodo_combo)
+
+        lbl_monto = QLabel(f"Monto (USD) {ASTERISCO_REQUERIDO}")
+        lbl_monto.setProperty("class", "FormLabel")
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
+        self.monto_input.set_value(saldo_pendiente)
+        self.monto_input.setFixedHeight(32)
+        self.monto_input.valueChanged.connect(self._calcular_bolivares_desde_usd)
+        layout.addWidget(lbl_monto)
+        layout.addWidget(self.monto_input)
+
+        # Campos para cálculo en bolivares (visible para todos los pagos bancarios)
+        self.campos_bolivares_widget = QWidget()
+        self.campos_bolivares_widget.setVisible(False)
+        campos_bolivares_layout = QVBoxLayout(self.campos_bolivares_widget)
+        campos_bolivares_layout.setContentsMargins(0, 0, 0, 0)
+        campos_bolivares_layout.setSpacing(8)
+
+        fila_bolivares = QHBoxLayout()
+        fila_bolivares.setSpacing(8)
+
+        col_bolivares = QVBoxLayout()
+        lbl_bolivares = QLabel("Monto (Bs)")
+        lbl_bolivares.setProperty("class", "FormLabel")
+        self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
+        self.bolivares_input.setFixedHeight(32)
+        self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
+        col_bolivares.addWidget(lbl_bolivares)
+        col_bolivares.addWidget(self.bolivares_input)
+
+        col_tasa = QVBoxLayout()
+        lbl_tasa = QLabel("Tasa del día (Bs/USD)")
+        lbl_tasa.setProperty("class", "FormLabel")
+        self.tasa_input = NumericLineEdit(NumericFieldType.RATE)
+        self.tasa_input.setFixedHeight(32)
+        self.tasa_input.valueChanged.connect(self._calcular_monto_usd)
+        col_tasa.addWidget(lbl_tasa)
+        col_tasa.addWidget(self.tasa_input)
+
+        fila_bolivares.addLayout(col_bolivares, stretch=1)
+        fila_bolivares.addLayout(col_tasa, stretch=1)
+        campos_bolivares_layout.addLayout(fila_bolivares)
+
+        # Selector de tasas disponibles
+        fila_tasa_selector = QHBoxLayout()
+        fila_tasa_selector.setSpacing(8)
+        lbl_usar_tasa = QLabel("Usar tasa:")
+        lbl_usar_tasa.setStyleSheet("font-size: 12px; color: #64748B;")
+        self.tasa_combo = QComboBox()
+        self.tasa_combo.setFixedHeight(32)
+        self.tasa_combo.addItem("-- Seleccionar --")
+        self.tasa_combo.currentIndexChanged.connect(self._on_tasa_seleccionada)
+        fila_tasa_selector.addWidget(lbl_usar_tasa)
+        fila_tasa_selector.addWidget(self.tasa_combo)
+        fila_tasa_selector.addStretch()
+        campos_bolivares_layout.addLayout(fila_tasa_selector)
+
+        layout.addWidget(self.campos_bolivares_widget)
+
+        lbl_origen = QLabel(f"Origen {ASTERISCO_REQUERIDO}")
+        lbl_origen.setProperty("class", "FormLabel")
+        self.origen_combo = QComboBox()
+        self.origen_combo.setFixedHeight(32)
+        self.origen_combo.currentIndexChanged.connect(self._toggle_campos_bolivares)
+        layout.addWidget(lbl_origen)
+        layout.addWidget(self.origen_combo)
+
+        lbl_ref = QLabel("Referencia")
+        lbl_ref.setProperty("class", "FormLabel")
+        self.referencia_input = QLineEdit()
+        self.referencia_input.setPlaceholderText("Opcional")
+        self.referencia_input.setFixedHeight(32)
+        self.referencia_input.setMaxLength(100)  # columna referencia VARCHAR(100)
+        layout.addWidget(lbl_ref)
+        layout.addWidget(self.referencia_input)
+
+        root.addWidget(card, stretch=1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        btn_cancelar = QPushButton("Cancelar")
+        btn_cancelar.setObjectName("BtnSecondary")
+        btn_cancelar.setFixedHeight(34)
+        btn_cancelar.setAutoDefault(False)
+        btn_cancelar.clicked.connect(self.reject)
+        self.btn_cobrar = QPushButton("Registrar Cobro")
+        self.btn_cobrar.setObjectName("BtnPrimary")
+        self.btn_cobrar.setFixedHeight(34)
+        self.btn_cobrar.setAutoDefault(False)
+        self.btn_cobrar.clicked.connect(self._validar_y_aceptar)
+        footer.addWidget(btn_cancelar)
+        footer.addWidget(self.btn_cobrar)
+        root.addLayout(footer)
+
+    def _cargar_origenes(self) -> None:
+        try:
+            cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cajas = []
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        try:
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cuentas = []
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
+
+    def _cargar_tasas(self) -> None:
+        """Carga las tasas actuales (BCV, paralelo y COP) en el combo."""
+        try:
+            from app.db.models import ControlDeTasa
+
+            # Obtener la tasa más reciente
+            tasa_registro = (
+                self.session.query(ControlDeTasa)
+                .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
+                .first()
+            )
+        except Exception:
+            tasa_registro = None
+
+        self.tasa_combo.blockSignals(True)
+        self.tasa_combo.clear()
+        self.tasa_combo.addItem("-- Seleccionar --")
+
+        if tasa_registro:
+            # Agregar tasa BCV
+            if tasa_registro.tasa_dolar_bcv:
+                tasa_bcv = _as_decimal(tasa_registro.tasa_dolar_bcv)
+                etiqueta_bcv = f"BCV: {float(tasa_bcv):,.2f}"
+                self.tasa_combo.addItem(etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv)))
+            # Agregar tasa paralelo
+            if tasa_registro.tasa_dolar_paralelo:
+                tasa_paralelo = _as_decimal(tasa_registro.tasa_dolar_paralelo)
+                etiqueta_paralelo = f"Paralelo: {float(tasa_paralelo):,.2f}"
+                self.tasa_combo.addItem(
+                    etiqueta_paralelo,
+                    (tasa_registro.id_tasa, float(tasa_paralelo)),
+                )
+            # Agregar tasa COP
+            if tasa_registro.tasa_cop:
+                tasa_cop = _as_decimal(tasa_registro.tasa_cop)
+                etiqueta_cop = f"COP: {float(tasa_cop):,.2f}"
+                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop)))
+
+        self.tasa_combo.blockSignals(False)
+
+        # Pre-seleccionar la tasa BCV si está disponible
+        if self.tasa_bcv:
+            self.tasa_input.set_value(self.tasa_bcv)
+
+    def _on_metodo_cambiado(self) -> None:
+        self._toggle_origen()
+        self._toggle_campos_bolivares()
+
+    def _toggle_origen(self) -> None:
+        metodo = self.metodo_combo.currentData()
+        requiere_caja = metodo in METODOS_QUE_REQUIEREN_CAJA
+        self.origen_combo.blockSignals(True)
+        self.origen_combo.clear()
+        if requiere_caja:
+            if not self._cajas_abiertas:
+                self.origen_combo.addItem("Sin cajas abiertas")
+                self.origen_combo.setEnabled(False)
+            else:
+                self.origen_combo.setEnabled(True)
+                for caja in self._cajas_abiertas:
+                    self.origen_combo.addItem(
+                        caja.nombre_caja or f"Caja {caja.id_caja}",
+                        ("caja", caja.id_caja),
+                    )
+        else:
+            if not self._cuentas_activas:
+                self.origen_combo.addItem("Sin cuentas bancarias activas")
+                self.origen_combo.setEnabled(False)
+            else:
+                self.origen_combo.setEnabled(True)
+                for cuenta in self._cuentas_activas:
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
+                    self.origen_combo.addItem(
+                        f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
+                        ("banco", cuenta.id_cuenta),
+                    )
+        self.origen_combo.blockSignals(False)
+        # Actualizar campos de bolivares cuando cambia el origen
+        self._toggle_campos_bolivares()
+
+    def _toggle_campos_bolivares(self) -> None:
+        """Muestra/oculta los campos de bolivares según el método de pago y origen."""
+        metodo = self.metodo_combo.currentData()
+        origen = self.origen_combo.currentData()
+
+        # Mostrar campos de bolivares para todos los métodos bancarios (no efectivo)
+        # Esto incluye: transferencia, zelle, binance, punto_de_venta
+        es_banco = origen is not None and origen[0] == "banco"
+        es_efectivo = metodo == "efectivo"
+
+        mostrar_bolivares = es_banco and not es_efectivo
+        self.campos_bolivares_widget.setVisible(bool(mostrar_bolivares))
+
+        if mostrar_bolivares:
+            # Habilitar cálculo automático
+            self.monto_input.setReadOnly(True)
+            self.monto_input.setStyleSheet("background-color: #F1F5F9;")
+            # Si no hay tasa seleccionada, seleccionar automáticamente la primera disponible (BCV)
+            if self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
+                self.tasa_combo.setCurrentIndex(1)  # El índice 0 es "-- Seleccionar --"
+        else:
+            # Restaurar campo de monto manual
+            self.monto_input.setReadOnly(False)
+            self.monto_input.setStyleSheet("")
+
+    def _on_tasa_seleccionada(self) -> None:
+        """Carga la tasa seleccionada del combo al campo de tasa y calcula bolivares."""
+        tasa_data = self.tasa_combo.currentData()
+        if tasa_data is not None:
+            id_tasa, valor_tasa = tasa_data
+            self._id_tasa_seleccionada = id_tasa
+            self.tasa_input.set_value(valor_tasa)
+            # Calcular automáticamente el monto en bolivares
+            monto_usd = self.monto_input.get_value() or Decimal("0")
+            if valor_tasa > 0 and monto_usd > 0:
+                bolivares = monto_usd * Decimal(str(valor_tasa))
+                self.bolivares_input.set_value(bolivares)
+            self._calcular_monto_usd()
+
+    def _calcular_monto_usd(self) -> None:
+        """Calcula el monto USD automáticamente: bolivares / tasa."""
+        metodo = self.metodo_combo.currentData()
+        origen = self.origen_combo.currentData()
+        # Solo calcular para métodos bancarios (no efectivo)
+        if metodo == "efectivo" or not origen or origen[0] != "banco":
+            return
+
+        bolivares = self.bolivares_input.get_value() or Decimal("0")
+        tasa = self.tasa_input.get_value() or Decimal("0")
+
+        if tasa > 0:
+            monto_usd = bolivares / tasa
+            self.monto_input.set_value(monto_usd)
+            # set_value() reformatea con el estilo base del widget -- reaplicar el
+            # resaltado de solo-lectura para que no desaparezca en cada recalculo
+            # mientras el metodo de pago siga siendo bancario.
+            if self.monto_input.isReadOnly():
+                self.monto_input.setStyleSheet("background-color: #F1F5F9;")
+
+    def _calcular_bolivares_desde_usd(self) -> None:
+        """Calcula el monto en bolivares automáticamente: USD * tasa."""
+        metodo = self.metodo_combo.currentData()
+        origen = self.origen_combo.currentData()
+        # Solo calcular para métodos bancarios (no efectivo)
+        if metodo == "efectivo" or not origen or origen[0] != "banco":
+            return
+
+        monto_usd = self.monto_input.get_value() or Decimal("0")
+        tasa = self.tasa_input.get_value() or Decimal("0")
+
+        if tasa > 0 and monto_usd > 0:
+            bolivares = monto_usd * tasa
+            self.bolivares_input.set_value(bolivares)
+
+    def _validar_y_aceptar(self) -> None:
+        origen = self.origen_combo.currentData()
+        if origen is None:
+            MessageBox.warning(
+                self,
+                "Origen requerido",
+                "No hay ninguna caja/cuenta disponible para este método.",
+            )
+            return
+        tipo_origen, id_origen = origen
+
+        self.btn_cobrar.setEnabled(False)
+        try:
+            metodo = self.metodo_combo.currentData()
+            monto_moneda_origen = None
+            monto_bolivares = None
+            tasa_cambio = None
+            id_tasa = None
+
+            # Si es pago bancario (no efectivo), guardar bolivares y tasa seleccionada
+            # Esto incluye: transferencia, zelle, binance, punto_de_venta
+            if metodo != "efectivo" and tipo_origen == "banco":
+                bolivares = self.bolivares_input.get_value() or Decimal("0")
+                tasa = self.tasa_input.get_value() or Decimal("0")
+
+                # Si no hay tasa manual, usar la tasa seleccionada del combo
+                if tasa == 0 and self._id_tasa_seleccionada:
+                    tasa_data = self.tasa_combo.currentData()
+                    if tasa_data:
+                        _, valor_tasa = tasa_data
+                        tasa = Decimal(str(valor_tasa))
+
+                # Calcular bolivares si no se ingresaron pero hay tasa
+                if bolivares == 0 and tasa > 0:
+                    bolivares = (self.monto_input.get_value() or Decimal("0")) * tasa
+
+                # Siempre guardar los valores para pagos bancarios
+                # Esto asegura que el trigger tenga los datos para crear el movimiento bancario
+                if bolivares > 0:
+                    # moneda se manda como VES mas abajo: monto_moneda_origen va en la misma moneda
+                    monto_moneda_origen = bolivares
+                    monto_bolivares = bolivares
+                if tasa > 0:
+                    tasa_cambio = tasa
+                # Siempre guardar el ID de la tasa si está seleccionada
+                id_tasa = self._id_tasa_seleccionada
+
+            self.pago_creado = reintentar_en_deadlock(
+                lambda: PagoService.registrar_pago_cobro(
+                    self.session,
+                    id_cuenta_por_cobrar=self.cuenta.id_cuenta_por_cobrar,
+                    monto=self.monto_input.get_value(),
+                    metodo_pago=metodo,
+                    moneda="VES" if monto_moneda_origen is not None else "USD",
+                    monto_moneda_origen=monto_moneda_origen,
+                    monto_bolivares=monto_bolivares,
+                    tasa_cambio=tasa_cambio,
+                    id_caja=id_origen if tipo_origen == "caja" else None,
+                    id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
+                    id_tasa=id_tasa,
+                    referencia=self.referencia_input.text().strip() or None,
+                    id_usuario=self.id_usuario,
+                )
+            )
+        except ValueError as exc:
+            self.session.rollback()
+            MessageBox.warning(self, "No se pudo registrar el cobro", str(exc))
+            return
+        except PermisoDenegadoError:
+            self.session.rollback()
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar cobros.")
+            return
+        except Exception as e:
+            self.session.rollback()
+            logger.exception(f"Fallo al registrar cobro de cliente: {e}")
+            MessageBox.critical(self, "Error", f"No se pudo registrar el cobro: {str(e)}")
+            return
+        finally:
+            self.btn_cobrar.setEnabled(True)
+
+        self.accept()
+
+
+class AbonoGeneralDialog(QDialog):
+    """Diálogo para aplicar un abono general a un cliente usando el método FIFO."""
+
+    def __init__(
+        self,
+        session: Session,
+        cliente,
+        id_usuario: int | None,
+        tasa_bcv: float | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.session = session
+        self.cliente = cliente
+        self.id_usuario = id_usuario
+        self.tasa_bcv = tasa_bcv
+        self.abono_aplicado = None
+        self._cajas_abiertas: list = []
+        self._cuentas_activas: list = []
+        self._id_tasa_seleccionada: int | None = None
+
+        self.setWindowTitle("Abono General")
+        ajustar_tamano(self, 450, 500)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self._build_ui()
+        hacer_desplazable(self)
+        self._cargar_origenes()
+        self._cargar_tasas()
+        self._toggle_origen()
+        self._toggle_campos_bolivares()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        lbl_titulo = QLabel(f"Abono General - {self.cliente.nombre_razon_social if self.cliente else 'Cliente'}")
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        root.addWidget(lbl_titulo)
+
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+
+        # Calcular deuda total del cliente
+        try:
+            from app.services.pagos import PagoService
+
+            resultado = PagoService.listar_cuentas_por_cobrar(
+                self.session,
+                id_cliente=self.cliente.id_cliente if self.cliente else None,
+                id_usuario=self.id_usuario,
+            )
+            deuda_total = sum(cuenta.saldo_pendiente for cuenta in resultado["items"])
+        except Exception:
+            deuda_total = Decimal("0.00")
+
+        lbl_deuda = QLabel(f"Deuda total: ${float(deuda_total):,.2f}")
+        if self.tasa_bcv:
+            lbl_deuda.setText(f"Deuda total: ${float(deuda_total):,.2f} (Bs {float(deuda_total) * self.tasa_bcv:,.2f})")
+        lbl_deuda.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
+        layout.addWidget(lbl_deuda)
+
+        # Calcular saldo a favor del cliente (desde la primera cuenta por cobrar del cliente)
+        saldo_favor = Decimal("0.00")
+        if self.cliente:
+            try:
+                primera_cuenta = (
+                    self.session.query(CuentaPorCobrar)
+                    .join(
+                        FacturaVenta,
+                        FacturaVenta.id_factura == CuentaPorCobrar.id_factura,
+                    )
+                    .filter(FacturaVenta.id_cliente_factura == self.cliente.id_cliente)
+                    .first()
+                )
+                if primera_cuenta:
+                    saldo_favor = getattr(primera_cuenta, "saldo_favor", Decimal("0.00"))
+                    if saldo_favor is None:
+                        saldo_favor = Decimal("0.00")
+            except Exception as e:
+                logger.warning(f"Error al obtener saldo a favor: {e}")
+                saldo_favor = Decimal("0.00")
+
+        if saldo_favor > 0:
+            lbl_saldo_favor = QLabel(f"Saldo a favor: ${float(saldo_favor):,.2f}")
+            lbl_saldo_favor.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
+            layout.addWidget(lbl_saldo_favor)
+
+        lbl_info = QLabel("El abono se aplicará automáticamente a las facturas más antiguas (FIFO)")
+        lbl_info.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; font-style: italic;")
+        layout.addWidget(lbl_info)
+
+        lbl_metodo = QLabel(f"Método de Pago {ASTERISCO_REQUERIDO}")
+        lbl_metodo.setProperty("class", "FormLabel")
+        self.metodo_combo = QComboBox()
+        for etiqueta, valor in METODOS_PAGO:
+            self.metodo_combo.addItem(etiqueta, valor)
+        self.metodo_combo.setFixedHeight(32)
+        self.metodo_combo.currentIndexChanged.connect(self._on_metodo_cambiado)
+        layout.addWidget(lbl_metodo)
+        layout.addWidget(self.metodo_combo)
+
+        lbl_monto = QLabel(f"Monto del Abono (USD) {ASTERISCO_REQUERIDO}")
+        lbl_monto.setProperty("class", "FormLabel")
+        self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
+        self.monto_input.set_value(deuda_total)  # Sugerir deuda total
+        self.monto_input.setFixedHeight(32)
+        self.monto_input.valueChanged.connect(self._calcular_bolivares_desde_usd)
+        layout.addWidget(lbl_monto)
+        layout.addWidget(self.monto_input)
+
+        # Campos para cálculo en bolivares
+        self.campos_bolivares_widget = QWidget()
+        self.campos_bolivares_widget.setVisible(False)
+        campos_bolivares_layout = QVBoxLayout(self.campos_bolivares_widget)
+        campos_bolivares_layout.setContentsMargins(0, 0, 0, 0)
+        campos_bolivares_layout.setSpacing(8)
+
+        fila_bolivares = QHBoxLayout()
+        fila_bolivares.setSpacing(8)
+
+        col_bolivares = QVBoxLayout()
+        lbl_bolivares = QLabel("Monto (Bs)")
+        lbl_bolivares.setProperty("class", "FormLabel")
+        self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
+        self.bolivares_input.setFixedHeight(32)
+        self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
+        col_bolivares.addWidget(lbl_bolivares)
+        col_bolivares.addWidget(self.bolivares_input)
+
+        col_tasa = QVBoxLayout()
+        lbl_tasa = QLabel("Tasa del día (Bs/USD)")
+        lbl_tasa.setProperty("class", "FormLabel")
+        self.tasa_input = NumericLineEdit(NumericFieldType.RATE)
+        self.tasa_input.setFixedHeight(32)
+        self.tasa_input.valueChanged.connect(self._calcular_monto_usd)
+        col_tasa.addWidget(lbl_tasa)
+        col_tasa.addWidget(self.tasa_input)
+
+        fila_bolivares.addLayout(col_bolivares, stretch=1)
+        fila_bolivares.addLayout(col_tasa, stretch=1)
+        campos_bolivares_layout.addLayout(fila_bolivares)
+
+        # Selector de tasas disponibles
+        fila_tasa_selector = QHBoxLayout()
+        fila_tasa_selector.setSpacing(8)
+        lbl_usar_tasa = QLabel("Usar tasa:")
+        lbl_usar_tasa.setStyleSheet("font-size: 12px; color: #64748B;")
+        self.tasa_combo = QComboBox()
+        self.tasa_combo.setFixedHeight(32)
+        self.tasa_combo.addItem("-- Seleccionar --")
+        self.tasa_combo.currentIndexChanged.connect(self._on_tasa_seleccionada)
+        fila_tasa_selector.addWidget(lbl_usar_tasa)
+        fila_tasa_selector.addWidget(self.tasa_combo)
+        fila_tasa_selector.addStretch()
+        campos_bolivares_layout.addLayout(fila_tasa_selector)
+
+        layout.addWidget(self.campos_bolivares_widget)
+
+        lbl_origen = QLabel(f"Origen {ASTERISCO_REQUERIDO}")
+        lbl_origen.setProperty("class", "FormLabel")
+        self.origen_combo = QComboBox()
+        self.origen_combo.setFixedHeight(32)
+        self.origen_combo.currentIndexChanged.connect(self._toggle_campos_bolivares)
+        layout.addWidget(lbl_origen)
+        layout.addWidget(self.origen_combo)
+
+        lbl_ref = QLabel("Referencia")
+        lbl_ref.setProperty("class", "FormLabel")
+        self.referencia_input = QLineEdit()
+        self.referencia_input.setPlaceholderText("Opcional")
+        self.referencia_input.setFixedHeight(32)
+        self.referencia_input.setMaxLength(100)
+        layout.addWidget(lbl_ref)
+        layout.addWidget(self.referencia_input)
+
+        root.addWidget(card, stretch=1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        btn_cancelar = QPushButton("Cancelar")
+        btn_cancelar.setObjectName("BtnSecondary")
+        btn_cancelar.setFixedHeight(34)
+        btn_cancelar.setAutoDefault(False)
+        btn_cancelar.clicked.connect(self.reject)
+        self.btn_abonar = QPushButton("Aplicar Abono")
+        self.btn_abonar.setObjectName("BtnPrimary")
+        self.btn_abonar.setFixedHeight(34)
+        self.btn_abonar.setAutoDefault(False)
+        self.btn_abonar.clicked.connect(self._validar_y_aceptar)
+        footer.addWidget(btn_cancelar)
+        footer.addWidget(self.btn_abonar)
+        root.addLayout(footer)
+
+    def _cargar_origenes(self) -> None:
+        try:
+            cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cajas = []
+        self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        try:
+            cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            cuentas = []
+        self._cuentas_activas = [c for c in cuentas if (c.estado_cuenta or "ACTIVO") == "ACTIVO"]
+
+    def _cargar_tasas(self) -> None:
+        """Carga las tasas actuales (BCV, paralelo y COP) en el combo."""
+        try:
+            from app.db.models import ControlDeTasa
+
+            tasa_registro = (
+                self.session.query(ControlDeTasa)
+                .order_by(ControlDeTasa.fecha_tasa.desc(), ControlDeTasa.id_tasa.desc())
+                .first()
+            )
+        except Exception:
+            tasa_registro = None
+
+        self.tasa_combo.blockSignals(True)
+        self.tasa_combo.clear()
+        self.tasa_combo.addItem("-- Seleccionar --")
+
+        if tasa_registro:
+            if tasa_registro.tasa_dolar_bcv:
+                tasa_bcv = _as_decimal(tasa_registro.tasa_dolar_bcv)
+                etiqueta_bcv = f"BCV: {float(tasa_bcv):,.2f}"
+                self.tasa_combo.addItem(etiqueta_bcv, (tasa_registro.id_tasa, float(tasa_bcv)))
+            if tasa_registro.tasa_dolar_paralelo:
+                tasa_paralelo = _as_decimal(tasa_registro.tasa_dolar_paralelo)
+                etiqueta_paralelo = f"Paralelo: {float(tasa_paralelo):,.2f}"
+                self.tasa_combo.addItem(
+                    etiqueta_paralelo,
+                    (tasa_registro.id_tasa, float(tasa_paralelo)),
+                )
+            if tasa_registro.tasa_cop:
+                tasa_cop = _as_decimal(tasa_registro.tasa_cop)
+                etiqueta_cop = f"COP: {float(tasa_cop):,.2f}"
+                self.tasa_combo.addItem(etiqueta_cop, (tasa_registro.id_tasa, float(tasa_cop)))
+
+        self.tasa_combo.blockSignals(False)
+
+        if self.tasa_bcv:
+            self.tasa_input.set_value(self.tasa_bcv)
+
+    def _on_metodo_cambiado(self) -> None:
+        self._toggle_origen()
+        self._toggle_campos_bolivares()
+
+    def _toggle_origen(self) -> None:
+        metodo = self.metodo_combo.currentData()
+        requiere_caja = metodo in METODOS_QUE_REQUIEREN_CAJA
+        self.origen_combo.blockSignals(True)
+        self.origen_combo.clear()
+        if requiere_caja:
+            if not self._cajas_abiertas:
+                self.origen_combo.addItem("Sin cajas abiertas")
+                self.origen_combo.setEnabled(False)
+            else:
+                self.origen_combo.setEnabled(True)
+                for caja in self._cajas_abiertas:
+                    self.origen_combo.addItem(
+                        caja.nombre_caja or f"Caja {caja.id_caja}",
+                        ("caja", caja.id_caja),
+                    )
+        else:
+            if not self._cuentas_activas:
+                self.origen_combo.addItem("Sin cuentas bancarias activas")
+                self.origen_combo.setEnabled(False)
+            else:
+                self.origen_combo.setEnabled(True)
+                for cuenta in self._cuentas_activas:
+                    nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
+                    self.origen_combo.addItem(
+                        f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
+                        ("banco", cuenta.id_cuenta),
+                    )
+        self.origen_combo.blockSignals(False)
+        self._toggle_campos_bolivares()
+
+    def _toggle_campos_bolivares(self) -> None:
+        """Muestra/oculta los campos de bolivares según el método de pago y origen."""
+        metodo = self.metodo_combo.currentData()
+        origen = self.origen_combo.currentData()
+        es_banco = origen is not None and origen[0] == "banco"
+        es_efectivo = metodo == "efectivo"
+
+        # Mostrar campos de bolivares solo para pagos bancarios (no efectivo)
+        mostrar_bolivares = es_banco and not es_efectivo
+        self.campos_bolivares_widget.setVisible(bool(mostrar_bolivares))
+
+        if mostrar_bolivares:
+            self.monto_input.setReadOnly(True)
+            self.monto_input.setStyleSheet("background-color: #F1F5F9;")
+            if self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
+                self.tasa_combo.setCurrentIndex(1)
+        else:
+            self.monto_input.setReadOnly(False)
+            self.monto_input.setStyleSheet("")
+
+        # Para efectivo, ocultar completamente el campo de tasa ya que no se usa
+        if es_efectivo:
+            self.tasa_input.set_value(Decimal("0.00"))
+            self.tasa_input.setEnabled(False)
+
+    def _on_tasa_seleccionada(self) -> None:
+        """Carga la tasa seleccionada del combo al campo de tasa y calcula bolivares."""
+        tasa_data = self.tasa_combo.currentData()
+        if tasa_data is not None:
+            id_tasa, valor_tasa = tasa_data
+            self._id_tasa_seleccionada = id_tasa
+            self.tasa_input.set_value(valor_tasa)
+            monto_usd = self.monto_input.get_value() or Decimal("0")
+            if valor_tasa > 0 and monto_usd > 0:
+                bolivares = monto_usd * Decimal(str(valor_tasa))
+                self.bolivares_input.set_value(bolivares)
+            self._calcular_monto_usd()
+
+    def _calcular_monto_usd(self) -> None:
+        """Calcula el monto USD automáticamente: bolivares / tasa."""
+        metodo = self.metodo_combo.currentData()
+        origen = self.origen_combo.currentData()
+        if metodo == "efectivo" or not origen or origen[0] != "banco":
+            return
+
+        bolivares = self.bolivares_input.get_value() or Decimal("0")
+        tasa = self.tasa_input.get_value() or Decimal("0")
+
+        if tasa > 0:
+            monto_usd = bolivares / tasa
+            self.monto_input.set_value(monto_usd)
+            if self.monto_input.isReadOnly():
+                self.monto_input.setStyleSheet("background-color: #F1F5F9;")
+
+    def _calcular_bolivares_desde_usd(self) -> None:
+        """Calcula el monto en bolivares automáticamente: USD * tasa."""
+        metodo = self.metodo_combo.currentData()
+        origen = self.origen_combo.currentData()
+        if metodo == "efectivo" or not origen or origen[0] != "banco":
+            return
+
+        monto_usd = self.monto_input.get_value() or Decimal("0")
+        tasa = self.tasa_input.get_value() or Decimal("0")
+
+        if tasa > 0 and monto_usd > 0:
+            bolivares = monto_usd * tasa
+            self.bolivares_input.set_value(bolivares)
+
+    def _validar_y_aceptar(self) -> None:
+        origen = self.origen_combo.currentData()
+        if origen is None:
+            MessageBox.warning(
+                self,
+                "Origen requerido",
+                "No hay ninguna caja/cuenta disponible para este método.",
+            )
+            return
+        tipo_origen, id_origen = origen
+
+        self.btn_abonar.setEnabled(False)
+        try:
+            metodo = self.metodo_combo.currentData()
+            tasa_cambio = None
+            id_tasa = None
+
+            # Obtener monto del abono primero
+            monto_abono = self.monto_input.get_value()
+            if not monto_abono or monto_abono <= 0:
+                MessageBox.warning(self, "Monto requerido", "El monto del abono debe ser mayor a cero.")
+                return
+
+            # Obtener tasa de cambio según el método de pago
+            if metodo != "efectivo" and tipo_origen == "banco":
+                # Para pagos bancarios, usar la tasa ingresada o seleccionada
+                tasa = self.tasa_input.get_value() or Decimal("0")
+                if tasa == 0 and self._id_tasa_seleccionada:
+                    tasa_data = self.tasa_combo.currentData()
+                    if tasa_data:
+                        _, valor_tasa = tasa_data
+                        tasa = Decimal(str(valor_tasa))
+
+                if tasa > 0:
+                    tasa_cambio = tasa
+                id_tasa = self._id_tasa_seleccionada
+
+                if not tasa_cambio or tasa_cambio <= 0:
+                    MessageBox.warning(
+                        self,
+                        "Tasa requerida",
+                        "Para pagos bancarios debe indicar una tasa de cambio válida.",
+                    )
+                    return
+            else:
+                # Para efectivo, usar tasa BCV solo para cálculos internos (no se muestra al usuario)
+                if self.tasa_bcv and self.tasa_bcv > 0:
+                    tasa_cambio = Decimal(str(self.tasa_bcv))
+                else:
+                    # Si no hay tasa BCV, usar 1.0 como tasa por defecto para efectivo
+                    tasa_cambio = Decimal("1.00")
+
+            # Aplicar abono general usando el servicio
+            from app.services.pagos import PagoService
+
+            self.abono_aplicado = reintentar_en_deadlock(
+                lambda: PagoService.aplicar_abono_general_cliente(
+                    self.session,
+                    id_cliente=self.cliente.id_cliente,
+                    monto_abono=monto_abono,
+                    tasa_cambio=tasa_cambio,
+                    metodo_pago=metodo,
+                    id_caja=id_origen if tipo_origen == "caja" else None,
+                    id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
+                    id_tasa=id_tasa,
+                    referencia=self.referencia_input.text().strip() or None,
+                    id_usuario=self.id_usuario,
+                )
+            )
+
+            # Mostrar resumen del abono
+            resumen = self._generar_resumen_abono()
+            MessageBox.information(self, "Abono aplicado", resumen)
+
+        except ValueError as exc:
+            self.session.rollback()
+            MessageBox.warning(self, "No se pudo aplicar el abono", str(exc))
+            return
+        except PermisoDenegadoError:
+            self.session.rollback()
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar abonos.")
+            return
+        except Exception as e:
+            self.session.rollback()
+            logger.exception(f"Fallo al aplicar abono general: {e}")
+            MessageBox.critical(self, "Error", f"No se pudo aplicar el abono general: {str(e)}")
+            return
+        finally:
+            self.btn_abonar.setEnabled(True)
+
+        self.accept()
+
+    def _generar_resumen_abono(self) -> str:
+        """Genera un resumen legible del abono aplicado."""
+        if not self.abono_aplicado:
+            return "No se pudo generar el resumen del abono."
+
+        resultado = self.abono_aplicado
+        lines = [
+            f"Monto total aplicado: ${float(resultado['monto_total_aplicado']):,.2f}",
+            f"Facturas actualizadas: {len(resultado['facturas_actualizadas'])}",
+        ]
+
+        if resultado["es_sobreabono"]:
+            lines.append(f"Saldo a favor del cliente: ${float(resultado['saldo_restante']):,.2f}")
+            if resultado.get("saldo_favor_id"):
+                lines.append(f"ID saldo a favor: {resultado['saldo_favor_id']}")
+
+        lines.append("\nFacturas afectadas:")
+        for factura in resultado["facturas_actualizadas"]:
+            try:
+                monto_aplicado = factura.get("monto_aplicado", Decimal("0.00"))
+                monto_aplicado_bs = factura.get("monto_aplicado_bs", Decimal("0.00"))
+                numero_factura = factura.get("numero_factura", "N/A")
+                estado_resultante = factura.get("estado_resultante", "desconocido")
+
+                # Mostrar Bs solo si el monto en Bs es significativo (no para efectivo)
+                if monto_aplicado_bs and monto_aplicado_bs > 0:
+                    lines.append(
+                        f"• {numero_factura}: ${float(monto_aplicado):,.2f} "
+                        f"({float(monto_aplicado_bs):,.2f} Bs) - Estado: {estado_resultante}"
+                    )
+                else:
+                    lines.append(f"• {numero_factura}: ${float(monto_aplicado):,.2f} - Estado: {estado_resultante}")
+            except (KeyError, TypeError, AttributeError) as e:
+                logger.warning(f"Error al procesar factura en resumen: {e}")
+                lines.append("• Factura con datos incompletos")
+
+        return "\n".join(lines)
+
+
+class DetalleClienteDialog(QDialog):
+    """Diálogo para mostrar el detalle de facturas de un cliente y permitir cobros individuales."""
+
+    def __init__(
+        self,
+        session: Session,
+        cliente,
+        cuentas: list,
+        tasa_paralelo: float | None,
+        id_usuario: int | None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.session = session
+        self.cliente = cliente
+        self.cuentas = cuentas
+        self.tasa_paralelo = tasa_paralelo
+        self.id_usuario = id_usuario
+        self.se_realizo_cobro = False
+        self.ver_todas_facturas = False
+        self.pagina_actual = 0
+        self.filas_por_pagina = 20
+
+        self.setWindowTitle(f"Detalle de Cuentas - {cliente.nombre_razon_social if cliente else 'Cliente'}")
+        ajustar_tamano(self, 900, 600)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self._build_ui()
+        hacer_desplazable(self)
+        self._poblar_tabla_detalle()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        # Header con información del cliente
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        lbl_titulo = QLabel("Facturas Pendientes")
+        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        header_layout.addWidget(lbl_titulo)
+        header_layout.addStretch()
+
+        lbl_cliente = QLabel(self.cliente.nombre_razon_social if self.cliente else "Cliente")
+        lbl_cliente.setStyleSheet(f"font-size: 14px; color: {COLOR_TEXT_MEDIUM};")
+        header_layout.addWidget(lbl_cliente)
+
+        # Saldo a favor del cliente (notas de crédito disponibles)
+        self.lbl_saldo_favor = QLabel("")
+        self.lbl_saldo_favor.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
+        header_layout.addWidget(self.lbl_saldo_favor)
+
+        root.addWidget(header)
+
+        # Filtros
+        filtros = QWidget()
+        filtros.setStyleSheet("background: transparent;")
+        filtros_layout = QHBoxLayout(filtros)
+        filtros_layout.setContentsMargins(0, 0, 0, 0)
+        filtros_layout.setSpacing(12)
+
+        self.chk_ver_todas = QCheckBox("Ver todas las facturas")
+        self.chk_ver_todas.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_DARK};")
+        self.chk_ver_todas.toggled.connect(self._on_ver_todas_toggled)
+        filtros_layout.addWidget(self.chk_ver_todas)
+        filtros_layout.addStretch()
+
+        root.addWidget(filtros)
+
+        # Tabla de facturas
+        self.tabla = self._crear_tabla_detalle()
+        root.addWidget(self.tabla)
+
+        # Controles de paginación
+        paginacion = QWidget()
+        paginacion.setStyleSheet("background: transparent;")
+        paginacion_layout = QHBoxLayout(paginacion)
+        paginacion_layout.setContentsMargins(0, 0, 0, 0)
+        paginacion_layout.setSpacing(8)
+
+        self.lbl_paginacion = QLabel("Página 1 de 1")
+        self.lbl_paginacion.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        paginacion_layout.addWidget(self.lbl_paginacion)
+        paginacion_layout.addStretch()
+
+        self.btn_anterior = QPushButton("Anterior")
+        self.btn_anterior.setObjectName("BtnSecondary")
+        self.btn_anterior.setFixedHeight(30)
+        self.btn_anterior.setEnabled(False)
+        self.btn_anterior.clicked.connect(self._pagina_anterior)
+        paginacion_layout.addWidget(self.btn_anterior)
+
+        self.btn_siguiente = QPushButton("Siguiente")
+        self.btn_siguiente.setObjectName("BtnSecondary")
+        self.btn_siguiente.setFixedHeight(30)
+        self.btn_siguiente.setEnabled(False)
+        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+        paginacion_layout.addWidget(self.btn_siguiente)
+
+        root.addWidget(paginacion)
+
+        # Footer con botones
+        footer = QHBoxLayout()
+        footer.addStretch()
+
+        btn_abono_general = QPushButton("Abono General")
+        btn_abono_general.setIcon(qta.icon("fa5s.money-bill-wave", color=COLOR_TEXT_DARK))
+        btn_abono_general.setObjectName("BtnPrimary")
+        btn_abono_general.setFixedHeight(34)
+        btn_abono_general.setAutoDefault(False)
+        btn_abono_general.clicked.connect(self._aplicar_abono_general)
+
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.setObjectName("BtnSecondary")
+        btn_cerrar.setFixedHeight(34)
+        btn_cerrar.setAutoDefault(False)
+        btn_cerrar.clicked.connect(self.accept)
+
+        footer.addWidget(btn_abono_general)
+        footer.addWidget(btn_cerrar)
+
+        root.addLayout(footer)
+
+    def _crear_tabla_detalle(self) -> QTableWidget:
+        columnas = [
+            "ID",
+            "Factura",
+            "Saldo Pendiente",
+            "Días",
+            "Fecha Factura",
+            "Estado",
+        ]
+        tabla = QTableWidget(0, len(columnas))
+        tabla.setHorizontalHeaderLabels(columnas)
+        tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        tabla.setAlternatingRowColors(True)
+        tabla.setShowGrid(False)
+        tabla.verticalHeader().setVisible(False)
+        tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(tabla)
+        tabla.setColumnHidden(0, True)
+        tabla.verticalHeader().setDefaultSectionSize(40)
+        tabla.doubleClicked.connect(self._on_double_click_factura_detalle)
+
+        alinear_encabezados(
+            tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignLeft,
+                5: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
+
+        return tabla
+
+    def _poblar_tabla_detalle(self) -> None:
+        # Filtrar cuentas: si no se marcan "ver todas", ocultar las pagadas
+        cuentas_a_mostrar = self.cuentas
+        if not self.ver_todas_facturas:
+            # Mostrar solo pendientes, parciales y vencidas (no pagadas)
+            cuentas_a_mostrar = [c for c in self.cuentas if c.estado in ("pendiente", "parcial", "vencida")]
+
+        # Calcular paginación
+        total_filas = len(cuentas_a_mostrar)
+        total_paginas = (total_filas + self.filas_por_pagina - 1) // self.filas_por_pagina if total_filas > 0 else 1
+
+        # Ajustar página actual si es necesario
+        if self.pagina_actual >= total_paginas:
+            self.pagina_actual = max(0, total_paginas - 1)
+
+        # Calcular índices de la página actual
+        inicio = self.pagina_actual * self.filas_por_pagina
+        fin = min(inicio + self.filas_por_pagina, total_filas)
+        cuentas_pagina = cuentas_a_mostrar[inicio:fin]
+
+        self.tabla.setRowCount(len(cuentas_pagina))
+
+        hoy = date.today()
+        for fila, cuenta in enumerate(cuentas_pagina):
+            factura = cuenta.factura
+            self.tabla.setItem(fila, 0, QTableWidgetItem(str(cuenta.id_cuenta_por_cobrar)))
+            self.tabla.setItem(fila, 1, QTableWidgetItem(factura.numero_factura if factura else ""))
+
+            saldo_pendiente = _as_decimal(cuenta.saldo_pendiente)
+            item_saldo = QTableWidgetItem(f"${float(saldo_pendiente):,.2f}")
+            item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 2, item_saldo)
+
+            # Calcular días transcurridos desde la emisión de la factura
+            dias_transcurridos = 0
+            if factura and factura.fecha_emision:
+                dias_transcurridos = (hoy - factura.fecha_emision.date()).days
+            item_dias = QTableWidgetItem(str(dias_transcurridos))
+            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 3, item_dias)
+
+            vencimiento = cuenta.fecha_vencimiento.strftime("%d/%m/%Y") if cuenta.fecha_vencimiento else "Sin definir"
+            self.tabla.setItem(fila, 4, QTableWidgetItem(vencimiento))
+
+            # Calcular estado visual
+            estado_visual = (
+                "vencida"
+                if cuenta.estado in ("pendiente", "parcial")
+                and cuenta.fecha_vencimiento is not None
+                and cuenta.fecha_vencimiento < hoy
+                else cuenta.estado
+            )
+            color = COLORES_ESTADO_CXC.get(estado_visual, COLOR_TEXT_MUTED)
+            self.tabla.setCellWidget(fila, 5, EstadoBadge(estado_visual.capitalize(), color))
+
+        # Actualizar controles de paginación
+        self.lbl_paginacion.setText(f"Página {self.pagina_actual + 1} de {total_paginas}")
+        self.btn_anterior.setEnabled(self.pagina_actual > 0)
+        self.btn_siguiente.setEnabled(self.pagina_actual < total_paginas - 1)
+
+        # Calcular y mostrar saldo a favor del cliente (desde la primera cuenta por cobrar)
+        saldo_favor = Decimal("0.00")
+        if self.cliente:
+            try:
+                primera_cuenta = (
+                    self.session.query(CuentaPorCobrar)
+                    .join(
+                        FacturaVenta,
+                        FacturaVenta.id_factura == CuentaPorCobrar.id_factura,
+                    )
+                    .filter(FacturaVenta.id_cliente_factura == self.cliente.id_cliente)
+                    .first()
+                )
+                if primera_cuenta:
+                    saldo_favor = getattr(primera_cuenta, "saldo_favor", Decimal("0.00"))
+                    if saldo_favor is None:
+                        saldo_favor = Decimal("0.00")
+            except Exception:
+                saldo_favor = Decimal("0.00")
+
+        if saldo_favor > 0:
+            self.lbl_saldo_favor.setText(f"Saldo a favor: ${float(saldo_favor):,.2f}")
+        else:
+            self.lbl_saldo_favor.setText("")
+
+    def _on_ver_todas_toggled(self, checked: bool) -> None:
+        """Maneja el cambio del checkbox 'Ver todas las facturas'."""
+        self.ver_todas_facturas = checked
+        self.pagina_actual = 0  # Reiniciar a la primera página
+        # Actualizar el título según el estado del checkbox
+        nombre_cliente = self.cliente.nombre_razon_social if self.cliente else "Cliente"
+        if checked:
+            self.setWindowTitle(f"Detalle de Cuentas - {nombre_cliente} (Todas las facturas)")
+        else:
+            self.setWindowTitle(f"Detalle de Cuentas - {nombre_cliente}")
+        self._poblar_tabla_detalle()
+
+    def _pagina_anterior(self) -> None:
+        """Navega a la página anterior."""
+        if self.pagina_actual > 0:
+            self.pagina_actual -= 1
+            self._poblar_tabla_detalle()
+
+    def _pagina_siguiente(self) -> None:
+        """Navega a la página siguiente."""
+        self.pagina_actual += 1
+        self._poblar_tabla_detalle()
+
+    def _on_double_click_cuenta(self) -> None:
+        """Maneja el doble clic en una cuenta para abrir el diálogo de cobro."""
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return
+
+        row = filas[0].row()
+        item = self.tabla.item(row, 0)
+        if item is None:
+            return
+
+        id_cuenta = int(item.text())
+        self._cobrar_cuenta(id_cuenta)
+
+    def _on_double_click_factura_detalle(self) -> None:
+        """Maneja el doble clic en una factura para abrir el diálogo de pago/abono."""
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return
+
+        row = filas[0].row()
+        item = self.tabla.item(row, 0)
+        if item is None:
+            return
+
+        id_cuenta = int(item.text())
+        self._cobrar_cuenta(id_cuenta)
+
+    def _cobrar_cuenta(self, id_cuenta: int) -> None:
+        """Abre el diálogo de cobro para una cuenta específica."""
+        try:
+            cuenta = self.session.get(CuentaPorCobrar, id_cuenta)
+            if cuenta is None:
+                MessageBox.warning(self, "Cuenta no encontrada", "La cuenta por cobrar no existe.")
+                return
+            if cuenta.estado == "pagada":
+                MessageBox.information(self, "Ya pagada", "Esta cuenta por cobrar ya está saldada.")
+                return
+
+            dialogo = PagoCobroDialog(
+                self.session,
+                self.id_usuario,
+                cuenta,
+                tasa_bcv=self.tasa_paralelo,
+                parent=self,
+            )
+            if dialogo.exec() and dialogo.pago_creado is not None:
+                self.se_realizo_cobro = True
+                MessageBox.information(self, "Cobro registrado", "El cobro se registró con éxito.")
+                # Recargar la tabla de detalle
+                self._recargar_cuentas()
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar cobros.")
+        except ValueError as e:
+            logger.exception("Error de validación al registrar cobro")
+            MessageBox.warning(self, "Error", str(e))
+        except Exception as e:
+            logger.exception("Fallo al registrar cobro de cliente")
+            MessageBox.critical(self, "Error", f"No se pudo registrar el cobro: {str(e)}")
+
+    def _recargar_cuentas(self) -> None:
+        """Recarga las cuentas del cliente después de un cobro."""
+        try:
+            resultado = PagoService.listar_cuentas_por_cobrar(
+                self.session,
+                id_cliente=self.cliente.id_cliente if self.cliente else None,
+                pagina=1,
+                por_pagina=10000,  # Traer todas las facturas (el dialogo pagina por su cuenta)
+                id_usuario=self.id_usuario,
+            )
+            self.cuentas = resultado["items"]
+            self._poblar_tabla_detalle()
+        except Exception:
+            logger.exception("Fallo al recargar cuentas del cliente")
+
+    def _aplicar_abono_general(self) -> None:
+        """Abre el diálogo de abono general para el cliente."""
+        try:
+            dialogo = AbonoGeneralDialog(
+                self.session,
+                self.cliente,
+                self.id_usuario,
+                tasa_bcv=self.tasa_paralelo,
+                parent=self,
+            )
+            if dialogo.exec() and dialogo.abono_aplicado is not None:
+                self.se_realizo_cobro = True
+                MessageBox.information(self, "Abono aplicado", "El abono general se aplicó con éxito.")
+                # Recargar la tabla de detalle
+                self._recargar_cuentas()
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar abonos.")
+        except Exception:
+            logger.exception("Fallo al aplicar abono general")
+            MessageBox.critical(self, "Error", "No se pudo aplicar el abono general.")
+
+
+class CuentasPorCobrarPanel(QWidget):
+    """Panel principal del modulo Cuentas por Cobrar: listado con filtro por estado,
+    paginacion y cobro contra PagoService.registrar_pago_cobro."""
+
+    def __init__(self, session_factory, usuario: Usuario, parent=None):
+        super().__init__(parent)
+        self.session_factory = session_factory
+        self.usuario = usuario
+        self.pagina_actual = 1
+        self.total_paginas = 1
+        self.texto_busqueda = ""
+        self.filtro_vendedor = None
+        self._tasa_paralelo: float | None = None
+        self.setObjectName("ContentArea")
+        self._setup_ui()
+        self._cargar_vendedores()
+        QTimer.singleShot(100, self.cargar_cuentas)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.cargar_cuentas()
+
+    # ── Construccion de la UI ─────────────────────────────────────────────
+
+    def _setup_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(16)
+
+        root.addWidget(self._make_header())
+        root.addWidget(self._make_toolbar())
+        root.addWidget(self._make_table())
+        root.addWidget(self._make_footer())
+
+        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+
+    def _make_header(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+
+        lbl = QLabel("Cuentas por Cobrar")
+        lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+
+        self.lbl_total = QLabel("Cargando…")
+        self.lbl_total.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 13px;"
+            f" background-color: {COLOR_TABLE_HEADER}; border-radius: 10px;"
+            " padding: 3px 10px;"
+        )
+
+        self.lbl_saldo_total = QLabel("$0.00")
+        self.lbl_saldo_total.setStyleSheet(
+            f"color: {COLOR_SUCCESS}; font-size: 13px; font-weight: bold;"
+            f" background-color: {COLOR_TABLE_HEADER}; border-radius: 10px;"
+            " padding: 3px 10px;"
+        )
+
+        # Tasa paralelo vigente -- mismo patron informativo que factura_form_dialog.py: se
+        # oculta si el usuario no tiene 'tasas'/'ver' o no hay ninguna tasa registrada,
+        # nunca bloquea el panel. Da contexto a los montos en Bs que se agregan a la
+        # tabla/dialogo de cobro mas abajo.
+        self.lbl_tasa = QLabel()
+        self.lbl_tasa.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 13px;"
+            f" background-color: {COLOR_TABLE_HEADER}; border-radius: 10px;"
+            " padding: 3px 10px;"
+        )
+        self.lbl_tasa.setVisible(False)
+
+        h.addWidget(lbl)
+        h.addWidget(self.lbl_total)
+        h.addWidget(self.lbl_saldo_total)
+        h.addWidget(self.lbl_tasa)
+        h.addStretch()
+        return w
+
+    def _make_toolbar(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet(
+            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
+        )
+        h = QHBoxLayout(w)
+        h.setContentsMargins(12, 8, 12, 8)
+        h.setSpacing(10)
+
+        # Barra de búsqueda
+        self.buscar_input = QLineEdit()
+        self.buscar_input.setPlaceholderText("Buscar por cliente…")
+        self.buscar_input.addAction(
+            qta.icon("fa5s.search", color=COLOR_TEXT_LIGHT),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        self.buscar_input.setObjectName("SearchInput")
+        self.buscar_input.setStyleSheet(SEARCH_QSS)
+        self.buscar_input.setFixedWidth(320)
+        self.buscar_input.textChanged.connect(self._busqueda_dinamica)
+
+        self.estado_combo = QComboBox()
+        for etiqueta, valor in ESTADOS_FILTRO:
+            self.estado_combo.addItem(etiqueta, valor)
+        self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
+
+        self.vendedor_combo = QComboBox()
+        self.vendedor_combo.addItem("Todos los vendedores")
+        self.vendedor_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
+
+        self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo), ("Vendedor", self.vendedor_combo)])
+
+        self.btn_exportar = BotonExportar(on_excel=self._exportar_excel, on_pdf=self._exportar_pdf)
+
+        h.addWidget(self.buscar_input)
+        h.addStretch()
+        h.addWidget(self.btn_filtrar)
+        h.addWidget(self.btn_exportar)
+        return w
+
+    def _make_table(self) -> QWidget:
+        headers = [
+            "ID",
+            "Cliente",
+            "Saldo Pendiente",
+            "Saldo a Favor",
+            "Saldo Vencido",
+            "Días",
+            "Fecha Factura",
+            "Estado",
+        ]
+        self.tabla = self._crear_tabla(headers)
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
+                7: Qt.AlignmentFlag.AlignCenter,
+            },
+        )
+        return self.tabla
+
+    def _crear_tabla(self, columnas: list[str]):
+        tabla = QTableWidget(0, len(columnas))
+        tabla.setHorizontalHeaderLabels(columnas)
+        tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        tabla.setAlternatingRowColors(True)
+        tabla.setShowGrid(False)
+        tabla.verticalHeader().setVisible(False)
+        tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        tabla.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(tabla)
+        tabla.setColumnHidden(0, True)
+        tabla.verticalHeader().setDefaultSectionSize(45)
+        tabla.doubleClicked.connect(self._on_double_click)
+        return tabla
+
+    def _make_footer(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+
+        self.lbl_pagina = QLabel("Página 1")
+        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
+
+        self.btn_anterior = QPushButton()
+        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
+        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_anterior.setFixedWidth(40)
+        self.btn_anterior.clicked.connect(self._pagina_anterior)
+
+        self.btn_siguiente = QPushButton()
+        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
+        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_siguiente.setFixedWidth(40)
+        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+
+        btn_cobrar = QPushButton("Ver Detalle")
+        btn_cobrar.setIcon(qta.icon("fa5s.list", color=COLOR_TEXT_DARK))
+        btn_cobrar.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_cobrar.clicked.connect(self.cobrar_seleccionada)
+
+        h.addWidget(self.lbl_pagina)
+        h.addWidget(self.btn_anterior)
+        h.addWidget(self.btn_siguiente)
+        h.addStretch()
+        h.addWidget(btn_cobrar)
+        return w
+
+    # ── Paginacion ───────────────────────────────────────────────────────
+
+    def _cargar_vendedores(self) -> None:
+        """Carga la lista de vendedores en el combo de filtro."""
+        session = self.session_factory()
+        try:
+            from app.db.models import Vendedor
+
+            vendedores = session.query(Vendedor).order_by(Vendedor.nombre_vendedor).all()
+            self.vendedor_combo.blockSignals(True)
+            self.vendedor_combo.clear()
+            self.vendedor_combo.addItem("Todos los vendedores")
+            for vendedor in vendedores:
+                self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
+            self.vendedor_combo.blockSignals(False)
+        except Exception:
+            logger.exception("Error al cargar vendedores")
+        finally:
+            session.close()
+
+    def _buscar_desde_inicio(self) -> None:
+        self.pagina_actual = 1
+        self.cargar_cuentas()
+
+    def _busqueda_dinamica(self) -> None:
+        """Búsqueda en tiempo real con debounce."""
+        if hasattr(self, "_search_timer") and self._search_timer is not None:
+            self._search_timer.stop()
+        self._search_timer = QTimer.singleShot(300, self._buscar_desde_inicio)
+
+    def _pagina_anterior(self) -> None:
+        if self.pagina_actual > 1:
+            self.pagina_actual -= 1
+            self.cargar_cuentas()
+
+    def _pagina_siguiente(self) -> None:
+        if self.pagina_actual < self.total_paginas:
+            self.pagina_actual += 1
+            self.cargar_cuentas()
+
+    # ── Logica de datos ────────────────────────────────────────────────────
+
+    def _cargar_tasa_actual(self, session) -> float | None:
+        """Tasa paralelo vigente, solo para mostrar el equivalente en Bs -- nunca bloquea el
+        panel. Mismo patron que factura_form_dialog.py::_cargar_tasa_vigente(): si el
+        usuario no tiene 'tasas'/'ver' o no hay ninguna tasa registrada, se oculta el
+        indicador y las columnas en Bs quedan vacías en vez de romper la carga."""
+        try:
+            tasa = TasaService.obtener_tasa_actual(session, id_usuario=self.usuario.id_usuario)
+        except PermisoDenegadoError:
+            self.lbl_tasa.setVisible(False)
+            return None
+        if tasa is None:
+            self.lbl_tasa.setVisible(False)
+            return None
+        fecha = tasa["fecha_tasa"].strftime("%d/%m/%Y")
+        tasa_paralelo = _as_decimal(tasa["tasa_paralelo"])
+        self.lbl_tasa.setText(f"Tasa paralelo: {float(tasa_paralelo):,.2f} Bs/USD ({fecha})")
+        self.lbl_tasa.setVisible(True)
+        return float(tasa_paralelo)
+
+    def cargar_cuentas(self) -> None:
+        session = self.session_factory()
+        try:
+            self.texto_busqueda = self.buscar_input.text().strip()
+            self.filtro_vendedor = self.vendedor_combo.currentData()
+            self._tasa_paralelo = self._cargar_tasa_actual(session)
+
+            resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(
+                session,
+                estado=self.estado_combo.currentData(),
+                id_vendedor=self.filtro_vendedor,
+                pagina=self.pagina_actual,
+                por_pagina=POR_PAGINA,
+                id_usuario=self.usuario.id_usuario,
+            )
+
+            # Aplicar filtros de búsqueda manualmente
+            clientes_filtrados = []
+            for cliente_data in resultado["items"]:
+                try:
+                    cliente = cliente_data["cliente"]
+
+                    # Filtro de búsqueda (nombre del cliente)
+                    if self.texto_busqueda:
+                        nombre = cliente.nombre_razon_social or ""
+                        if self.texto_busqueda.lower() not in nombre.lower():
+                            continue
+
+                    # Incluir clientes con saldo pendiente > 0 o saldo a favor > 0
+                    saldo_favor = cliente_data.get("saldo_favor", Decimal("0.00"))
+                    if cliente_data["saldo_total"] <= 0 and saldo_favor <= 0:
+                        continue
+
+                    clientes_filtrados.append(cliente_data)
+                except (AttributeError, TypeError, KeyError) as e:
+                    # Si hay error al acceder a atributos, saltar este cliente
+                    logger.warning(f"Error procesando cliente data: {e}")
+                    continue
+
+            # Actualizar resultado con clientes filtrados
+            resultado["items"] = clientes_filtrados
+            resultado["total"] = len(clientes_filtrados)
+
+            self._poblar_tabla(resultado)
+        except PermisoDenegadoError:
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para consultar cuentas por cobrar.",
+            )
+        except Exception as e:
+            logger.exception("Fallo al cargar el listado de cuentas por cobrar: %s", e)
+            msg = f"No se pudo cargar el listado de cuentas por cobrar: {e}"
+            MessageBox.critical(self, "Error de conexión", msg)
+        finally:
+            session.close()
+
+    def _poblar_tabla(self, resultado: dict) -> None:
+        clientes_data: list[dict] = resultado["items"]
+        self.tabla.setRowCount(len(clientes_data))
+
+        saldo_total = 0.0
+        for fila, cliente_data in enumerate(clientes_data):
+            cliente = cliente_data["cliente"]
+            saldo_total_cliente = cliente_data["saldo_total"]
+            saldo_favor_cliente = cliente_data.get("saldo_favor", Decimal("0.00"))
+            fecha_emision_mas_antigua = cliente_data.get("fecha_emision_mas_antigua_pendiente")
+            cuentas = cliente_data["cuentas"]
+            dias_transcurridos = cliente_data.get("dias_transcurridos", 0)
+
+            self.tabla.setItem(fila, 0, QTableWidgetItem(str(cliente.id_cliente)))
+            self.tabla.setItem(fila, 1, QTableWidgetItem(cliente.nombre_razon_social or ""))
+
+            saldo_total_cliente_decimal = _as_decimal(saldo_total_cliente)
+            item_saldo = QTableWidgetItem(f"${float(saldo_total_cliente_decimal):,.2f}")
+            item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 2, item_saldo)
+
+            # Saldo a favor del cliente (notas de crédito disponibles)
+            saldo_favor_decimal = _as_decimal(saldo_favor_cliente)
+            if saldo_favor_decimal > 0:
+                item_saldo_favor = QTableWidgetItem(f"${float(saldo_favor_decimal):,.2f}")
+                item_saldo_favor.setForeground(QColor(COLOR_SUCCESS))
+                item_saldo_favor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla.setItem(fila, 3, item_saldo_favor)
+            else:
+                item_saldo_favor = QTableWidgetItem("$0.00")
+                item_saldo_favor.setForeground(QColor(COLOR_TEXT_MUTED))
+                item_saldo_favor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tabla.setItem(fila, 3, item_saldo_favor)
+
+            # Saldo vencido del cliente
+            saldo_vencido = cliente_data.get("saldo_vencido", Decimal("0.00"))
+            saldo_vencido_decimal = _as_decimal(saldo_vencido)
+            item_saldo_vencido = QTableWidgetItem(f"${float(saldo_vencido_decimal):,.2f}")
+            if saldo_vencido_decimal > 0:
+                item_saldo_vencido.setForeground(QColor(COLOR_DANGER))
+            else:
+                item_saldo_vencido.setForeground(QColor(COLOR_TEXT_MUTED))
+            item_saldo_vencido.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 4, item_saldo_vencido)
+
+            # Días transcurridos desde la factura más vieja pendiente
+            item_dias = QTableWidgetItem(str(dias_transcurridos))
+            item_dias.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 5, item_dias)
+
+            # Fecha de la factura más vieja pendiente
+            fecha_factura = (
+                fecha_emision_mas_antigua.strftime("%d/%m/%Y") if fecha_emision_mas_antigua else "Sin definir"
+            )
+            self.tabla.setItem(fila, 6, QTableWidgetItem(fecha_factura))
+
+            # Determinar estado general del cliente basado en sus cuentas
+            estado_general = self._determinar_estado_cliente(cuentas)
+            color = COLORES_ESTADO_CXC.get(estado_general, COLOR_TEXT_MUTED)
+            self.tabla.setCellWidget(fila, 7, EstadoBadge(estado_general.capitalize(), color))
+
+            saldo_total += float(saldo_total_cliente)
+
+        total = resultado["total"]
+        self.total_paginas = max(1, -(-total // POR_PAGINA))
+        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+
+        self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''} con deuda")
+        self.lbl_saldo_total.setText(f"${_as_decimal(saldo_total):,.2f}")
+        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
+        self.btn_anterior.setEnabled(self.pagina_actual > 1)
+        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
+
+    def _determinar_estado_cliente(self, cuentas: list) -> str:
+        """Determina el estado general de un cliente basado en sus cuentas por cobrar."""
+        hoy = date.today()
+        tiene_vencida = False
+        tiene_pendiente = False
+        tiene_parcial = False
+        tiene_pagada = False
+
+        for cuenta in cuentas:
+            estado = cuenta.estado
+            if estado == "pagada":
+                tiene_pagada = True
+            elif estado == "parcial":
+                tiene_parcial = True
+            elif estado == "pendiente":
+                tiene_pendiente = True
+                # Verificar si está vencida
+                if cuenta.fecha_vencimiento and cuenta.fecha_vencimiento < hoy:
+                    tiene_vencida = True
+
+        # Prioridad de estados para mostrar
+        if tiene_vencida:
+            return "vencida"
+        elif tiene_pendiente:
+            return "pendiente"
+        elif tiene_parcial:
+            return "parcial"
+        elif tiene_pagada:
+            return "pagada"
+        else:
+            return "pendiente"
+
+    def _fila_seleccionada_id(self) -> int | None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            MessageBox.information(
+                self,
+                "Selección requerida",
+                "Selecciona una cuenta por cobrar de la lista.",
+            )
+            return None
+        item = self.tabla.item(filas[0].row(), 0)
+        return int(item.text()) if item is not None else None
+
+    def _on_double_click(self) -> None:
+        """Maneja el doble clic en una fila para mostrar el detalle del cliente."""
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return
+
+        row = filas[0].row()
+        item = self.tabla.item(row, 0)
+        if item is None:
+            return
+
+        id_cliente = int(item.text())
+        self._mostrar_detalle_cliente(id_cliente)
+
+    def _mostrar_detalle_cliente(self, id_cliente: int) -> None:
+        """Muestra el diálogo con el detalle de facturas del cliente."""
+        session = self.session_factory()
+        try:
+            # Obtener todas las cuentas por cobrar del cliente (sin paginación)
+            resultado = PagoService.listar_cuentas_por_cobrar(
+                session,
+                id_cliente=id_cliente,
+                pagina=1,
+                por_pagina=10000,  # Traer todas las facturas
+                id_usuario=self.usuario.id_usuario,
+            )
+
+            cuentas = resultado["items"]
+            if not cuentas:
+                MessageBox.information(self, "Sin detalle", "Este cliente no tiene cuentas por cobrar.")
+                return
+
+            # Obtener información del cliente
+            cliente = None
+            if cuentas and cuentas[0].factura and cuentas[0].factura.cliente:
+                cliente = cuentas[0].factura.cliente
+
+            dialog = DetalleClienteDialog(
+                session,
+                cliente,
+                cuentas,
+                self._tasa_paralelo,
+                self.usuario.id_usuario,
+                parent=self,
+            )
+            dialog.exec()
+
+            # Si se realizó algún cobro, recargar la tabla principal
+            if dialog.se_realizo_cobro:
+                self.cargar_cuentas()
+
+        except PermisoDenegadoError:
+            MessageBox.warning(
+                self,
+                "Sin permiso",
+                "No tienes permiso para ver el detalle del cliente.",
+            )
+        except Exception as e:
+            logger.exception(f"Fallo al cargar el detalle del cliente {id_cliente}: {e}")
+            MessageBox.critical(self, "Error", f"No se pudo cargar el detalle del cliente: {str(e)}")
+        finally:
+            session.close()
+
+    def cobrar_seleccionada(self) -> None:
+        """Abre el diálogo de detalle del cliente seleccionado."""
+        id_cliente = self._fila_seleccionada_id()
+        if id_cliente is None:
+            return
+        self._mostrar_detalle_cliente(id_cliente)
+
+    # ── Exportación ───────────────────────────────────────────────────────
+
+    def _exportar_excel(self) -> None:
+        """Exporta la tabla actual a un archivo Excel."""
+        filas = self._obtener_filas_para_exportar()
+        if not filas:
+            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
+            return
+
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar a Excel", "cuentas_por_cobrar.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+
+        try:
+            config_empresa = self._obtener_config_empresa()
+            encabezados = [
+                "Cliente",
+                "Saldo Pendiente",
+                "Días",
+                "Fecha Factura",
+                "Estado",
+            ]
+            exportar_excel(
+                ruta,
+                encabezados,
+                filas,
+                titulo="Cuentas por Cobrar",
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar a Excel")
+            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+
+    def _exportar_pdf(self) -> None:
+        """Exporta la tabla actual a un archivo PDF."""
+        filas = self._obtener_filas_para_exportar()
+        if not filas:
+            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
+            return
+
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar a PDF", "cuentas_por_cobrar.pdf", "PDF (*.pdf)")
+        if not ruta:
+            return
+
+        try:
+            config_empresa = self._obtener_config_empresa()
+            encabezados = [
+                "Cliente",
+                "Saldo Pendiente",
+                "Días",
+                "Fecha Factura",
+                "Estado",
+            ]
+            filtros = self._obtener_filtros_para_exportar()
+            col_widths = [2.5, 1.5, 0.8, 1.2, 1.0]
+            exportar_pdf(
+                ruta,
+                "Cuentas por Cobrar",
+                encabezados,
+                filas,
+                filtros=filtros,
+                col_widths=col_widths,
+                config_empresa=config_empresa,
+            )
+            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
+        except Exception:
+            logger.exception("Fallo al exportar a PDF")
+            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
+
+    def _obtener_filas_para_exportar(self) -> list[list]:
+        """Obtiene las filas de la tabla actual para exportación."""
+        filas = []
+        for row in range(self.tabla.rowCount()):
+            fila = []
+            for col in range(1, self.tabla.columnCount()):  # Saltar columna ID (0)
+                item = self.tabla.item(row, col)
+                if item:
+                    fila.append(item.text())
+                else:
+                    # Para widgets como EstadoBadge
+                    widget = self.tabla.cellWidget(row, col)
+                    if widget:
+                        # EstadoBadge es un QWidget que contiene un QLabel
+                        # Buscamos el QLabel dentro del layout
+                        if hasattr(widget, "layout"):
+                            layout = widget.layout()
+                            if layout:
+                                for i in range(layout.count()):
+                                    layout_item = layout.itemAt(i)
+                                    if layout_item:
+                                        item_widget = layout_item.widget()
+                                        if isinstance(item_widget, QLabel):
+                                            fila.append(item_widget.text())
+                                            break
+                                else:
+                                    fila.append("")
+                            else:
+                                fila.append("")
+                        else:
+                            fila.append("")
+                    else:
+                        fila.append("")
+            filas.append(fila)
+        return filas
+
+    def _obtener_filtros_para_exportar(self) -> dict[str, str]:
+        """Genera un diccionario con los filtros aplicados para el PDF."""
+        filtros = {}
+        if self.texto_busqueda:
+            filtros["Cliente"] = self.texto_busqueda
+        if self.estado_combo.currentData():
+            filtros["Estado"] = self.estado_combo.currentText()
+        if self.filtro_vendedor:
+            filtros["Vendedor"] = self.vendedor_combo.currentText()
+        return filtros
+
+    def _obtener_config_empresa(self) -> ConfiguracionEmpresa | None:
+        """Obtiene la configuración de la empresa para la exportación."""
+        session = self.session_factory()
+        try:
+            return EmpresaService.obtener_datos_documento(session)
+        finally:
+            session.close()
