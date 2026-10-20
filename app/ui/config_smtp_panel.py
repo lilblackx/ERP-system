@@ -38,6 +38,7 @@ from app.services.smtp_config import (
 )
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -106,9 +107,11 @@ _AYUDA_OTRO = (
 )
 
 
-class ConfigSmtpPanel(QWidget):
+class ConfigSmtpPanel(MixinPermisos, QWidget):
     """Formulario de la cuenta de correo. La contraseña nunca se vuelve a mostrar: si ya hay
     una guardada, dejar el campo vacío la conserva."""
+
+    recurso_permisos = "empresa"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -244,8 +247,10 @@ class ConfigSmtpPanel(QWidget):
         self.btn_guardar.setMinimumWidth(200)
         self.btn_guardar.clicked.connect(self.guardar_cambios)
         botones.addStretch()
-        botones.addWidget(self.btn_probar)
-        botones.addWidget(self.btn_guardar)
+        if self._puede("editar"):
+            botones.addWidget(self.btn_probar)
+        if self._puede("editar"):
+            botones.addWidget(self.btn_guardar)
         layout.addLayout(botones)
         layout.addStretch()
 
@@ -357,6 +362,8 @@ class ConfigSmtpPanel(QWidget):
         self.lbl_origen.setText("No tiene permiso para ver esta configuración.")
 
     def guardar_cambios(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para modificar la configuración del correo."):
+            return
         conexion = self._conexion_elegida()
         if conexion is None:
             MessageBox.warning(self, "Dato requerido", "Seleccione su servicio de correo.")
@@ -406,6 +413,8 @@ class ConfigSmtpPanel(QWidget):
     # ── Probar conexión (en segundo plano) ──────────────────────────────────
 
     def probar_conexion(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para modificar la configuración del correo."):
+            return
         if self._worker is not None and self._worker.isRunning():
             return
 

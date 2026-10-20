@@ -24,3 +24,6 @@ packaging/firma/*.cer
 # Local
 /Logo.png
 notificaciones_leidas.json
+
+# Preferencias de interfaz de esta PC (app/ui/animaciones.py), como notificaciones_leidas.json
+preferencias_ui.json

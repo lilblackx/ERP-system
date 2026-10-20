@@ -37,12 +37,14 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.caja_apertura_dialog import CajaAperturaDialog
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.factura_form_dialog import FacturaFormDialog
 from app.ui.factura_pdf import imprimir_factura
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -198,10 +200,12 @@ CONDICIONES_FILTRO = [
 ]
 
 
-class FacturacionPanel(QWidget):
+class FacturacionPanel(MixinPermisos, QWidget):
     """Panel principal del módulo Facturación: listado de facturas con búsqueda por
     número, filtro por estado/condición de pago, paginación, emisión de nuevas
     facturas (carrito), ver detalle y anulación."""
+
+    recurso_permisos = "ventas"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -324,7 +328,8 @@ class FacturacionPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_nueva_factura)
+        if self._puede("crear"):
+            h.addWidget(self.btn_nueva_factura)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -400,7 +405,8 @@ class FacturacionPanel(QWidget):
         h.addWidget(self.btn_siguiente)
         h.addStretch()
         h.addWidget(btn_detalle)
-        h.addWidget(btn_anular)
+        if self._puede("eliminar"):
+            h.addWidget(btn_anular)
         return w
 
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
@@ -559,6 +565,8 @@ class FacturacionPanel(QWidget):
             self._verificando_caja = False
 
     def nueva_factura(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para emitir facturas."):
+            return
         if not self._verificar_caja_abierta(ofrecer_apertura=True):
             MessageBox.information(
                 self,
@@ -661,6 +669,8 @@ class FacturacionPanel(QWidget):
             self._abriendo_dialogo = False
 
     def anular_factura_seleccionada(self) -> None:
+        if not self._exigir_permiso("eliminar", "No tienes permiso para anular facturas."):
+            return
         id_factura = self._fila_seleccionada_id()
         if id_factura is None:
             return
@@ -756,7 +766,7 @@ class FacturacionPanel(QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_facturas_excel,
@@ -774,7 +784,7 @@ class FacturacionPanel(QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_facturas_pdf,
@@ -786,7 +796,7 @@ class FacturacionPanel(QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(
             self,
@@ -795,6 +805,6 @@ class FacturacionPanel(QWidget):
         )
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar el listado de facturas: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")

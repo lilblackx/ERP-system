@@ -5,11 +5,12 @@ Primera pantalla que ve el usuario tras iniciar sesión.
 """
 
 import logging
+import re
 import socket
 from datetime import datetime
 
 import qtawesome as qta
-from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEasingCurve, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import (
     QColor,
     QLinearGradient,
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.services.dashboard import DashboardService
+from app.ui.animaciones import DURACION_MEDIA, animaciones_activas, contar
 from app.ui.message_box import MessageBox
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -87,6 +89,18 @@ class _SeparadorKpi(QWidget):
         painter.end()
 
 
+_CIFRA_RE = re.compile(r"^([^\d-]*)(-?[\d,]+(?:\.(\d+))?)([^\d]*)$")
+
+
+def _parsear_cifra(texto: str) -> tuple[str, float, int, str] | None:
+    """'$1,234.50' -> ('$', 1234.5, 2, ''); None si no es una cifra simple (entonces no se anima)."""
+    m = _CIFRA_RE.match(texto.strip())
+    if m is None:
+        return None
+    prefijo, numero, decimales, sufijo = m.groups()
+    return prefijo, float(numero.replace(",", "")), len(decimales or ""), sufijo
+
+
 class KpiCard(QWidget):
     """Tarjeta de indicador: título + ícono + valor grande + detalle/delta."""
 
@@ -128,8 +142,14 @@ class KpiCard(QWidget):
         v.addWidget(self.lbl_valor)
         v.addWidget(self.lbl_detalle)
 
-    def set_valor(self, texto: str) -> None:
-        self.lbl_valor.setText(texto)
+    def set_valor(self, texto: str, animar: bool = False) -> None:
+        """Con `animar`, la cifra sube desde 0 hasta su valor (solo la primera vez que carga el panel)."""
+        cifra = _parsear_cifra(texto) if animar else None
+        if cifra is None:
+            self.lbl_valor.setText(texto)
+            return
+        prefijo, valor, decimales, sufijo = cifra
+        contar(self.lbl_valor, valor, lambda v: f"{prefijo}{v:,.{decimales}f}{sufijo}")
 
     def set_detalle(self, texto: str, color: str = COLOR_TEXT_MUTED) -> None:
         self.lbl_detalle.setStyleSheet(
@@ -145,10 +165,27 @@ class VentasSemanaChart(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._puntos: list[dict] = []
+        self._revelado = 1.0  # fraccion del grafico ya dibujada (de izquierda a derecha)
         self.setMinimumHeight(140)
 
-    def set_datos(self, puntos: list[dict]) -> None:
+    def set_datos(self, puntos: list[dict], animar: bool = False) -> None:
         self._puntos = puntos
+        if animar and puntos and animaciones_activas():
+            animacion = QVariantAnimation(self)
+            animacion.setDuration(DURACION_MEDIA * 2)
+            animacion.setStartValue(0.0)
+            animacion.setEndValue(1.0)
+            animacion.setEasingCurve(QEasingCurve.Type.OutCubic)
+            animacion.valueChanged.connect(self._revelar)
+            animacion.finished.connect(lambda: self._revelar(1.0))
+            self._revelar(0.0)
+            animacion.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
+            return
+        self._revelado = 1.0
+        self.update()
+
+    def _revelar(self, fraccion) -> None:
+        self._revelado = float(fraccion)
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
@@ -156,6 +193,8 @@ class VentasSemanaChart(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         rect = self.rect()
+        if self._revelado < 1.0:
+            painter.setClipRect(QRectF(rect.left(), rect.top(), rect.width() * self._revelado, rect.height()))
         if not self._puntos:
             painter.setPen(QColor(COLOR_TEXT_LIGHT))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "Sin ventas registradas esta semana")
@@ -490,6 +529,7 @@ class DashboardPanel(QWidget):
         self.session_factory = session_factory
         self.usuario = usuario
         self.setObjectName("ContentArea")
+        self._ya_animado = False
         self._build_ui()
         # self._setup_reloj()  -- desactivado junto con el bloque de equipo/fecha/hora
         # del header, ver _make_header().
@@ -751,29 +791,33 @@ class DashboardPanel(QWidget):
         self.cargar_datos()
 
     def _mostrar_datos(self, datos: dict) -> None:
+        # Cifras que suben y grafico que se dibuja solo la primera vez: el panel se recarga cada vez que se
+        # vuelve a mostrar, y repetir el efecto en cada visita cansaria.
+        animar = not self._ya_animado
+        self._ya_animado = True
         ventas_hoy = datos["ventas_hoy"]
-        self.kpi_ventas_hoy.set_valor(f"${float(ventas_hoy['total']):,.2f}")
+        self.kpi_ventas_hoy.set_valor(f"${float(ventas_hoy['total']):,.2f}", animar)
         pct = ventas_hoy["porcentaje_vs_ayer"]
         color = COLOR_SUCCESS if pct >= 0 else COLOR_DANGER
         signo = "+" if pct >= 0 else ""
         self.kpi_ventas_hoy.set_detalle(f"{signo}{pct:.1f}% vs ayer", color)
 
         por_cobrar = datos["por_cobrar"]
-        self.kpi_por_cobrar.set_valor(f"${float(por_cobrar['saldo_total']):,.2f}")
+        self.kpi_por_cobrar.set_valor(f"${float(por_cobrar['saldo_total']):,.2f}", animar)
         self.kpi_por_cobrar.set_detalle(f"{por_cobrar['facturas_vencidas']} facturas vencidas", COLOR_DANGER)
 
         por_pagar = datos["por_pagar"]
-        self.kpi_por_pagar.set_valor(f"${float(por_pagar['saldo_total']):,.2f}")
+        self.kpi_por_pagar.set_valor(f"${float(por_pagar['saldo_total']):,.2f}", animar)
         self.kpi_por_pagar.set_detalle(f"{por_pagar['compras_vencidas']} compras vencidas", COLOR_DANGER)
 
-        self.kpi_productos_alerta.set_valor(str(datos["productos_alerta"]))
+        self.kpi_productos_alerta.set_valor(str(datos["productos_alerta"]), animar)
         # Ya no es solo "bajo el minimo" -- el conteo tambien suma proximos a vencer
         # (ver DashboardService._filtro_alerta_inventario), asi que el detalle debe
         # cubrir ambos motivos sin volverse tan largo como para ensanchar la tarjeta
         # (ver el comentario de kpi_productos_alerta mas arriba).
         self.kpi_productos_alerta.set_detalle("Stock o vencimiento", COLOR_WARNING)
 
-        self.grafico_ventas.set_datos(datos["grafico_semanal"])
+        self.grafico_ventas.set_datos(datos["grafico_semanal"], animar)
         self.etiquetas_dias.set_datos(datos["grafico_semanal"])
 
         self._poblar_lista(

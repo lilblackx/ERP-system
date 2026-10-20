@@ -32,6 +32,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService
 from app.ui.banco_form_dialog import BancoFormDialog
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -78,12 +79,14 @@ COLORES_ESTADO_BANCO = {
 }
 
 
-class BancosPanel(QWidget):
+class BancosPanel(MixinPermisos, QWidget):
     """
     Panel principal del módulo Bancos.
     Encapsula la barra de herramientas y la tabla de datos en un solo widget
     para ser insertado directamente en el área de contenido del MainWindow.
     """
+
+    recurso_permisos = "bancos"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -182,7 +185,8 @@ class BancosPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_nuevo)
+        if self._puede("crear"):
+            h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
         return w
 
@@ -259,8 +263,10 @@ class BancosPanel(QWidget):
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
-        h.addWidget(self.btn_editar)
-        h.addWidget(self.btn_cambiar_estado)
+        if self._puede("editar"):
+            h.addWidget(self.btn_editar)
+        if self._puede("eliminar"):
+            h.addWidget(self.btn_cambiar_estado)
         return w
 
     # ── Carga de datos ─────────────────────────────────────────────────────
@@ -390,6 +396,8 @@ class BancosPanel(QWidget):
 
     def nuevo_banco(self):
         """Abre el diálogo para crear un nuevo banco."""
+        if not self._exigir_permiso("crear", "No tienes permiso para crear bancos."):
+            return
         session = self.session_factory()
         try:
             dialog = BancoFormDialog(session, parent=self)
@@ -419,6 +427,8 @@ class BancosPanel(QWidget):
 
     def editar_banco(self):
         """Abre el diálogo para editar el banco seleccionado."""
+        if not self._exigir_permiso("editar", "No tienes permiso para editar bancos."):
+            return
         banco_id = self._id_seleccionado()
         if banco_id is None:
             return
@@ -459,6 +469,8 @@ class BancosPanel(QWidget):
 
     def cambiar_estado_banco(self):
         """Cambia el estado del banco seleccionado (ACTIVO <-> INACTIVO)."""
+        if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de bancos."):
+            return
         banco_id = self._id_seleccionado()
         if banco_id is None:
             return

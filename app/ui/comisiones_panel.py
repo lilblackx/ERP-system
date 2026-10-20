@@ -41,10 +41,12 @@ from app.services.tesoreria import BancoService, CajaService
 from app.services.usuarios import UsuarioService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -357,6 +359,7 @@ class PagarComisionesDialog(QDialog):
         if respuesta != QMessageBox.StandardButton.Yes:
             return
 
+        ocupar_boton(self.btn_pagar)
         try:
             self.pago_creado = PagoComisionService.pagar_comisiones_vendedor(
                 self.session,
@@ -382,6 +385,8 @@ class PagarComisionesDialog(QDialog):
             logger.exception("Fallo al pagar comisiones")
             MessageBox.critical(self, "Error", "No se pudo registrar el pago.")
             return
+        finally:
+            liberar_boton(self.btn_pagar)
 
         self.accept()
 
@@ -527,10 +532,12 @@ class DetalleComisionFacturaDialog(QDialog):
         root.addLayout(fila_botones)
 
 
-class ComisionesPanel(QWidget):
+class ComisionesPanel(MixinPermisos, QWidget):
     """Panel del modulo Comisiones: dos modos segun el permiso del usuario.
     - Modo gestion (comisiones:ver): selector de vendedor + tabla + pagar.
     - Modo "Mis Comisiones" (reportes_comisiones:ver): solo lectura de propias."""
+
+    recurso_permisos = "comisiones"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -713,7 +720,8 @@ class ComisionesPanel(QWidget):
         self.btn_pagar.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_pagar.clicked.connect(self.pagar_comisiones)
         self.btn_pagar.setEnabled(False)
-        h.addWidget(self.btn_pagar)
+        if self._puede("crear"):
+            h.addWidget(self.btn_pagar)
         return w
 
     def cargar_datos(self) -> None:
@@ -903,6 +911,8 @@ class ComisionesPanel(QWidget):
         DetalleComisionFacturaDialog(grupo, parent=self).exec()
 
     def pagar_comisiones(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para pagar comisiones."):
+            return
         if self.id_vendedor_actual is None:
             MessageBox.information(self, "Selección requerida", "Selecciona un vendedor.")
             return
@@ -1005,7 +1015,7 @@ class ComisionesPanel(QWidget):
             session.close()
 
         encabezados, filas = self._datos_para_exportar()
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_excel,
@@ -1036,7 +1046,7 @@ class ComisionesPanel(QWidget):
             session.close()
 
         encabezados, filas = self._datos_para_exportar()
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_pdf,
@@ -1052,11 +1062,11 @@ class ComisionesPanel(QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, ruta: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         MessageBox.information(self, "Exportación completa", f"Se exportó a:\n{ruta}")
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar comisiones: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo completar la exportación.")
 

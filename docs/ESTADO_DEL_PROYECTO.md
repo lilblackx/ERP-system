@@ -386,6 +386,24 @@ y escribe correo + contraseña: servidor/puerto/TLS salen del catálogo `PROVEED
   mostraba "revise el puerto".
 - Puerto 465 usa `SMTP_SSL` (SSL directo); el resto, STARTTLS si `usar_tls`.
 
+### Artículo BCV (migración 0079, 2026-10-19)
+
+- `inventario.articulo_bcv` (BIT, default 0), casilla "Artículo BCV" en el formulario de producto.
+  Un artículo marcado se factura siempre a su precio guardado: el porcentaje BCV de la factura
+  no se le aplica. Los demás artículos de la misma factura sí lo llevan.
+- El porcentaje BCV lo aplica el diálogo de factura (`FacturaFormDialog`), no el servicio:
+  `_porcentaje_bcv_para(id_producto)` devuelve 0 para un artículo BCV y lo usan el combo de
+  precios, el precio a facturar, el precio base del carrito y el recálculo del carrito cuando
+  cambia el porcentaje. El combo de productos marca "· Artículo BCV".
+- Comisiones: la base de comisión de un artículo BCV tampoco lleva el porcentaje
+  (`ComisionService`), así que su comisión es la de siempre (venta − precio de lista).
+- No cambia las facturas ya emitidas ni la cuenta por cobrar BCV (que sigue siendo por factura,
+  con el porcentaje que se escribió). Una factura con porcentaje BCV cuyos artículos son todos
+  Artículo BCV igual abre su cuenta BCV, con el mismo total.
+- *No cubierto:* en el diálogo de factura, pasar un artículo a venta "por unidad"
+  (`_on_tipo_venta_cambiado`) fija el precio sin porcentaje BCV para cualquier artículo; es un
+  comportamiento anterior a este cambio.
+
 ### Revisión de cobros, comisiones y pantallas chicas (2026-10-06)
 
 - **Pagos de cuentas por cobrar BCV (migración 0078).** Un pago contra `cuentas_por_cobrar_bcv`

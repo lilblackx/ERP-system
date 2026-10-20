@@ -19,6 +19,13 @@ Comandos:
                  autenticacion mixto (cambios en el registro + reinicio del servicio; requiere administrador
                  de Windows). El mensaje empieza con SIN CAMBIOS, CAMBIOS (solo_diagnostico), CONFIGURADO u
                  OMITIDO (servidor remoto)
+    probar-drive prueba que se pueda escribir en la carpeta de Google Drive (existe la unidad, se crea la
+                 carpeta si falta y un archivo de prueba se escribe, lee y borra)
+    respaldos    crea en SQL Server Agent los trabajos de respaldo (completo diario 19:00, log cada 30 min),
+                 limpieza por dias de retencion y mantenimiento semanal; con ruta_drive (obligatoria, se prueba antes)
+                 programa ademas la copia a Google Drive para escritorio. Con alerta_correos + smtp_* configura
+                 Database Mail y agrega a cada trabajo un paso que avisa por correo (HTML, importancia alta) si
+                 falla. Falla si el SQL Server es Express (sin Agent)
     validar-clave  valida una contrasena contra la politica de la app (usuario `admin`)
     servidor     crea la base, el esquema, el usuario SQL propio de la app y el usuario `admin`,
                  y escribe config.env (MODO_INSTALACION=SERVIDOR) + datos_estaciones.txt
@@ -565,6 +572,607 @@ def cmd_actualizar(datos: dict) -> str:
     return "Base de datos actualizada."
 
 
+# ── Respaldos automaticos (trabajos de SQL Server Agent + copia a Google Drive) ──────
+#
+# Los respaldos son trabajos de SQL Server Agent (se ven y se editan en SSMS > SQL Server Agent > Trabajos):
+# SQL Server no deja crear por script un "Plan de mantenimiento" propiamente dicho. La copia a Google Drive
+# no puede hacerla SQL Agent (corre con otra cuenta de Windows, que no ve la unidad de Google Drive para
+# escritorio del usuario): la hace una tarea programada de Windows con la sesion del usuario que instala.
+
+TRABAJO_COMPLETO = "Nexo ERP - Respaldo completo"
+TRABAJO_LOG = "Nexo ERP - Respaldo de log de transacciones"
+TRABAJO_MANTENIMIENTO = "Nexo ERP - Mantenimiento semanal"
+TAREA_COPIA_DRIVE = "Nexo ERP - Copia de respaldos a Google Drive"
+CARPETA_RESPALDOS_DEFECTO = r"C:\Respaldos\Nexo"
+DIAS_RETENCION_DEFECTO = 3  # vale para los respaldos completos y los de log, en local y en Drive
+_RUTA_RE = re.compile(r"""^(?:[A-Za-z]:[\\/]|\\\\|/)[^'"<>|*?;\r\n]+$""")
+_EDICION_EXPRESS = 4  # SERVERPROPERTY('EngineEdition'): Express no incluye SQL Server Agent
+PERFIL_CORREO = "Nexo ERP - Alertas"
+CUENTA_CORREO = "Nexo ERP - Alertas"
+SMTP_HOST_DEFECTO = "smtp.gmail.com"
+SMTP_PUERTO_DEFECTO = 587
+_CORREO_RE = re.compile(r"""^[^@\s;,'"<>]+@[^@\s;,'"<>]+\.[^@\s;,'"<>]+$""")
+_HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
+
+
+def _validar_alertas(datos: dict) -> dict | None:
+    """None = sin alertas por correo (no se indico ningun destinatario)."""
+    crudo = str(datos.get("alerta_correos") or "")
+    destinatarios = [c.strip() for c in re.split(r"[;,]", crudo) if c.strip()]
+    if not destinatarios:
+        return None
+    for correo in destinatarios:
+        if not _CORREO_RE.match(correo):
+            raise ErrorInstalacion(f"El correo '{correo}' para las alertas no es valido.")
+    usuario = str(datos.get("smtp_usuario") or "").strip()
+    clave = str(datos.get("smtp_clave") or "")
+    if not usuario or not clave:
+        raise ErrorInstalacion(
+            "Para enviar alertas por correo indique el correo remitente y su contrasena (en Gmail, una "
+            "'contrasena de aplicacion')."
+        )
+    remitente = str(datos.get("smtp_remitente") or usuario).strip()
+    host = str(datos.get("smtp_host") or SMTP_HOST_DEFECTO).strip()
+    if not _CORREO_RE.match(remitente) or not _HOST_RE.match(host):
+        raise ErrorInstalacion("El correo remitente o el servidor SMTP de las alertas no son validos.")
+    try:
+        puerto = int(str(datos.get("smtp_puerto") or SMTP_PUERTO_DEFECTO).strip())
+    except ValueError:
+        puerto = 0
+    if not 1 <= puerto <= 65535:
+        raise ErrorInstalacion("El puerto SMTP de las alertas debe ser un numero entre 1 y 65535.")
+    return {
+        "destinatarios": ";".join(destinatarios),
+        "usuario": usuario,
+        "clave": clave,
+        "remitente": remitente,
+        "host": host,
+        "puerto": puerto,
+    }
+
+
+def _ruta_valida(valor: str, que: str) -> str:
+    """Las rutas terminan dentro de sentencias SQL y de un script de PowerShell: lista blanca de caracteres."""
+    ruta = valor.strip().rstrip("\\/") if len(valor.strip()) > 3 else valor.strip()
+    if not _RUTA_RE.match(ruta):
+        raise ErrorInstalacion(
+            f"{que} debe ser una ruta completa (ej. C:\\Respaldos\\Nexo) sin comillas ni los caracteres < > | * ? ;"
+        )
+    return ruta
+
+
+def _ejecutar_con_parametros(motor, sentencias: list[tuple[str, tuple]]) -> None:
+    with motor.connect().execution_options(isolation_level="AUTOCOMMIT") as conexion:
+        for sql, parametros in sentencias:
+            cursor = conexion.connection.cursor()
+            try:
+                cursor.execute(sql, *parametros)
+                # BACKUP emite mensajes informativos: el controlador solo termina de ejecutar (y de informar
+                # errores) cuando se recorren todos los resultados.
+                while cursor.nextset():
+                    pass
+            finally:
+                cursor.close()
+
+
+def _alta_trabajo(
+    nombre: str,
+    descripcion: str,
+    pasos: list[tuple[str, str, str]],
+    programacion: dict,
+    comando_alerta: str | None = None,
+) -> tuple:
+    """Sentencia (sql, parametros) que borra el trabajo si existe y lo crea con sus pasos y horario.
+    `pasos`: (nombre, comando T-SQL, base de datos). Con `comando_alerta`, se agrega al final un paso de alerta
+    al que va cualquier paso que falle (y que deja el trabajo como fallido)."""
+    lineas = [
+        "IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = ?) "
+        "EXEC msdb.dbo.sp_delete_job @job_name = ?, @delete_unused_schedule = 1;",
+        "DECLARE @propietario SYSNAME = SUSER_SNAME(0x01);",
+        "EXEC msdb.dbo.sp_add_job @job_name = ?, @description = ?, @owner_login_name = @propietario;",
+    ]
+    parametros: list = [nombre, nombre, nombre, descripcion]
+    for i, (paso, comando, base) in enumerate(pasos):
+        siguiente = 3 if i < len(pasos) - 1 else 1  # 3 = pasar al paso siguiente, 1 = terminar bien
+        # 4 = si falla, ir al paso de alerta; 2 = terminar con fallo.
+        if comando_alerta:
+            ante_fallo = f"@on_fail_action = 4, @on_fail_step_id = {len(pasos) + 1}"
+        else:
+            ante_fallo = "@on_fail_action = 2"
+        lineas.append(
+            "EXEC msdb.dbo.sp_add_jobstep @job_name = ?, @step_name = ?, @subsystem = N'TSQL', @command = ?, "
+            f"@database_name = ?, @on_success_action = {siguiente}, {ante_fallo};"
+        )
+        parametros += [nombre, paso, comando, base]
+    if comando_alerta:
+        lineas.append(
+            "EXEC msdb.dbo.sp_add_jobstep @job_name = ?, @step_name = N'Enviar alerta por correo', "
+            "@subsystem = N'TSQL', @command = ?, @database_name = N'master', @on_success_action = 2, "
+            "@on_fail_action = 2;"
+        )
+        parametros += [nombre, comando_alerta]
+    campos = ", ".join(f"@{k} = {v}" for k, v in programacion.items())
+    lineas.append(f"EXEC msdb.dbo.sp_add_jobschedule @job_name = ?, @name = ?, {campos};")
+    parametros += [nombre, nombre]
+    lineas.append("EXEC msdb.dbo.sp_add_jobserver @job_name = ?, @server_name = N'(local)';")
+    parametros.append(nombre)
+    return "\n".join(lineas), tuple(parametros)
+
+
+def _comando_respaldo(base: str, carpeta: str, tipo: str) -> str:
+    """T-SQL de un respaldo con nombre `<base>_FULL|LOG_<fecha>_<hora>.bak|.trn` dentro de `carpeta`."""
+    separador = "/" if "/" in carpeta and "\\" not in carpeta else "\\"
+    etiqueta, objeto, extension = ("FULL", "DATABASE", "bak") if tipo == "full" else ("LOG", "LOG", "trn")
+    return (
+        f"DECLARE @f NVARCHAR(500) = N'{carpeta}{separador}{base}_{etiqueta}_' "
+        f"+ FORMAT(GETDATE(), 'yyyyMMdd_HHmmss') + N'.{extension}';\n"
+        f"BACKUP {objeto} [{base}] TO DISK = @f WITH COMPRESSION, CHECKSUM, INIT;"
+    )
+
+
+def _comando_limpieza(carpeta: str, dias: int) -> str:
+    return (
+        f"DECLARE @corte DATETIME = DATEADD(DAY, -{dias}, GETDATE());\n"
+        f"EXEC master.dbo.xp_delete_file 0, N'{carpeta}', N'bak', @corte, 0;\n"
+        f"EXEC master.dbo.xp_delete_file 0, N'{carpeta}', N'trn', @corte, 0;"
+    )
+
+
+def _asegurar_agente(instancia: str | None) -> str:
+    """SQL Server Agent con inicio automatico y en ejecucion (solo para un SQL Server de este equipo)."""
+    servicio = f"SQLAgent${instancia}" if instancia else "SQLSERVERAGENT"
+    if _estado_servicio(servicio) is None:
+        return f"No se encontro el servicio {servicio}: inicielo manualmente para que corran los respaldos."
+    subprocess.run(["sc", "config", servicio, "start=", "auto"], capture_output=True, text=True)
+    if _estado_servicio(servicio) != _SERVICIO_EN_EJECUCION:
+        _net("start", servicio)
+    if _estado_servicio(servicio) != _SERVICIO_EN_EJECUCION:
+        return f"No se pudo iniciar el servicio {servicio}: inicielo manualmente para que corran los respaldos."
+    return ""
+
+
+def _reiniciar_agente(instancia: str | None) -> str:
+    """SQL Server Agent solo lee el perfil de Database Mail al arrancar."""
+    servicio = f"SQLAgent${instancia}" if instancia else "SQLSERVERAGENT"
+    if _estado_servicio(servicio) is None:
+        return f"No se encontro el servicio {servicio}: reinicielo manualmente para activar las alertas por correo."
+    if _estado_servicio(servicio) == _SERVICIO_EN_EJECUCION:
+        _net("stop", servicio, "/y")
+    _net("start", servicio)
+    if _estado_servicio(servicio) != _SERVICIO_EN_EJECUCION:
+        return (
+            f"No se pudo reiniciar el servicio {servicio}: reinicielo manualmente para activar las alertas por correo."
+        )
+    return ""
+
+
+def _lit(texto: str) -> str:
+    """Literal NVARCHAR de T-SQL. Los textos fijos del instalador usan entidades HTML (&oacute;) para no llevar
+    caracteres no ASCII."""
+    return "N'" + texto.replace("'", "''") + "'"
+
+
+def _html_correo(titulo: str, color: str, filas: list[tuple[str, str]], detalle: str | None, pie: str) -> str:
+    """Expresion T-SQL (NVARCHAR) con el cuerpo HTML de un correo de alerta. `filas`: (etiqueta, expresion T-SQL ya
+    escapada para HTML); `detalle`: expresion T-SQL del texto del error (se muestra aparte, en bloque de codigo)."""
+    partes = [
+        _lit(
+            '<html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Segoe UI,Arial,sans-serif;">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;'
+            'padding:24px 0;"><tr><td align="center">'
+            '<table role="presentation" width="620" cellpadding="0" cellspacing="0" style="background:#ffffff;'
+            'border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
+            f'<tr><td style="background:{color};padding:18px 24px;color:#ffffff;">'
+            '<div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;opacity:.85;">Nexo ERP</div>'
+            f'<div style="font-size:20px;font-weight:600;margin-top:4px;">{titulo}</div></td></tr>'
+            '<tr><td style="padding:20px 24px;"><table role="presentation" width="100%" cellpadding="0" '
+            'cellspacing="0" style="font-size:14px;color:#111827;">'
+        )
+    ]
+    for etiqueta, expresion in filas:
+        partes.append(
+            _lit(
+                '<tr><td style="padding:7px 12px 7px 0;color:#6b7280;white-space:nowrap;vertical-align:top;'
+                f'border-bottom:1px solid #f3f4f6;">{etiqueta}</td><td style="padding:7px 0;font-weight:600;'
+                'border-bottom:1px solid #f3f4f6;">'
+            )
+        )
+        partes.append(expresion)
+        partes.append(_lit("</td></tr>"))
+    partes.append(_lit("</table>"))
+    if detalle is not None:
+        partes.append(
+            _lit(
+                '<div style="margin-top:18px;font-size:12px;color:#6b7280;text-transform:uppercase;'
+                'letter-spacing:.5px;">Detalle del error</div><pre style="margin:6px 0 0;padding:12px;'
+                "background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#7f1d1d;font-size:12px;"
+                "white-space:pre-wrap;word-break:break-word;"
+                'font-family:Consolas,monospace;">'
+            )
+        )
+        partes.append(detalle)
+        partes.append(_lit("</pre>"))
+    partes.append(
+        _lit(
+            f'</td></tr><tr><td style="padding:14px 24px;background:#f9fafb;color:#6b7280;font-size:12px;">{pie}'
+            "</td></tr></table></td></tr></table></body></html>"
+        )
+    )
+    # NVARCHAR(MAX) desde el principio: concatenando literales de hasta 4000 caracteres el resultado se truncaria.
+    return "CAST(N'' AS NVARCHAR(MAX)) + " + " + ".join(partes)
+
+
+def _escapar_html_sql(expresion: str) -> str:
+    return f"REPLACE(REPLACE(REPLACE({expresion}, N'&', N'&amp;'), N'<', N'&lt;'), N'>', N'&gt;')"
+
+
+def _envio_correo(destinatarios: str, asunto: str, cuerpo: str) -> str:
+    """sp_send_dbmail: siempre HTML y con importancia alta. `asunto` y `cuerpo` son expresiones T-SQL."""
+    return (
+        "EXEC msdb.dbo.sp_send_dbmail "
+        f"@profile_name = {_lit(PERFIL_CORREO)}, @recipients = {_lit(destinatarios)}, @subject = {asunto}, "
+        f"@body = {cuerpo}, @body_format = 'HTML', @importance = 'High';"
+    )
+
+
+def _comando_alerta_fallo(destinatarios: str) -> str:
+    """Paso final de cada trabajo, al que van los pasos cuando fallan: manda el correo de alerta (HTML, importancia
+    alta) con el trabajo, el paso y el error. Las notificaciones propias de SQL Agent no permiten cambiar ni el
+    formato ni la importancia, por eso la alerta se envia desde aqui y no desde un operador.
+    $(ESCAPE_NONE(JOBID)) es un token de SQL Agent: se reemplaza al ejecutarse el paso."""
+    cuerpo = _html_correo(
+        "Fall&oacute; un trabajo de respaldo o mantenimiento",
+        "#b91c1c",
+        [
+            ("Servidor", "@@SERVERNAME"),
+            ("Trabajo", "@trabajo"),
+            ("Paso que fall&oacute;", "@paso"),
+            ("Fecha y hora", "CONVERT(NVARCHAR(30), @inicio, 120)"),
+        ],
+        "@detalle",
+        "Revise el trabajo en SSMS &gt; SQL Server Agent &gt; Trabajos &gt; Ver historial. "
+        "Mientras no se corrija, los respaldos pueden no estar realiz&aacute;ndose.",
+    )
+    return (
+        "DECLARE @id UNIQUEIDENTIFIER = CONVERT(UNIQUEIDENTIFIER, $(ESCAPE_NONE(JOBID)));\n"
+        "DECLARE @trabajo NVARCHAR(128), @paso NVARCHAR(128), @detalle NVARCHAR(MAX), @inicio DATETIME;\n"
+        "SELECT @trabajo = name FROM msdb.dbo.sysjobs WHERE job_id = @id;\n"
+        "SELECT TOP 1 @paso = step_name, @detalle = message, @inicio = msdb.dbo.agent_datetime(run_date, run_time)\n"
+        "FROM msdb.dbo.sysjobhistory WHERE job_id = @id AND step_id > 0 AND run_status = 0 ORDER BY instance_id DESC;\n"
+        "SET @trabajo = ISNULL(@trabajo, N'(desconocido)');\n"
+        "SET @paso = ISNULL(@paso, N'(desconocido)');\n"
+        "SET @inicio = ISNULL(@inicio, GETDATE());\n"
+        "SET @detalle = " + _escapar_html_sql("LEFT(ISNULL(@detalle, " + _lit("(sin detalle)") + "), 3000)") + ";\n"
+        "SET @trabajo = " + _escapar_html_sql("@trabajo") + ";\n"
+        "SET @paso = " + _escapar_html_sql("@paso") + ";\n"
+        "DECLARE @cuerpo NVARCHAR(MAX) = " + cuerpo + ";\n"
+        "DECLARE @asunto NVARCHAR(255) = N'[Nexo ERP] ALERTA: fall' + NCHAR(243) + N' el trabajo ' "
+        "+ LEFT(@trabajo, 100) + N' en ' + @@SERVERNAME;\n" + _envio_correo(destinatarios, "@asunto", "@cuerpo")
+    )
+
+
+def _comando_correo_prueba(destinatarios: str, base: str, carpeta: str, dias: int) -> str:
+    cuerpo = _html_correo(
+        "Alertas de respaldo configuradas",
+        "#15803d",
+        [
+            ("Servidor", "@@SERVERNAME"),
+            ("Base de datos", _lit(base)),
+            ("Carpeta de respaldos", _lit(carpeta)),
+            ("Respaldo completo", _lit("Todos los d&iacute;as a las 7:00 pm")),
+            ("Respaldo de log", _lit("Cada 30 minutos")),
+            ("Se conservan", _lit(f"{dias} d&iacute;as")),
+            ("Reciben la alerta", _lit(destinatarios.replace(";", "<br>"))),
+        ],
+        None,
+        "Este es un correo de prueba. A partir de ahora recibir&aacute; un aviso, con importancia alta, si falla "
+        "alg&uacute;n trabajo de respaldo o mantenimiento de Nexo ERP en este servidor.",
+    )
+    return (
+        f"DECLARE @cuerpo NVARCHAR(MAX) = {cuerpo};\n"
+        "DECLARE @asunto NVARCHAR(255) = N'[Nexo ERP] Alertas de respaldo configuradas en ' + @@SERVERNAME;\n"
+        + _envio_correo(destinatarios, "@asunto", "@cuerpo")
+    )
+
+
+def _configurar_alertas(motor, alertas: dict, instancia: str | None, es_local: bool, contexto: dict) -> str:
+    """Database Mail (cuenta y perfil propios), perfil asignado a SQL Agent (que se reinicia) y correo de prueba.
+    Los trabajos ya llevan su paso de alerta (ver _comando_alerta_fallo). Devuelve un aviso si algo no quedo listo;
+    "" si todo salio bien."""
+    try:
+        _ejecutar_con_parametros(
+            motor,
+            [
+                ("EXEC sp_configure 'show advanced options', 1; RECONFIGURE;", ()),
+                ("EXEC sp_configure 'Database Mail XPs', 1; RECONFIGURE;", ()),
+                (
+                    "IF EXISTS (SELECT 1 FROM msdb.dbo.sysmail_profile WHERE name = ?) "
+                    "EXEC msdb.dbo.sysmail_delete_profile_sp @profile_name = ?;",
+                    (PERFIL_CORREO, PERFIL_CORREO),
+                ),
+                (
+                    "IF EXISTS (SELECT 1 FROM msdb.dbo.sysmail_account WHERE name = ?) "
+                    "EXEC msdb.dbo.sysmail_delete_account_sp @account_name = ?;",
+                    (CUENTA_CORREO, CUENTA_CORREO),
+                ),
+                (
+                    "EXEC msdb.dbo.sysmail_add_account_sp @account_name = ?, @email_address = ?, "
+                    "@display_name = N'Nexo ERP', @mailserver_name = ?, @port = ?, @enable_ssl = 1, "
+                    "@username = ?, @password = ?",
+                    (
+                        CUENTA_CORREO,
+                        alertas["remitente"],
+                        alertas["host"],
+                        alertas["puerto"],
+                        alertas["usuario"],
+                        alertas["clave"],
+                    ),
+                ),
+                ("EXEC msdb.dbo.sysmail_add_profile_sp @profile_name = ?", (PERFIL_CORREO,)),
+                (
+                    "EXEC msdb.dbo.sysmail_add_profileaccount_sp @profile_name = ?, @account_name = ?, "
+                    "@sequence_number = 1",
+                    (PERFIL_CORREO, CUENTA_CORREO),
+                ),
+                (
+                    "EXEC msdb.dbo.sp_set_sqlagent_properties @databasemail_profile = ?, @use_databasemail = 1",
+                    (PERFIL_CORREO,),
+                ),
+            ],
+        )
+    except Exception as exc:
+        return (
+            "Las alertas por correo quedaron a medias: los trabajos tienen su paso de alerta, pero no se pudo "
+            f"configurar Database Mail ({_traducir_error(exc)}). Configurelo en SSMS > Management > Database Mail "
+            f"con un perfil llamado '{PERFIL_CORREO}'."
+        )
+    if es_local:
+        aviso = _reiniciar_agente(instancia)
+        if aviso:
+            return aviso
+    try:
+        _ejecutar_con_parametros(
+            motor,
+            [
+                (
+                    _comando_correo_prueba(
+                        alertas["destinatarios"], contexto["base"], contexto["carpeta"], contexto["dias"]
+                    ),
+                    (),
+                )
+            ],
+        )
+    except Exception as exc:
+        return f"No se pudo enviar el correo de prueba de las alertas: {_traducir_error(exc)}"
+    return ""
+
+
+def _usuario_windows() -> str:
+    import os
+
+    dominio, usuario = os.environ.get("USERDOMAIN", ""), os.environ.get("USERNAME", "")
+    return f"{dominio}\\{usuario}" if dominio and usuario else usuario
+
+
+def _ruta_drive_obligatoria(datos: dict) -> str:
+    ruta = str(datos.get("ruta_drive", "")).strip()
+    if not ruta:
+        raise ErrorInstalacion(
+            "La carpeta de Google Drive es obligatoria: los respaldos se copian ahi para tenerlos fuera de este "
+            "equipo. Indique una ruta (ej. G:\\Mi unidad\\Nexo)."
+        )
+    return _ruta_valida(ruta, "La ruta de Google Drive")
+
+
+def _probar_ruta_drive(ruta: str) -> str:
+    """Comprueba que se pueda escribir en `ruta` con el usuario que ejecuta el instalador (el mismo con el que
+    correra la tarea de copia): la unidad existe, la carpeta existe o se puede crear, y un archivo de prueba se
+    escribe, se lee y se borra. Solo se crea el ultimo nivel de la ruta: un error de tipeo en una carpeta padre
+    no debe dejar carpetas sobrantes en Google Drive."""
+    carpeta = Path(ruta)
+    if not carpeta.anchor or not Path(carpeta.anchor).exists():
+        raise ErrorInstalacion(
+            f"No existe la unidad {carpeta.anchor or ruta}. Abra Google Drive para escritorio, inicie sesion y "
+            "verifique la letra de unidad (o la ruta de la carpeta sincronizada)."
+        )
+    if not carpeta.exists():
+        if not carpeta.parent.exists():
+            raise ErrorInstalacion(
+                f"No existe la carpeta {carpeta.parent}. Verifique la ruta (mayusculas, tildes y espacios) o "
+                "cree primero esa carpeta en Google Drive."
+            )
+        try:
+            carpeta.mkdir()
+        except OSError as exc:
+            raise ErrorInstalacion(f"No se pudo crear la carpeta {ruta}: {exc.strerror or exc}") from exc
+    elif not carpeta.is_dir():
+        raise ErrorInstalacion(f"{ruta} existe pero no es una carpeta.")
+    archivo = carpeta / f"nexo_prueba_{secrets.token_hex(4)}.tmp"
+    contenido = "Prueba de escritura de Nexo ERP. Se puede borrar."
+    try:
+        archivo.write_text(contenido, encoding="utf-8")
+        if archivo.read_text(encoding="utf-8") != contenido:
+            raise ErrorInstalacion(f"Se escribio un archivo de prueba en {ruta} pero no se pudo leer igual.")
+        archivo.unlink()
+    except OSError as exc:
+        raise ErrorInstalacion(f"No se pudo escribir en {ruta}: {exc.strerror or exc}") from exc
+    return f"La carpeta funciona: se escribio, leyo y borro un archivo de prueba en {ruta}."
+
+
+def cmd_probar_drive(datos: dict) -> str:
+    return _probar_ruta_drive(_ruta_drive_obligatoria(datos))
+
+
+def _programar_copia_drive(carpeta: str, ruta_drive: str, dias: int, directorio_datos: Path) -> str:
+    """Script de PowerShell + tarea programada (cada 30 min, con la sesion del usuario que instala) que copia a
+    `ruta_drive` los respaldos nuevos de `carpeta` y borra de Drive los de mas de `dias` dias."""
+    script = directorio_datos / "copiar_respaldos_drive.ps1"
+    directorio_datos.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        "# Generado por el instalador de Nexo ERP. Copia los respaldos a Google Drive para escritorio.\n"
+        f"$origen = '{carpeta}'\n"
+        f"$destino = '{ruta_drive}'\n"
+        f"$dias = {dias}\n"
+        "$fallos = 0\n"
+        "if (-not (Test-Path -LiteralPath $destino)) {\n"
+        "    New-Item -ItemType Directory -Path $destino -Force -ErrorAction SilentlyContinue | Out-Null\n"
+        "}\n"
+        "if (-not (Test-Path -LiteralPath $destino)) { exit 1 }  # Drive para escritorio no esta iniciado\n"
+        "$ext = '.bak', '.trn'\n"
+        "# Se omiten los archivos de los ultimos 2 minutos: SQL Server puede seguir escribiendolos.\n"
+        "$limite = (Get-Date).AddMinutes(-2)\n"
+        "Get-ChildItem -LiteralPath $origen -File |\n"
+        "    Where-Object { $ext -contains $_.Extension -and $_.LastWriteTime -lt $limite } |\n"
+        "    ForEach-Object {\n"
+        "        $copia = Join-Path $destino $_.Name\n"
+        "        if (-not (Test-Path -LiteralPath $copia)) {\n"
+        "            try { Copy-Item -LiteralPath $_.FullName -Destination $copia -ErrorAction Stop }\n"
+        "            catch { $fallos++ }\n"
+        "        }\n"
+        "    }\n"
+        "$corte = (Get-Date).AddDays(-$dias)\n"
+        "Get-ChildItem -LiteralPath $destino -File |\n"
+        "    Where-Object { $ext -contains $_.Extension -and $_.LastWriteTime -lt $corte } |\n"
+        "    Remove-Item -Force -ErrorAction SilentlyContinue\n"
+        "if ($fallos -gt 0) { exit 1 }\n",
+        encoding="utf-8-sig",
+    )
+    comando = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{script}"'
+    argumentos = ["schtasks", "/Create", "/TN", TAREA_COPIA_DRIVE, "/TR", comando, "/SC", "MINUTE", "/MO", "30", "/F"]
+    usuario = _usuario_windows()
+    if usuario:
+        argumentos += ["/RU", usuario, "/IT"]
+    r = subprocess.run(argumentos, capture_output=True, text=True)
+    if r.returncode != 0:
+        detalle = (r.stderr or r.stdout).strip().splitlines()
+        return (
+            f"No se pudo crear la tarea programada de copia a Google Drive: {detalle[-1] if detalle else r.returncode}"
+        )
+    return ""
+
+
+def cmd_respaldos(datos: dict) -> str:
+    servidor = _servidor_sql(datos)
+    base = str(datos.get("base", "")).strip()
+    if not _IDENTIFICADOR_RE.match(base):
+        raise ErrorInstalacion("El nombre de la base de datos solo admite letras, numeros y guion bajo (3 a 40).")
+    carpeta = _ruta_valida(str(datos.get("carpeta") or CARPETA_RESPALDOS_DEFECTO), "La carpeta de respaldos")
+    ruta_drive = _ruta_drive_obligatoria(datos)
+    if not datos.get("omitir_prueba_drive"):
+        _probar_ruta_drive(ruta_drive)
+    try:
+        dias = int(str(datos.get("dias_retencion") or DIAS_RETENCION_DEFECTO).strip())
+    except ValueError:
+        dias = 0
+    if not 1 <= dias <= 3650:
+        raise ErrorInstalacion("Los dias de retencion de los respaldos deben ser un numero entre 1 y 3650.")
+    alertas = _validar_alertas(datos)
+    comando_alerta = _comando_alerta_fallo(alertas["destinatarios"]) if alertas else None
+    directorio_datos = Path(datos.get("config_destino") or ARCHIVO_CONFIG).parent
+
+    avisos: list[str] = []
+    alertas_listas = False
+    es_local = _es_local(servidor.split(",")[0].split("\\")[0])
+    motor = _motor(
+        servidor,
+        "master",
+        datos.get("usuario_admin", ""),
+        datos.get("clave_admin", ""),
+        bool(datos.get("windows_auth")),
+    )
+    try:
+        with motor.connect() as c:
+            edicion = c.execute(text("SELECT CAST(SERVERPROPERTY('EngineEdition') AS INT)")).scalar()
+            instancia = c.execute(text("SELECT CAST(SERVERPROPERTY('InstanceName') AS NVARCHAR(128))")).scalar()
+        if edicion == _EDICION_EXPRESS:
+            raise ErrorInstalacion(
+                "Esta edicion de SQL Server (Express) no incluye SQL Server Agent, que ejecuta los respaldos "
+                "automaticos. Se necesita SQL Server Standard o superior."
+            )
+        _ejecutar_con_parametros(
+            motor,
+            [
+                ("EXEC master.dbo.xp_create_subdir ?", (carpeta,)),
+                # Sin modelo de recuperacion completo no se pueden respaldar los logs de transacciones.
+                (f"ALTER DATABASE [{base}] SET RECOVERY FULL", ()),
+                # El log solo se puede respaldar despues de un respaldo completo: se hace uno ya.
+                (_comando_respaldo(base, carpeta, "full"), ()),
+                _alta_trabajo(
+                    TRABAJO_COMPLETO,
+                    "Respaldo completo diario de la base de Nexo ERP, y borrado de respaldos antiguos.",
+                    [
+                        ("Respaldo completo", _comando_respaldo(base, carpeta, "full"), "master"),
+                        ("Borrar respaldos antiguos", _comando_limpieza(carpeta, dias), "master"),
+                    ],
+                    {"freq_type": 4, "freq_interval": 1, "active_start_time": 190000},
+                    comando_alerta,
+                ),
+                _alta_trabajo(
+                    TRABAJO_LOG,
+                    "Respaldo del log de transacciones de Nexo ERP cada 30 minutos.",
+                    [("Respaldo de log", _comando_respaldo(base, carpeta, "log"), "master")],
+                    {
+                        "freq_type": 4,
+                        "freq_interval": 1,
+                        "freq_subday_type": 4,
+                        "freq_subday_interval": 30,
+                        "active_start_time": 0,
+                        "active_end_time": 235959,
+                    },
+                    comando_alerta,
+                ),
+                _alta_trabajo(
+                    TRABAJO_MANTENIMIENTO,
+                    "Verificacion de integridad y actualizacion de estadisticas de la base de Nexo ERP (domingos).",
+                    [
+                        ("Verificar integridad", f"DBCC CHECKDB ([{base}]) WITH NO_INFOMSGS;", "master"),
+                        ("Actualizar estadisticas", "EXEC sp_updatestats;", base),
+                    ],
+                    {"freq_type": 8, "freq_interval": 1, "freq_recurrence_factor": 1, "active_start_time": 30000},
+                    comando_alerta,
+                ),
+            ],
+        )
+        if alertas:
+            try:
+                aviso = _configurar_alertas(
+                    motor, alertas, instancia, es_local, {"base": base, "carpeta": carpeta, "dias": dias}
+                )
+            except Exception as exc:
+                aviso = f"No se pudieron configurar las alertas por correo: {_traducir_error(exc)}"
+            if aviso:
+                avisos.append(aviso)
+            else:
+                alertas_listas = True
+    except ErrorInstalacion:
+        raise
+    except Exception as exc:
+        raise ErrorInstalacion(_traducir_error(exc)) from exc
+    finally:
+        motor.dispose()
+
+    if es_local:
+        aviso = _asegurar_agente(instancia)
+        if aviso:
+            avisos.append(aviso)
+    mensajes = [
+        f"Respaldos listos en {carpeta}: completo diario a las 19:00, log cada 30 minutos, "
+        f"se conservan {dias} dias. Trabajos visibles en SSMS > SQL Server Agent > Trabajos."
+    ]
+    if alertas_listas:
+        mensajes.append(
+            f"Alertas por correo si falla un trabajo: {alertas['destinatarios']} (se envio un correo de prueba)."
+        )
+    aviso = _programar_copia_drive(carpeta, ruta_drive, dias, directorio_datos)
+    if aviso:
+        avisos.append(aviso)
+    else:
+        mensajes.append(
+            f"Copia a Google Drive cada 30 minutos hacia {ruta_drive} (requiere Google Drive para escritorio abierto)."
+        )
+    return "\n".join(mensajes + avisos)
+
+
 def cmd_validar_clave(datos: dict) -> str:
     from app.services.auth import validar_password_policy
 
@@ -589,6 +1197,8 @@ COMANDOS = {
     "estacion": cmd_estacion,
     "actualizar": cmd_actualizar,
     "configurar-sql": cmd_configurar_sql,
+    "respaldos": cmd_respaldos,
+    "probar-drive": cmd_probar_drive,
     "validar-clave": cmd_validar_clave,
     "generar-clave": cmd_generar_clave,
 }

@@ -59,6 +59,26 @@ class QueryWorker(QThread):
         self._tarea = tarea
         self._args = args
         self._kwargs = kwargs
+        # Los refrescos automaticos y la busqueda mientras se escribe se marcan `silencioso = True`
+        # antes de start(): no deben encender la barra de carga (ver app/ui/carga.py).
+        self.silencioso = False
+        self._contado = False
+        self.started.connect(self._avisar_inicio)
+        self.finished.connect(self._avisar_fin)
+
+    def _avisar_inicio(self) -> None:
+        if not self.silencioso:
+            from app.ui.carga import GestorActividad
+
+            self._contado = True
+            GestorActividad.instancia().iniciar()
+
+    def _avisar_fin(self) -> None:
+        if self._contado:
+            from app.ui.carga import GestorActividad
+
+            self._contado = False
+            GestorActividad.instancia().terminar()
 
     def emitir_progreso(self, valor: int) -> None:
         """Callback que `tarea` puede invocar para reportar avance (0-100)."""

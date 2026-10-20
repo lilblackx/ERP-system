@@ -32,7 +32,9 @@ from app.db.models import Usuario
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     COLOR_BORDER,
@@ -91,9 +93,11 @@ OPCIONES_RANGO = [
 ]
 
 
-class TasasPanel(QWidget):
+class TasasPanel(MixinPermisos, QWidget):
     """Panel principal del módulo Tasas de Cambio: tasa vigente + registrar una nueva +
     histórico exportable."""
+
+    recurso_permisos = "tasas"
 
     # TasaTicker (franja superior del shell, app/ui/tasa_ticker.py) vive fuera de este
     # panel y tiene su propio timer de refresco cada 5 minutos -- sin esta señal, registrar
@@ -244,7 +248,8 @@ class TasasPanel(QWidget):
         h.addWidget(lbl_rango)
         h.addWidget(self.rango_combo)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_registrar)
+        if self._puede("crear"):
+            h.addWidget(self.btn_registrar)
         h.addWidget(self.btn_exportar)
         return w
 
@@ -399,6 +404,8 @@ class TasasPanel(QWidget):
         return respuesta == QMessageBox.StandardButton.Yes
 
     def registrar_tasa(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar tasas."):
+            return
         dialogo = TasaRegistroDialog(parent=self)
         if not dialogo.exec():
             return
@@ -441,7 +448,7 @@ class TasasPanel(QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_tasas_excel,
@@ -459,7 +466,7 @@ class TasasPanel(QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_tasas_pdf,
@@ -471,11 +478,11 @@ class TasasPanel(QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} tasas a:\n{ruta}")
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar el histórico de tasas: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")

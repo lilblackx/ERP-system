@@ -538,3 +538,25 @@ def test_establecer_precio_bloquea_con_updlock_rowlock_concurrente(db_session, t
     assert precio_final.precio_venta == Decimal("20.00")
     total = db_session.query(ProductoPrecio).filter(ProductoPrecio.id_producto == id_producto).count()
     assert total == 1
+
+
+# --- Articulo BCV (migrations/0079) --------------------------------------------------
+
+
+def test_producto_nuevo_no_es_articulo_bcv_por_defecto(db_session):
+    producto = crear_producto(db_session)
+    assert producto.articulo_bcv is False
+
+
+def test_crear_y_actualizar_articulo_bcv(db_session):
+    admin = crear_usuario_admin(db_session)
+    categoria = crear_categoria(db_session)
+    producto = ProductoService.crear(
+        db_session,
+        **_datos_producto(categoria.id_categoria, creado_por=admin.id_usuario, articulo_bcv=True),
+    )
+    assert producto.articulo_bcv is True
+
+    ProductoService.actualizar(db_session, producto.id_producto, id_usuario=admin.id_usuario, articulo_bcv=False)
+    db_session.refresh(producto)
+    assert producto.articulo_bcv is False

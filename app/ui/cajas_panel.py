@@ -39,6 +39,7 @@ from app.ui.caja_cierre_dialog import CajaCierreDialog
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pantalla import ajustar_tamano
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -412,7 +413,9 @@ class HistorialMovimientosDialog(QDialog):
             MessageBox.critical(self, "Error", f"No se pudo cargar el historial: {str(e)}")
 
 
-class CajasPanel(QWidget):
+class CajasPanel(MixinPermisos, QWidget):
+    recurso_permisos = "cajas"
+
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
         self.session_factory = session_factory
@@ -460,7 +463,8 @@ class CajasPanel(QWidget):
         btn_nueva_caja.setIcon(qta.icon("fa5s.plus", color="white"))
         btn_nueva_caja.setStyleSheet(BUTTON_PRIMARY_QSS)
         btn_nueva_caja.clicked.connect(self.crear_caja)
-        h.addWidget(btn_nueva_caja)
+        if self._es_admin():
+            h.addWidget(btn_nueva_caja)
 
         btn_refrescar = QPushButton("Actualizar")
         btn_refrescar.setIcon(qta.icon("fa5s.sync-alt", color="white"))
@@ -523,12 +527,16 @@ class CajasPanel(QWidget):
         btn_cerrar.setStyleSheet(BUTTON_PRIMARY_QSS)
         btn_cerrar.clicked.connect(self.cerrar_turno_seleccionado)
 
-        h.addWidget(self.btn_movimiento)
+        if self._puede("crear"):
+            h.addWidget(self.btn_movimiento)
         h.addWidget(btn_historial)
-        h.addWidget(btn_cerrar)
+        if self._es_admin():
+            h.addWidget(btn_cerrar)
         return w
 
     def crear_caja(self) -> None:
+        if not self._exigir_admin("Solo un administrador puede crear cajas."):
+            return
         dialogo = CajaFormDialog(parent=self)
         if not dialogo.exec():
             return
@@ -620,6 +628,8 @@ class CajasPanel(QWidget):
         return int(item.text())
 
     def cerrar_turno_seleccionado(self) -> None:
+        if not self._exigir_admin("Solo un administrador puede cerrar el turno de una caja."):
+            return
         id_caja = self._fila_seleccionada_id()
         if id_caja is None:
             return
@@ -663,6 +673,8 @@ class CajasPanel(QWidget):
             session.close()
 
     def registrar_movimiento_manual(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar movimientos de caja."):
+            return
         id_caja = self._fila_seleccionada_id()
         if id_caja is None:
             return

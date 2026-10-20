@@ -119,6 +119,7 @@ def test_precargar_setea_valores_desde_producto(qtbot):
         cantidad_minima=Decimal("10.00"),
         id_categoria=None,
         fecha_vencimiento=None,
+        articulo_bcv=False,
     )
     dialogo._precargar(producto)
     assert dialogo.costo_input.get_value() == Decimal("8.50")
@@ -148,3 +149,36 @@ def test_get_precio_venta_devuelve_decimal(qtbot):
     qtbot.addWidget(dialogo)
     _escribir_y_perder_foco(qtbot, dialogo.precio_venta_input, "99,90")
     assert dialogo.get_precio_venta() == Decimal("99.90")
+
+
+# --- Articulo BCV (migrations/0079) --------------------------------------------------
+
+
+def test_articulo_bcv_arranca_desmarcado_y_sale_en_get_data(qtbot):
+    dialogo = ProductoFormDialog(_mock_session(), id_usuario=1)
+    qtbot.addWidget(dialogo)
+    assert dialogo.articulo_bcv_check.isChecked() is False
+    assert dialogo.get_data()["articulo_bcv"] is False
+
+    dialogo.articulo_bcv_check.setChecked(True)
+    assert dialogo.get_data()["articulo_bcv"] is True
+
+
+def test_precargar_refleja_si_es_articulo_bcv(qtbot):
+    dialogo = ProductoFormDialog(_mock_session(precio_existente=Decimal("5")), id_usuario=1)
+    qtbot.addWidget(dialogo)
+    producto = SimpleNamespace(
+        id_producto=7,
+        cod_producto="PROD-001",
+        nombre_producto="Articulo con precio BCV",
+        descripcion_producto=None,
+        costo_producto=Decimal("1.00"),
+        cantidad_unidad=Decimal("10.00"),
+        cantidad_caja=Decimal("1.00"),
+        cantidad_minima=Decimal("0.00"),
+        id_categoria=None,
+        fecha_vencimiento=None,
+        articulo_bcv=True,
+    )
+    dialogo._precargar(producto)
+    assert dialogo.articulo_bcv_check.isChecked() is True

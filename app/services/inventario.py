@@ -100,6 +100,7 @@ class ProductoService:
             "cantidad_caja",
             "cantidad_minima",
             "costo_producto",
+            "articulo_bcv",
         ]
         valores_anteriores = {}
         for campo in campos_auditoria:

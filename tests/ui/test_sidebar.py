@@ -81,3 +81,13 @@ def test_el_texto_seleccionado_usa_el_azul_de_la_app_y_no_el_acento_de_windows()
 
     assert paleta.color(QPalette.ColorRole.Highlight) == QColor(COLOR_PRIMARY_LIGHT)
     assert paleta.color(QPalette.ColorRole.HighlightedText) == QColor("white")
+
+
+# ── Animacion de colapso: respeta el interruptor de animaciones ─────────────
+
+
+def test_colapsar_sin_animaciones_cambia_el_ancho_de_inmediato(qtbot):
+    sidebar = _crear_sidebar(qtbot)
+    sidebar.toggle()
+    assert sidebar.minimumWidth() == SIDEBAR_COLLAPSED
+    assert sidebar.maximumWidth() == SIDEBAR_COLLAPSED

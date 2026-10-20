@@ -47,10 +47,12 @@ from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -526,7 +528,7 @@ class PagoCobroDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
-        self.btn_cobrar.setEnabled(False)
+        ocupar_boton(self.btn_cobrar)
         try:
             metodo = self.metodo_combo.currentData()
             monto_moneda_origen = None
@@ -593,7 +595,7 @@ class PagoCobroDialog(QDialog):
             MessageBox.critical(self, "Error", f"No se pudo registrar el cobro: {str(e)}")
             return
         finally:
-            self.btn_cobrar.setEnabled(True)
+            liberar_boton(self.btn_cobrar)
 
         self.accept()
 
@@ -962,7 +964,7 @@ class AbonoGeneralDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
-        self.btn_abonar.setEnabled(False)
+        ocupar_boton(self.btn_abonar)
         try:
             metodo = self.metodo_combo.currentData()
             tasa_cambio = None
@@ -1039,7 +1041,7 @@ class AbonoGeneralDialog(QDialog):
             MessageBox.critical(self, "Error", f"No se pudo aplicar el abono general: {str(e)}")
             return
         finally:
-            self.btn_abonar.setEnabled(True)
+            liberar_boton(self.btn_abonar)
 
         self.accept()
 
@@ -1082,8 +1084,10 @@ class AbonoGeneralDialog(QDialog):
         return "\n".join(lines)
 
 
-class DetalleClienteDialog(QDialog):
+class DetalleClienteDialog(MixinPermisos, QDialog):
     """Diálogo para mostrar el detalle de facturas de un cliente y permitir cobros individuales."""
+
+    recurso_permisos = "pagos"
 
     def __init__(
         self,
@@ -1204,7 +1208,8 @@ class DetalleClienteDialog(QDialog):
         btn_cerrar.setAutoDefault(False)
         btn_cerrar.clicked.connect(self.accept)
 
-        footer.addWidget(btn_abono_general)
+        if self._puede("crear"):
+            footer.addWidget(btn_abono_general)
         footer.addWidget(btn_cerrar)
 
         root.addLayout(footer)
@@ -1386,6 +1391,8 @@ class DetalleClienteDialog(QDialog):
 
     def _cobrar_cuenta(self, id_cuenta: int) -> None:
         """Abre el diálogo de cobro para una cuenta específica."""
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar cobros."):
+            return
         try:
             cuenta = self.session.get(CuentaPorCobrar, id_cuenta)
             if cuenta is None:
@@ -1433,6 +1440,8 @@ class DetalleClienteDialog(QDialog):
 
     def _aplicar_abono_general(self) -> None:
         """Abre el diálogo de abono general para el cliente."""
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar cobros."):
+            return
         try:
             dialogo = AbonoGeneralDialog(
                 self.session,

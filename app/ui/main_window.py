@@ -37,6 +37,7 @@ from app.services.usuarios import UsuarioService
 from app.ui.auditoria_panel import AuditoriaPanel
 from app.ui.bancos_panel import BancosPanel
 from app.ui.cajas_panel import CajasPanel
+from app.ui.carga import BarraCarga
 from app.ui.clientes_panel import ClientesPanel
 from app.ui.comisiones_panel import ComisionesPanel
 from app.ui.compras import ComprasView
@@ -351,6 +352,11 @@ class MainWindow(QMainWindow):
         self.topbar.accion_solicitada.connect(self._ejecutar_accion)
         right_v.addWidget(self.topbar)
 
+        # Barra fina de actividad en segundo plano (ver app/ui/carga.py): ocupa siempre su alto, asi
+        # que mostrarla u ocultarla no mueve nada.
+        self.barra_carga = BarraCarga()
+        right_v.addWidget(self.barra_carga)
+
         self.stack = QStackedWidget()
         right_v.addWidget(self.stack)
 
@@ -403,6 +409,7 @@ class MainWindow(QMainWindow):
         self._worker_notificaciones = QueryWorker(
             SessionLocal, lambda session: NotificacionesService.obtener(session, id_usuario)
         )
+        self._worker_notificaciones.silencioso = True  # refresco automatico: no enciende la barra de carga
         self._worker_notificaciones.resultado.connect(self.topbar.set_notificaciones)
         # La campana es informativa: si falla (QueryWorker ya lo registra en el log) queda
         # como estaba, sin interrumpir al usuario con un diálogo.

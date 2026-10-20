@@ -265,6 +265,9 @@ class Inventario(Base):
     # 0.00 = sin minimo configurado para ese producto (no aparece en el reporte).
     cantidad_minima: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), server_default="0.00")
     costo_producto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
+    # Articulo BCV (migrations/0079): al facturar con porcentaje BCV este producto mantiene su precio
+    # guardado, sin el porcentaje. False = el porcentaje BCV de la factura le aplica como a los demas.
+    articulo_bcv: Mapped[bool] = mapped_column(Boolean, server_default="0", default=False)
     fecha_registro: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     fecha_vencimiento: Mapped[datetime.date | None] = mapped_column(Date)
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))

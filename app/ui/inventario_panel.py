@@ -37,7 +37,9 @@ from app.services.categorias import CategoriaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.producto_auditoria_dialog import ProductoAuditoriaDialog
 from app.ui.producto_form_dialog import ProductoFormDialog
 from app.ui.styles import (
@@ -149,9 +151,11 @@ def _tarea_exportar_productos_pdf(
     return ruta, len(filas)
 
 
-class InventarioPanel(QWidget):
+class InventarioPanel(MixinPermisos, QWidget):
     """Panel principal del módulo Inventario: catálogo de productos con búsqueda,
     filtro por categoría, paginación, alta/edición (con precio de venta) y export."""
+
+    recurso_permisos = "inventario"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -160,6 +164,12 @@ class InventarioPanel(QWidget):
         self.pagina_actual = 1
         self.total_paginas = 1
         self.es_vendedor = usuario.id_vendedor_usuario is not None
+        # Que botones de escritura se muestran depende del permiso real del rol, no solo de si el
+        # usuario es vendedor: un CAJERO ve el catalogo (inventario:ver) pero no puede crear,
+        # editar ni cambiar el estado de productos.
+        self.puede_crear = self._puede("crear")
+        self.puede_editar = self._puede("editar")
+        self.puede_cambiar_estado = self._puede("eliminar")
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self._cargar_categorias_filtro)
@@ -290,9 +300,10 @@ class InventarioPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        # Solo mostrar botones de creación y auditoría si no es vendedor
+        # Creación y auditoría: no para vendedores; crear, además, solo con inventario:crear
         if not self.es_vendedor:
-            h.addWidget(self.btn_nuevo)
+            if self.puede_crear:
+                h.addWidget(self.btn_nuevo)
             h.addWidget(self.btn_auditoria)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_refresh)
@@ -360,19 +371,19 @@ class InventarioPanel(QWidget):
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
-        # Solo mostrar botones de edición y cambio de estado si no es vendedor
-        if not self.es_vendedor:
-            btn_editar = QPushButton("Editar seleccionado")
-            btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
-            btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
-            btn_editar.clicked.connect(self.editar_producto)
-            h.addWidget(btn_editar)
-
-            btn_estado = QPushButton("Cambiar estado")
-            btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
-            btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
-            btn_estado.clicked.connect(self.cambiar_estado_producto_seleccionado)
-            h.addWidget(btn_estado)
+        # Edición y cambio de estado: no para vendedores y solo con el permiso correspondiente
+        if not self.es_vendedor and self.puede_editar:
+            self.btn_editar = QPushButton("Editar seleccionado")
+            self.btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
+            self.btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
+            self.btn_editar.clicked.connect(self.editar_producto)
+            h.addWidget(self.btn_editar)
+        if not self.es_vendedor and self.puede_cambiar_estado:
+            self.btn_estado = QPushButton("Cambiar estado")
+            self.btn_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
+            self.btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
+            self.btn_estado.clicked.connect(self.cambiar_estado_producto_seleccionado)
+            h.addWidget(self.btn_estado)
         return w
 
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
@@ -583,6 +594,8 @@ class InventarioPanel(QWidget):
         return int(item.text())
 
     def nuevo_producto(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear productos."):
+            return
         session = self.session_factory()
         try:
             dialogo = ProductoFormDialog(session, self.usuario.id_usuario, parent=self)
@@ -608,6 +621,9 @@ class InventarioPanel(QWidget):
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Error de validación", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para crear productos.")
         finally:
             session.close()
 
@@ -624,6 +640,8 @@ class InventarioPanel(QWidget):
             session.close()
 
     def editar_producto(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para editar productos."):
+            return
         id_producto = self._fila_seleccionada_id()
         if id_producto is None:
             return
@@ -664,6 +682,8 @@ class InventarioPanel(QWidget):
             session.close()
 
     def cambiar_estado_producto_seleccionado(self) -> None:
+        if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de productos."):
+            return
         id_producto = self._fila_seleccionada_id()
         if id_producto is None:
             return
@@ -715,7 +735,7 @@ class InventarioPanel(QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_productos_excel,
@@ -733,7 +753,7 @@ class InventarioPanel(QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_productos_pdf,
@@ -745,7 +765,7 @@ class InventarioPanel(QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(
             self,
@@ -754,6 +774,6 @@ class InventarioPanel(QWidget):
         )
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar el catálogo de inventario: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")

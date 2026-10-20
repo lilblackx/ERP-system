@@ -7,6 +7,7 @@ expone `licencia_panel` para que MainWindow conecte su señal `estado_cambiado`.
 from PySide6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
 from app.db.models import Usuario
+from app.ui.config_apariencia_panel import ConfigAparienciaPanel
 from app.ui.config_empresa_panel import ConfigEmpresaPanel
 from app.ui.config_licencia_panel import LicenciaPanel
 from app.ui.config_smtp_panel import ConfigSmtpPanel
@@ -28,6 +29,8 @@ class ConfiguracionPanel(QWidget):
         self.tabs.addTab(self.empresa_panel, "Empresa")
         self.tabs.addTab(self.smtp_panel, "Correo")
         self.tabs.addTab(self.licencia_panel, "Licencia")
+        # Al final: ACCIONES_CONFIG (busqueda global) apunta a las pestanas anteriores por indice.
+        self.tabs.addTab(ConfigAparienciaPanel(), "Apariencia")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(40, 20, 40, 0)

@@ -63,6 +63,7 @@ from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_PRIMARY_QSS,
@@ -1417,10 +1418,12 @@ class CompraDesdeOCFormDialog(QDialog):
 # =============================================================================
 
 
-class ComprasView(QWidget):
+class ComprasView(MixinPermisos, QWidget):
     """Modulo unico de Compras: cubre el flujo OC -> NR -> Compra -> Pago completo en 4
     pestanas. Cada pestana mantiene su propia paginacion, igual que un panel independiente
     -- son 4 listados distintos, no una sola tabla con filtros."""
+
+    recurso_permisos = "compras"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -1565,7 +1568,7 @@ class ComprasView(QWidget):
             ("Anulada", "ANULADA"),
         ]
         toolbar, self.oc_buscar_input, self.oc_estado_combo = self._make_toolbar(
-            estados, self._buscar_ocs_desde_inicio, self.nueva_oc, "Nueva ODC"
+            estados, self._buscar_ocs_desde_inicio, self.nueva_oc if self._puede("crear_oc") else None, "Nueva ODC"
         )
 
         # Agregar botón de exportación a la toolbar
@@ -1612,7 +1615,7 @@ class ComprasView(QWidget):
         footer, self.lbl_pagina_oc, self.btn_oc_anterior, self.btn_oc_siguiente = self._make_footer(
             lambda: self._pagina_anterior("oc"),
             lambda: self._pagina_siguiente("oc"),
-            [btn_ver_detalle, btn_enmendar],
+            [btn_ver_detalle, *([btn_enmendar] if self._puede("crear_enmienda_oc") else [])],
         )
         layout.addWidget(footer)
         return page
@@ -1687,6 +1690,8 @@ class ComprasView(QWidget):
             session.close()
 
     def nueva_oc(self) -> None:
+        if not self._exigir_permiso("crear_oc", "No tienes permiso para crear órdenes de compra."):
+            return
         session = self.session_factory()
         try:
             dialogo = OrdenCompraFormDialog(session, self.usuario.id_usuario, parent=self)
@@ -1703,6 +1708,8 @@ class ComprasView(QWidget):
             session.close()
 
     def enmendar_oc_seleccionada(self) -> None:
+        if not self._exigir_permiso("crear_enmienda_oc", "No tienes permiso para enmendar órdenes de compra."):
+            return
         id_oc = self._fila_seleccionada_id(self.tabla_oc)
         if id_oc is None:
             return
@@ -1809,7 +1816,7 @@ class ComprasView(QWidget):
         footer, self.lbl_pagina_nr, self.btn_nr_anterior, self.btn_nr_siguiente = self._make_footer(
             lambda: self._pagina_anterior("nr"),
             lambda: self._pagina_siguiente("nr"),
-            [btn_detalle_nr, btn_rechazar],
+            [btn_detalle_nr, *([btn_rechazar] if self._puede("crear_nota_devolucion") else [])],
         )
         layout.addWidget(footer)
         return page
@@ -1882,6 +1889,8 @@ class ComprasView(QWidget):
             session.close()
 
     def nueva_recepcion(self) -> None:
+        if not self._exigir_permiso("recibir_mercancia", "No tienes permiso para registrar recepciones de mercancía."):
+            return
         session = self.session_factory()
         try:
             resultado = CompraOCService.listar_ocs(session, por_pagina=200, id_usuario=self.usuario.id_usuario)
@@ -1922,6 +1931,8 @@ class ComprasView(QWidget):
             session.close()
 
     def rechazar_nr_seleccionada(self) -> None:
+        if not self._exigir_permiso("crear_nota_devolucion", "No tienes permiso para registrar devoluciones."):
+            return
         id_nr = self._fila_seleccionada_id(self.tabla_nr)
         if id_nr is None:
             return
@@ -1985,7 +1996,7 @@ class ComprasView(QWidget):
                 ("Anulada", "ANULADA"),
             ],
             self._buscar_compras_desde_inicio,
-            self.nueva_factura_desde_oc,
+            self.nueva_factura_desde_oc if self._puede("crear") else None,
             "Nueva Factura",
         )
 
@@ -2111,6 +2122,8 @@ class ComprasView(QWidget):
             session.close()
 
     def nueva_factura_desde_oc(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar facturas de compra."):
+            return
         session = self.session_factory()
         try:
             resultado = CompraOCService.listar_ocs(session, por_pagina=200, id_usuario=self.usuario.id_usuario)

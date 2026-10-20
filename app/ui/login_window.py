@@ -23,6 +23,7 @@ from app.db.session import SessionLocal
 from app.rutas import ARCHIVO_LOGO, NOMBRE_APP
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.recuperacion_acceso import TIPO_DESBLOQUEO, TIPO_RECUPERAR_CLAVE
+from app.ui.animaciones import marcar_error, sacudir
 from app.ui.message_box import MessageBox
 from app.ui.pantalla import ajustar_tamano
 from app.ui.solicitar_codigo_dialog import SolicitarCodigoDialog
@@ -230,7 +231,15 @@ class LoginWindow(QDialog):
             QLineEdit:focus {{
                 border-bottom: 2px solid {COLOR_PRIMARY};
             }}
+            QLineEdit[error="true"] {{
+                border-bottom: 2px solid {COLOR_DANGER};
+            }}
         """
+
+    def _avisar_rechazo(self, campo: QLineEdit) -> None:
+        """La ventana se sacude y el campo queda en rojo un momento: "no se pudo entrar", sin leer el texto."""
+        sacudir(self)
+        marcar_error(campo)
 
     # ── Lógica de autenticación ───────────────────────────────────────────
 
@@ -248,6 +257,7 @@ class LoginWindow(QDialog):
 
         if not nombre_usuario or not clave:
             self._mostrar_mensaje("Ingrese usuario y contraseña", "fa5s.exclamation-triangle")
+            self._avisar_rechazo(self.usuario_input if not nombre_usuario else self.clave_input)
             return
 
         self.btn_login.setText("Verificando…")
@@ -260,6 +270,7 @@ class LoginWindow(QDialog):
             self._mostrar_mensaje("Cuenta bloqueada por intentos fallidos", "fa5s.exclamation-triangle")
             self.clave_input.clear()
             self.clave_input.setFocus()
+            self._avisar_rechazo(self.clave_input)
             dialogo = SolicitarCodigoDialog(SessionLocal, TIPO_DESBLOQUEO, nombre_usuario, parent=self)
             dialogo.exec()
             return
@@ -280,6 +291,7 @@ class LoginWindow(QDialog):
             self._mostrar_mensaje("Usuario o contraseña incorrectos", "fa5s.times-circle")
             self.clave_input.clear()
             self.clave_input.setFocus()
+            self._avisar_rechazo(self.clave_input)
             return
 
         self.usuario_autenticado = usuario

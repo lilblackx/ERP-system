@@ -47,6 +47,7 @@ from app.ui.styles import (
     aplicar_sombra,
     color_con_alpha,
 )
+from app.ui.toast import Toast, es_confirmacion_de_exito
 
 # icono + color semantico por tipo -- "information" en esta app siempre se usa para
 # confirmar una operacion ya completada ("Exportación completa", "Cliente creado"), never
@@ -207,6 +208,12 @@ class MessageBox(QDialog):
 
     @staticmethod
     def information(parent, titulo: str, texto: str) -> None:
+        # "information" confirma una operacion ya hecha ("Factura emitida", "Exportación completa"): no hace
+        # falta un clic para seguir, asi que va como aviso breve. Lo que si pide lectura ("Selección
+        # requerida", "Sin datos") sigue siendo el dialogo modal de siempre.
+        if es_confirmacion_de_exito(titulo, texto):
+            Toast.mostrar(parent, titulo, texto)
+            return
         MessageBox(parent, titulo, texto, tipo="information").exec()
 
     @staticmethod

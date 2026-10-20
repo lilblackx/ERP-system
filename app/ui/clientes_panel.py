@@ -37,9 +37,11 @@ from app.services.clientes import (
 )
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.historial_cliente_window import HistorialClienteWindow
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -156,12 +158,14 @@ def _tarea_exportar_clientes_pdf(
     return ruta, len(filas)
 
 
-class ClientesPanel(QWidget):
+class ClientesPanel(MixinPermisos, QWidget):
     """
     Panel principal del módulo Clientes.
     Encapsula la barra de herramientas y la tabla de datos en un solo widget
     para ser insertado directamente en el área de contenido del MainWindow.
     """
+
+    recurso_permisos = "clientes"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -292,7 +296,8 @@ class ClientesPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_nuevo)
+        if self._puede("crear"):
+            h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -383,8 +388,10 @@ class ClientesPanel(QWidget):
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
-        h.addWidget(btn_editar)
-        h.addWidget(btn_estado)
+        if self._puede("editar"):
+            h.addWidget(btn_editar)
+        if self._puede("eliminar"):
+            h.addWidget(btn_estado)
         h.addWidget(btn_historial)
         return w
 
@@ -504,7 +511,7 @@ class ClientesPanel(QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_clientes_excel,
@@ -533,7 +540,7 @@ class ClientesPanel(QWidget):
         # ID: pequeño, Nombre: grande, Identificación: medio, Email: grande, etc.
         col_widths = [0.5, 2.5, 1.2, 2.0, 1.2, 1.5, 1.5, 1.0, 0.8, 1.0]
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_clientes_pdf,
@@ -547,7 +554,7 @@ class ClientesPanel(QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(
             self,
@@ -556,7 +563,7 @@ class ClientesPanel(QWidget):
         )
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar clientes: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
 
@@ -572,6 +579,8 @@ class ClientesPanel(QWidget):
         return int(item.text())
 
     def nuevo_cliente(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear clientes."):
+            return
         session = self.session_factory()
         try:
             dialogo = ClienteFormDialog(session, id_usuario=self.usuario.id_usuario, parent=self)
@@ -603,6 +612,8 @@ class ClientesPanel(QWidget):
             session.close()
 
     def editar_cliente(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para editar clientes."):
+            return
         id_cliente = self._fila_seleccionada_id()
         if id_cliente is None:
             return
@@ -640,6 +651,8 @@ class ClientesPanel(QWidget):
             session.close()
 
     def cambiar_estado_cliente_seleccionado(self) -> None:
+        if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de clientes."):
+            return
         id_cliente = self._fila_seleccionada_id()
         if id_cliente is None:
             return

@@ -35,7 +35,9 @@ from app.db.models import Proveedor, Usuario
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.proveedor_form_dialog import ProveedorFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -138,10 +140,12 @@ def _tarea_exportar_proveedores_pdf(
     return ruta, len(filas)
 
 
-class ProveedoresPanel(QWidget):
+class ProveedoresPanel(MixinPermisos, QWidget):
     """Panel principal del módulo Proveedores: listado con búsqueda, alta/edición
     y activar/desactivar -- lo mínimo necesario para poder registrar compras
     (OrdenCompraFormDialog exige un proveedor activo, ver app/ui/compras.py)."""
+
+    recurso_permisos = "proveedores"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -231,7 +235,8 @@ class ProveedoresPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_nuevo)
+        if self._puede("crear"):
+            h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -304,8 +309,10 @@ class ProveedoresPanel(QWidget):
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
-        h.addWidget(btn_editar)
-        h.addWidget(btn_estado)
+        if self._puede("editar"):
+            h.addWidget(btn_editar)
+        if self._puede("eliminar"):
+            h.addWidget(btn_estado)
         return w
 
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
@@ -400,7 +407,7 @@ class ProveedoresPanel(QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_proveedores_excel,
@@ -425,7 +432,7 @@ class ProveedoresPanel(QWidget):
         }
         col_widths = [0.5, 1.2, 2.5, 1.5, 1.3, 2.0, 1.0, 1.0]
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_proveedores_pdf,
@@ -439,7 +446,7 @@ class ProveedoresPanel(QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(
             self,
@@ -448,7 +455,7 @@ class ProveedoresPanel(QWidget):
         )
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar proveedores: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar la lista de proveedores.")
 
@@ -464,6 +471,8 @@ class ProveedoresPanel(QWidget):
         return int(item.text())
 
     def nuevo_proveedor(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear proveedores."):
+            return
         session = self.session_factory()
         try:
             dialogo = ProveedorFormDialog(session, parent=self)
@@ -493,6 +502,8 @@ class ProveedoresPanel(QWidget):
             session.close()
 
     def editar_proveedor(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para editar proveedores."):
+            return
         id_proveedor = self._fila_seleccionada_id()
         if id_proveedor is None:
             return
@@ -530,6 +541,8 @@ class ProveedoresPanel(QWidget):
             session.close()
 
     def cambiar_estado_proveedor_seleccionado(self) -> None:
+        if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de proveedores."):
+            return
         id_proveedor = self._fila_seleccionada_id()
         if id_proveedor is None:
             return

@@ -406,3 +406,21 @@ def test_los_tipos_nuevos_tienen_icono_propio():
         bg.TIPO_CUENTA_BANCARIA, bg.TIPO_CAJA, bg.TIPO_USUARIO, bg.TIPO_ACCION,
     ]  # fmt: skip
     assert all(t in topbar_mod._ICONO_TIPO for t in tipos)
+
+
+# ── Latido del contador: solo cuando llega una alerta nueva ─────────────────
+
+
+def test_el_contador_late_una_vez_solo_cuando_sube(qtbot, monkeypatch):
+    latidos = []
+    monkeypatch.setattr(topbar_mod, "rebote", lambda widget: latidos.append(widget))
+    barra = _crear_topbar(qtbot, monkeypatch)
+
+    barra.set_notificaciones([_ALTA])  # 0 -> 1: llego una alerta nueva
+    assert latidos == [barra.lbl_contador]
+    barra.set_notificaciones([_ALTA])  # el refresco automatico trae lo mismo: sin latido
+    assert len(latidos) == 1
+    barra.set_notificaciones([_ALTA, _MEDIA])  # 1 -> 2
+    assert len(latidos) == 2
+    barra.set_notificaciones([_MEDIA])  # baja: sin latido
+    assert len(latidos) == 2

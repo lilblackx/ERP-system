@@ -76,6 +76,45 @@ aplicado. Si el cambio no se puede deshacer de forma segura con datos ya migrado
 se borro una columna con datos), la unica via de vuelta atras es un restore desde backup
 a un punto anterior a esa migracion.
 
+## Respaldos automaticos en el servidor instalado
+
+El instalador (modo Servidor, instalacion nueva) puede dejar los respaldos configurados
+(`respaldos` en `app/instalacion.py`; pagina "Respaldos automaticos" del asistente o los
+parametros `/CarpetaRespaldos`, `/RutaDrive`, `/DiasRetencion`, `/Respaldos=0`):
+
+- Trabajos de **SQL Server Agent** (SSMS > SQL Server Agent > Trabajos), no un "Plan de
+  mantenimiento" de SSMS: SQL Server no permite crear esos por script. Necesita SQL Server
+  Standard o superior (Express no trae Agent; el instalador avisa y sigue).
+  - `Nexo ERP - Respaldo completo`: diario 19:00; despues borra los `.bak`/`.trn` con mas de N
+    dias (N = 3 por defecto, igual para completos y de log, en local y en Drive).
+  - `Nexo ERP - Respaldo de log de transacciones`: cada 30 min (la base queda en recovery FULL y
+    el instalador toma un respaldo completo inicial, sin el los respaldos de log fallan).
+  - `Nexo ERP - Mantenimiento semanal`: domingo 03:00, `DBCC CHECKDB` + `sp_updatestats`.
+- Copia a Google Drive: tarea programada de Windows `Nexo ERP - Copia de respaldos a Google
+  Drive` (cada 30 min, script `copiar_respaldos_drive.ps1` en la carpeta de datos) que copia los
+  respaldos nuevos a la carpeta de **Google Drive para escritorio** indicada y borra de Drive los
+  de mas de N dias. Corre con la sesion del usuario que instalo (SQL Agent no ve esa unidad), asi
+  que Drive para escritorio debe estar abierto con la sesion iniciada. La carpeta de Drive es
+  **obligatoria** cuando se configuran respaldos. El asistente tiene el boton "Probar carpeta" (y
+  no deja avanzar si falla); la prueba (`probar-drive`) comprueba que exista la unidad y la carpeta
+  padre, crea el ultimo nivel si falta y escribe, lee y borra un archivo de prueba, con el usuario
+  que instala. En modo silencioso la misma prueba corre antes de tocar SQL Server;
+  `/SinPruebaDrive=1` la omite (p. ej. si Drive para escritorio aun no tiene la sesion iniciada).
+- Alertas por correo (pagina "Alertas por correo" del asistente; `/AlertaCorreos`,
+  `/SmtpUsuario`, `/SmtpClave`, `/SmtpHost`, `/SmtpPuerto`): cada trabajo termina con el paso
+  `Enviar alerta por correo`, al que va cualquier paso que falle. Manda con `sp_send_dbmail` un
+  correo HTML (trabajo, paso, fecha y detalle del error) con **importancia alta**, a los correos
+  indicados. No se usan las notificaciones de operador de SQL Agent porque no permiten cambiar el
+  formato ni la importancia. Se crea Database Mail (cuenta y perfil `Nexo ERP - Alertas`, asignado a
+  SQL Agent, que se reinicia) y se envia un correo de prueba, tambien HTML e importancia alta. La
+  contrasena SMTP queda solo en el SQL Server del cliente (en Gmail: contrasena de aplicacion).
+  Database Mail no existe en SQL Server para Linux: en el Docker de desarrollo solo se verifica la
+  estructura de los trabajos; el envio real se prueba en SQL Server para Windows.
+- Las actualizaciones del instalador no tocan los trabajos ni preguntan por respaldos. Para
+  configurarlos en un servidor ya instalado, o recrearlos (el comando borra y vuelve a crear los
+  tres trabajos), ejecutar `Nexo-Herramientas.exe respaldos --entrada datos.json --salida r.txt`
+  con el JSON de `ConfigurarRespaldos` en `packaging/instalador.iss`.
+
 ## Que no cubre esta guia
 
 - Backup automatizado corriendo dentro del proyecto (cron/servicio) — no hay

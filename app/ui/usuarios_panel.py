@@ -32,6 +32,7 @@ from app.db.models import Usuario
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.roles_permisos_panel import RolesPermisosPanel
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -60,8 +61,10 @@ COLS_VISIBLES = ["ID", "USUARIO", "NOMBRE", "ROL", "ESTADO"]
 COL_ID_INTERNO = 0  # oculto
 
 
-class UsuariosPanel(QWidget):
+class UsuariosPanel(MixinPermisos, QWidget):
     """Panel principal del módulo Usuarios."""
+
+    recurso_permisos = "usuarios"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -167,7 +170,8 @@ class UsuariosPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_nuevo)
+        if self._puede("crear"):
+            h.addWidget(self.btn_nuevo)
         return w
 
     def _make_table(self) -> QTableWidget:
@@ -225,9 +229,12 @@ class UsuariosPanel(QWidget):
 
         h.addWidget(self.lbl_pagina)
         h.addStretch()
-        h.addWidget(btn_editar)
-        h.addWidget(btn_estado)
-        h.addWidget(btn_desbloquear)
+        if self._puede("editar"):
+            h.addWidget(btn_editar)
+        if self._puede("editar"):
+            h.addWidget(btn_estado)
+        if self._puede("editar"):
+            h.addWidget(btn_desbloquear)
         return w
 
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
@@ -283,6 +290,8 @@ class UsuariosPanel(QWidget):
         return int(self.tabla.item(filas[0].row(), 0).text())
 
     def nuevo_usuario(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear usuarios."):
+            return
         session = self.session_factory()
         try:
             dialogo = UsuarioFormDialog(session, self.usuario.id_usuario, parent=self)
@@ -309,6 +318,8 @@ class UsuariosPanel(QWidget):
             session.close()
 
     def editar_usuario(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para editar usuarios."):
+            return
         id_usuario = self._fila_seleccionada_id()
         if id_usuario is None:
             return
@@ -343,6 +354,8 @@ class UsuariosPanel(QWidget):
             session.close()
 
     def cambiar_estado_usuario_seleccionado(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para cambiar el estado de usuarios."):
+            return
         id_usuario = self._fila_seleccionada_id()
         if id_usuario is None:
             return
@@ -391,6 +404,8 @@ class UsuariosPanel(QWidget):
             session.close()
 
     def desbloquear_usuario_seleccionado(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para desbloquear usuarios."):
+            return
         id_usuario = self._fila_seleccionada_id()
         if id_usuario is None:
             return

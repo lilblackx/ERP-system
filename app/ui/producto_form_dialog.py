@@ -30,6 +30,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHT,
@@ -177,10 +178,12 @@ QPushButton#BtnAddCategoria:hover {{
 """
 
 
-class ProductoFormDialog(QDialog):
+class ProductoFormDialog(MixinPermisos, QDialog):
     """Dialogo horizontal para creacion/edicion de productos, con precio de venta
     (ProductoPrecio) integrado en el mismo formulario -- un producto sin precio no se
     puede vender, tiene sentido capturarlo en el mismo paso que el alta."""
+
+    recurso_permisos = "categorias"
 
     def __init__(
         self,
@@ -306,7 +309,9 @@ class ProductoFormDialog(QDialog):
         btn_nueva_categoria.clicked.connect(self._crear_categoria_rapida)
 
         cat_hbox.addWidget(self.categoria_combo)
-        cat_hbox.addWidget(btn_nueva_categoria)
+        # CategoriaService.crear exige categorias:crear
+        if self._puede("crear"):
+            cat_hbox.addWidget(btn_nueva_categoria)
         grid.addLayout(cat_hbox, 1, 1)
 
         # Nombre
@@ -443,6 +448,17 @@ class ProductoFormDialog(QDialog):
         grid.addWidget(self.lbl_cajas_calculadas, 11, 0)
         grid.addWidget(self.lbl_unidades_sueltas, 11, 1)
 
+        # Articulo BCV (migrations/0079): al facturar con porcentaje BCV se queda con su precio guardado.
+        self.articulo_bcv_check = QCheckBox("Artículo BCV")
+        self.articulo_bcv_check.setToolTip(
+            "Al facturar con porcentaje BCV, este artículo mantiene su precio guardado: "
+            "no se le aplica el porcentaje que sí se aplica a los demás."
+        )
+        lbl_articulo_bcv = QLabel("No se le aplica el porcentaje BCV al facturar")
+        lbl_articulo_bcv.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; margin-top: -4px;")
+        grid.addWidget(self.articulo_bcv_check, 12, 0, 1, 2)
+        grid.addWidget(lbl_articulo_bcv, 13, 0, 1, 2)
+
         layout.addLayout(grid)
         layout.addStretch()
         return card
@@ -500,6 +516,8 @@ class ProductoFormDialog(QDialog):
                 self.categoria_combo.setCurrentIndex(idx)
 
     def _crear_categoria_rapida(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear categorías."):
+            return
         nombre, ok = QInputDialog.getText(self, "Nueva categoría", "Nombre de la categoría:")
         nombre = nombre.strip()
         if not ok or not nombre:
@@ -547,6 +565,7 @@ class ProductoFormDialog(QDialog):
         self.cantidad_unidad_input.set_value(producto.cantidad_unidad or 0)
         self.cantidad_minima_input.set_value(producto.cantidad_minima or 0)
         self.cantidad_caja_input.set_value(producto.cantidad_caja or 0)
+        self.articulo_bcv_check.setChecked(bool(producto.articulo_bcv))
 
         idx_categoria = self.categoria_combo.findData(producto.id_categoria)
         if idx_categoria >= 0:
@@ -618,6 +637,7 @@ class ProductoFormDialog(QDialog):
             "cantidad_unidad": self.cantidad_unidad_input.get_value(),
             "cantidad_minima": self.cantidad_minima_input.get_value(),
             "cantidad_caja": self.cantidad_caja_input.get_value(),
+            "articulo_bcv": self.articulo_bcv_check.isChecked(),
             "fecha_vencimiento": (
                 self.vencimiento_input.date().toPython() if self.tiene_vencimiento_check.isChecked() else None
             ),

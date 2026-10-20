@@ -673,3 +673,41 @@ def test_listar_mis_comisiones_filtra_por_porcentaje_bcv(db_session):
     assert {c.id_comision for c in todas} == {bcv.id_comision, usd.id_comision}
     assert [c.id_comision for c in con_bcv] == [bcv.id_comision]
     assert [c.id_comision for c in sin_bcv] == [usd.id_comision]
+
+
+# --- Articulo BCV: el porcentaje BCV no entra en su base de comision ----------------
+
+
+def _comision_de_una_linea(session, porcentaje_bcv, **datos_producto):
+    """Factura a credito de una linea (precio de lista 1.00 vendido a 2.00) y su comision."""
+    admin = crear_usuario_admin(session)
+    vendedor = crear_vendedor(session)
+    producto = crear_producto(session, cantidad_unidad=50, **datos_producto)
+    crear_precio_producto(session, producto, "1.00")
+    cliente = crear_cliente(session, limite_credito=Decimal("1000.00"))
+    factura = VentaService.emitir_factura(
+        session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "2.00"}],
+        porcentaje_bcv=porcentaje_bcv,
+    )
+    detalle = session.query(FacturaDetalle).filter_by(id_factura=factura.id_factura).one()
+    return session.query(ComisionFactura).filter_by(id_factura_detalle=detalle.id_factura_detalle).one()
+
+
+def test_comision_con_porcentaje_bcv_sube_la_base_del_articulo_normal(db_session):
+    comision = _comision_de_una_linea(db_session, Decimal("10"))
+    assert comision.monto_comision == Decimal("0.90")  # 2.00 - 1.00 * 1.10
+
+
+def test_comision_de_articulo_bcv_no_lleva_el_porcentaje_en_la_base(db_session):
+    comision = _comision_de_una_linea(db_session, Decimal("10"), articulo_bcv=True)
+    assert comision.monto_comision == Decimal("1.00")  # 2.00 - 1.00, como sin porcentaje
+
+
+def test_comision_de_articulo_bcv_sin_porcentaje_es_la_de_siempre(db_session):
+    comision = _comision_de_una_linea(db_session, None, articulo_bcv=True)
+    assert comision.monto_comision == Decimal("1.00")

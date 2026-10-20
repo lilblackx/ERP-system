@@ -47,6 +47,7 @@ from app.db.models import (
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.reportes import ReporteService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
@@ -5977,7 +5978,7 @@ class ReportesPanel(QWidget):
             MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_reporte_excel,
@@ -6011,7 +6012,7 @@ class ReportesPanel(QWidget):
             MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_reporte_pdf,
@@ -6028,11 +6029,11 @@ class ReportesPanel(QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} filas a:\n{ruta}")
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar el reporte: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
