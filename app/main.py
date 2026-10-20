@@ -45,6 +45,7 @@ from app.services.licencia import (
     instalar_gate,
     registrar_aviso_bloqueo,
 )
+from app.ui.animaciones import FiltroFundidoDialogos
 from app.ui.geo_http import esperar_workers_pendientes
 from app.ui.licencia_aviso import AvisoLicencia
 from app.ui.login_window import LoginWindow
@@ -139,6 +140,9 @@ def main():
     # flechas de QComboBox/QDateEdit (GLOBAL_QSS y los QSS locales de los dialogos) --
     # ver el comentario junto a generar_iconos_qss() en app/ui/styles.py.
     generar_iconos_qss()
+    # Cada dialogo que se abre aparece con un fundido de 100 ms (ver app/ui/animaciones.py). Referencia viva.
+    app._filtro_fundido = FiltroFundidoDialogos(app)
+    app.installEventFilter(app._filtro_fundido)
     # Referencia viva: si se pierde, Qt destruye el objeto y el aviso deja de funcionar.
     aviso_licencia = AvisoLicencia(app)
     registrar_aviso_bloqueo(aviso_licencia.notificar)

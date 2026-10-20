@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.rutas import ARCHIVO_LOGO, NOMBRE_APP
+from app.ui.animaciones import animaciones_activas
 from app.ui.styles import (
     COLOR_SIDEBAR_ACTIVE,
     COLOR_SIDEBAR_BG,
@@ -33,7 +34,7 @@ from app.ui.styles import (
 # ── Constantes de tamaño ────────────────────────────────────────────────────
 SIDEBAR_EXPANDED = 230  # px cuando está abierto
 SIDEBAR_COLLAPSED = 58  # px cuando está cerrado (solo íconos)
-ANIM_DURATION_MS = 220  # velocidad de la animación
+ANIM_DURATION_MS = 160  # velocidad de la animación (cada cuadro reacomoda el contenido: corta a proposito)
 
 # ── Módulos agrupados por sección ───────────────────────────────────────────
 # (nombre_seccion, [(clave_interna, texto_visible), ...])
@@ -585,6 +586,10 @@ class Sidebar(QWidget):
         self.toggled.emit(True)
 
     def _animar(self, desde: int, hasta: int) -> None:
+        if not animaciones_activas():
+            self.setMinimumWidth(hasta)
+            self.setMaximumWidth(hasta)
+            return
         self._anim = QPropertyAnimation(self, b"minimumWidth")
         self._anim.setDuration(ANIM_DURATION_MS)
         self._anim.setStartValue(desde)

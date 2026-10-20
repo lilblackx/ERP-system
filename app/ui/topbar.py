@@ -49,6 +49,7 @@ from app.services.busqueda_global import (
     normalizar,
 )
 from app.services.notificaciones import SEVERIDAD_ALTA, Notificacion
+from app.ui.animaciones import rebote
 from app.ui.notificaciones_leidas import cargar as cargar_leidas
 from app.ui.notificaciones_leidas import firma as firma_notificacion
 from app.ui.notificaciones_leidas import guardar as guardar_leidas
@@ -140,6 +141,7 @@ class TopBar(QWidget):
         # None = sin filtrar (cualquier caller que no pase el set calculado por rol).
         self._modulos_visibles = modulos_visibles
         self._notificaciones: list[Notificacion] = []
+        self._cantidad_mostrada = 0  # alertas sin leer que mostraba el contador (el latido es solo si sube)
         # Firmas de las alertas que este usuario ya marco como leidas (ver notificaciones_leidas.py).
         self._leidas: set[str] = cargar_leidas(getattr(usuario, "id_usuario", None))
         self._panel_notificaciones: PanelNotificaciones | None = None
@@ -311,6 +313,7 @@ class TopBar(QWidget):
             return BusquedaGlobalService.buscar(session, id_usuario, texto)
 
         worker = QueryWorker(self.session_factory, _tarea)
+        worker.silencioso = True  # busqueda mientras se escribe: tiene su propia lista de resultados
         worker.resultado.connect(lambda entidades: self._mostrar_resultados(id_busqueda, modulos, entidades))
         # Si falla la consulta (QueryWorker ya lo registra en el log), al menos quedan los
         # módulos, que no dependen de la base.
@@ -411,6 +414,8 @@ class TopBar(QWidget):
         """El contador cuenta solo las alertas SIN leer (y su color sale de ellas)."""
         sin_leer = self._no_leidas()
         cantidad = len(sin_leer)
+        creciente = cantidad > self._cantidad_mostrada
+        self._cantidad_mostrada = cantidad
         if not cantidad:
             self.lbl_contador.setVisible(False)
             self.btn_notif.setToolTip(
@@ -426,6 +431,8 @@ class TopBar(QWidget):
         self.lbl_contador.setGeometry(self.btn_notif.width() - 18, 2, 16, 16)
         self.lbl_contador.setVisible(True)
         self.btn_notif.setToolTip(f"Notificaciones — {cantidad} sin leer")
+        if creciente:
+            rebote(self.lbl_contador)
 
     def _filas_panel(self) -> list[tuple[Notificacion, bool]]:
         return [(n, firma_notificacion(n) in self._leidas) for n in self._notificaciones]

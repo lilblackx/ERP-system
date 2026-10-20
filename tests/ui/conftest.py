@@ -2,9 +2,21 @@ import pytest
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget
 
-from app.ui import notificaciones_leidas, permisos_ui
+from app.ui import animaciones, notificaciones_leidas, permisos_ui
 
 _single_shot_original = QTimer.singleShot
+
+
+@pytest.fixture(autouse=True)
+def _sin_animaciones(monkeypatch, tmp_path):
+    """Las animaciones apagadas por defecto: los tiempos de una animacion no tienen lugar en un test. Los tests
+    de app/ui/animaciones.py las activan a mano con animaciones.forzar(True). La preferencia guardada va a un
+    directorio temporal para no leer ni ensuciar la de la PC real."""
+    monkeypatch.setattr(animaciones, "ARCHIVO_PREFERENCIAS", tmp_path / "preferencias_ui.json")
+    monkeypatch.setattr(animaciones, "_reducir_cache", None)
+    animaciones.forzar(False)
+    yield
+    animaciones.forzar(None)
 
 
 @pytest.fixture(autouse=True)

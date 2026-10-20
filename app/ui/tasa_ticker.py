@@ -149,6 +149,7 @@ class TasaTicker(QWidget):
         if getattr(self, "_worker", None) is not None and self._worker.isRunning():
             return
         self._worker = QueryWorker(self.session_factory, _tarea_tasa_actual, id_usuario=self.usuario.id_usuario)
+        self._worker.silencioso = True  # refresco periodico: no enciende la barra de carga
         self._worker.resultado.connect(self._mostrar_tasa)
         self._worker.error.connect(self._ocultar_por_error)
         self._worker.start()

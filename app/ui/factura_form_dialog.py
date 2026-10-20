@@ -44,6 +44,7 @@ from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
+from app.ui.animaciones import destello, destello_fila, liberar_boton, ocupar_boton
 from app.ui.autorizacion_dialog import AutorizacionDialog
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.message_box import MessageBox
@@ -1848,7 +1849,9 @@ class FacturaFormDialog(QDialog):
         if existente is not None:
             existente["cantidad"] += cantidad
             existente["comision"] += comision
+            fila_afectada = self.items.index(existente)
         else:
+            fila_afectada = len(self.items)
             self.items.append(
                 {
                     "id_producto": id_producto,
@@ -1864,6 +1867,9 @@ class FacturaFormDialog(QDialog):
                 }
             )
         self._refrescar_tabla_items()
+        # Confirma sin ventanas que la linea entro (o que se sumo a una existente) y que el total cambio.
+        destello_fila(self.tabla_items, fila_afectada)
+        destello(self.lbl_total)
         self.producto_buscar_input.clear()
         self.nota_item_input.clear()
         # Reinicia cantidad, precio y selector de precio (Precio 1 por defecto) para el producto
@@ -2138,14 +2144,14 @@ class FacturaFormDialog(QDialog):
 
     def _iniciar_emision_ui(self) -> None:
         self._emitiendo_factura = True
-        self.btn_emitir.setEnabled(False)
+        ocupar_boton(self.btn_emitir, color="#FFFFFF")
         self.btn_cancelar.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
 
     def _finalizar_emision_ui(self) -> None:
         self._emitiendo_factura = False
         QApplication.restoreOverrideCursor()
-        self.btn_emitir.setEnabled(True)
+        liberar_boton(self.btn_emitir)
         self.btn_cancelar.setEnabled(True)
 
     def _on_resultado_emitir_factura(self, resultado: dict) -> None:
