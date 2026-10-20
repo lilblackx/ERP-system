@@ -395,9 +395,9 @@ class BancosPanel(MixinPermisos, QWidget):
     # ── CRUD ─────────────────────────────────────────────────────────────
 
     def nuevo_banco(self):
+        """Abre el diálogo para crear un nuevo banco."""
         if not self._exigir_permiso("crear", "No tienes permiso para crear bancos."):
             return
-        """Abre el diálogo para crear un nuevo banco."""
         session = self.session_factory()
         try:
             dialog = BancoFormDialog(session, parent=self)
@@ -426,9 +426,9 @@ class BancosPanel(MixinPermisos, QWidget):
             session.close()
 
     def editar_banco(self):
+        """Abre el diálogo para editar el banco seleccionado."""
         if not self._exigir_permiso("editar", "No tienes permiso para editar bancos."):
             return
-        """Abre el diálogo para editar el banco seleccionado."""
         banco_id = self._id_seleccionado()
         if banco_id is None:
             return
@@ -468,9 +468,9 @@ class BancosPanel(MixinPermisos, QWidget):
             self._abriendo_dialogo = False
 
     def cambiar_estado_banco(self):
+        """Cambia el estado del banco seleccionado (ACTIVO <-> INACTIVO)."""
         if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de bancos."):
             return
-        """Cambia el estado del banco seleccionado (ACTIVO <-> INACTIVO)."""
         banco_id = self._id_seleccionado()
         if banco_id is None:
             return

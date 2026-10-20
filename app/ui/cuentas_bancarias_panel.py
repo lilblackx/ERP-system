@@ -456,9 +456,9 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         self._cargar_datos()
 
     def _on_nueva_cuenta(self):
+        """Abre el diálogo para crear una nueva cuenta bancaria."""
         if not self._exigir_permiso("crear", "No tienes permiso para crear cuentas bancarias."):
             return
-        """Abre el diálogo para crear una nueva cuenta bancaria."""
         session = self.session_factory()
         try:
             dialog = CuentaBancariaFormDialog(session, parent=self)
@@ -488,9 +488,9 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
             session.close()
 
     def _on_editar(self):
+        """Abre el diálogo para editar la cuenta seleccionada."""
         if not self._exigir_permiso("editar", "No tienes permiso para editar cuentas bancarias."):
             return
-        """Abre el diálogo para editar la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
             MessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
@@ -541,9 +541,9 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
             session.close()
 
     def _on_cambiar_estado(self):
+        """Cambia el estado de la cuenta seleccionada."""
         if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de cuentas bancarias."):
             return
-        """Cambia el estado de la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
             MessageBox.information(self, "Selección requerida", "Selecciona una cuenta de la lista.")
