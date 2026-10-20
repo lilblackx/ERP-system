@@ -100,6 +100,16 @@ parametros `/CarpetaRespaldos`, `/RutaDrive`, `/DiasRetencion`, `/Respaldos=0`):
   padre, crea el ultimo nivel si falta y escribe, lee y borra un archivo de prueba, con el usuario
   que instala. En modo silencioso la misma prueba corre antes de tocar SQL Server;
   `/SinPruebaDrive=1` la omite (p. ej. si Drive para escritorio aun no tiene la sesion iniciada).
+- Alertas por correo (pagina "Alertas por correo" del asistente; `/AlertaCorreos`,
+  `/SmtpUsuario`, `/SmtpClave`, `/SmtpHost`, `/SmtpPuerto`): cada trabajo termina con el paso
+  `Enviar alerta por correo`, al que va cualquier paso que falle. Manda con `sp_send_dbmail` un
+  correo HTML (trabajo, paso, fecha y detalle del error) con **importancia alta**, a los correos
+  indicados. No se usan las notificaciones de operador de SQL Agent porque no permiten cambiar el
+  formato ni la importancia. Se crea Database Mail (cuenta y perfil `Nexo ERP - Alertas`, asignado a
+  SQL Agent, que se reinicia) y se envia un correo de prueba, tambien HTML e importancia alta. La
+  contrasena SMTP queda solo en el SQL Server del cliente (en Gmail: contrasena de aplicacion).
+  Database Mail no existe en SQL Server para Linux: en el Docker de desarrollo solo se verifica la
+  estructura de los trabajos; el envio real se prueba en SQL Server para Windows.
 - Las actualizaciones del instalador no tocan los trabajos ni preguntan por respaldos. Para
   configurarlos en un servidor ya instalado, o recrearlos (el comando borra y vuelve a crear los
   tres trabajos), ejecutar `Nexo-Herramientas.exe respaldos --entrada datos.json --salida r.txt`

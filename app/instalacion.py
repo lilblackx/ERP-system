@@ -23,7 +23,9 @@ Comandos:
                  carpeta si falta y un archivo de prueba se escribe, lee y borra)
     respaldos    crea en SQL Server Agent los trabajos de respaldo (completo diario 19:00, log cada 30 min),
                  limpieza por dias de retencion y mantenimiento semanal; con ruta_drive (obligatoria, se prueba antes)
-                 programa ademas la copia a Google Drive para escritorio. Falla si el SQL Server es Express (sin Agent)
+                 programa ademas la copia a Google Drive para escritorio. Con alerta_correos + smtp_* configura
+                 Database Mail y agrega a cada trabajo un paso que avisa por correo (HTML, importancia alta) si
+                 falla. Falla si el SQL Server es Express (sin Agent)
     validar-clave  valida una contrasena contra la politica de la app (usuario `admin`)
     servidor     crea la base, el esquema, el usuario SQL propio de la app y el usuario `admin`,
                  y escribe config.env (MODO_INSTALACION=SERVIDOR) + datos_estaciones.txt
@@ -585,6 +587,48 @@ CARPETA_RESPALDOS_DEFECTO = r"C:\Respaldos\Nexo"
 DIAS_RETENCION_DEFECTO = 3  # vale para los respaldos completos y los de log, en local y en Drive
 _RUTA_RE = re.compile(r"""^(?:[A-Za-z]:[\\/]|\\\\|/)[^'"<>|*?;\r\n]+$""")
 _EDICION_EXPRESS = 4  # SERVERPROPERTY('EngineEdition'): Express no incluye SQL Server Agent
+PERFIL_CORREO = "Nexo ERP - Alertas"
+CUENTA_CORREO = "Nexo ERP - Alertas"
+SMTP_HOST_DEFECTO = "smtp.gmail.com"
+SMTP_PUERTO_DEFECTO = 587
+_CORREO_RE = re.compile(r"""^[^@\s;,'"<>]+@[^@\s;,'"<>]+\.[^@\s;,'"<>]+$""")
+_HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
+
+
+def _validar_alertas(datos: dict) -> dict | None:
+    """None = sin alertas por correo (no se indico ningun destinatario)."""
+    crudo = str(datos.get("alerta_correos") or "")
+    destinatarios = [c.strip() for c in re.split(r"[;,]", crudo) if c.strip()]
+    if not destinatarios:
+        return None
+    for correo in destinatarios:
+        if not _CORREO_RE.match(correo):
+            raise ErrorInstalacion(f"El correo '{correo}' para las alertas no es valido.")
+    usuario = str(datos.get("smtp_usuario") or "").strip()
+    clave = str(datos.get("smtp_clave") or "")
+    if not usuario or not clave:
+        raise ErrorInstalacion(
+            "Para enviar alertas por correo indique el correo remitente y su contrasena (en Gmail, una "
+            "'contrasena de aplicacion')."
+        )
+    remitente = str(datos.get("smtp_remitente") or usuario).strip()
+    host = str(datos.get("smtp_host") or SMTP_HOST_DEFECTO).strip()
+    if not _CORREO_RE.match(remitente) or not _HOST_RE.match(host):
+        raise ErrorInstalacion("El correo remitente o el servidor SMTP de las alertas no son validos.")
+    try:
+        puerto = int(str(datos.get("smtp_puerto") or SMTP_PUERTO_DEFECTO).strip())
+    except ValueError:
+        puerto = 0
+    if not 1 <= puerto <= 65535:
+        raise ErrorInstalacion("El puerto SMTP de las alertas debe ser un numero entre 1 y 65535.")
+    return {
+        "destinatarios": ";".join(destinatarios),
+        "usuario": usuario,
+        "clave": clave,
+        "remitente": remitente,
+        "host": host,
+        "puerto": puerto,
+    }
 
 
 def _ruta_valida(valor: str, que: str) -> str:
@@ -611,9 +655,16 @@ def _ejecutar_con_parametros(motor, sentencias: list[tuple[str, tuple]]) -> None
                 cursor.close()
 
 
-def _alta_trabajo(nombre: str, descripcion: str, pasos: list[tuple[str, str, str]], programacion: dict) -> tuple:
+def _alta_trabajo(
+    nombre: str,
+    descripcion: str,
+    pasos: list[tuple[str, str, str]],
+    programacion: dict,
+    comando_alerta: str | None = None,
+) -> tuple:
     """Sentencia (sql, parametros) que borra el trabajo si existe y lo crea con sus pasos y horario.
-    `pasos`: (nombre, comando T-SQL, base de datos)."""
+    `pasos`: (nombre, comando T-SQL, base de datos). Con `comando_alerta`, se agrega al final un paso de alerta
+    al que va cualquier paso que falle (y que deja el trabajo como fallido)."""
     lineas = [
         "IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = ?) "
         "EXEC msdb.dbo.sp_delete_job @job_name = ?, @delete_unused_schedule = 1;",
@@ -623,11 +674,23 @@ def _alta_trabajo(nombre: str, descripcion: str, pasos: list[tuple[str, str, str
     parametros: list = [nombre, nombre, nombre, descripcion]
     for i, (paso, comando, base) in enumerate(pasos):
         siguiente = 3 if i < len(pasos) - 1 else 1  # 3 = pasar al paso siguiente, 1 = terminar bien
+        # 4 = si falla, ir al paso de alerta; 2 = terminar con fallo.
+        if comando_alerta:
+            ante_fallo = f"@on_fail_action = 4, @on_fail_step_id = {len(pasos) + 1}"
+        else:
+            ante_fallo = "@on_fail_action = 2"
         lineas.append(
             "EXEC msdb.dbo.sp_add_jobstep @job_name = ?, @step_name = ?, @subsystem = N'TSQL', @command = ?, "
-            f"@database_name = ?, @on_success_action = {siguiente};"
+            f"@database_name = ?, @on_success_action = {siguiente}, {ante_fallo};"
         )
         parametros += [nombre, paso, comando, base]
+    if comando_alerta:
+        lineas.append(
+            "EXEC msdb.dbo.sp_add_jobstep @job_name = ?, @step_name = N'Enviar alerta por correo', "
+            "@subsystem = N'TSQL', @command = ?, @database_name = N'master', @on_success_action = 2, "
+            "@on_fail_action = 2;"
+        )
+        parametros += [nombre, comando_alerta]
     campos = ", ".join(f"@{k} = {v}" for k, v in programacion.items())
     lineas.append(f"EXEC msdb.dbo.sp_add_jobschedule @job_name = ?, @name = ?, {campos};")
     parametros += [nombre, nombre]
@@ -665,6 +728,222 @@ def _asegurar_agente(instancia: str | None) -> str:
         _net("start", servicio)
     if _estado_servicio(servicio) != _SERVICIO_EN_EJECUCION:
         return f"No se pudo iniciar el servicio {servicio}: inicielo manualmente para que corran los respaldos."
+    return ""
+
+
+def _reiniciar_agente(instancia: str | None) -> str:
+    """SQL Server Agent solo lee el perfil de Database Mail al arrancar."""
+    servicio = f"SQLAgent${instancia}" if instancia else "SQLSERVERAGENT"
+    if _estado_servicio(servicio) is None:
+        return f"No se encontro el servicio {servicio}: reinicielo manualmente para activar las alertas por correo."
+    if _estado_servicio(servicio) == _SERVICIO_EN_EJECUCION:
+        _net("stop", servicio, "/y")
+    _net("start", servicio)
+    if _estado_servicio(servicio) != _SERVICIO_EN_EJECUCION:
+        return (
+            f"No se pudo reiniciar el servicio {servicio}: reinicielo manualmente para activar las alertas por correo."
+        )
+    return ""
+
+
+def _lit(texto: str) -> str:
+    """Literal NVARCHAR de T-SQL. Los textos fijos del instalador usan entidades HTML (&oacute;) para no llevar
+    caracteres no ASCII."""
+    return "N'" + texto.replace("'", "''") + "'"
+
+
+def _html_correo(titulo: str, color: str, filas: list[tuple[str, str]], detalle: str | None, pie: str) -> str:
+    """Expresion T-SQL (NVARCHAR) con el cuerpo HTML de un correo de alerta. `filas`: (etiqueta, expresion T-SQL ya
+    escapada para HTML); `detalle`: expresion T-SQL del texto del error (se muestra aparte, en bloque de codigo)."""
+    partes = [
+        _lit(
+            '<html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Segoe UI,Arial,sans-serif;">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;'
+            'padding:24px 0;"><tr><td align="center">'
+            '<table role="presentation" width="620" cellpadding="0" cellspacing="0" style="background:#ffffff;'
+            'border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
+            f'<tr><td style="background:{color};padding:18px 24px;color:#ffffff;">'
+            '<div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;opacity:.85;">Nexo ERP</div>'
+            f'<div style="font-size:20px;font-weight:600;margin-top:4px;">{titulo}</div></td></tr>'
+            '<tr><td style="padding:20px 24px;"><table role="presentation" width="100%" cellpadding="0" '
+            'cellspacing="0" style="font-size:14px;color:#111827;">'
+        )
+    ]
+    for etiqueta, expresion in filas:
+        partes.append(
+            _lit(
+                '<tr><td style="padding:7px 12px 7px 0;color:#6b7280;white-space:nowrap;vertical-align:top;'
+                f'border-bottom:1px solid #f3f4f6;">{etiqueta}</td><td style="padding:7px 0;font-weight:600;'
+                'border-bottom:1px solid #f3f4f6;">'
+            )
+        )
+        partes.append(expresion)
+        partes.append(_lit("</td></tr>"))
+    partes.append(_lit("</table>"))
+    if detalle is not None:
+        partes.append(
+            _lit(
+                '<div style="margin-top:18px;font-size:12px;color:#6b7280;text-transform:uppercase;'
+                'letter-spacing:.5px;">Detalle del error</div><pre style="margin:6px 0 0;padding:12px;'
+                "background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#7f1d1d;font-size:12px;"
+                "white-space:pre-wrap;word-break:break-word;"
+                'font-family:Consolas,monospace;">'
+            )
+        )
+        partes.append(detalle)
+        partes.append(_lit("</pre>"))
+    partes.append(
+        _lit(
+            f'</td></tr><tr><td style="padding:14px 24px;background:#f9fafb;color:#6b7280;font-size:12px;">{pie}'
+            "</td></tr></table></td></tr></table></body></html>"
+        )
+    )
+    # NVARCHAR(MAX) desde el principio: concatenando literales de hasta 4000 caracteres el resultado se truncaria.
+    return "CAST(N'' AS NVARCHAR(MAX)) + " + " + ".join(partes)
+
+
+def _escapar_html_sql(expresion: str) -> str:
+    return f"REPLACE(REPLACE(REPLACE({expresion}, N'&', N'&amp;'), N'<', N'&lt;'), N'>', N'&gt;')"
+
+
+def _envio_correo(destinatarios: str, asunto: str, cuerpo: str) -> str:
+    """sp_send_dbmail: siempre HTML y con importancia alta. `asunto` y `cuerpo` son expresiones T-SQL."""
+    return (
+        "EXEC msdb.dbo.sp_send_dbmail "
+        f"@profile_name = {_lit(PERFIL_CORREO)}, @recipients = {_lit(destinatarios)}, @subject = {asunto}, "
+        f"@body = {cuerpo}, @body_format = 'HTML', @importance = 'High';"
+    )
+
+
+def _comando_alerta_fallo(destinatarios: str) -> str:
+    """Paso final de cada trabajo, al que van los pasos cuando fallan: manda el correo de alerta (HTML, importancia
+    alta) con el trabajo, el paso y el error. Las notificaciones propias de SQL Agent no permiten cambiar ni el
+    formato ni la importancia, por eso la alerta se envia desde aqui y no desde un operador.
+    $(ESCAPE_NONE(JOBID)) es un token de SQL Agent: se reemplaza al ejecutarse el paso."""
+    cuerpo = _html_correo(
+        "Fall&oacute; un trabajo de respaldo o mantenimiento",
+        "#b91c1c",
+        [
+            ("Servidor", "@@SERVERNAME"),
+            ("Trabajo", "@trabajo"),
+            ("Paso que fall&oacute;", "@paso"),
+            ("Fecha y hora", "CONVERT(NVARCHAR(30), @inicio, 120)"),
+        ],
+        "@detalle",
+        "Revise el trabajo en SSMS &gt; SQL Server Agent &gt; Trabajos &gt; Ver historial. "
+        "Mientras no se corrija, los respaldos pueden no estar realiz&aacute;ndose.",
+    )
+    return (
+        "DECLARE @id UNIQUEIDENTIFIER = CONVERT(UNIQUEIDENTIFIER, $(ESCAPE_NONE(JOBID)));\n"
+        "DECLARE @trabajo NVARCHAR(128), @paso NVARCHAR(128), @detalle NVARCHAR(MAX), @inicio DATETIME;\n"
+        "SELECT @trabajo = name FROM msdb.dbo.sysjobs WHERE job_id = @id;\n"
+        "SELECT TOP 1 @paso = step_name, @detalle = message, @inicio = msdb.dbo.agent_datetime(run_date, run_time)\n"
+        "FROM msdb.dbo.sysjobhistory WHERE job_id = @id AND step_id > 0 AND run_status = 0 ORDER BY instance_id DESC;\n"
+        "SET @trabajo = ISNULL(@trabajo, N'(desconocido)');\n"
+        "SET @paso = ISNULL(@paso, N'(desconocido)');\n"
+        "SET @inicio = ISNULL(@inicio, GETDATE());\n"
+        "SET @detalle = " + _escapar_html_sql("LEFT(ISNULL(@detalle, " + _lit("(sin detalle)") + "), 3000)") + ";\n"
+        "SET @trabajo = " + _escapar_html_sql("@trabajo") + ";\n"
+        "SET @paso = " + _escapar_html_sql("@paso") + ";\n"
+        "DECLARE @cuerpo NVARCHAR(MAX) = " + cuerpo + ";\n"
+        "DECLARE @asunto NVARCHAR(255) = N'[Nexo ERP] ALERTA: fall' + NCHAR(243) + N' el trabajo ' "
+        "+ LEFT(@trabajo, 100) + N' en ' + @@SERVERNAME;\n" + _envio_correo(destinatarios, "@asunto", "@cuerpo")
+    )
+
+
+def _comando_correo_prueba(destinatarios: str, base: str, carpeta: str, dias: int) -> str:
+    cuerpo = _html_correo(
+        "Alertas de respaldo configuradas",
+        "#15803d",
+        [
+            ("Servidor", "@@SERVERNAME"),
+            ("Base de datos", _lit(base)),
+            ("Carpeta de respaldos", _lit(carpeta)),
+            ("Respaldo completo", _lit("Todos los d&iacute;as a las 7:00 pm")),
+            ("Respaldo de log", _lit("Cada 30 minutos")),
+            ("Se conservan", _lit(f"{dias} d&iacute;as")),
+            ("Reciben la alerta", _lit(destinatarios.replace(";", "<br>"))),
+        ],
+        None,
+        "Este es un correo de prueba. A partir de ahora recibir&aacute; un aviso, con importancia alta, si falla "
+        "alg&uacute;n trabajo de respaldo o mantenimiento de Nexo ERP en este servidor.",
+    )
+    return (
+        f"DECLARE @cuerpo NVARCHAR(MAX) = {cuerpo};\n"
+        "DECLARE @asunto NVARCHAR(255) = N'[Nexo ERP] Alertas de respaldo configuradas en ' + @@SERVERNAME;\n"
+        + _envio_correo(destinatarios, "@asunto", "@cuerpo")
+    )
+
+
+def _configurar_alertas(motor, alertas: dict, instancia: str | None, es_local: bool, contexto: dict) -> str:
+    """Database Mail (cuenta y perfil propios), perfil asignado a SQL Agent (que se reinicia) y correo de prueba.
+    Los trabajos ya llevan su paso de alerta (ver _comando_alerta_fallo). Devuelve un aviso si algo no quedo listo;
+    "" si todo salio bien."""
+    try:
+        _ejecutar_con_parametros(
+            motor,
+            [
+                ("EXEC sp_configure 'show advanced options', 1; RECONFIGURE;", ()),
+                ("EXEC sp_configure 'Database Mail XPs', 1; RECONFIGURE;", ()),
+                (
+                    "IF EXISTS (SELECT 1 FROM msdb.dbo.sysmail_profile WHERE name = ?) "
+                    "EXEC msdb.dbo.sysmail_delete_profile_sp @profile_name = ?;",
+                    (PERFIL_CORREO, PERFIL_CORREO),
+                ),
+                (
+                    "IF EXISTS (SELECT 1 FROM msdb.dbo.sysmail_account WHERE name = ?) "
+                    "EXEC msdb.dbo.sysmail_delete_account_sp @account_name = ?;",
+                    (CUENTA_CORREO, CUENTA_CORREO),
+                ),
+                (
+                    "EXEC msdb.dbo.sysmail_add_account_sp @account_name = ?, @email_address = ?, "
+                    "@display_name = N'Nexo ERP', @mailserver_name = ?, @port = ?, @enable_ssl = 1, "
+                    "@username = ?, @password = ?",
+                    (
+                        CUENTA_CORREO,
+                        alertas["remitente"],
+                        alertas["host"],
+                        alertas["puerto"],
+                        alertas["usuario"],
+                        alertas["clave"],
+                    ),
+                ),
+                ("EXEC msdb.dbo.sysmail_add_profile_sp @profile_name = ?", (PERFIL_CORREO,)),
+                (
+                    "EXEC msdb.dbo.sysmail_add_profileaccount_sp @profile_name = ?, @account_name = ?, "
+                    "@sequence_number = 1",
+                    (PERFIL_CORREO, CUENTA_CORREO),
+                ),
+                (
+                    "EXEC msdb.dbo.sp_set_sqlagent_properties @databasemail_profile = ?, @use_databasemail = 1",
+                    (PERFIL_CORREO,),
+                ),
+            ],
+        )
+    except Exception as exc:
+        return (
+            "Las alertas por correo quedaron a medias: los trabajos tienen su paso de alerta, pero no se pudo "
+            f"configurar Database Mail ({_traducir_error(exc)}). Configurelo en SSMS > Management > Database Mail "
+            f"con un perfil llamado '{PERFIL_CORREO}'."
+        )
+    if es_local:
+        aviso = _reiniciar_agente(instancia)
+        if aviso:
+            return aviso
+    try:
+        _ejecutar_con_parametros(
+            motor,
+            [
+                (
+                    _comando_correo_prueba(
+                        alertas["destinatarios"], contexto["base"], contexto["carpeta"], contexto["dias"]
+                    ),
+                    (),
+                )
+            ],
+        )
+    except Exception as exc:
+        return f"No se pudo enviar el correo de prueba de las alertas: {_traducir_error(exc)}"
     return ""
 
 
@@ -787,9 +1066,12 @@ def cmd_respaldos(datos: dict) -> str:
         dias = 0
     if not 1 <= dias <= 3650:
         raise ErrorInstalacion("Los dias de retencion de los respaldos deben ser un numero entre 1 y 3650.")
+    alertas = _validar_alertas(datos)
+    comando_alerta = _comando_alerta_fallo(alertas["destinatarios"]) if alertas else None
     directorio_datos = Path(datos.get("config_destino") or ARCHIVO_CONFIG).parent
 
     avisos: list[str] = []
+    alertas_listas = False
     es_local = _es_local(servidor.split(",")[0].split("\\")[0])
     motor = _motor(
         servidor,
@@ -823,6 +1105,7 @@ def cmd_respaldos(datos: dict) -> str:
                         ("Borrar respaldos antiguos", _comando_limpieza(carpeta, dias), "master"),
                     ],
                     {"freq_type": 4, "freq_interval": 1, "active_start_time": 190000},
+                    comando_alerta,
                 ),
                 _alta_trabajo(
                     TRABAJO_LOG,
@@ -836,6 +1119,7 @@ def cmd_respaldos(datos: dict) -> str:
                         "active_start_time": 0,
                         "active_end_time": 235959,
                     },
+                    comando_alerta,
                 ),
                 _alta_trabajo(
                     TRABAJO_MANTENIMIENTO,
@@ -845,9 +1129,21 @@ def cmd_respaldos(datos: dict) -> str:
                         ("Actualizar estadisticas", "EXEC sp_updatestats;", base),
                     ],
                     {"freq_type": 8, "freq_interval": 1, "freq_recurrence_factor": 1, "active_start_time": 30000},
+                    comando_alerta,
                 ),
             ],
         )
+        if alertas:
+            try:
+                aviso = _configurar_alertas(
+                    motor, alertas, instancia, es_local, {"base": base, "carpeta": carpeta, "dias": dias}
+                )
+            except Exception as exc:
+                aviso = f"No se pudieron configurar las alertas por correo: {_traducir_error(exc)}"
+            if aviso:
+                avisos.append(aviso)
+            else:
+                alertas_listas = True
     except ErrorInstalacion:
         raise
     except Exception as exc:
@@ -863,6 +1159,10 @@ def cmd_respaldos(datos: dict) -> str:
         f"Respaldos listos en {carpeta}: completo diario a las 19:00, log cada 30 minutos, "
         f"se conservan {dias} dias. Trabajos visibles en SSMS > SQL Server Agent > Trabajos."
     ]
+    if alertas_listas:
+        mensajes.append(
+            f"Alertas por correo si falla un trabajo: {alertas['destinatarios']} (se envio un correo de prueba)."
+        )
     aviso = _programar_copia_drive(carpeta, ruta_drive, dias, directorio_datos)
     if aviso:
         avisos.append(aviso)

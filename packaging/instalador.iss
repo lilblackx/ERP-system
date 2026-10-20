@@ -17,6 +17,9 @@
 ;                                       Drive para escritorio aun no tiene la sesion iniciada al instalar)
 ;   /DiasRetencion=3                    dias que se conservan los respaldos
 ;   /Respaldos=0                        no configurar respaldos
+; Alertas por correo si falla un trabajo (Database Mail; vacio /AlertaCorreos = sin alertas):
+;   /AlertaCorreos="a@x.com;b@x.com" /SmtpUsuario=remitente@gmail.com /SmtpClave=... [/SmtpHost=smtp.gmail.com /SmtpPuerto=587]
+
 #ifndef Version
   #define Version "1.0.0"
 #endif
@@ -154,6 +157,7 @@ var
   PgServidor: TInputQueryWizardPage;
   PgClavesApp: TInputQueryWizardPage;
   PgRespaldos: TInputQueryWizardPage;
+  PgAlertas: TInputQueryWizardPage;
   PgEstacion: TInputQueryWizardPage;
   PgActualizar: TInputQueryWizardPage;
   BtnProbarServidor, BtnProbarEstacion, BtnProbarDrive: TNewButton;
@@ -374,6 +378,26 @@ function ValDiasRetencion: String;
 begin
   if WizardSilent then Result := Par('DiasRetencion', '3') else Result := Trim(PgRespaldos.Values[2]);
 end;
+function ValAlertaCorreos: String;
+begin
+  if WizardSilent then Result := Par('AlertaCorreos', '') else Result := Trim(PgAlertas.Values[0]);
+end;
+function ValSmtpUsuario: String;
+begin
+  if WizardSilent then Result := Par('SmtpUsuario', '') else Result := Trim(PgAlertas.Values[1]);
+end;
+function ValSmtpClave: String;
+begin
+  if WizardSilent then Result := Par('SmtpClave', '') else Result := PgAlertas.Values[2];
+end;
+function ValSmtpHost: String;
+begin
+  if WizardSilent then Result := Par('SmtpHost', 'smtp.gmail.com') else Result := Trim(PgAlertas.Values[3]);
+end;
+function ValSmtpPuerto: String;
+begin
+  if WizardSilent then Result := Par('SmtpPuerto', '587') else Result := Trim(PgAlertas.Values[4]);
+end;
 function RespaldosActivados: Boolean;
 begin
   { /Respaldos=0 o carpeta vacia = no configurar respaldos. }
@@ -548,7 +572,19 @@ begin
   BtnProbarDrive.Anchors := [akTop, akRight];
   BtnProbarDrive.OnClick := @ProbarDriveClick;
 
-  PgEstacion := CreateInputQueryPage(PgRespaldos.ID, 'Conexion con el servidor',
+  PgAlertas := CreateInputQueryPage(PgRespaldos.ID, 'Alertas por correo',
+    'Aviso por correo si falla un trabajo de respaldo o de mantenimiento.',
+    'SQL Server envia el aviso con Database Mail desde una cuenta de correo propia. En Gmail use una "contrasena de aplicacion" (cuenta con verificacion en dos pasos), no la contrasena normal. La contrasena queda solo en este SQL Server. Deje los destinatarios vacios para no configurar alertas.');
+  PgAlertas.Add('Correos que reciben la alerta (separados por punto y coma):', False);
+  PgAlertas.Add('Correo remitente (cuenta desde la que se envia):', False);
+  PgAlertas.Add('Contrasena del correo remitente (contrasena de aplicacion):', True);
+  PgAlertas.Add('Servidor SMTP:', False);
+  PgAlertas.Add('Puerto SMTP:', False);
+  PgAlertas.Values[0] := 'luisangelfd18@gmail.com;jdfuenmayor16@gmail.com';
+  PgAlertas.Values[3] := 'smtp.gmail.com';
+  PgAlertas.Values[4] := '587';
+
+  PgEstacion := CreateInputQueryPage(PgAlertas.ID, 'Conexion con el servidor',
     'Esta estacion se conectara a la base de datos del servidor.',
     'Use los datos que el instalador del servidor guardo en "datos_estaciones.txt" (en la carpeta de datos de Nexo ERP del servidor).');
   PgEstacion.Add('Servidor SQL (nombre o IP del servidor, coma y puerto; ej. SERVIDOR,1433):', False);
@@ -580,7 +616,7 @@ begin
   Result := False;
   if EsActualizacion then
   begin
-    if (PageID = PgTipo.ID) or (PageID = PgServidor.ID) or (PageID = PgClavesApp.ID) or (PageID = PgRespaldos.ID) or (PageID = PgEstacion.ID) then
+    if (PageID = PgTipo.ID) or (PageID = PgServidor.ID) or (PageID = PgClavesApp.ID) or (PageID = PgRespaldos.ID) or (PageID = PgAlertas.ID) or (PageID = PgEstacion.ID) then
       Result := True
     else if PageID = PgActualizar.ID then
       Result := (ModoPrevio <> 'SERVIDOR');
@@ -591,6 +627,8 @@ begin
       Result := True
     else if (PageID = PgServidor.ID) or (PageID = PgClavesApp.ID) or (PageID = PgRespaldos.ID) then
       Result := not EsServidor
+    else if PageID = PgAlertas.ID then
+      Result := (not EsServidor) or (Trim(PgRespaldos.Values[0]) = '')
     else if PageID = PgEstacion.ID then
       Result := EsServidor;
   end;
@@ -675,6 +713,16 @@ begin
     { No se avanza con una carpeta de Drive que no funciona. }
     Result := ProbarDrive(Mensaje);
     if not Result then MsgBox(Mensaje, mbError, MB_OK);
+    Exit;
+  end;
+
+  if (not EsActualizacion) and (CurPageID = PgAlertas.ID) then
+  begin
+    if (ValAlertaCorreos <> '') and ((ValSmtpUsuario = '') or (ValSmtpClave = '') or (ValSmtpHost = '')) then
+    begin
+      MsgBox('Para enviar alertas indique el correo remitente, su contrasena y el servidor SMTP (o deje los destinatarios vacios).', mbError, MB_OK);
+      Result := False;
+    end;
     Exit;
   end;
 
@@ -804,7 +852,9 @@ begin
           '","windows_auth":' + BoolJson(ValAdminSql = '') + ',"carpeta":"' + JsonEscape(ValCarpetaRespaldos) +
           '","ruta_drive":"' + JsonEscape(ValRutaDrive) + '","omitir_prueba_drive":' + BoolJson(Par('SinPruebaDrive', '0') = '1') +
           ',"dias_retencion":"' + JsonEscape(ValDiasRetencion) +
-          '","config_destino":"' + JsonEscape(ArchivoConfig) + '"}';
+          '","alerta_correos":"' + JsonEscape(ValAlertaCorreos) + '","smtp_usuario":"' + JsonEscape(ValSmtpUsuario) +
+          '","smtp_clave":"' + JsonEscape(ValSmtpClave) + '","smtp_host":"' + JsonEscape(ValSmtpHost) +
+          '","smtp_puerto":"' + JsonEscape(ValSmtpPuerto) + '","config_destino":"' + JsonEscape(ArchivoConfig) + '"}';
   if EjecutarTool('respaldos', Json, Mensaje) then
     Log('respaldos: ' + Mensaje)
   else

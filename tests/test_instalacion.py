@@ -613,6 +613,165 @@ def test_copia_drive_si_falla_la_tarea_devuelve_un_aviso(monkeypatch, tmp_path):
     assert "Acceso denegado" in aviso
 
 
+# ── respaldos: alertas por correo cuando falla un trabajo ──
+
+ALERTAS = {
+    "alerta_correos": "uno@ejemplo.com; dos@ejemplo.com",
+    "smtp_usuario": "remitente@ejemplo.com",
+    "smtp_clave": "clave de aplicacion",
+}
+CONTEXTO_ALERTAS = {"base": "mi_base", "carpeta": r"C:\Respaldos\Nexo", "dias": 3}
+
+
+def _pasos_del_trabajo(nombre):
+    with _admin_pyodbc() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT s.step_id, s.step_name, s.command, s.on_success_action, s.on_fail_action, s.on_fail_step_id "
+            "FROM msdb.dbo.sysjobsteps s JOIN msdb.dbo.sysjobs j ON j.job_id = s.job_id WHERE j.name = ? "
+            "ORDER BY s.step_id",
+            nombre,
+        )
+        return cur.fetchall()
+
+
+def test_respaldos_con_alertas_agrega_un_paso_de_alerta_html_de_importancia_alta(
+    servidor_instalado, respaldos_sin_efectos_externos, tmp_path
+):
+    # En el SQL Server de pruebas (Linux) no existe Database Mail: aqui se verifica la estructura de los trabajos;
+    # el envio real se prueba en SQL Server para Windows.
+    _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(**ALERTAS), tmp_path)
+    assert estado == "OK", mensaje
+    esperado = {
+        instalacion.TRABAJO_COMPLETO: 2,
+        instalacion.TRABAJO_LOG: 1,
+        instalacion.TRABAJO_MANTENIMIENTO: 2,
+    }
+    for trabajo, n_pasos in esperado.items():
+        pasos = _pasos_del_trabajo(trabajo)
+        assert len(pasos) == n_pasos + 1
+        *reales, alerta = pasos
+        assert alerta[1] == "Enviar alerta por correo"
+        assert alerta[3] == 2 and alerta[4] == 2  # el trabajo termina como fallido
+        for paso in reales:
+            assert paso[5] == alerta[0] and paso[4] == 4  # si falla, va al paso de alerta
+        assert "@importance = 'High'" in alerta[2] and "@body_format = 'HTML'" in alerta[2]
+        assert "uno@ejemplo.com;dos@ejemplo.com" in alerta[2]
+    with _admin_pyodbc() as conn:
+        cur = conn.cursor()
+        # La alerta la envia el paso (formato e importancia propios), no una notificacion de operador de SQL Agent.
+        cur.execute("SELECT COUNT(*) FROM msdb.dbo.sysjobs WHERE name LIKE N'Nexo ERP -%' AND notify_level_email <> 0")
+        assert cur.fetchone()[0] == 0
+
+
+def test_respaldos_sin_destinatarios_no_agrega_paso_de_alerta(
+    servidor_instalado, respaldos_sin_efectos_externos, tmp_path
+):
+    _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(), tmp_path)
+    assert estado == "OK" and "Alertas por correo" not in mensaje
+    assert [p[1] for p in _pasos_del_trabajo(instalacion.TRABAJO_LOG)] == ["Respaldo de log"]
+    assert _pasos_del_trabajo(instalacion.TRABAJO_LOG)[0][4] == 2  # si falla, el trabajo termina fallido
+
+
+def test_respaldos_repetidos_con_alertas_actualizan_los_destinatarios(
+    servidor_instalado, respaldos_sin_efectos_externos, tmp_path
+):
+    _ejecutar("respaldos", _datos_respaldos(**ALERTAS), tmp_path)
+    _, estado, mensaje = _ejecutar(
+        "respaldos", _datos_respaldos(**{**ALERTAS, "alerta_correos": "tres@ejemplo.com"}), tmp_path
+    )
+    assert estado == "OK", mensaje
+    alerta = _pasos_del_trabajo(instalacion.TRABAJO_LOG)[-1]
+    assert "tres@ejemplo.com" in alerta[2] and "uno@ejemplo.com" not in alerta[2]
+
+
+def test_el_correo_de_alerta_es_html_ascii_y_no_se_trunca():
+    comando = instalacion._comando_alerta_fallo("a@x.com;b@x.com")
+    assert comando.isascii()  # los acentos van como entidades HTML / NCHAR: no depende de la codificacion
+    assert "$(ESCAPE_NONE(JOBID))" in comando  # token de SQL Agent: identifica el trabajo que fallo
+    assert "@importance = 'High'" in comando and "@body_format = 'HTML'" in comando
+    assert "CAST(N'' AS NVARCHAR(MAX)) + " in comando  # concatenar literales de 4000 caracteres truncaria el cuerpo
+    assert "REPLACE(REPLACE(REPLACE(@detalle" in comando or "@detalle = REPLACE(REPLACE(REPLACE(" in comando
+
+
+def test_el_correo_de_prueba_tambien_es_html_de_importancia_alta():
+    comando = instalacion._comando_correo_prueba("a@x.com;b@x.com", "mi_base", r"C:\Respaldos\Nexo", 3)
+    assert comando.isascii()
+    assert "@importance = 'High'" in comando and "@body_format = 'HTML'" in comando
+    assert "mi_base" in comando and "a@x.com<br>b@x.com" in comando and "3 d&iacute;as" in comando
+
+
+def test_alertas_configura_database_mail_reinicia_agente_y_envia_prueba(monkeypatch):
+    ejecutadas = []
+    monkeypatch.setattr(instalacion, "_ejecutar_con_parametros", lambda motor, s: ejecutadas.extend(s))
+    reinicios = []
+    monkeypatch.setattr(instalacion, "_reiniciar_agente", lambda i: reinicios.append(i) or "")
+    alertas = instalacion._validar_alertas({**ALERTAS, "smtp_puerto": "465"})
+    assert instalacion._configurar_alertas(object(), alertas, "SQL2019", True, CONTEXTO_ALERTAS) == ""
+    sqls = [s for s, _ in ejecutadas]
+    cuenta = next(p for s, p in ejecutadas if "sysmail_add_account_sp" in s)
+    assert cuenta == (
+        instalacion.CUENTA_CORREO,
+        "remitente@ejemplo.com",
+        "smtp.gmail.com",
+        465,
+        "remitente@ejemplo.com",
+        "clave de aplicacion",
+    )
+    assert any("sp_set_sqlagent_properties" in s for s in sqls)
+    assert "sp_send_dbmail" in sqls[-1] and "@importance = 'High'" in sqls[-1]
+    assert reinicios == ["SQL2019"]
+
+
+def test_alertas_servidor_remoto_no_reinicia_el_agente(monkeypatch):
+    monkeypatch.setattr(instalacion, "_ejecutar_con_parametros", lambda motor, s: None)
+    monkeypatch.setattr(instalacion, "_reiniciar_agente", lambda i: pytest.fail("no debe reiniciar"))
+    alertas = instalacion._validar_alertas(ALERTAS)
+    assert instalacion._configurar_alertas(object(), alertas, None, False, CONTEXTO_ALERTAS) == ""
+
+
+def test_alertas_si_database_mail_falla_deja_un_aviso(monkeypatch):
+    def ejecutar(motor, sentencias):
+        if any("Database Mail XPs" in s for s, _ in sentencias):
+            raise RuntimeError("Database Mail no disponible")
+
+    monkeypatch.setattr(instalacion, "_ejecutar_con_parametros", ejecutar)
+    alertas = instalacion._validar_alertas(ALERTAS)
+    aviso = instalacion._configurar_alertas(object(), alertas, None, True, CONTEXTO_ALERTAS)
+    assert "a medias" in aviso and "Database Mail" in aviso
+
+
+@pytest.mark.parametrize(
+    "extra, texto",
+    [
+        ({"alerta_correos": "no-es-un-correo"}, "no es valido"),
+        ({"alerta_correos": "a@b.com; x'y@b.com"}, "no es valido"),
+        ({"smtp_usuario": ""}, "correo remitente"),
+        ({"smtp_clave": ""}, "correo remitente"),
+        ({"smtp_host": "host;malo"}, "no son validos"),
+        ({"smtp_puerto": "0"}, "puerto SMTP"),
+    ],
+)
+def test_respaldos_rechaza_alertas_invalidas(extra, texto, tmp_path):
+    _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(**{**ALERTAS, **extra}), tmp_path)
+    assert estado == "ERROR" and texto in mensaje
+
+
+@pytest.mark.parametrize("comando", ["alerta", "prueba"])
+def test_los_comandos_de_correo_son_t_sql_valido(comando):
+    # SET PARSEONLY compila el lote sin ejecutarlo (no hace falta Database Mail): atrapa errores de sintaxis.
+    if comando == "alerta":
+        sql = instalacion._comando_alerta_fallo("a@x.com;b@x.com").replace("$(ESCAPE_NONE(JOBID))", "0x01")
+    else:
+        sql = instalacion._comando_correo_prueba("a@x.com;b@x.com", "mi_base", r"C:\Respaldos\Nexo", 3)
+    with _admin_pyodbc() as conn:
+        conn.execute("SET PARSEONLY ON")
+        try:
+            conn.execute(sql)
+        finally:
+            conn.execute("SET PARSEONLY OFF")
+
+
 # ── carpeta de Google Drive: obligatoria y con prueba de escritura ──
 
 
