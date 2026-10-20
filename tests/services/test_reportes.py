@@ -2,6 +2,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 
 from app.db.models import (
     BancoMovimiento,
@@ -814,6 +815,12 @@ def test_notas_credito_emitidas_sin_usuario_autorizado_falla(db_session):
         )
 
 
+def _hoy_en_la_base(session) -> date:
+    """La fecha de las notas de credito la pone la base (GETDATE) y no Python: con SQL Server en un contenedor
+    (UTC) y la PC en otra zona horaria, a ciertas horas del dia no coinciden y `date.today()` cae en otro dia."""
+    return session.execute(text("SELECT CAST(GETDATE() AS DATE)")).scalar()
+
+
 def test_notas_credito_emitidas_lista_las_generadas_al_anular_con_pago(db_session):
     """anular_factura() solo genera NotaCreditoCliente si la cuenta por cobrar ya tenia
     pagos aplicados -- una factura de contado pagada de contado en la emision siempre
@@ -853,8 +860,8 @@ def test_notas_credito_emitidas_lista_las_generadas_al_anular_con_pago(db_sessio
     resultado = ReporteService.notas_credito_emitidas(
         db_session,
         id_usuario=admin.id_usuario,
-        fecha_desde=date.today(),
-        fecha_hasta=date.today(),
+        fecha_desde=_hoy_en_la_base(db_session),
+        fecha_hasta=_hoy_en_la_base(db_session),
     )
 
     assert len(resultado["filas"]) == 1
@@ -904,8 +911,8 @@ def test_notas_credito_emitidas_filtra_por_cliente(db_session):
     resultado = ReporteService.notas_credito_emitidas(
         db_session,
         id_usuario=admin.id_usuario,
-        fecha_desde=date.today(),
-        fecha_hasta=date.today(),
+        fecha_desde=_hoy_en_la_base(db_session),
+        fecha_hasta=_hoy_en_la_base(db_session),
         id_cliente=cliente_a.id_cliente,
     )
 
@@ -1412,8 +1419,8 @@ def test_notas_credito_proveedor_lista_generada_al_anular_con_pago(db_session):
     resultado = ReporteService.notas_credito_proveedor(
         db_session,
         id_usuario=admin.id_usuario,
-        fecha_desde=date.today(),
-        fecha_hasta=date.today(),
+        fecha_desde=_hoy_en_la_base(db_session),
+        fecha_hasta=_hoy_en_la_base(db_session),
     )
 
     assert len(resultado["filas"]) == 1
