@@ -37,6 +37,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.caja_apertura_dialog import CajaAperturaDialog
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
@@ -765,7 +766,7 @@ class FacturacionPanel(MixinPermisos, QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_facturas_excel,
@@ -783,7 +784,7 @@ class FacturacionPanel(MixinPermisos, QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_facturas_pdf,
@@ -795,7 +796,7 @@ class FacturacionPanel(MixinPermisos, QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(
             self,
@@ -804,6 +805,6 @@ class FacturacionPanel(MixinPermisos, QWidget):
         )
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar el listado de facturas: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el listado de facturas.")

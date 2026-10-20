@@ -25,6 +25,7 @@ from app.services.cuentas_bancarias import CuentaBancariaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, _enmascarar_numero_cuenta
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.conciliacion_bancos_dialog import ConciliacionBancosDialog
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
 from app.ui.message_box import MessageBox
@@ -677,7 +678,7 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_cuentas_bancarias_excel,
@@ -705,7 +706,7 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         }
         col_widths = [0.5, 1.5, 1.5, 1.0, 1.5, 1.3, 1.0, 1.0, 1.0]
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_cuentas_bancarias_pdf,
@@ -719,7 +720,7 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(
             self,
@@ -728,7 +729,7 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         )
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar cuentas bancarias: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar la lista de cuentas bancarias.")
 

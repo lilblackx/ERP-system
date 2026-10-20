@@ -43,6 +43,7 @@ from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
@@ -478,7 +479,7 @@ class PagoProveedorDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
-        self.btn_pagar.setEnabled(False)
+        ocupar_boton(self.btn_pagar)
         try:
             metodo = self.metodo_combo.currentData()
             monto_bolivares = None
@@ -522,7 +523,7 @@ class PagoProveedorDialog(QDialog):
             MessageBox.critical(self, "Error", "No se pudo registrar el pago.")
             return
         finally:
-            self.btn_pagar.setEnabled(True)
+            liberar_boton(self.btn_pagar)
 
         self.accept()
 

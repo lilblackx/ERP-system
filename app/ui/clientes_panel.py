@@ -37,6 +37,7 @@ from app.services.clientes import (
 )
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.historial_cliente_window import HistorialClienteWindow
 from app.ui.message_box import MessageBox
@@ -510,7 +511,7 @@ class ClientesPanel(MixinPermisos, QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_clientes_excel,
@@ -539,7 +540,7 @@ class ClientesPanel(MixinPermisos, QWidget):
         # ID: pequeño, Nombre: grande, Identificación: medio, Email: grande, etc.
         col_widths = [0.5, 2.5, 1.2, 2.0, 1.2, 1.5, 1.5, 1.0, 0.8, 1.0]
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_clientes_pdf,
@@ -553,7 +554,7 @@ class ClientesPanel(MixinPermisos, QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(
             self,
@@ -562,7 +563,7 @@ class ClientesPanel(MixinPermisos, QWidget):
         )
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar clientes: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar la lista de clientes.")
 

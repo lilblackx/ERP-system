@@ -33,6 +33,7 @@ from app.services.historial_cliente import (
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.ventas import VentaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.aplicar_nota_credito_dialog import AplicarNotaCreditoDialog
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
@@ -686,7 +687,7 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
             if not ruta:
                 return
 
-            self.btn_exportar_excel.setEnabled(False)
+            ocupar_boton(self.btn_exportar_excel)
             self._worker_export_excel = QueryWorker(
                 self.session_factory,
                 _tarea_exportar_historial_excel,
@@ -709,7 +710,7 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
             if not ruta:
                 return
 
-            self.btn_exportar_pdf.setEnabled(False)
+            ocupar_boton(self.btn_exportar_pdf)
             self._worker_export_pdf = QueryWorker(
                 self.session_factory,
                 _tarea_exportar_historial_pdf,
@@ -724,20 +725,20 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
             session.close()
 
     def _on_exportar_excel_ok(self, ruta: str) -> None:
-        self.btn_exportar_excel.setEnabled(True)
+        liberar_boton(self.btn_exportar_excel)
         MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
 
     def _on_exportar_excel_error(self, mensaje: str) -> None:
-        self.btn_exportar_excel.setEnabled(True)
+        liberar_boton(self.btn_exportar_excel)
         logger.error("Fallo al exportar historial a Excel: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el historial a Excel.")
 
     def _on_exportar_pdf_ok(self, ruta: str) -> None:
-        self.btn_exportar_pdf.setEnabled(True)
+        liberar_boton(self.btn_exportar_pdf)
         MessageBox.information(self, "Exportación completa", f"Se exportó el historial a:\n{ruta}")
 
     def _on_exportar_pdf_error(self, mensaje: str) -> None:
-        self.btn_exportar_pdf.setEnabled(True)
+        liberar_boton(self.btn_exportar_pdf)
         logger.error("Fallo al exportar historial a PDF: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el historial a PDF.")
 

@@ -47,6 +47,7 @@ from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
@@ -527,7 +528,7 @@ class PagoCobroDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
-        self.btn_cobrar.setEnabled(False)
+        ocupar_boton(self.btn_cobrar)
         try:
             metodo = self.metodo_combo.currentData()
             monto_moneda_origen = None
@@ -594,7 +595,7 @@ class PagoCobroDialog(QDialog):
             MessageBox.critical(self, "Error", f"No se pudo registrar el cobro: {str(e)}")
             return
         finally:
-            self.btn_cobrar.setEnabled(True)
+            liberar_boton(self.btn_cobrar)
 
         self.accept()
 
@@ -963,7 +964,7 @@ class AbonoGeneralDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
-        self.btn_abonar.setEnabled(False)
+        ocupar_boton(self.btn_abonar)
         try:
             metodo = self.metodo_combo.currentData()
             tasa_cambio = None
@@ -1040,7 +1041,7 @@ class AbonoGeneralDialog(QDialog):
             MessageBox.critical(self, "Error", f"No se pudo aplicar el abono general: {str(e)}")
             return
         finally:
-            self.btn_abonar.setEnabled(True)
+            liberar_boton(self.btn_abonar)
 
         self.accept()
 

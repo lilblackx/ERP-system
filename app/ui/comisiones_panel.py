@@ -41,6 +41,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.services.usuarios import UsuarioService
 from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
@@ -358,6 +359,7 @@ class PagarComisionesDialog(QDialog):
         if respuesta != QMessageBox.StandardButton.Yes:
             return
 
+        ocupar_boton(self.btn_pagar)
         try:
             self.pago_creado = PagoComisionService.pagar_comisiones_vendedor(
                 self.session,
@@ -383,6 +385,8 @@ class PagarComisionesDialog(QDialog):
             logger.exception("Fallo al pagar comisiones")
             MessageBox.critical(self, "Error", "No se pudo registrar el pago.")
             return
+        finally:
+            liberar_boton(self.btn_pagar)
 
         self.accept()
 
@@ -1011,7 +1015,7 @@ class ComisionesPanel(MixinPermisos, QWidget):
             session.close()
 
         encabezados, filas = self._datos_para_exportar()
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_excel,
@@ -1042,7 +1046,7 @@ class ComisionesPanel(MixinPermisos, QWidget):
             session.close()
 
         encabezados, filas = self._datos_para_exportar()
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_pdf,
@@ -1058,11 +1062,11 @@ class ComisionesPanel(MixinPermisos, QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, ruta: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         MessageBox.information(self, "Exportación completa", f"Se exportó a:\n{ruta}")
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar comisiones: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo completar la exportación.")
 

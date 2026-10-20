@@ -37,6 +37,7 @@ from app.services.categorias import CategoriaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.producto_auditoria_dialog import ProductoAuditoriaDialog
@@ -720,7 +721,7 @@ class InventarioPanel(MixinPermisos, QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_productos_excel,
@@ -738,7 +739,7 @@ class InventarioPanel(MixinPermisos, QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_productos_pdf,
@@ -750,7 +751,7 @@ class InventarioPanel(MixinPermisos, QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(
             self,
@@ -759,6 +760,6 @@ class InventarioPanel(MixinPermisos, QWidget):
         )
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar el catálogo de inventario: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el catálogo de inventario.")

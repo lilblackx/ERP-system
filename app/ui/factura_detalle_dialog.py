@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from app.services.empresa import EmpresaService
 from app.services.permisos import PermisoDenegadoError
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_pdf import generar_pdf_factura, imprimir_factura
 from app.ui.message_box import MessageBox
@@ -526,7 +527,7 @@ class FacturaDetalleDialog(MixinPermisos, QDialog):
         btn_exportar.setAutoDefault(False)
         btn_exportar.clicked.connect(self.exportar_pdf)
 
-        btn_imprimir = QPushButton("Imprimir")
+        self.btn_imprimir = btn_imprimir = QPushButton("Imprimir")
         btn_imprimir.setIcon(qta.icon("fa5s.print", color=COLOR_PRIMARY))
         btn_imprimir.setObjectName("BtnSecondary")
         btn_imprimir.setFixedHeight(36)
@@ -584,7 +585,11 @@ class FacturaDetalleDialog(MixinPermisos, QDialog):
                 )
                 return
 
-            ruta_pdf = imprimir_factura(self.datos, config_empresa, config_empresa.impresora_predeterminada)
+            ocupar_boton(self.btn_imprimir)
+            try:
+                ruta_pdf = imprimir_factura(self.datos, config_empresa, config_empresa.impresora_predeterminada)
+            finally:
+                liberar_boton(self.btn_imprimir)
             MessageBox.information(
                 self,
                 "Impresión enviada",

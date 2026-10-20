@@ -32,6 +32,7 @@ from app.db.models import Usuario
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
@@ -447,7 +448,7 @@ class TasasPanel(MixinPermisos, QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_tasas_excel,
@@ -465,7 +466,7 @@ class TasasPanel(MixinPermisos, QWidget):
         if not ruta:
             return
 
-        self.btn_exportar.setEnabled(False)
+        ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(
             self.session_factory,
             _tarea_exportar_tasas_pdf,
@@ -477,11 +478,11 @@ class TasasPanel(MixinPermisos, QWidget):
         self._worker_export.start()
 
     def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         ruta, cantidad = resultado
         MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} tasas a:\n{ruta}")
 
     def _on_exportar_error(self, mensaje: str) -> None:
-        self.btn_exportar.setEnabled(True)
+        liberar_boton(self.btn_exportar)
         logger.error("Fallo al exportar el histórico de tasas: %s", mensaje)
         MessageBox.critical(self, "Error", "No se pudo exportar el histórico de tasas.")

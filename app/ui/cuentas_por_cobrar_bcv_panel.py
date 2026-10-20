@@ -34,6 +34,7 @@ from app.services.pagos_bcv import PagoBCVService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
+from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
@@ -1092,7 +1093,7 @@ class AbonoGeneralBCVDialog(QDialog):
             return
         tipo_origen, id_origen = origen
 
-        self.btn_abonar.setEnabled(False)
+        ocupar_boton(self.btn_abonar)
         try:
             metodo = self.metodo_combo.currentData()
             tasa_cambio = None
@@ -1170,7 +1171,7 @@ class AbonoGeneralBCVDialog(QDialog):
             MessageBox.critical(self, "Error", f"No se pudo aplicar el abono: {str(e)}")
             return
         finally:
-            self.btn_abonar.setEnabled(True)
+            liberar_boton(self.btn_abonar)
 
 
 class DetalleCuentasBCVDialog(MixinPermisos, QDialog):
