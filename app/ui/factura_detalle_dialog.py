@@ -28,6 +28,7 @@ from app.ui.factura_pdf import generar_pdf_factura, imprimir_factura
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
@@ -112,12 +113,14 @@ _ETIQUETAS_METODO_VUELTO = {
 }
 
 
-class FacturaDetalleDialog(QDialog):
+class FacturaDetalleDialog(MixinPermisos, QDialog):
     """Vista de solo lectura de una factura: cabecera + lineas. `datos` es el dict
     devuelto por `VentaService.obtener_factura()` ({"factura": FacturaVenta,
     "detalles": [FacturaDetalle, ...]}). `session`/`id_usuario` se usan solo para poder
     exportar la factura digital a PDF (necesita los datos de la empresa, ver
     EmpresaService.obtener_configuracion)."""
+
+    recurso_permisos = "notas_credito"
 
     def __init__(self, datos: dict, session, id_usuario: int | None, parent=None):
         super().__init__(parent)
@@ -417,11 +420,14 @@ class FacturaDetalleDialog(QDialog):
         self.btn_devolver_nota.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_devolver_nota.setAutoDefault(False)
         self.btn_devolver_nota.clicked.connect(self._devolver_nota_credito)
-        layout.addWidget(self.btn_devolver_nota)
+        if self._puede("crear"):
+            layout.addWidget(self.btn_devolver_nota)
 
         return card
 
     def _devolver_nota_credito(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para devolver notas de crédito."):
+            return
         dialogo = DevolverNotaCreditoDialog(self.session, self.id_usuario, [self.nota_credito], parent=self)
         if dialogo.exec() != QDialog.DialogCode.Accepted or dialogo.nota_actualizada is None:
             return

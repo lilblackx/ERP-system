@@ -29,6 +29,7 @@ from app.ui.conciliacion_bancos_dialog import ConciliacionBancosDialog
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
 from app.ui.message_box import MessageBox
 from app.ui.movimientos_cuenta_dialog import MovimientosCuentaDialog
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -137,8 +138,10 @@ def _tarea_exportar_cuentas_bancarias_pdf(
     return ruta, len(filas)
 
 
-class CuentasBancariasPanel(QWidget):
+class CuentasBancariasPanel(MixinPermisos, QWidget):
     """Panel de gestión de cuentas bancarias."""
+
+    recurso_permisos = "bancos"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -216,7 +219,8 @@ class CuentasBancariasPanel(QWidget):
         btn_nuevo.setIcon(qta.icon("fa5s.plus", color="#FFFFFF"))
         btn_nuevo.setStyleSheet(BUTTON_PRIMARY_QSS)
         btn_nuevo.clicked.connect(self._on_nueva_cuenta)
-        toolbar_layout.addWidget(btn_nuevo)
+        if self._puede("crear"):
+            toolbar_layout.addWidget(btn_nuevo)
 
         # Filtros (banco + estado) agrupados detras de "Filtrar" -- GUIA_ESTILO_UI.md §3.3,
         # ningun dropdown suelto en la barra, ni siquiera uno solo.
@@ -302,7 +306,8 @@ class CuentasBancariasPanel(QWidget):
         btn_conciliacion.setIcon(qta.icon("fa5s.balance-scale", color=COLOR_TEXT_DARK))
         btn_conciliacion.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_conciliacion.clicked.connect(self._on_conciliacion)
-        footer_layout.addWidget(btn_conciliacion)
+        if self._puede("crear"):
+            footer_layout.addWidget(btn_conciliacion)
 
         btn_ver_movimientos = QPushButton("Ver movimientos")
         btn_ver_movimientos.setIcon(qta.icon("fa5s.exchange-alt", color=COLOR_TEXT_DARK))
@@ -314,13 +319,15 @@ class CuentasBancariasPanel(QWidget):
         btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_editar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_editar.clicked.connect(self._on_editar)
-        footer_layout.addWidget(btn_editar)
+        if self._puede("editar"):
+            footer_layout.addWidget(btn_editar)
 
         btn_cambiar_estado = QPushButton("Cambiar estado")
         btn_cambiar_estado.setIcon(qta.icon("fa5s.sync-alt", color=COLOR_TEXT_DARK))
         btn_cambiar_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_cambiar_estado.clicked.connect(self._on_cambiar_estado)
-        footer_layout.addWidget(btn_cambiar_estado)
+        if self._puede("eliminar"):
+            footer_layout.addWidget(btn_cambiar_estado)
 
         layout.addWidget(footer)
 
@@ -449,6 +456,8 @@ class CuentasBancariasPanel(QWidget):
         self._cargar_datos()
 
     def _on_nueva_cuenta(self):
+        if not self._exigir_permiso("crear", "No tienes permiso para crear cuentas bancarias."):
+            return
         """Abre el diálogo para crear una nueva cuenta bancaria."""
         session = self.session_factory()
         try:
@@ -479,6 +488,8 @@ class CuentasBancariasPanel(QWidget):
             session.close()
 
     def _on_editar(self):
+        if not self._exigir_permiso("editar", "No tienes permiso para editar cuentas bancarias."):
+            return
         """Abre el diálogo para editar la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
@@ -530,6 +541,8 @@ class CuentasBancariasPanel(QWidget):
             session.close()
 
     def _on_cambiar_estado(self):
+        if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de cuentas bancarias."):
+            return
         """Cambia el estado de la cuenta seleccionada."""
         row = self.table.currentRow()
         if row < 0:
@@ -616,6 +629,8 @@ class CuentasBancariasPanel(QWidget):
 
     def _on_conciliacion(self):
         """Abre el diálogo de conciliación de bancos."""
+        if not self._exigir_permiso("crear", "No tienes permiso para conciliar bancos."):
+            return
         session = self.session_factory()
         try:
             dialog = ConciliacionBancosDialog(session, self.usuario, parent=self)

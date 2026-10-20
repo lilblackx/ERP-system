@@ -38,6 +38,7 @@ from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.pantalla import ajustar_tamano
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
@@ -192,8 +193,10 @@ def _tarea_exportar_historial_pdf(session, ruta: str, id_cliente: int, cliente_n
     return ruta
 
 
-class HistorialClienteWindow(QDialog):
+class HistorialClienteWindow(MixinPermisos, QDialog):
     """Ventana que muestra el historial de facturas y pagos de un cliente."""
+
+    recurso_permisos = "notas_credito"
 
     def __init__(
         self,
@@ -430,8 +433,10 @@ class HistorialClienteWindow(QDialog):
         btn_cerrar.clicked.connect(self.accept)
 
         h.addWidget(btn_detalle)
-        h.addWidget(self.btn_aplicar_nota)
-        h.addWidget(self.btn_devolver_nota)
+        if self._puede("crear"):
+            h.addWidget(self.btn_aplicar_nota)
+        if self._puede("crear"):
+            h.addWidget(self.btn_devolver_nota)
         h.addWidget(self.btn_exportar_excel)
         h.addWidget(self.btn_exportar_pdf)
         h.addWidget(btn_cerrar)
@@ -515,6 +520,8 @@ class HistorialClienteWindow(QDialog):
             self.lbl_notas_credito.hide()
 
     def aplicar_nota_credito(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para aplicar notas de crédito."):
+            return
         session = self.session_factory()
         try:
             dialogo = AplicarNotaCreditoDialog(
@@ -535,6 +542,8 @@ class HistorialClienteWindow(QDialog):
             session.close()
 
     def devolver_nota_credito(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para devolver notas de crédito."):
+            return
         session = self.session_factory()
         try:
             dialogo = DevolverNotaCreditoDialog(session, self.id_usuario, self._notas_disponibles, parent=self)

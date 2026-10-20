@@ -2,7 +2,7 @@ import pytest
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget
 
-from app.ui import notificaciones_leidas
+from app.ui import notificaciones_leidas, permisos_ui
 
 _single_shot_original = QTimer.singleShot
 
@@ -31,3 +31,16 @@ def _sin_cargas_iniciales_diferidas(monkeypatch):
         return _single_shot_original(msec, *args)
 
     monkeypatch.setattr(QTimer, "singleShot", staticmethod(single_shot))
+
+
+@pytest.fixture(autouse=True)
+def _permisos_concedidos_por_defecto(request, monkeypatch):
+    """Los paneles muestran sus botones segun el permiso del usuario (app/ui/permisos_ui.py). Los
+    tests de UI arman paneles con una Session mockeada, contra la que ese chequeo daria "sin
+    permiso" y ocultaria los botones (o abriria un aviso modal que bloquea el test). Por defecto se
+    conceden todos los permisos; los tests con base de datos real (fixture db_session) prueban la
+    matriz de verdad y no se tocan."""
+    if "db_session" in request.fixturenames:
+        return
+    for nombre in ("tiene_permiso", "es_admin", "tiene_permiso_en_sesion", "es_admin_en_sesion"):
+        monkeypatch.setattr(permisos_ui, nombre, lambda *args, **kwargs: True)

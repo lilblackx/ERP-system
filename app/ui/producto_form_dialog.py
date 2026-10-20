@@ -30,6 +30,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHT,
@@ -177,10 +178,12 @@ QPushButton#BtnAddCategoria:hover {{
 """
 
 
-class ProductoFormDialog(QDialog):
+class ProductoFormDialog(MixinPermisos, QDialog):
     """Dialogo horizontal para creacion/edicion de productos, con precio de venta
     (ProductoPrecio) integrado en el mismo formulario -- un producto sin precio no se
     puede vender, tiene sentido capturarlo en el mismo paso que el alta."""
+
+    recurso_permisos = "categorias"
 
     def __init__(
         self,
@@ -306,7 +309,9 @@ class ProductoFormDialog(QDialog):
         btn_nueva_categoria.clicked.connect(self._crear_categoria_rapida)
 
         cat_hbox.addWidget(self.categoria_combo)
-        cat_hbox.addWidget(btn_nueva_categoria)
+        # CategoriaService.crear exige categorias:crear
+        if self._puede("crear"):
+            cat_hbox.addWidget(btn_nueva_categoria)
         grid.addLayout(cat_hbox, 1, 1)
 
         # Nombre
@@ -500,6 +505,8 @@ class ProductoFormDialog(QDialog):
                 self.categoria_combo.setCurrentIndex(idx)
 
     def _crear_categoria_rapida(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear categorías."):
+            return
         nombre, ok = QInputDialog.getText(self, "Nueva categoría", "Nombre de la categoría:")
         nombre = nombre.strip()
         if not ok or not nombre:

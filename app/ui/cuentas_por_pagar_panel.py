@@ -48,6 +48,7 @@ from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -749,9 +750,11 @@ class DetalleCuentaPorPagarDialog(QDialog):
             MessageBox.warning(self, "Error", f"No se pudo cargar los pagos: {str(e)}")
 
 
-class CuentasPorPagarPanel(QWidget):
+class CuentasPorPagarPanel(MixinPermisos, QWidget):
     """Panel principal del modulo Cuentas por Pagar: listado con filtro por estado,
     paginacion y pago contra PagoService.registrar_pago_proveedor."""
+
+    recurso_permisos = "pagos"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -936,7 +939,8 @@ class CuentasPorPagarPanel(QWidget):
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
-        h.addWidget(btn_pagar)
+        if self._puede("crear"):
+            h.addWidget(btn_pagar)
         return w
 
     # ── Paginacion ───────────────────────────────────────────────────────
@@ -1137,6 +1141,8 @@ class CuentasPorPagarPanel(QWidget):
         return int(item.text()) if item is not None else None
 
     def pagar_seleccionada(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar pagos a proveedores."):
+            return
         id_cuenta = self._fila_seleccionada_id()
         if id_cuenta is None:
             return

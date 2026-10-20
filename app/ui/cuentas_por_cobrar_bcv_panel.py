@@ -38,6 +38,7 @@ from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BORDER,
@@ -1172,8 +1173,10 @@ class AbonoGeneralBCVDialog(QDialog):
             self.btn_abonar.setEnabled(True)
 
 
-class DetalleCuentasBCVDialog(QDialog):
+class DetalleCuentasBCVDialog(MixinPermisos, QDialog):
     """Diálogo para mostrar las cuentas individuales BCV de un cliente."""
+
+    recurso_permisos = "pagos"
 
     def __init__(
         self,
@@ -1253,7 +1256,8 @@ class DetalleCuentasBCVDialog(QDialog):
         btn_cerrar.setAutoDefault(False)
         btn_cerrar.clicked.connect(self.accept)
 
-        footer.addWidget(btn_abono_general)
+        if self._puede("crear"):
+            footer.addWidget(btn_abono_general)
         footer.addWidget(btn_cerrar)
 
         root.addLayout(footer)
@@ -1389,6 +1393,8 @@ class DetalleCuentasBCVDialog(QDialog):
 
     def _cobrar_cuenta(self, id_cuenta: int) -> None:
         """Abre el diálogo de cobro para una cuenta específica."""
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar cobros."):
+            return
         try:
             session = self.session_factory()
             try:
@@ -1432,6 +1438,8 @@ class DetalleCuentasBCVDialog(QDialog):
 
     def _aplicar_abono_general(self) -> None:
         """Abre el diálogo de abono general BCV para el cliente."""
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar cobros."):
+            return
         try:
             dialogo = AbonoGeneralBCVDialog(
                 self.session_factory,

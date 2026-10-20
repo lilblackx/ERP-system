@@ -30,6 +30,7 @@ from app.services.empresa import _SENTINEL, EmpresaService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.rif_input import conectar_formato_identificacion
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -49,8 +50,10 @@ from app.utils.rif import formatear_rif
 logger = logging.getLogger(__name__)
 
 
-class ConfigEmpresaPanel(QWidget):
+class ConfigEmpresaPanel(MixinPermisos, QWidget):
     """Panel para gestionar los datos de configuración de la empresa."""
+
+    recurso_permisos = "empresa"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -133,8 +136,10 @@ class ConfigEmpresaPanel(QWidget):
         btn_borrar_logo.setFixedWidth(150)
         btn_borrar_logo.clicked.connect(self.borrar_logo)
 
-        logo_btn_layout.addWidget(btn_seleccionar_logo)
-        logo_btn_layout.addWidget(btn_borrar_logo)
+        if self._puede("editar"):
+            logo_btn_layout.addWidget(btn_seleccionar_logo)
+        if self._puede("editar"):
+            logo_btn_layout.addWidget(btn_borrar_logo)
         logo_btn_layout.addWidget(lbl_logo_hint)
 
         logo_layout.addWidget(self.lbl_logo_preview)
@@ -324,7 +329,8 @@ class ConfigEmpresaPanel(QWidget):
         btn_guardar.clicked.connect(self.guardar_cambios)
 
         footer_layout.addStretch()
-        footer_layout.addWidget(btn_guardar)
+        if self._puede("editar"):
+            footer_layout.addWidget(btn_guardar)
 
         card_layout.addLayout(footer_layout)
 
@@ -395,6 +401,8 @@ class ConfigEmpresaPanel(QWidget):
             session.close()
 
     def seleccionar_logo(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para modificar la configuración de la empresa."):
+            return
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Logo", "", "Images (*.png *.jpg *.jpeg)")
         if not file_path:
             return
@@ -428,6 +436,8 @@ class ConfigEmpresaPanel(QWidget):
             MessageBox.warning(self, "Error al cargar logo", "No se pudo leer el archivo seleccionado.")
 
     def borrar_logo(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para modificar la configuración de la empresa."):
+            return
         self.logo_bytes = None
         self.lbl_logo_preview.clear()
         self.lbl_logo_preview.setText("Sin Logo")
@@ -446,6 +456,8 @@ class ConfigEmpresaPanel(QWidget):
             self.lbl_logo_preview.setText("")
 
     def guardar_cambios(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para modificar la configuración de la empresa."):
+            return
         self._formatear_rif()
         session = self.session_factory()
         try:

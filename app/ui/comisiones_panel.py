@@ -45,6 +45,7 @@ from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -527,10 +528,12 @@ class DetalleComisionFacturaDialog(QDialog):
         root.addLayout(fila_botones)
 
 
-class ComisionesPanel(QWidget):
+class ComisionesPanel(MixinPermisos, QWidget):
     """Panel del modulo Comisiones: dos modos segun el permiso del usuario.
     - Modo gestion (comisiones:ver): selector de vendedor + tabla + pagar.
     - Modo "Mis Comisiones" (reportes_comisiones:ver): solo lectura de propias."""
+
+    recurso_permisos = "comisiones"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -713,7 +716,8 @@ class ComisionesPanel(QWidget):
         self.btn_pagar.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_pagar.clicked.connect(self.pagar_comisiones)
         self.btn_pagar.setEnabled(False)
-        h.addWidget(self.btn_pagar)
+        if self._puede("crear"):
+            h.addWidget(self.btn_pagar)
         return w
 
     def cargar_datos(self) -> None:
@@ -903,6 +907,8 @@ class ComisionesPanel(QWidget):
         DetalleComisionFacturaDialog(grupo, parent=self).exec()
 
     def pagar_comisiones(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para pagar comisiones."):
+            return
         if self.id_vendedor_actual is None:
             MessageBox.information(self, "Selección requerida", "Selecciona un vendedor.")
             return

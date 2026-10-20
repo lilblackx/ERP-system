@@ -38,6 +38,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.vendedores import VendedorService
 from app.ui.mapa_rutas_panel import MapaRutasPanel
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.rutas_panel import RutasPanel
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -136,10 +137,12 @@ ESTADOS_FILTRO = [
 ]
 
 
-class VendedoresPanel(QWidget):
+class VendedoresPanel(MixinPermisos, QWidget):
     """Panel principal del módulo Vendedores: listado con búsqueda, alta/edición
     y activar/desactivar -- lo minimo necesario para poder emitir facturas
     (FacturaFormDialog exige un vendedor activo)."""
+
+    recurso_permisos = "vendedores"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -286,7 +289,8 @@ class VendedoresPanel(QWidget):
         h.addWidget(self.buscar_input)
         h.addWidget(self.estado_combo)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_nuevo)
+        if self._puede("crear"):
+            h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_exportar)
         return w
 
@@ -357,8 +361,10 @@ class VendedoresPanel(QWidget):
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
-        h.addWidget(btn_editar)
-        h.addWidget(btn_estado)
+        if self._puede("editar"):
+            h.addWidget(btn_editar)
+        if self._puede("eliminar"):
+            h.addWidget(btn_estado)
         return w
 
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
@@ -506,6 +512,8 @@ class VendedoresPanel(QWidget):
         return int(self.tabla.item(filas[0].row(), 0).text())
 
     def nuevo_vendedor(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear vendedores."):
+            return
         session = self.session_factory()
         try:
             dialogo = VendedorFormDialog(session, id_usuario=self.usuario.id_usuario, parent=self)
@@ -535,6 +543,8 @@ class VendedoresPanel(QWidget):
             session.close()
 
     def editar_vendedor(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para editar vendedores."):
+            return
         id_vendedor = self._fila_seleccionada_id()
         if id_vendedor is None:
             return
@@ -572,6 +582,8 @@ class VendedoresPanel(QWidget):
             session.close()
 
     def cambiar_estado_vendedor_seleccionado(self) -> None:
+        if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de vendedores."):
+            return
         id_vendedor = self._fila_seleccionada_id()
         if id_vendedor is None:
             return

@@ -33,6 +33,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     COLOR_BORDER,
@@ -91,9 +92,11 @@ OPCIONES_RANGO = [
 ]
 
 
-class TasasPanel(QWidget):
+class TasasPanel(MixinPermisos, QWidget):
     """Panel principal del módulo Tasas de Cambio: tasa vigente + registrar una nueva +
     histórico exportable."""
+
+    recurso_permisos = "tasas"
 
     # TasaTicker (franja superior del shell, app/ui/tasa_ticker.py) vive fuera de este
     # panel y tiene su propio timer de refresco cada 5 minutos -- sin esta señal, registrar
@@ -244,7 +247,8 @@ class TasasPanel(QWidget):
         h.addWidget(lbl_rango)
         h.addWidget(self.rango_combo)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_registrar)
+        if self._puede("crear"):
+            h.addWidget(self.btn_registrar)
         h.addWidget(self.btn_exportar)
         return w
 
@@ -399,6 +403,8 @@ class TasasPanel(QWidget):
         return respuesta == QMessageBox.StandardButton.Yes
 
     def registrar_tasa(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para registrar tasas."):
+            return
         dialogo = TasaRegistroDialog(parent=self)
         if not dialogo.exec():
             return

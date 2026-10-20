@@ -40,6 +40,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.historial_cliente_window import HistorialClienteWindow
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -156,12 +157,14 @@ def _tarea_exportar_clientes_pdf(
     return ruta, len(filas)
 
 
-class ClientesPanel(QWidget):
+class ClientesPanel(MixinPermisos, QWidget):
     """
     Panel principal del módulo Clientes.
     Encapsula la barra de herramientas y la tabla de datos en un solo widget
     para ser insertado directamente en el área de contenido del MainWindow.
     """
+
+    recurso_permisos = "clientes"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -292,7 +295,8 @@ class ClientesPanel(QWidget):
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        h.addWidget(self.btn_nuevo)
+        if self._puede("crear"):
+            h.addWidget(self.btn_nuevo)
         h.addWidget(self.btn_filtrar)
         h.addWidget(self.btn_exportar)
         return w
@@ -383,8 +387,10 @@ class ClientesPanel(QWidget):
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
-        h.addWidget(btn_editar)
-        h.addWidget(btn_estado)
+        if self._puede("editar"):
+            h.addWidget(btn_editar)
+        if self._puede("eliminar"):
+            h.addWidget(btn_estado)
         h.addWidget(btn_historial)
         return w
 
@@ -572,6 +578,8 @@ class ClientesPanel(QWidget):
         return int(item.text())
 
     def nuevo_cliente(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear clientes."):
+            return
         session = self.session_factory()
         try:
             dialogo = ClienteFormDialog(session, id_usuario=self.usuario.id_usuario, parent=self)
@@ -603,6 +611,8 @@ class ClientesPanel(QWidget):
             session.close()
 
     def editar_cliente(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para editar clientes."):
+            return
         id_cliente = self._fila_seleccionada_id()
         if id_cliente is None:
             return
@@ -640,6 +650,8 @@ class ClientesPanel(QWidget):
             session.close()
 
     def cambiar_estado_cliente_seleccionado(self) -> None:
+        if not self._exigir_permiso("eliminar", "No tienes permiso para cambiar el estado de clientes."):
+            return
         id_cliente = self._fila_seleccionada_id()
         if id_cliente is None:
             return

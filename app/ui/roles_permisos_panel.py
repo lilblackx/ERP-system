@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from app.db.models import Usuario
 from app.services.permisos import PermisoDenegadoError, PermisoService, RolService
 from app.ui.message_box import MessageBox
+from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
@@ -49,10 +50,12 @@ from app.ui.styles import (
 logger = logging.getLogger(__name__)
 
 
-class RolesPermisosPanel(QWidget):
+class RolesPermisosPanel(MixinPermisos, QWidget):
     """Lista de roles a la izquierda + checkbox-grid de permisos del rol seleccionado a
     la derecha, agrupado por recurso (una fila de checkboxes por recurso, una casilla por
     acción disponible de ese recurso)."""
+
+    recurso_permisos = "permisos"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -125,9 +128,12 @@ class RolesPermisosPanel(QWidget):
         self.btn_eliminar_rol.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_eliminar_rol.clicked.connect(self.eliminar_rol)
 
-        botones.addWidget(self.btn_nuevo_rol)
-        botones.addWidget(self.btn_editar_rol)
-        botones.addWidget(self.btn_eliminar_rol)
+        if self._puede("crear"):
+            botones.addWidget(self.btn_nuevo_rol)
+        if self._puede("editar"):
+            botones.addWidget(self.btn_editar_rol)
+        if self._puede("eliminar"):
+            botones.addWidget(self.btn_eliminar_rol)
         layout.addLayout(botones)
         return card
 
@@ -152,7 +158,8 @@ class RolesPermisosPanel(QWidget):
         self.btn_guardar_matriz.setStyleSheet(BUTTON_PRIMARY_QSS)
         self.btn_guardar_matriz.clicked.connect(self.guardar_matriz)
         self.btn_guardar_matriz.setEnabled(False)
-        header.addWidget(self.btn_guardar_matriz)
+        if self._puede("editar"):
+            header.addWidget(self.btn_guardar_matriz)
         layout.addLayout(header)
 
         self.lbl_aviso_admin = QLabel(
@@ -223,6 +230,8 @@ class RolesPermisosPanel(QWidget):
         self._cargar_matriz(id_rol, actual.text())
 
     def nuevo_rol(self) -> None:
+        if not self._exigir_permiso("crear", "No tienes permiso para crear roles."):
+            return
         nombre, ok = QInputDialog.getText(self, "Nuevo rol", "Nombre del rol:")
         nombre = nombre.strip().upper()
         if not ok or not nombre:
@@ -252,6 +261,8 @@ class RolesPermisosPanel(QWidget):
             session.close()
 
     def editar_rol(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para editar roles."):
+            return
         item = self.lista_roles.currentItem()
         if item is None:
             MessageBox.information(self, "Selección requerida", "Selecciona un rol de la lista.")
@@ -281,6 +292,8 @@ class RolesPermisosPanel(QWidget):
             session.close()
 
     def eliminar_rol(self) -> None:
+        if not self._exigir_permiso("eliminar", "No tienes permiso para eliminar roles."):
+            return
         item = self.lista_roles.currentItem()
         if item is None:
             MessageBox.information(self, "Selección requerida", "Selecciona un rol de la lista.")
@@ -385,6 +398,8 @@ class RolesPermisosPanel(QWidget):
             self._matriz_layout.insertWidget(self._matriz_layout.count() - 1, bloque)
 
     def guardar_matriz(self) -> None:
+        if not self._exigir_permiso("editar", "No tienes permiso para modificar los permisos de un rol."):
+            return
         if self._rol_seleccionado_id is None:
             return
         ids_marcados = [id_permiso for id_permiso, chk in self._checkboxes.items() if chk.isChecked()]
