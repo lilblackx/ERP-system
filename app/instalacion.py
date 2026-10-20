@@ -19,6 +19,11 @@ Comandos:
                  autenticacion mixto (cambios en el registro + reinicio del servicio; requiere administrador
                  de Windows). El mensaje empieza con SIN CAMBIOS, CAMBIOS (solo_diagnostico), CONFIGURADO u
                  OMITIDO (servidor remoto)
+    probar-drive prueba que se pueda escribir en la carpeta de Google Drive (existe la unidad, se crea la
+                 carpeta si falta y un archivo de prueba se escribe, lee y borra)
+    respaldos    crea en SQL Server Agent los trabajos de respaldo (completo diario 19:00, log cada 30 min),
+                 limpieza por dias de retencion y mantenimiento semanal; con ruta_drive (obligatoria, se prueba antes)
+                 programa ademas la copia a Google Drive para escritorio. Falla si el SQL Server es Express (sin Agent)
     validar-clave  valida una contrasena contra la politica de la app (usuario `admin`)
     servidor     crea la base, el esquema, el usuario SQL propio de la app y el usuario `admin`,
                  y escribe config.env (MODO_INSTALACION=SERVIDOR) + datos_estaciones.txt
@@ -565,6 +570,309 @@ def cmd_actualizar(datos: dict) -> str:
     return "Base de datos actualizada."
 
 
+# ── Respaldos automaticos (trabajos de SQL Server Agent + copia a Google Drive) ──────
+#
+# Los respaldos son trabajos de SQL Server Agent (se ven y se editan en SSMS > SQL Server Agent > Trabajos):
+# SQL Server no deja crear por script un "Plan de mantenimiento" propiamente dicho. La copia a Google Drive
+# no puede hacerla SQL Agent (corre con otra cuenta de Windows, que no ve la unidad de Google Drive para
+# escritorio del usuario): la hace una tarea programada de Windows con la sesion del usuario que instala.
+
+TRABAJO_COMPLETO = "Nexo ERP - Respaldo completo"
+TRABAJO_LOG = "Nexo ERP - Respaldo de log de transacciones"
+TRABAJO_MANTENIMIENTO = "Nexo ERP - Mantenimiento semanal"
+TAREA_COPIA_DRIVE = "Nexo ERP - Copia de respaldos a Google Drive"
+CARPETA_RESPALDOS_DEFECTO = r"C:\Respaldos\Nexo"
+DIAS_RETENCION_DEFECTO = 3  # vale para los respaldos completos y los de log, en local y en Drive
+_RUTA_RE = re.compile(r"""^(?:[A-Za-z]:[\\/]|\\\\|/)[^'"<>|*?;\r\n]+$""")
+_EDICION_EXPRESS = 4  # SERVERPROPERTY('EngineEdition'): Express no incluye SQL Server Agent
+
+
+def _ruta_valida(valor: str, que: str) -> str:
+    """Las rutas terminan dentro de sentencias SQL y de un script de PowerShell: lista blanca de caracteres."""
+    ruta = valor.strip().rstrip("\\/") if len(valor.strip()) > 3 else valor.strip()
+    if not _RUTA_RE.match(ruta):
+        raise ErrorInstalacion(
+            f"{que} debe ser una ruta completa (ej. C:\\Respaldos\\Nexo) sin comillas ni los caracteres < > | * ? ;"
+        )
+    return ruta
+
+
+def _ejecutar_con_parametros(motor, sentencias: list[tuple[str, tuple]]) -> None:
+    with motor.connect().execution_options(isolation_level="AUTOCOMMIT") as conexion:
+        for sql, parametros in sentencias:
+            cursor = conexion.connection.cursor()
+            try:
+                cursor.execute(sql, *parametros)
+                # BACKUP emite mensajes informativos: el controlador solo termina de ejecutar (y de informar
+                # errores) cuando se recorren todos los resultados.
+                while cursor.nextset():
+                    pass
+            finally:
+                cursor.close()
+
+
+def _alta_trabajo(nombre: str, descripcion: str, pasos: list[tuple[str, str, str]], programacion: dict) -> tuple:
+    """Sentencia (sql, parametros) que borra el trabajo si existe y lo crea con sus pasos y horario.
+    `pasos`: (nombre, comando T-SQL, base de datos)."""
+    lineas = [
+        "IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = ?) "
+        "EXEC msdb.dbo.sp_delete_job @job_name = ?, @delete_unused_schedule = 1;",
+        "DECLARE @propietario SYSNAME = SUSER_SNAME(0x01);",
+        "EXEC msdb.dbo.sp_add_job @job_name = ?, @description = ?, @owner_login_name = @propietario;",
+    ]
+    parametros: list = [nombre, nombre, nombre, descripcion]
+    for i, (paso, comando, base) in enumerate(pasos):
+        siguiente = 3 if i < len(pasos) - 1 else 1  # 3 = pasar al paso siguiente, 1 = terminar bien
+        lineas.append(
+            "EXEC msdb.dbo.sp_add_jobstep @job_name = ?, @step_name = ?, @subsystem = N'TSQL', @command = ?, "
+            f"@database_name = ?, @on_success_action = {siguiente};"
+        )
+        parametros += [nombre, paso, comando, base]
+    campos = ", ".join(f"@{k} = {v}" for k, v in programacion.items())
+    lineas.append(f"EXEC msdb.dbo.sp_add_jobschedule @job_name = ?, @name = ?, {campos};")
+    parametros += [nombre, nombre]
+    lineas.append("EXEC msdb.dbo.sp_add_jobserver @job_name = ?, @server_name = N'(local)';")
+    parametros.append(nombre)
+    return "\n".join(lineas), tuple(parametros)
+
+
+def _comando_respaldo(base: str, carpeta: str, tipo: str) -> str:
+    """T-SQL de un respaldo con nombre `<base>_FULL|LOG_<fecha>_<hora>.bak|.trn` dentro de `carpeta`."""
+    separador = "/" if "/" in carpeta and "\\" not in carpeta else "\\"
+    etiqueta, objeto, extension = ("FULL", "DATABASE", "bak") if tipo == "full" else ("LOG", "LOG", "trn")
+    return (
+        f"DECLARE @f NVARCHAR(500) = N'{carpeta}{separador}{base}_{etiqueta}_' "
+        f"+ FORMAT(GETDATE(), 'yyyyMMdd_HHmmss') + N'.{extension}';\n"
+        f"BACKUP {objeto} [{base}] TO DISK = @f WITH COMPRESSION, CHECKSUM, INIT;"
+    )
+
+
+def _comando_limpieza(carpeta: str, dias: int) -> str:
+    return (
+        f"DECLARE @corte DATETIME = DATEADD(DAY, -{dias}, GETDATE());\n"
+        f"EXEC master.dbo.xp_delete_file 0, N'{carpeta}', N'bak', @corte, 0;\n"
+        f"EXEC master.dbo.xp_delete_file 0, N'{carpeta}', N'trn', @corte, 0;"
+    )
+
+
+def _asegurar_agente(instancia: str | None) -> str:
+    """SQL Server Agent con inicio automatico y en ejecucion (solo para un SQL Server de este equipo)."""
+    servicio = f"SQLAgent${instancia}" if instancia else "SQLSERVERAGENT"
+    if _estado_servicio(servicio) is None:
+        return f"No se encontro el servicio {servicio}: inicielo manualmente para que corran los respaldos."
+    subprocess.run(["sc", "config", servicio, "start=", "auto"], capture_output=True, text=True)
+    if _estado_servicio(servicio) != _SERVICIO_EN_EJECUCION:
+        _net("start", servicio)
+    if _estado_servicio(servicio) != _SERVICIO_EN_EJECUCION:
+        return f"No se pudo iniciar el servicio {servicio}: inicielo manualmente para que corran los respaldos."
+    return ""
+
+
+def _usuario_windows() -> str:
+    import os
+
+    dominio, usuario = os.environ.get("USERDOMAIN", ""), os.environ.get("USERNAME", "")
+    return f"{dominio}\\{usuario}" if dominio and usuario else usuario
+
+
+def _ruta_drive_obligatoria(datos: dict) -> str:
+    ruta = str(datos.get("ruta_drive", "")).strip()
+    if not ruta:
+        raise ErrorInstalacion(
+            "La carpeta de Google Drive es obligatoria: los respaldos se copian ahi para tenerlos fuera de este "
+            "equipo. Indique una ruta (ej. G:\\Mi unidad\\Nexo)."
+        )
+    return _ruta_valida(ruta, "La ruta de Google Drive")
+
+
+def _probar_ruta_drive(ruta: str) -> str:
+    """Comprueba que se pueda escribir en `ruta` con el usuario que ejecuta el instalador (el mismo con el que
+    correra la tarea de copia): la unidad existe, la carpeta existe o se puede crear, y un archivo de prueba se
+    escribe, se lee y se borra. Solo se crea el ultimo nivel de la ruta: un error de tipeo en una carpeta padre
+    no debe dejar carpetas sobrantes en Google Drive."""
+    carpeta = Path(ruta)
+    if not carpeta.anchor or not Path(carpeta.anchor).exists():
+        raise ErrorInstalacion(
+            f"No existe la unidad {carpeta.anchor or ruta}. Abra Google Drive para escritorio, inicie sesion y "
+            "verifique la letra de unidad (o la ruta de la carpeta sincronizada)."
+        )
+    if not carpeta.exists():
+        if not carpeta.parent.exists():
+            raise ErrorInstalacion(
+                f"No existe la carpeta {carpeta.parent}. Verifique la ruta (mayusculas, tildes y espacios) o "
+                "cree primero esa carpeta en Google Drive."
+            )
+        try:
+            carpeta.mkdir()
+        except OSError as exc:
+            raise ErrorInstalacion(f"No se pudo crear la carpeta {ruta}: {exc.strerror or exc}") from exc
+    elif not carpeta.is_dir():
+        raise ErrorInstalacion(f"{ruta} existe pero no es una carpeta.")
+    archivo = carpeta / f"nexo_prueba_{secrets.token_hex(4)}.tmp"
+    contenido = "Prueba de escritura de Nexo ERP. Se puede borrar."
+    try:
+        archivo.write_text(contenido, encoding="utf-8")
+        if archivo.read_text(encoding="utf-8") != contenido:
+            raise ErrorInstalacion(f"Se escribio un archivo de prueba en {ruta} pero no se pudo leer igual.")
+        archivo.unlink()
+    except OSError as exc:
+        raise ErrorInstalacion(f"No se pudo escribir en {ruta}: {exc.strerror or exc}") from exc
+    return f"La carpeta funciona: se escribio, leyo y borro un archivo de prueba en {ruta}."
+
+
+def cmd_probar_drive(datos: dict) -> str:
+    return _probar_ruta_drive(_ruta_drive_obligatoria(datos))
+
+
+def _programar_copia_drive(carpeta: str, ruta_drive: str, dias: int, directorio_datos: Path) -> str:
+    """Script de PowerShell + tarea programada (cada 30 min, con la sesion del usuario que instala) que copia a
+    `ruta_drive` los respaldos nuevos de `carpeta` y borra de Drive los de mas de `dias` dias."""
+    script = directorio_datos / "copiar_respaldos_drive.ps1"
+    directorio_datos.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        "# Generado por el instalador de Nexo ERP. Copia los respaldos a Google Drive para escritorio.\n"
+        f"$origen = '{carpeta}'\n"
+        f"$destino = '{ruta_drive}'\n"
+        f"$dias = {dias}\n"
+        "$fallos = 0\n"
+        "if (-not (Test-Path -LiteralPath $destino)) {\n"
+        "    New-Item -ItemType Directory -Path $destino -Force -ErrorAction SilentlyContinue | Out-Null\n"
+        "}\n"
+        "if (-not (Test-Path -LiteralPath $destino)) { exit 1 }  # Drive para escritorio no esta iniciado\n"
+        "$ext = '.bak', '.trn'\n"
+        "# Se omiten los archivos de los ultimos 2 minutos: SQL Server puede seguir escribiendolos.\n"
+        "$limite = (Get-Date).AddMinutes(-2)\n"
+        "Get-ChildItem -LiteralPath $origen -File |\n"
+        "    Where-Object { $ext -contains $_.Extension -and $_.LastWriteTime -lt $limite } |\n"
+        "    ForEach-Object {\n"
+        "        $copia = Join-Path $destino $_.Name\n"
+        "        if (-not (Test-Path -LiteralPath $copia)) {\n"
+        "            try { Copy-Item -LiteralPath $_.FullName -Destination $copia -ErrorAction Stop }\n"
+        "            catch { $fallos++ }\n"
+        "        }\n"
+        "    }\n"
+        "$corte = (Get-Date).AddDays(-$dias)\n"
+        "Get-ChildItem -LiteralPath $destino -File |\n"
+        "    Where-Object { $ext -contains $_.Extension -and $_.LastWriteTime -lt $corte } |\n"
+        "    Remove-Item -Force -ErrorAction SilentlyContinue\n"
+        "if ($fallos -gt 0) { exit 1 }\n",
+        encoding="utf-8-sig",
+    )
+    comando = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{script}"'
+    argumentos = ["schtasks", "/Create", "/TN", TAREA_COPIA_DRIVE, "/TR", comando, "/SC", "MINUTE", "/MO", "30", "/F"]
+    usuario = _usuario_windows()
+    if usuario:
+        argumentos += ["/RU", usuario, "/IT"]
+    r = subprocess.run(argumentos, capture_output=True, text=True)
+    if r.returncode != 0:
+        detalle = (r.stderr or r.stdout).strip().splitlines()
+        return (
+            f"No se pudo crear la tarea programada de copia a Google Drive: {detalle[-1] if detalle else r.returncode}"
+        )
+    return ""
+
+
+def cmd_respaldos(datos: dict) -> str:
+    servidor = _servidor_sql(datos)
+    base = str(datos.get("base", "")).strip()
+    if not _IDENTIFICADOR_RE.match(base):
+        raise ErrorInstalacion("El nombre de la base de datos solo admite letras, numeros y guion bajo (3 a 40).")
+    carpeta = _ruta_valida(str(datos.get("carpeta") or CARPETA_RESPALDOS_DEFECTO), "La carpeta de respaldos")
+    ruta_drive = _ruta_drive_obligatoria(datos)
+    if not datos.get("omitir_prueba_drive"):
+        _probar_ruta_drive(ruta_drive)
+    try:
+        dias = int(str(datos.get("dias_retencion") or DIAS_RETENCION_DEFECTO).strip())
+    except ValueError:
+        dias = 0
+    if not 1 <= dias <= 3650:
+        raise ErrorInstalacion("Los dias de retencion de los respaldos deben ser un numero entre 1 y 3650.")
+    directorio_datos = Path(datos.get("config_destino") or ARCHIVO_CONFIG).parent
+
+    avisos: list[str] = []
+    es_local = _es_local(servidor.split(",")[0].split("\\")[0])
+    motor = _motor(
+        servidor,
+        "master",
+        datos.get("usuario_admin", ""),
+        datos.get("clave_admin", ""),
+        bool(datos.get("windows_auth")),
+    )
+    try:
+        with motor.connect() as c:
+            edicion = c.execute(text("SELECT CAST(SERVERPROPERTY('EngineEdition') AS INT)")).scalar()
+            instancia = c.execute(text("SELECT CAST(SERVERPROPERTY('InstanceName') AS NVARCHAR(128))")).scalar()
+        if edicion == _EDICION_EXPRESS:
+            raise ErrorInstalacion(
+                "Esta edicion de SQL Server (Express) no incluye SQL Server Agent, que ejecuta los respaldos "
+                "automaticos. Se necesita SQL Server Standard o superior."
+            )
+        _ejecutar_con_parametros(
+            motor,
+            [
+                ("EXEC master.dbo.xp_create_subdir ?", (carpeta,)),
+                # Sin modelo de recuperacion completo no se pueden respaldar los logs de transacciones.
+                (f"ALTER DATABASE [{base}] SET RECOVERY FULL", ()),
+                # El log solo se puede respaldar despues de un respaldo completo: se hace uno ya.
+                (_comando_respaldo(base, carpeta, "full"), ()),
+                _alta_trabajo(
+                    TRABAJO_COMPLETO,
+                    "Respaldo completo diario de la base de Nexo ERP, y borrado de respaldos antiguos.",
+                    [
+                        ("Respaldo completo", _comando_respaldo(base, carpeta, "full"), "master"),
+                        ("Borrar respaldos antiguos", _comando_limpieza(carpeta, dias), "master"),
+                    ],
+                    {"freq_type": 4, "freq_interval": 1, "active_start_time": 190000},
+                ),
+                _alta_trabajo(
+                    TRABAJO_LOG,
+                    "Respaldo del log de transacciones de Nexo ERP cada 30 minutos.",
+                    [("Respaldo de log", _comando_respaldo(base, carpeta, "log"), "master")],
+                    {
+                        "freq_type": 4,
+                        "freq_interval": 1,
+                        "freq_subday_type": 4,
+                        "freq_subday_interval": 30,
+                        "active_start_time": 0,
+                        "active_end_time": 235959,
+                    },
+                ),
+                _alta_trabajo(
+                    TRABAJO_MANTENIMIENTO,
+                    "Verificacion de integridad y actualizacion de estadisticas de la base de Nexo ERP (domingos).",
+                    [
+                        ("Verificar integridad", f"DBCC CHECKDB ([{base}]) WITH NO_INFOMSGS;", "master"),
+                        ("Actualizar estadisticas", "EXEC sp_updatestats;", base),
+                    ],
+                    {"freq_type": 8, "freq_interval": 1, "freq_recurrence_factor": 1, "active_start_time": 30000},
+                ),
+            ],
+        )
+    except ErrorInstalacion:
+        raise
+    except Exception as exc:
+        raise ErrorInstalacion(_traducir_error(exc)) from exc
+    finally:
+        motor.dispose()
+
+    if es_local:
+        aviso = _asegurar_agente(instancia)
+        if aviso:
+            avisos.append(aviso)
+    mensajes = [
+        f"Respaldos listos en {carpeta}: completo diario a las 19:00, log cada 30 minutos, "
+        f"se conservan {dias} dias. Trabajos visibles en SSMS > SQL Server Agent > Trabajos."
+    ]
+    aviso = _programar_copia_drive(carpeta, ruta_drive, dias, directorio_datos)
+    if aviso:
+        avisos.append(aviso)
+    else:
+        mensajes.append(
+            f"Copia a Google Drive cada 30 minutos hacia {ruta_drive} (requiere Google Drive para escritorio abierto)."
+        )
+    return "\n".join(mensajes + avisos)
+
+
 def cmd_validar_clave(datos: dict) -> str:
     from app.services.auth import validar_password_policy
 
@@ -589,6 +897,8 @@ COMANDOS = {
     "estacion": cmd_estacion,
     "actualizar": cmd_actualizar,
     "configurar-sql": cmd_configurar_sql,
+    "respaldos": cmd_respaldos,
+    "probar-drive": cmd_probar_drive,
     "validar-clave": cmd_validar_clave,
     "generar-clave": cmd_generar_clave,
 }

@@ -2,6 +2,7 @@
 Crean una base y un login temporales (dj_inst_test / dj_inst_app) y los eliminan al terminar."""
 
 import json
+from pathlib import Path
 
 import bcrypt
 import pyodbc
@@ -410,3 +411,290 @@ def test_configurar_sql_instancia_predeterminada_de_sql_server_2019(monkeypatch,
     _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
     assert sql.reg[(instalacion._ruta_instancia(id_), "LoginMode")] == 2
     assert sql.acciones == [("stop", "MSSQLSERVER"), ("start", "MSSQLSERVER"), ("start", "SQLSERVERAGENT")]
+
+
+# ── respaldos: trabajos de SQL Server Agent reales; la unica carpeta es la del contenedor de SQL Server ──
+
+CARPETA_RESPALDOS_TEST = "/var/opt/mssql/data/nexo_respaldos_test"
+RUTA_DRIVE_TEST = "G:\\Mi unidad\\Nexo"
+TRABAJOS_RESPALDO = (
+    instalacion.TRABAJO_COMPLETO,
+    instalacion.TRABAJO_LOG,
+    instalacion.TRABAJO_MANTENIMIENTO,
+)
+
+
+def _borrar_trabajos_respaldo():
+    with _admin_pyodbc() as conn:
+        for nombre in TRABAJOS_RESPALDO:
+            conn.execute(
+                f"IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = N'{nombre}') "
+                f"EXEC msdb.dbo.sp_delete_job @job_name = N'{nombre}', @delete_unused_schedule = 1"
+            )
+
+
+@pytest.fixture
+def respaldos_sin_efectos_externos(monkeypatch):
+    """No se toca el servicio SQL Agent ni el Programador de tareas de la PC donde corren los tests."""
+    llamadas = {"agente": [], "drive": []}
+    monkeypatch.setattr(instalacion, "_asegurar_agente", lambda i: llamadas["agente"].append(i) or "")
+    monkeypatch.setattr(instalacion, "_programar_copia_drive", lambda *a: llamadas["drive"].append(a) or "")
+    _borrar_trabajos_respaldo()
+    yield llamadas
+    _borrar_trabajos_respaldo()
+
+
+def _datos_respaldos(**extra):
+    return {
+        "servidor": DB_SERVER,
+        "base": BASE,
+        "usuario_admin": DB_USER,
+        "clave_admin": DB_PASSWORD,
+        "carpeta": CARPETA_RESPALDOS_TEST,
+        "ruta_drive": RUTA_DRIVE_TEST,
+        "omitir_prueba_drive": True,  # la prueba de la carpeta de Drive tiene sus propios tests
+        **extra,
+    }
+
+
+def test_respaldos_crea_los_trabajos_con_sus_horarios(servidor_instalado, respaldos_sin_efectos_externos, tmp_path):
+    _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(dias_retencion="15"), tmp_path)
+    assert estado == "OK", mensaje
+    assert "15 dias" in mensaje
+    with _admin_pyodbc() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT recovery_model_desc FROM sys.databases WHERE name = ?", BASE)
+        assert cur.fetchone()[0] == "FULL"
+        cur.execute(
+            "SELECT j.name, s.freq_type, s.freq_subday_type, s.freq_subday_interval, s.active_start_time "
+            "FROM msdb.dbo.sysjobs j JOIN msdb.dbo.sysjobschedules js ON js.job_id = j.job_id "
+            "JOIN msdb.dbo.sysschedules s ON s.schedule_id = js.schedule_id WHERE j.name LIKE N'Nexo ERP -%'"
+        )
+        horarios = {fila[0]: tuple(fila[1:]) for fila in cur.fetchall()}
+        assert horarios[instalacion.TRABAJO_COMPLETO] == (4, 1, 0, 190000)  # diario 19:00
+        assert horarios[instalacion.TRABAJO_LOG] == (4, 4, 30, 0)  # cada 30 minutos
+        assert horarios[instalacion.TRABAJO_MANTENIMIENTO][0] == 8  # semanal
+        cur.execute(
+            "SELECT s.step_name, s.command FROM msdb.dbo.sysjobsteps s JOIN msdb.dbo.sysjobs j ON j.job_id = s.job_id "
+            "WHERE j.name = ? ORDER BY s.step_id",
+            instalacion.TRABAJO_COMPLETO,
+        )
+        pasos = cur.fetchall()
+        assert [p[0] for p in pasos] == ["Respaldo completo", "Borrar respaldos antiguos"]
+        assert f"BACKUP DATABASE [{BASE}]" in pasos[0][1] and "DATEADD(DAY, -15" in pasos[1][1]
+        # El respaldo completo inicial ya existe: sin el, el primer respaldo de log fallaria.
+        cur.execute(
+            "SELECT COUNT(*) FROM msdb.dbo.backupset WHERE database_name = ? AND type = 'D' "
+            "AND is_copy_only = 0 AND backup_start_date > DATEADD(MINUTE, -5, GETDATE())",
+            BASE,
+        )
+        assert cur.fetchone()[0] >= 1
+    assert respaldos_sin_efectos_externos["agente"] == [None]
+    (copia_drive,) = respaldos_sin_efectos_externos["drive"]
+    assert copia_drive[:3] == (CARPETA_RESPALDOS_TEST, RUTA_DRIVE_TEST, 15)
+
+
+def test_respaldos_se_pueden_repetir_sin_duplicar_trabajos(
+    servidor_instalado, respaldos_sin_efectos_externos, tmp_path
+):
+    for _ in range(2):
+        _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(), tmp_path)
+        assert estado == "OK", mensaje
+    with _admin_pyodbc() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM msdb.dbo.sysjobs WHERE name LIKE N'Nexo ERP -%'")
+        assert cur.fetchone()[0] == 3
+
+
+def test_respaldos_los_comandos_de_los_pasos_se_ejecutan(servidor_instalado, respaldos_sin_efectos_externos, tmp_path):
+    # Los comandos de los pasos son los que correra SQL Agent: se ejecutan tal cual, uno a uno.
+    _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(), tmp_path)
+    assert estado == "OK", mensaje
+    with _admin_pyodbc() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT s.command FROM msdb.dbo.sysjobsteps s JOIN msdb.dbo.sysjobs j ON j.job_id = s.job_id "
+            "WHERE j.name IN (?, ?) ORDER BY j.name, s.step_id",
+            instalacion.TRABAJO_COMPLETO,
+            instalacion.TRABAJO_LOG,
+        )
+        comandos = [fila[0] for fila in cur.fetchall()]
+        assert len(comandos) == 3
+        for comando in comandos:
+            conn.execute(comando)
+
+
+def test_respaldos_con_ruta_de_drive_programa_la_copia(servidor_instalado, respaldos_sin_efectos_externos, tmp_path):
+    ruta = r"G:\Mi unidad\Respaldos Nexo"
+    datos = _datos_respaldos(ruta_drive=ruta, config_destino=str(tmp_path / "c.env"))
+    _, estado, mensaje = _ejecutar("respaldos", datos, tmp_path)
+    assert estado == "OK", mensaje
+    assert "Google Drive" in mensaje and ruta in mensaje
+    assert respaldos_sin_efectos_externos["drive"] == [(CARPETA_RESPALDOS_TEST, ruta, 3, tmp_path)]
+
+
+@pytest.mark.parametrize(
+    "extra, texto",
+    [
+        ({"carpeta": "respaldos"}, "ruta completa"),
+        ({"carpeta": "C:\\Res'paldos"}, "ruta completa"),
+        ({"ruta_drive": "Mi unidad\\Nexo"}, "ruta completa"),
+        ({"ruta_drive": "G:\\Mi unidad';--"}, "ruta completa"),
+        ({"dias_retencion": "0"}, "dias de retencion"),
+        ({"dias_retencion": "mucho"}, "dias de retencion"),
+        ({"base": "mala; DROP"}, "base de datos"),
+    ],
+)
+def test_respaldos_rechaza_datos_invalidos(extra, texto, tmp_path):
+    _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(**extra), tmp_path)
+    assert estado == "ERROR" and texto in mensaje
+
+
+def test_respaldos_en_sql_server_express_explica_que_falta_sql_agent(monkeypatch, servidor_instalado, tmp_path):
+    original = instalacion._motor
+
+    class _Conexion:
+        def __init__(self, real):
+            self._real = real
+
+        def __enter__(self):
+            self._c = self._real.connect().__enter__()
+            return self
+
+        def __exit__(self, *a):
+            return self._c.__exit__(*a)
+
+        def execute(self, consulta, *a, **k):
+            if "EngineEdition" in str(consulta):
+                return type("R", (), {"scalar": lambda s: 4})()
+            return self._c.execute(consulta, *a, **k)
+
+    class _MotorExpress:
+        def __init__(self, real):
+            self._real = real
+
+        def connect(self):
+            return _Conexion(self._real)
+
+        def dispose(self):
+            self._real.dispose()
+
+    monkeypatch.setattr(instalacion, "_motor", lambda *a, **k: _MotorExpress(original(*a, **k)))
+    _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(), tmp_path)
+    assert estado == "ERROR" and "SQL Server Agent" in mensaje
+
+
+def test_copia_drive_escribe_el_script_y_crea_la_tarea(monkeypatch, tmp_path):
+    ejecutados = []
+
+    class R:
+        returncode, stdout, stderr = 0, "", ""
+
+    monkeypatch.setattr(instalacion.subprocess, "run", lambda args, **k: ejecutados.append(args) or R())
+    monkeypatch.setattr(instalacion, "_usuario_windows", lambda: "PC\\luis")
+    aviso = instalacion._programar_copia_drive(r"C:\Respaldos\Nexo", r"G:\Mi unidad\Nexo", 45, tmp_path)
+    assert aviso == ""
+    script = (tmp_path / "copiar_respaldos_drive.ps1").read_text(encoding="utf-8-sig")
+    assert r"$origen = 'C:\Respaldos\Nexo'" in script
+    assert r"$destino = 'G:\Mi unidad\Nexo'" in script
+    assert "$dias = 45" in script
+    (schtasks,) = ejecutados
+    assert schtasks[:2] == ["schtasks", "/Create"]
+    assert schtasks[schtasks.index("/MO") + 1] == "30"
+    assert schtasks[schtasks.index("/RU") + 1] == "PC\\luis" and "/IT" in schtasks
+
+
+def test_copia_drive_si_falla_la_tarea_devuelve_un_aviso(monkeypatch, tmp_path):
+    class R:
+        returncode, stdout, stderr = 1, "", "ERROR: Acceso denegado."
+
+    monkeypatch.setattr(instalacion.subprocess, "run", lambda args, **k: R())
+    aviso = instalacion._programar_copia_drive(r"C:\R", r"G:\D", 30, tmp_path)
+    assert "Acceso denegado" in aviso
+
+
+# ── carpeta de Google Drive: obligatoria y con prueba de escritura ──
+
+
+def _unidad_inexistente():
+    import string
+
+    return next(f"{letra}:\\" for letra in reversed(string.ascii_uppercase) if not Path(f"{letra}:\\").exists())
+
+
+def test_probar_drive_escribe_lee_y_borra_un_archivo_de_prueba(tmp_path):
+    carpeta = tmp_path / "Drive" / "Nexo"
+    (tmp_path / "Drive").mkdir()
+    codigo, estado, mensaje = _ejecutar("probar-drive", {"ruta_drive": str(carpeta)}, tmp_path)
+    assert (codigo, estado) == (0, "OK"), mensaje
+    assert carpeta.is_dir() and list(carpeta.iterdir()) == []  # se creo el ultimo nivel y no quedo nada
+
+
+def test_probar_drive_con_la_carpeta_ya_existente(tmp_path):
+    _, estado, mensaje = _ejecutar("probar-drive", {"ruta_drive": str(tmp_path)}, tmp_path)
+    assert estado == "OK", mensaje
+
+
+def test_probar_drive_no_crea_carpetas_padre_por_un_error_de_tipeo(tmp_path):
+    destino = tmp_path / "Mi unidd" / "Nexo"
+    _, estado, mensaje = _ejecutar("probar-drive", {"ruta_drive": str(destino)}, tmp_path)
+    assert estado == "ERROR" and "No existe la carpeta" in mensaje
+    assert not (tmp_path / "Mi unidd").exists()
+
+
+def test_probar_drive_con_unidad_inexistente_pide_abrir_google_drive(tmp_path):
+    ruta = _unidad_inexistente() + "Mi unidad\\Nexo"
+    _, estado, mensaje = _ejecutar("probar-drive", {"ruta_drive": ruta}, tmp_path)
+    assert estado == "ERROR" and "Google Drive para escritorio" in mensaje
+
+
+def test_probar_drive_si_la_ruta_es_un_archivo(tmp_path):
+    archivo = tmp_path / "x.txt"
+    archivo.write_text("x")
+    _, estado, mensaje = _ejecutar("probar-drive", {"ruta_drive": str(archivo)}, tmp_path)
+    assert estado == "ERROR" and "no es una carpeta" in mensaje
+
+
+def test_probar_drive_sin_permiso_de_escritura(monkeypatch, tmp_path):
+    def sin_permiso(self, *a, **k):
+        raise PermissionError(13, "Acceso denegado")
+
+    monkeypatch.setattr(Path, "write_text", sin_permiso)
+    with pytest.raises(ErrorInstalacion, match="No se pudo escribir.*Acceso denegado"):
+        instalacion._probar_ruta_drive(str(tmp_path))
+
+
+@pytest.mark.parametrize("ruta", ["", "   ", "Mi unidad\\Nexo"])
+def test_probar_drive_exige_una_ruta_completa(ruta, tmp_path):
+    _, estado, mensaje = _ejecutar("probar-drive", {"ruta_drive": ruta}, tmp_path)
+    assert estado == "ERROR" and ("obligatoria" in mensaje or "ruta completa" in mensaje)
+
+
+def test_respaldos_exige_la_ruta_de_drive_y_no_crea_nada_sin_ella(
+    servidor_instalado, respaldos_sin_efectos_externos, tmp_path
+):
+    _, estado, mensaje = _ejecutar("respaldos", _datos_respaldos(ruta_drive=""), tmp_path)
+    assert estado == "ERROR" and "obligatoria" in mensaje
+    with _admin_pyodbc() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM msdb.dbo.sysjobs WHERE name LIKE N'Nexo ERP -%'").fetchone()[0] == 0
+
+
+def test_respaldos_con_drive_que_no_funciona_falla_antes_de_tocar_sql_server(
+    servidor_instalado, respaldos_sin_efectos_externos, tmp_path
+):
+    datos = _datos_respaldos(ruta_drive=_unidad_inexistente() + "Nexo", omitir_prueba_drive=False)
+    _, estado, mensaje = _ejecutar("respaldos", datos, tmp_path)
+    assert estado == "ERROR" and "Google Drive para escritorio" in mensaje
+    with _admin_pyodbc() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM msdb.dbo.sysjobs WHERE name LIKE N'Nexo ERP -%'").fetchone()[0] == 0
+
+
+def test_respaldos_prueba_la_carpeta_de_drive_antes_de_crear_los_trabajos(
+    servidor_instalado, respaldos_sin_efectos_externos, tmp_path
+):
+    drive = tmp_path / "Drive"
+    drive.mkdir()
+    datos = _datos_respaldos(ruta_drive=str(drive / "Nexo"), omitir_prueba_drive=False)
+    _, estado, mensaje = _ejecutar("respaldos", datos, tmp_path)
+    assert estado == "OK", mensaje
+    assert (drive / "Nexo").is_dir() and list((drive / "Nexo").iterdir()) == []

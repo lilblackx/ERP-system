@@ -10,7 +10,13 @@
 ;   Estacion : NexoERP-Setup.exe /VERYSILENT /Tipo=ESTACION /Servidor=PC-SERVIDOR,1433
 ;              /Base=distribuidora_dj /UsuarioSql=dj_app /ClaveSql=...
 ; Registro detallado: agregar /LOG="C:\ruta\instalacion.log".
-
+; Respaldos automaticos (solo Servidor nuevo; necesitan SQL Server Standard o superior, por SQL Server Agent):
+;   /CarpetaRespaldos="D:\Respaldos"   carpeta local (por defecto C:\Respaldos\Nexo)
+;   /RutaDrive="G:\Mi unidad\Nexo"      OBLIGATORIA: copia ahi los respaldos cada 30 min (Google Drive para escritorio).
+;                                       Antes se prueba que se pueda escribir; /SinPruebaDrive=1 omite la prueba (p. ej. si
+;                                       Drive para escritorio aun no tiene la sesion iniciada al instalar)
+;   /DiasRetencion=3                    dias que se conservan los respaldos
+;   /Respaldos=0                        no configurar respaldos
 #ifndef Version
   #define Version "1.0.0"
 #endif
@@ -34,6 +40,8 @@
 #define ServicioAnterior "DistribuidoraDJLicencia"
 #define ReglaFirewall "Nexo ERP - SQL Server"
 #define ReglaFirewallAnterior "Distribuidora DJ - SQL Server"
+; Tarea programada que copia los respaldos a Google Drive (la crea Nexo-Herramientas.exe, comando "respaldos").
+#define TareaCopiaDrive "Nexo ERP - Copia de respaldos a Google Drive"
 ; INTERNO: el certificado ya instalado en los equipos que se actualizan se identifica por este nombre.
 #define CertNombre "Distribuidora DJ"
 
@@ -127,6 +135,7 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 Filename: "{sys}\sc.exe"; Parameters: "stop {#ServicioAnterior}"; Flags: runhidden; RunOnceId: "DetenerServicioAnterior"
 Filename: "{sys}\sc.exe"; Parameters: "delete {#ServicioAnterior}"; Flags: runhidden; RunOnceId: "BorrarServicioAnterior"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#ReglaFirewallAnterior}"""; Flags: runhidden; RunOnceId: "BorrarFirewallAnterior"
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#TareaCopiaDrive}"" /F"; Flags: runhidden; RunOnceId: "BorrarTareaCopiaDrive"
 #ifdef Cer
 Filename: "{sys}\certutil.exe"; Parameters: "-delstore Root ""{#CertNombre}"""; Flags: runhidden; RunOnceId: "QuitarCertRaiz"
 Filename: "{sys}\certutil.exe"; Parameters: "-delstore TrustedPublisher ""{#CertNombre}"""; Flags: runhidden; RunOnceId: "QuitarCertEditor"
@@ -144,9 +153,10 @@ var
   PgTipo: TInputOptionWizardPage;
   PgServidor: TInputQueryWizardPage;
   PgClavesApp: TInputQueryWizardPage;
+  PgRespaldos: TInputQueryWizardPage;
   PgEstacion: TInputQueryWizardPage;
   PgActualizar: TInputQueryWizardPage;
-  BtnProbarServidor, BtnProbarEstacion: TNewButton;
+  BtnProbarServidor, BtnProbarEstacion, BtnProbarDrive: TNewButton;
   EsActualizacion: Boolean;
   ModoPrevio: String;
   SalidaPorFaltaDeSql: Boolean;
@@ -352,6 +362,23 @@ function ValClaveAdminApp: String;
 begin
   if WizardSilent then Result := Par('ClaveAdminApp', '') else Result := PgClavesApp.Values[0];
 end;
+function ValCarpetaRespaldos: String;
+begin
+  if WizardSilent then Result := Par('CarpetaRespaldos', 'C:\Respaldos\Nexo') else Result := Trim(PgRespaldos.Values[0]);
+end;
+function ValRutaDrive: String;
+begin
+  if WizardSilent then Result := Par('RutaDrive', '') else Result := Trim(PgRespaldos.Values[1]);
+end;
+function ValDiasRetencion: String;
+begin
+  if WizardSilent then Result := Par('DiasRetencion', '3') else Result := Trim(PgRespaldos.Values[2]);
+end;
+function RespaldosActivados: Boolean;
+begin
+  { /Respaldos=0 o carpeta vacia = no configurar respaldos. }
+  Result := (Par('Respaldos', '1') <> '0') and (ValCarpetaRespaldos <> '');
+end;
 function ValServidorEstacion: String;
 begin
   if WizardSilent then Result := Par('Servidor', '') else Result := Trim(PgEstacion.Values[0]);
@@ -431,6 +458,22 @@ begin
     MsgBox(Mensaje, mbError, MB_OK);
 end;
 
+{ Prueba la carpeta de Google Drive con el usuario que instala (el mismo con el que correra la copia). }
+function ProbarDrive(var Mensaje: String): Boolean;
+begin
+  Result := EjecutarTool('probar-drive', '{"ruta_drive":"' + JsonEscape(ValRutaDrive) + '"}', Mensaje);
+end;
+
+procedure ProbarDriveClick(Sender: TObject);
+var
+  Mensaje: String;
+begin
+  if ProbarDrive(Mensaje) then
+    MsgBox(Mensaje, mbInformation, MB_OK)
+  else
+    MsgBox(Mensaje, mbError, MB_OK);
+end;
+
 procedure ProbarEstacionClick(Sender: TObject);
 var
   Mensaje, Json: String;
@@ -486,7 +529,26 @@ begin
   PgClavesApp.Add('Contrasena del usuario "admin":', True);
   PgClavesApp.Add('Repita la contrasena:', True);
 
-  PgEstacion := CreateInputQueryPage(PgClavesApp.ID, 'Conexion con el servidor',
+  PgRespaldos := CreateInputQueryPage(PgClavesApp.ID, 'Respaldos automaticos',
+    'Respaldo completo todos los dias a las 7:00 pm y del registro de transacciones cada 30 minutos.',
+    'Se crean como trabajos de SQL Server Agent (visibles en SSMS > SQL Server Agent > Trabajos) y requieren SQL Server Standard o superior. Los respaldos se copian ademas a Google Drive (obligatorio, para tenerlos fuera de este equipo): tenga instalado y con la sesion iniciada Google Drive para escritorio e indique la carpeta de Drive donde guardarlos, por ejemplo G:\Mi unidad\Nexo. Use "Probar carpeta" para comprobar que se puede escribir; la copia se hace con la sesion del usuario que instala.');
+  PgRespaldos.Add('Carpeta local de los respaldos (vacio = no configurar respaldos):', False);
+  PgRespaldos.Add('Carpeta de Google Drive (obligatoria):', False);
+  PgRespaldos.Add('Dias que se conservan los respaldos:', False);
+  PgRespaldos.Values[0] := 'C:\Respaldos\Nexo';
+  PgRespaldos.Values[2] := '3';
+
+  BtnProbarDrive := TNewButton.Create(PgRespaldos);
+  BtnProbarDrive.Parent := PgRespaldos.Surface;
+  BtnProbarDrive.Caption := 'Probar carpeta';
+  BtnProbarDrive.Width := ScaleX(120);
+  BtnProbarDrive.Height := ScaleY(26);
+  BtnProbarDrive.Left := PgRespaldos.Edits[1].Left + PgRespaldos.Edits[1].Width - BtnProbarDrive.Width;
+  BtnProbarDrive.Top := PgRespaldos.PromptLabels[1].Top - ScaleY(5);
+  BtnProbarDrive.Anchors := [akTop, akRight];
+  BtnProbarDrive.OnClick := @ProbarDriveClick;
+
+  PgEstacion := CreateInputQueryPage(PgRespaldos.ID, 'Conexion con el servidor',
     'Esta estacion se conectara a la base de datos del servidor.',
     'Use los datos que el instalador del servidor guardo en "datos_estaciones.txt" (en la carpeta de datos de Nexo ERP del servidor).');
   PgEstacion.Add('Servidor SQL (nombre o IP del servidor, coma y puerto; ej. SERVIDOR,1433):', False);
@@ -518,7 +580,7 @@ begin
   Result := False;
   if EsActualizacion then
   begin
-    if (PageID = PgTipo.ID) or (PageID = PgServidor.ID) or (PageID = PgClavesApp.ID) or (PageID = PgEstacion.ID) then
+    if (PageID = PgTipo.ID) or (PageID = PgServidor.ID) or (PageID = PgClavesApp.ID) or (PageID = PgRespaldos.ID) or (PageID = PgEstacion.ID) then
       Result := True
     else if PageID = PgActualizar.ID then
       Result := (ModoPrevio <> 'SERVIDOR');
@@ -527,7 +589,7 @@ begin
   begin
     if PageID = PgActualizar.ID then
       Result := True
-    else if (PageID = PgServidor.ID) or (PageID = PgClavesApp.ID) then
+    else if (PageID = PgServidor.ID) or (PageID = PgClavesApp.ID) or (PageID = PgRespaldos.ID) then
       Result := not EsServidor
     else if PageID = PgEstacion.ID then
       Result := EsServidor;
@@ -591,6 +653,27 @@ begin
     end;
     Json := '{"clave":"' + JsonEscape(ValClaveAdminApp) + '"}';
     Result := EjecutarTool('validar-clave', Json, Mensaje);
+    if not Result then MsgBox(Mensaje, mbError, MB_OK);
+    Exit;
+  end;
+
+  if (not EsActualizacion) and (CurPageID = PgRespaldos.ID) then
+  begin
+    if ValCarpetaRespaldos = '' then Exit;
+    if (StrToIntDef(ValDiasRetencion, 0) < 1) or (StrToIntDef(ValDiasRetencion, 0) > 3650) then
+    begin
+      MsgBox('Los dias que se conservan los respaldos deben ser un numero entre 1 y 3650.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+    if ValRutaDrive = '' then
+    begin
+      MsgBox('La carpeta de Google Drive es obligatoria: los respaldos se copian ahi para tenerlos fuera de este equipo.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+    { No se avanza con una carpeta de Drive que no funciona. }
+    Result := ProbarDrive(Mensaje);
     if not Result then MsgBox(Mensaje, mbError, MB_OK);
     Exit;
   end;
@@ -709,6 +792,29 @@ begin
   end;
 end;
 
+{ Respaldos automaticos (trabajos de SQL Server Agent + copia a Google Drive). Un fallo aqui no invalida la
+  instalacion: se avisa (ver docs\BACKUP_RESTORE.md para repetirlo a mano). }
+procedure ConfigurarRespaldos;
+var
+  Json, Mensaje: String;
+begin
+  if not RespaldosActivados then Exit;
+  Json := '{"servidor":"' + JsonEscape(ValServidor) + '","puerto":"' + JsonEscape(ValPuerto) + '","base":"' + JsonEscape(ValBase) +
+          '","usuario_admin":"' + JsonEscape(ValAdminSql) + '","clave_admin":"' + JsonEscape(ValClaveAdminSql) +
+          '","windows_auth":' + BoolJson(ValAdminSql = '') + ',"carpeta":"' + JsonEscape(ValCarpetaRespaldos) +
+          '","ruta_drive":"' + JsonEscape(ValRutaDrive) + '","omitir_prueba_drive":' + BoolJson(Par('SinPruebaDrive', '0') = '1') +
+          ',"dias_retencion":"' + JsonEscape(ValDiasRetencion) +
+          '","config_destino":"' + JsonEscape(ArchivoConfig) + '"}';
+  if EjecutarTool('respaldos', Json, Mensaje) then
+    Log('respaldos: ' + Mensaje)
+  else
+  begin
+    Log('Fallaron los respaldos automaticos: ' + Mensaje);
+    SuppressibleMsgBox('Nexo ERP se instalo, pero no se pudieron configurar los respaldos automaticos:' + #13#10 + #13#10 + Mensaje,
+                       mbError, MB_OK, IDOK);
+  end;
+end;
+
 procedure ConfigurarInstalacion;
 var
   Json, Mensaje, ClaveApp: String;
@@ -745,7 +851,11 @@ begin
               '","clave_admin_app":"' + JsonEscape(ValClaveAdminApp) + '","config_destino":"' + JsonEscape(ArchivoConfig) + '"}';
       Ok := EjecutarTool('servidor', Json, Mensaje);
       MensajeConfig := Mensaje;
-      if Ok then InstalarServicioYFirewall;
+      if Ok then
+      begin
+        InstalarServicioYFirewall;
+        ConfigurarRespaldos;
+      end;
     end;
   end
   else
