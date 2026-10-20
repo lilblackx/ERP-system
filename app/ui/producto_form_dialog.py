@@ -448,6 +448,17 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         grid.addWidget(self.lbl_cajas_calculadas, 11, 0)
         grid.addWidget(self.lbl_unidades_sueltas, 11, 1)
 
+        # Articulo BCV (migrations/0079): al facturar con porcentaje BCV se queda con su precio guardado.
+        self.articulo_bcv_check = QCheckBox("Artículo BCV")
+        self.articulo_bcv_check.setToolTip(
+            "Al facturar con porcentaje BCV, este artículo mantiene su precio guardado: "
+            "no se le aplica el porcentaje que sí se aplica a los demás."
+        )
+        lbl_articulo_bcv = QLabel("No se le aplica el porcentaje BCV al facturar")
+        lbl_articulo_bcv.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; margin-top: -4px;")
+        grid.addWidget(self.articulo_bcv_check, 12, 0, 1, 2)
+        grid.addWidget(lbl_articulo_bcv, 13, 0, 1, 2)
+
         layout.addLayout(grid)
         layout.addStretch()
         return card
@@ -554,6 +565,7 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         self.cantidad_unidad_input.set_value(producto.cantidad_unidad or 0)
         self.cantidad_minima_input.set_value(producto.cantidad_minima or 0)
         self.cantidad_caja_input.set_value(producto.cantidad_caja or 0)
+        self.articulo_bcv_check.setChecked(bool(producto.articulo_bcv))
 
         idx_categoria = self.categoria_combo.findData(producto.id_categoria)
         if idx_categoria >= 0:
@@ -625,6 +637,7 @@ class ProductoFormDialog(MixinPermisos, QDialog):
             "cantidad_unidad": self.cantidad_unidad_input.get_value(),
             "cantidad_minima": self.cantidad_minima_input.get_value(),
             "cantidad_caja": self.cantidad_caja_input.get_value(),
+            "articulo_bcv": self.articulo_bcv_check.isChecked(),
             "fecha_vencimiento": (
                 self.vencimiento_input.date().toPython() if self.tiene_vencimiento_check.isChecked() else None
             ),

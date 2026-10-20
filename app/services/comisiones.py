@@ -121,8 +121,9 @@ class ComisionService:
                 precio_venta_ajustado = precio_unitario
 
             # Aplicar porcentaje BCV solo al precio base (no al precio de venta)
-            # El porcentaje establece la nueva base fija para cálculo de comisión
-            if porcentaje_bcv > 0:
+            # El porcentaje establece la nueva base fija para cálculo de comisión.
+            # Un artículo BCV se factura a su precio guardado (sin porcentaje), así que su base tampoco lo lleva.
+            if porcentaje_bcv > 0 and not producto.articulo_bcv:
                 precio_base_ajustado = precio_base_ajustado * (Decimal("1.00") + porcentaje_bcv / Decimal("100.00"))
 
             monto_base = precio_base_ajustado * cantidad

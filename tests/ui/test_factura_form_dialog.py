@@ -140,6 +140,7 @@ def test_agregar_item_usa_cantidad_y_precio_tecleados(qtbot, monkeypatch):
         cantidad_unidad=Decimal("1000.00"),
         cantidad_caja=Decimal("1.00"),
         estado_producto="ACTIVO",
+        articulo_bcv=False,
     )
     dialogo = _crear_dialogo(qtbot, monkeypatch, productos=[producto])
     indice = dialogo.producto_combo.findData(1)
@@ -166,6 +167,7 @@ def test_stock_solo_en_el_selector_no_en_el_carrito(qtbot, monkeypatch):
         cantidad_unidad=Decimal("37.00"),
         cantidad_caja=Decimal("1.00"),
         estado_producto="ACTIVO",
+        articulo_bcv=False,
     )
     dialogo = _crear_dialogo(qtbot, monkeypatch, productos=[producto])
     assert dialogo.producto_combo.itemText(0) == "PROD-1 - Producto Uno (stock: 37.00 Und)"
@@ -188,6 +190,7 @@ def test_agregar_el_mismo_producto_dos_veces_suma_en_la_misma_linea(qtbot, monke
         cantidad_unidad=Decimal("1000.00"),
         cantidad_caja=Decimal("1.00"),
         estado_producto="ACTIVO",
+        articulo_bcv=False,
     )
     dialogo = _crear_dialogo(qtbot, monkeypatch, productos=[producto])
     precio = SimpleNamespace(
@@ -820,3 +823,101 @@ def test_cliente_sin_vendedor_asignado_no_cambia_la_seleccion_ni_revienta(qtbot,
     dialogo.cliente_combo.setCurrentIndex(dialogo.cliente_combo.findData(1))
 
     assert dialogo.vendedor_combo.currentData() == 20
+
+
+# --- Articulo BCV: el porcentaje BCV de la factura no le aplica (migrations/0079) -----
+
+
+def _producto_catalogo(id_producto, articulo_bcv):
+    return SimpleNamespace(
+        id_producto=id_producto,
+        cod_producto=f"P-{id_producto}",
+        nombre_producto=f"Producto {id_producto}",
+        cantidad_unidad=Decimal("100"),
+        cantidad_caja=Decimal("0"),
+        cantidad_caja_total=Decimal("0"),
+        estado_producto="ACTIVO",
+        articulo_bcv=articulo_bcv,
+    )
+
+
+def _dialogo_con_articulos(qtbot, monkeypatch):
+    """Catalogo con un articulo normal (id 1) y un Articulo BCV (id 2), ambos con Precio 1 = 10.00."""
+    productos = [_producto_catalogo(1, False), _producto_catalogo(2, True)]
+    dialogo = _crear_dialogo(qtbot, monkeypatch, productos=productos)
+    precio = SimpleNamespace(precio_1=10.0, precio_2=None, precio_3=None, precio_venta=10.0)
+    monkeypatch.setattr(ffd.PrecioService, "obtener_precio", staticmethod(lambda *a, **k: precio))
+    return dialogo
+
+
+def _activar_porcentaje_bcv(dialogo, porcentaje):
+    dialogo.chk_porcentaje_bcv.setChecked(True)
+    _cambiar_porcentaje_bcv(dialogo, porcentaje)
+
+
+def _cambiar_porcentaje_bcv(dialogo, porcentaje):
+    dialogo.porcentaje_bcv_input.set_value(porcentaje)
+    dialogo._on_porcentaje_bcv_cambiado()  # lo dispara el campo al terminar de editarse
+
+
+def _seleccionar(dialogo, id_producto):
+    dialogo.producto_combo.setCurrentIndex(dialogo.producto_combo.findData(id_producto))
+    dialogo._on_producto_cambiado()
+
+
+def test_articulo_normal_lleva_el_porcentaje_bcv(qtbot, monkeypatch):
+    dialogo = _dialogo_con_articulos(qtbot, monkeypatch)
+    _activar_porcentaje_bcv(dialogo, 10)
+    _seleccionar(dialogo, 1)
+    assert float(dialogo.precio_input.get_value()) == 11.0
+    assert dialogo.precio_seleccion_combo.itemText(0) == "Precio 1: $11.00"
+
+
+def test_articulo_bcv_queda_con_su_precio_guardado(qtbot, monkeypatch):
+    dialogo = _dialogo_con_articulos(qtbot, monkeypatch)
+    _activar_porcentaje_bcv(dialogo, 10)
+    _seleccionar(dialogo, 2)
+    assert float(dialogo.precio_input.get_value()) == 10.0
+    assert dialogo.precio_seleccion_combo.itemText(0) == "Precio 1: $10.00"
+
+
+def test_el_combo_marca_los_articulos_bcv(qtbot, monkeypatch):
+    dialogo = _dialogo_con_articulos(qtbot, monkeypatch)
+    assert "Artículo BCV" not in dialogo.producto_combo.itemText(dialogo.producto_combo.findData(1))
+    assert dialogo.producto_combo.itemText(dialogo.producto_combo.findData(2)).endswith("· Artículo BCV")
+
+
+def test_carrito_mixto_reprecia_solo_los_articulos_normales(qtbot, monkeypatch):
+    dialogo = _dialogo_con_articulos(qtbot, monkeypatch)
+    for id_producto in (1, 2):
+        _seleccionar(dialogo, id_producto)
+        dialogo._agregar_item()
+    assert [i["precio_unitario"] for i in dialogo.items] == [10.0, 10.0]
+
+    _activar_porcentaje_bcv(dialogo, 10)
+    assert [round(i["precio_unitario"], 2) for i in dialogo.items] == [11.0, 10.0]
+
+    _cambiar_porcentaje_bcv(dialogo, 20)
+    assert [round(i["precio_unitario"], 2) for i in dialogo.items] == [12.0, 10.0]
+
+    dialogo.chk_porcentaje_bcv.setChecked(False)
+    dialogo._on_porcentaje_bcv_cambiado()
+    assert [round(i["precio_unitario"], 2) for i in dialogo.items] == [10.0, 10.0]
+
+
+def test_articulo_bcv_agregado_con_porcentaje_conserva_su_precio_base(qtbot, monkeypatch):
+    dialogo = _dialogo_con_articulos(qtbot, monkeypatch)
+    _activar_porcentaje_bcv(dialogo, 10)
+    for id_producto in (1, 2):
+        _seleccionar(dialogo, id_producto)
+        dialogo._agregar_item()
+    normal, articulo_bcv = dialogo.items
+    assert (round(normal["precio_unitario"], 2), round(normal["precio_base"], 2)) == (11.0, 10.0)
+    assert (articulo_bcv["precio_unitario"], articulo_bcv["precio_base"]) == (10.0, 10.0)
+
+
+def test_producto_fuera_del_catalogo_busca_la_marca_en_la_base(qtbot, monkeypatch):
+    dialogo = _dialogo_con_articulos(qtbot, monkeypatch)
+    dialogo.session.get.return_value = SimpleNamespace(articulo_bcv=True)
+    assert dialogo._es_articulo_bcv(999) is True
+    assert dialogo._es_articulo_bcv(None) is False
