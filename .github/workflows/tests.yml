@@ -15,9 +15,9 @@ env:
   DB_TRUST_SERVER_CERTIFICATE: "yes"
   DB_TRUSTED_CONNECTION: "no"
   # pytest-qt (tests/ui/test_numeric_inputs.py y demas tests de widgets) instancia
-  # QApplication real -- el runner ubuntu-22.04 no tiene servidor X, "offscreen" evita que
-  # Qt intente abrir un display y cuelgue/falle el job.
-  QT_QPA_PLATFORM: offscreen
+  # QApplication real -- usamos xvfb-run para un framebuffer virtual, más estable que
+  # QT_QPA_PLATFORM=offscreen que causa memory corruption en CI.
+  QT_QPA_PLATFORM: xcb
 
 jobs:
   test:
@@ -70,10 +70,10 @@ jobs:
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
-      # Qt necesita libEGL y otras dependencias para funcionar en modo offscreen
+      # Qt necesita xvfb para framebuffer virtual en CI (más estable que offscreen)
       - name: Instalar dependencias de Qt
         run: |
-          sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0
+          sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0 xvfb
 
       - name: Configurar Python
         uses: actions/setup-python@v6
@@ -97,5 +97,7 @@ jobs:
       # tests/conftest.py (fixture test_engine) crea distribuidora_dj_test y aplica el
       # schema + migraciones pendientes automaticamente la primera vez que corren los
       # tests, igual que en local.
+      # xvfb-run proporciona un framebuffer virtual para Qt, evitando memory corruption
+      # que ocurría con QT_QPA_PLATFORM=offscreen.
       - name: Correr suite de tests
-        run: pytest -q
+        run: xvfb-run -a pytest -q

@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QCoreApplication
 from PySide6.QtWidgets import QWidget
 
 from app.ui import animaciones, notificaciones_leidas, permisos_ui
@@ -56,3 +56,14 @@ def _permisos_concedidos_por_defecto(request, monkeypatch):
         return
     for nombre in ("tiene_permiso", "es_admin", "tiene_permiso_en_sesion", "es_admin_en_sesion"):
         monkeypatch.setattr(permisos_ui, nombre, lambda *args, **kwargs: True)
+
+
+@pytest.fixture(autouse=True)
+def _limpiar_eventos_qt(qtbot):
+    """Limpia eventos pendientes de Qt despues de cada test para evitar memory corruption
+    en modo offscreen (GH Actions)."""
+    yield
+    # Procesa todos los eventos pendientes antes de destruir widgets
+    QCoreApplication.processEvents()
+    # Pequeña pausa para permitir que Qt complete la limpieza
+    QCoreApplication.processEvents()
