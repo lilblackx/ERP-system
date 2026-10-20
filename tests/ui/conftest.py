@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import QTimer, QCoreApplication
+from PySide6.QtCore import QCoreApplication, QTimer
 from PySide6.QtWidgets import QWidget
 
 from app.ui import animaciones, notificaciones_leidas, permisos_ui
