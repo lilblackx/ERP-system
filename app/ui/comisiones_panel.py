@@ -91,7 +91,7 @@ ESTADOS_FILTRO = [
     ("Pagada", "pagada"),
 ]
 
-LIMITE_CATALOGO = 50
+LIMITE_CATALOGO = 60
 
 
 def _tarea_exportar_excel(session, ruta: str, encabezados: list[str], filas: list[list], config_empresa) -> str:
