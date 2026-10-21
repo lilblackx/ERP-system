@@ -61,9 +61,12 @@ def _permisos_concedidos_por_defecto(request, monkeypatch):
 @pytest.fixture(autouse=True)
 def _limpiar_eventos_qt(qtbot):
     """Limpia eventos pendientes de Qt despues de cada test para evitar memory corruption
-    en modo offscreen (GH Actions)."""
+    en CI headless (GH Actions)."""
     yield
     # Procesa todos los eventos pendientes antes de destruir widgets
     QCoreApplication.processEvents()
-    # Pequeña pausa para permitir que Qt complete la limpieza
+    # Forzar garbage collection para liberar objetos Qt
+    import gc
+    gc.collect()
+    # Segunda pasada de eventos después de GC
     QCoreApplication.processEvents()
