@@ -67,6 +67,7 @@ def _limpiar_eventos_qt(qtbot):
     QCoreApplication.processEvents()
     # Forzar garbage collection para liberar objetos Qt
     import gc
+
     gc.collect()
     # Segunda pasada de eventos después de GC
     QCoreApplication.processEvents()
