@@ -15,9 +15,9 @@ env:
   DB_TRUST_SERVER_CERTIFICATE: "yes"
   DB_TRUSTED_CONNECTION: "no"
   # pytest-qt (tests/ui/test_numeric_inputs.py y demas tests de widgets) instancia
-  # QApplication real -- QT_QPA_PLATFORM=offscreen es más estable que xcb en CI headless
-  # y evita memory corruption sin necesidad de xvfb.
-  QT_QPA_PLATFORM: offscreen
+  # QApplication real -- xvfb-run con herbstluftwm (window manager) es la configuración
+  # recomendada por pytest-qt para evitar memory corruption en CI headless.
+  DISPLAY: :99
 
 jobs:
   test:
@@ -70,10 +70,11 @@ jobs:
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
-      # Qt necesita librerías EGL para QT_QPA_PLATFORM=offscreen
+      # Qt necesita xvfb y herbstluftwm (window manager) para evitar memory corruption
+      # en CI headless según documentación de pytest-qt
       - name: Instalar dependencias de Qt
         run: |
-          sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0
+          sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0 xvfb herbstluftwm
 
       - name: Configurar Python
         uses: actions/setup-python@v6
@@ -97,6 +98,12 @@ jobs:
       # tests/conftest.py (fixture test_engine) crea distribuidora_dj_test y aplica el
       # schema + migraciones pendientes automaticamente la primera vez que corren los
       # tests, igual que en local.
-      # QT_QPA_PLATFORM=offscreen evita memory corruption sin necesidad de xvfb.
+      # xvfb con herbstluftwm previene memory corruption al proveer un framebuffer
+      # virtual estable con window manager para Qt en CI headless (documentación pytest-qt).
       - name: Correr suite de tests
-        run: pytest -q
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+          sleep 3
+          herbstluftwm &
+          sleep 1
+          pytest -q
