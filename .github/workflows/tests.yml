@@ -15,9 +15,9 @@ env:
   DB_TRUST_SERVER_CERTIFICATE: "yes"
   DB_TRUSTED_CONNECTION: "no"
   # pytest-qt (tests/ui/test_numeric_inputs.py y demas tests de widgets) instancia
-  # QApplication real -- xvfb-run es el wrapper recomendado para evitar memory corruption
-  # en CI headless (documentación pytest-qt).
-  QT_QPA_PLATFORM: xcb
+  # QApplication real -- QT_QPA_PLATFORM=offscreen es más estable que xcb en CI headless
+  # cuando se tienen las librerías EGL instaladas.
+  QT_QPA_PLATFORM: offscreen
 
 jobs:
   test:
@@ -101,6 +101,6 @@ jobs:
       - name: Correr tests de servicios
         run: pytest -q --ignore=tests/ui
 
-      # Tests de UI requieren xvfb para framebuffer virtual
+      # Tests de UI con QT_QPA_PLATFORM=offscreen (no requiere xvfb)
       - name: Correr tests de UI
-        run: xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension GLX +render -noreset" pytest -q tests/ui
+        run: pytest -q tests/ui
