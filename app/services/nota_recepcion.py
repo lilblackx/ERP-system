@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     CompraOC,
     CompraOCDetalle,
+    Inventario,
     NotaDevolucion,
     NotaDevolucionDetalle,
     NotaRecepcion,
@@ -114,20 +115,36 @@ class NotaRecepcionService:
         session.flush()
 
         for detalle_oc, cantidad_recibida, cantidad_rechazada in lineas_validadas:
-            session.add(
-                NotaRecepcionDetalle(
-                    id_nr=nr.id_nr,
-                    id_oc_detalle=detalle_oc.id_detalle,
-                    id_producto=detalle_oc.id_producto,
-                    cantidad_recibida=cantidad_recibida,
-                    cantidad_rechazada=cantidad_rechazada,
-                    precio_unitario=detalle_oc.precio_unitario,
-                    total_linea=cantidad_recibida * detalle_oc.precio_unitario,
-                )
+            detalle_nr = NotaRecepcionDetalle(
+                id_nr=nr.id_nr,
+                id_oc_detalle=detalle_oc.id_detalle,
+                id_producto=detalle_oc.id_producto,
+                cantidad_recibida=cantidad_recibida,
+                cantidad_rechazada=cantidad_rechazada,
+                precio_unitario=detalle_oc.precio_unitario,
+                total_linea=cantidad_recibida * detalle_oc.precio_unitario,
             )
+            session.add(detalle_nr)
 
         session.commit()
         session.refresh(nr)
+
+        # Registrar auditoría por cada línea de detalle con el formato correcto
+        for detalle_oc, cantidad_recibida, _cantidad_rechazada in lineas_validadas:
+            producto = session.get(Inventario, detalle_oc.id_producto)
+            nombre_producto = producto.nombre_producto if producto else "Producto desconocido"
+            detalle_texto = (
+                f"Recepción OC {oc.numero_oc} - NR {nr.numero_nr}: "
+                f"{cantidad_recibida} unidades de {nombre_producto} "
+                f"(ID: {detalle_oc.id_producto})"
+            )
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="RECEPCION_MERCANCIA",
+                modulo="INVENTARIO",
+                detalle=detalle_texto,
+            )
 
         logger.info("NR %s registrada: OC=%s usuario=%s", nr.numero_nr, oc.numero_oc, id_usuario)
         AuditoriaService.registrar_evento(

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.models import Auditoria, Usuario
@@ -138,6 +139,7 @@ class ProductoAuditoriaDialog(QDialog):
         self.accion_combo.addItem("Cambio de Descripción", "CAMBIO_DESCRIPCION")
         self.accion_combo.addItem("Cambio de Nombre", "CAMBIO_NOMBRE")
         self.accion_combo.addItem("Eliminación de Precio", "ELIMINAR_PRECIO")
+        self.accion_combo.addItem("Recepción de Mercancía", "RECEPCION_MERCANCIA")
         self.accion_combo.setMinimumHeight(32)
         self.accion_combo.currentIndexChanged.connect(self._aplicar_filtros)
 
@@ -246,7 +248,7 @@ class ProductoAuditoriaDialog(QDialog):
         self.lbl_cambios_precio = QLabel("Cambios de precio: 0")
         self.lbl_cambios_precio.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
 
-        self.lbl_movimientos_stock = QLabel("Cambios de estado: 0")
+        self.lbl_movimientos_stock = QLabel("Movimientos de stock: 0")
         self.lbl_movimientos_stock.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};")
 
         self.lbl_ediciones = QLabel("Ediciones: 0")
@@ -284,8 +286,14 @@ class ProductoAuditoriaDialog(QDialog):
 
             # Filtrar por producto específico si se proporcionó
             if self.producto_id:
-                # Buscar en el JSON del detalle usando LIKE con el formato JSON correcto
-                query = query.filter(Auditoria.detalle.like(f'%"id_producto": {self.producto_id}%'))
+                # Buscar tanto en formato JSON como en texto plano (RECEPCION_MERCANCIA)
+                query = query.filter(
+                    or_(
+                        Auditoria.detalle.like(f'%"id_producto": {self.producto_id}%'),
+                        Auditoria.detalle.like(f'%id_detalle: {self.producto_id}%'),
+                        Auditoria.detalle.like(f'%(ID: {self.producto_id})%')
+                    )
+                )
 
             # Aplicar filtros actuales
             accion = self.accion_combo.currentData()
@@ -406,6 +414,9 @@ class ProductoAuditoriaDialog(QDialog):
         elif accion == "ACTUALIZAR_PRODUCTO":
             item.setBackground(QColor("#E0E7FF"))
             item.setForeground(QColor("#4338CA"))
+        elif accion == "RECEPCION_MERCANCIA":
+            item.setBackground(QColor("#D1FAE5"))
+            item.setForeground(QColor("#047857"))
 
     def _formatear_accion(self, accion: str | None) -> str:
         """Formatea la acción para mostrarla de forma legible."""
@@ -420,6 +431,7 @@ class ProductoAuditoriaDialog(QDialog):
             "CAMBIO_DESCRIPCION": "Cambio Descripción",
             "CAMBIO_NOMBRE": "Cambio Nombre",
             "ELIMINAR_PRECIO": "Eliminar Precio",
+            "RECEPCION_MERCANCIA": "Recepción Mercancía",
         }
         return mapeo.get(accion, accion)
 
@@ -427,6 +439,10 @@ class ProductoAuditoriaDialog(QDialog):
         """Formatea el detalle JSON para hacerlo más legible."""
         if not detalle:
             return "Sin detalle"
+
+        # Si el detalle es texto plano (como en RECEPCION_MERCANCIA), retornarlo tal cual
+        if not detalle.strip().startswith("{"):
+            return detalle
 
         try:
             datos = json.loads(detalle)
@@ -570,6 +586,8 @@ class ProductoAuditoriaDialog(QDialog):
             return "Nombre"
         elif accion == "ELIMINAR_PRECIO":
             return "Precio"
+        elif accion == "RECEPCION_MERCANCIA":
+            return "Recepción"
 
         # Fallback: buscar en el detalle
         if detalle and isinstance(detalle, str):
@@ -592,7 +610,7 @@ class ProductoAuditoriaDialog(QDialog):
         return "General"
 
     def _extraer_id_relacionado(self, detalle):
-        """Extrae el ID relacionado del detalle JSON."""
+        """Extrae el ID relacionado del detalle JSON o texto plano."""
         if not detalle:
             return None
 
@@ -611,10 +629,28 @@ class ProductoAuditoriaDialog(QDialog):
                     return int(detalle[inicio:fin].strip())
                 except (ValueError, IndexError):
                     pass
+
+            # Para formato texto plano (RECEPCION_MERCANCIA): "Recepción OC ODC-000004 - NR NR-000017: 1.0000 unidades de HARINA DE TRIGO PRINCESA 45Kg (ID: 1)"
+            if "(ID:" in detalle:
+                try:
+                    inicio = detalle.index("(ID:") + len("(ID:")
+                    fin = detalle.index(")", inicio)
+                    return int(detalle[inicio:fin].strip())
+                except (ValueError, IndexError):
+                    pass
+            # Para formato anterior: "Recepción de X unidades de [PRODUCTO] de la OC [OC] en la NR [NR], id_detalle: [ID]"
+            if "id_detalle:" in detalle:
+                try:
+                    inicio = detalle.index("id_detalle:") + len("id_detalle:")
+                    fin = len(detalle)
+                    return int(detalle[inicio:fin].strip())
+                except (ValueError, IndexError):
+                    pass
+
         return None
 
     def _extraer_nombre_producto(self, detalle):
-        """Extrae el nombre del producto del detalle JSON."""
+        """Extrae el nombre del producto del detalle JSON o texto plano."""
         if not detalle:
             return None
 
@@ -624,6 +660,35 @@ class ProductoAuditoriaDialog(QDialog):
                 return datos["nombre_producto"]
         except (json.JSONDecodeError, Exception):
             pass
+
+        # Para formato texto plano con motivo: "Motivo: ... - Stock: ... | Nombre del producto: XXX"
+        if detalle and "Nombre del producto:" in detalle:
+            try:
+                inicio = detalle.index("Nombre del producto:") + len("Nombre del producto:")
+                return detalle[inicio:].strip()
+            except (ValueError, IndexError):
+                pass
+
+        # Para formato texto plano (RECEPCION_MERCANCIA): "Recepción OC ODC-000004 - NR NR-000017: 1.0000 unidades de HARINA DE TRIGO PRINCESA 45Kg (ID: 1)"
+        if detalle and " unidades de " in detalle:
+            try:
+                inicio = detalle.index(" unidades de ") + len(" unidades de ")
+                # Buscar el patrón "(ID: X)" al final
+                if "(ID:" in detalle:
+                    fin = detalle.index("(ID:", inicio)
+                    return detalle[inicio:fin].strip()
+                else:
+                    # Fallback: buscar " de la OC" o " - NR"
+                    if " de la OC" in detalle:
+                        fin = detalle.index(" de la OC", inicio)
+                    elif " - NR" in detalle:
+                        fin = detalle.index(" - NR", inicio)
+                    else:
+                        fin = len(detalle)
+                    if fin > inicio:
+                        return detalle[inicio:fin].strip()
+            except (ValueError, IndexError):
+                pass
 
         # Si no está en el detalle, intentar obtenerlo del ID del producto
         producto_id = self._extraer_id_relacionado(detalle)
@@ -643,6 +708,7 @@ class ProductoAuditoriaDialog(QDialog):
         total = len(resultados)
         cambios_precio = sum(1 for r in resultados if r.accion == "CAMBIO_PRECIO")
         movimientos_stock = sum(1 for r in resultados if r.accion == "MOVIMIENTO_STOCK")
+        recepciones_mercancia = sum(1 for r in resultados if r.accion == "RECEPCION_MERCANCIA")
         cambios_descripcion = sum(1 for r in resultados if r.accion == "CAMBIO_DESCRIPCION")
         cambios_nombre = sum(1 for r in resultados if r.accion == "CAMBIO_NOMBRE")
         cambios_estado = sum(1 for r in resultados if r.accion == "CAMBIAR_ESTADO_PRODUCTO")
@@ -653,7 +719,7 @@ class ProductoAuditoriaDialog(QDialog):
         self.lbl_cambios_precio.setText(f"Cambios de precio: {cambios_precio}")
         self.lbl_movimientos_stock.setText(f"Movimientos de stock: {movimientos_stock}")
         resumen_texto = (
-            f"Descripción: {cambios_descripcion} | Nombre: {cambios_nombre} | "
+            f"Recepciones: {recepciones_mercancia} | Descripción: {cambios_descripcion} | Nombre: {cambios_nombre} | "
             f"Estado: {cambios_estado} | Ediciones: {ediciones} | Creaciones: {creaciones}"
         )
         self.lbl_ediciones.setText(resumen_texto)

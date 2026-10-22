@@ -649,10 +649,32 @@ class InventarioPanel(MixinPermisos, QWidget):
         session = self.session_factory()
         try:
             producto = session.get(Inventario, id_producto)
+            cantidad_anterior = producto.cantidad_unidad
             dialogo = ProductoFormDialog(session, self.usuario.id_usuario, producto, parent=self)
             if dialogo.exec():
                 datos = dialogo.get_data()
-                ProductoService.actualizar(session, id_producto, id_usuario=self.usuario.id_usuario, **datos)
+                cantidad_nueva = datos.get("cantidad_unidad", cantidad_anterior)
+
+                # Si cambió la cantidad de stock, pedir motivo
+                motivo = None
+                if cantidad_anterior != cantidad_nueva:
+                    from app.ui.motivo_stock_dialog import MotivoStockDialog
+
+                    motivo_dialogo = MotivoStockDialog(
+                        producto.nombre_producto or "Producto desconocido",
+                        float(cantidad_anterior) if cantidad_anterior else 0,
+                        float(cantidad_nueva) if cantidad_nueva else 0,
+                        parent=self,
+                    )
+                    if motivo_dialogo.exec():
+                        motivo = motivo_dialogo.get_motivo()
+                    else:
+                        # Usuario canceló, no actualizar
+                        return
+
+                ProductoService.actualizar(
+                    session, id_producto, id_usuario=self.usuario.id_usuario, motivo=motivo, **datos
+                )
                 precio_1, precio_2, precio_3 = dialogo.get_precios()
                 if precio_1 > 0:
                     PrecioService.establecer_precio(
