@@ -1,12 +1,11 @@
-from app.db.session import engine
 from sqlalchemy import text
+
+from app.db.session import engine
 
 conn = engine.connect()
 
 # Verificar si existe el trigger de auditoría
-trigger_audit = conn.execute(
-    text("SELECT OBJECT_ID('dbo.trg_auditoria_recepcion_mercancia')")
-)
+trigger_audit = conn.execute(text("SELECT OBJECT_ID('dbo.trg_auditoria_recepcion_mercancia')"))
 print(f"Trigger trg_auditoria_recepcion_mercancia existe: {trigger_audit.scalar() is not None}")
 
 # Verificar los últimos registros de auditoría de recepción

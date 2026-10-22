@@ -290,8 +290,8 @@ class ProductoAuditoriaDialog(QDialog):
                 query = query.filter(
                     or_(
                         Auditoria.detalle.like(f'%"id_producto": {self.producto_id}%'),
-                        Auditoria.detalle.like(f'%id_detalle: {self.producto_id}%'),
-                        Auditoria.detalle.like(f'%(ID: {self.producto_id})%')
+                        Auditoria.detalle.like(f"%id_detalle: {self.producto_id}%"),
+                        Auditoria.detalle.like(f"%(ID: {self.producto_id})%"),
                     )
                 )
 
@@ -630,7 +630,8 @@ class ProductoAuditoriaDialog(QDialog):
                 except (ValueError, IndexError):
                     pass
 
-            # Para formato texto plano (RECEPCION_MERCANCIA): "Recepción OC ODC-000004 - NR NR-000017: 1.0000 unidades de HARINA DE TRIGO PRINCESA 45Kg (ID: 1)"
+            # Para formato texto plano (RECEPCION_MERCANCIA):
+            # "Recepción OC ODC-000004 - NR NR-000017: 1.0000 unidades de HARINA DE TRIGO PRINCESA 45Kg (ID: 1)"
             if "(ID:" in detalle:
                 try:
                     inicio = detalle.index("(ID:") + len("(ID:")
@@ -638,7 +639,8 @@ class ProductoAuditoriaDialog(QDialog):
                     return int(detalle[inicio:fin].strip())
                 except (ValueError, IndexError):
                     pass
-            # Para formato anterior: "Recepción de X unidades de [PRODUCTO] de la OC [OC] en la NR [NR], id_detalle: [ID]"
+            # Para formato anterior:
+            # "Recepción de X unidades de [PRODUCTO] de la OC [OC] en la NR [NR], id_detalle: [ID]"
             if "id_detalle:" in detalle:
                 try:
                     inicio = detalle.index("id_detalle:") + len("id_detalle:")
@@ -669,7 +671,8 @@ class ProductoAuditoriaDialog(QDialog):
             except (ValueError, IndexError):
                 pass
 
-        # Para formato texto plano (RECEPCION_MERCANCIA): "Recepción OC ODC-000004 - NR NR-000017: 1.0000 unidades de HARINA DE TRIGO PRINCESA 45Kg (ID: 1)"
+        # Para formato texto plano (RECEPCION_MERCANCIA):
+        # "Recepción OC ODC-000004 - NR NR-000017: 1.0000 unidades de HARINA DE TRIGO PRINCESA 45Kg (ID: 1)"
         if detalle and " unidades de " in detalle:
             try:
                 inicio = detalle.index(" unidades de ") + len(" unidades de ")

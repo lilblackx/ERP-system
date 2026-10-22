@@ -79,7 +79,13 @@ class ProductoService:
         return producto
 
     @staticmethod
-    def actualizar(session: Session, id_producto: int, id_usuario: int | None = None, motivo: str | None = None, **datos) -> Inventario:
+    def actualizar(
+        session: Session,
+        id_producto: int,
+        id_usuario: int | None = None,
+        motivo: str | None = None,
+        **datos,
+    ) -> Inventario:
         require_permiso(session, id_usuario, "inventario", "editar")
         producto = session.get(Inventario, id_producto)
         if producto is None:
@@ -189,7 +195,8 @@ class ProductoService:
         if cambios_stock:
             # Formatear el detalle con el motivo si se proporcionó
             if motivo:
-                # Formato: "Motivo: (motivo) - Stock: Cantidad Unidad: X → Y (TIPO: +/-) | Producto ID: X | Código: XXX | Nombre del producto"
+                # Formato: "Motivo: (motivo) - Stock: Cantidad Unidad: X → Y "
+                # "(TIPO: +/-) | Producto ID: X | Código: XXX | Nombre del producto"
                 movimiento = cambios_stock[0]  # Tomar el primer movimiento (debería haber solo uno de stock)
                 detalle_texto = (
                     f"Motivo: {motivo} - Stock: Cantidad Unidad: {movimiento['valor_anterior']} → "

@@ -58,8 +58,7 @@ class MotivoStockDialog(QDialog):
         icon_container = QWidget()
         icon_container.setFixedSize(64, 64)
         icon_container.setStyleSheet(
-            f"background-color: {COLOR_SUCCESS if self.es_aumento else COLOR_DANGER}; "
-            f"border-radius: 32px;"
+            f"background-color: {COLOR_SUCCESS if self.es_aumento else COLOR_DANGER}; border-radius: 32px;"
         )
         icon_layout = QVBoxLayout(icon_container)
         icon_layout.setContentsMargins(0, 0, 0, 0)
