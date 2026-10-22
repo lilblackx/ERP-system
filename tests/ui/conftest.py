@@ -63,11 +63,14 @@ def _limpiar_eventos_qt(qtbot):
     """Limpia eventos pendientes de Qt despues de cada test para evitar memory corruption
     en CI headless (GH Actions)."""
     yield
-    # Procesa todos los eventos pendientes antes de destruir widgets
-    QCoreApplication.processEvents()
-    # Forzar garbage collection para liberar objetos Qt
+    # Procesa todos los eventos pendientes múltiples veces
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    # Forzar garbage collection agresivo para liberar objetos Qt
     import gc
 
     gc.collect()
+    gc.collect()
     # Segunda pasada de eventos después de GC
-    QCoreApplication.processEvents()
+    for _ in range(3):
+        QCoreApplication.processEvents()

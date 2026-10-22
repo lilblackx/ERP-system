@@ -97,7 +97,10 @@ jobs:
       # tests/conftest.py (fixture test_engine) crea distribuidora_dj_test y aplica el
       # schema + migraciones pendientes automaticamente la primera vez que corren los
       # tests, igual que en local.
-      # xvfb-run previene memory corruption al proveer un framebuffer virtual
-      # para Qt en CI headless.
-      - name: Correr suite de tests
-        run: xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension GLX +render -noreset" pytest -q
+      # Correr tests de servicios primero (sin Qt, no requiere xvfb)
+      - name: Correr tests de servicios
+        run: pytest -q --ignore=tests/ui
+
+      # Tests de UI requieren xvfb para framebuffer virtual
+      - name: Correr tests de UI
+        run: xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension GLX +render -noreset" pytest -q tests/ui
