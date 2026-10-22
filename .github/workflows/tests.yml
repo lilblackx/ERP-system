@@ -70,11 +70,10 @@ jobs:
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
-      # Qt necesita xvfb y herbstluftwm (window manager) para evitar memory corruption
-      # en CI headless según documentación de pytest-qt
+      # Qt necesita xvfb para framebuffer virtual en CI headless
       - name: Instalar dependencias de Qt
         run: |
-          sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0 xvfb herbstluftwm
+          sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0 xvfb
 
       - name: Configurar Python
         uses: actions/setup-python@v6
@@ -98,10 +97,7 @@ jobs:
       # tests/conftest.py (fixture test_engine) crea distribuidora_dj_test y aplica el
       # schema + migraciones pendientes automaticamente la primera vez que corren los
       # tests, igual que en local.
-      # xvfb-run con herbstluftwm previene memory corruption al proveer un framebuffer
-      # virtual estable con window manager para Qt en CI headless (documentación pytest-qt).
+      # xvfb-run previene memory corruption al proveer un framebuffer virtual
+      # para Qt en CI headless.
       - name: Correr suite de tests
-        run: |
-          herbstluftwm &
-          sleep 1
-          xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension GLX +render -noreset" pytest -q
+        run: xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension GLX +render -noreset" pytest -q
