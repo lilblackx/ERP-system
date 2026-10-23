@@ -524,7 +524,8 @@ begin
 
   PgServidor := CreateInputQueryPage(PgTipo.ID, 'Conexion con SQL Server',
     'Se usara un SQL Server que ya exista en este equipo.',
-    'Indique como conectarse. El instalador habilita TCP/IP, fija el puerto y el modo mixto en SQL Server (puede reiniciar el servicio), y crea la base de datos y un usuario propio de la aplicacion. Las credenciales de administrador solo se usan durante la instalacion y no se guardan. Con autenticacion de Windows (usuario vacio) su cuenta debe ser administradora de SQL Server.');
+    { Texto corto a proposito: cada linea de mas empuja los campos hacia abajo y el ultimo (la contrasena) queda cortado. }
+    'Se habilita TCP/IP y el modo mixto (puede reiniciar el servicio) y se crea la base y un usuario propio. Usuario vacio = autenticacion de Windows. Las credenciales no se guardan.');
   PgServidor.Add('Servidor SQL (nombre, IP o nombre\instancia):', False);
   PgServidor.Add('Puerto TCP (el instalador lo fija en SQL Server para que las estaciones se conecten):', False);
   PgServidor.Add('Nombre de la base de datos:', False);
@@ -555,7 +556,8 @@ begin
 
   PgRespaldos := CreateInputQueryPage(PgClavesApp.ID, 'Respaldos automaticos',
     'Respaldo completo todos los dias a las 7:00 pm y del registro de transacciones cada 30 minutos.',
-    'Se crean como trabajos de SQL Server Agent (visibles en SSMS > SQL Server Agent > Trabajos) y requieren SQL Server Standard o superior. Los respaldos se copian ademas a Google Drive (obligatorio, para tenerlos fuera de este equipo): tenga instalado y con la sesion iniciada Google Drive para escritorio e indique la carpeta de Drive donde guardarlos, por ejemplo G:\Mi unidad\Nexo. Use "Probar carpeta" para comprobar que se puede escribir; la copia se hace con la sesion del usuario que instala.');
+    { Texto corto a proposito (ver PgServidor): cada linea de mas empuja los campos hacia abajo. }
+    'Son trabajos de SQL Server Agent (requiere Standard o superior) y se copian a Google Drive para tenerlos fuera de este equipo. Con Google Drive para escritorio iniciado, indique la carpeta de Drive, por ejemplo G:\Mi unidad\Nexo, y use "Probar carpeta".');
   PgRespaldos.Add('Carpeta local de los respaldos (vacio = no configurar respaldos):', False);
   PgRespaldos.Add('Carpeta de Google Drive (obligatoria):', False);
   PgRespaldos.Add('Dias que se conservan los respaldos:', False);
@@ -574,7 +576,8 @@ begin
 
   PgAlertas := CreateInputQueryPage(PgRespaldos.ID, 'Alertas por correo',
     'Aviso por correo si falla un trabajo de respaldo o de mantenimiento.',
-    'SQL Server envia el aviso con Database Mail desde una cuenta de correo propia. En Gmail use una "contrasena de aplicacion" (cuenta con verificacion en dos pasos), no la contrasena normal. La contrasena queda solo en este SQL Server. Deje los destinatarios vacios para no configurar alertas.');
+    { Texto corto a proposito (ver PgServidor): con 5 campos, cada linea de mas corta el ultimo. }
+    'En Gmail use una "contrasena de aplicacion". Destinatarios vacios = sin alertas.');
   PgAlertas.Add('Correos que reciben la alerta (separados por punto y coma):', False);
   PgAlertas.Add('Correo remitente (cuenta desde la que se envia):', False);
   PgAlertas.Add('Contrasena del correo remitente (contrasena de aplicacion):', True);

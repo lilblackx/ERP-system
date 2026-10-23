@@ -69,7 +69,9 @@ class ErrorInstalacion(Exception):
 
 
 def _cadena_odbc(servidor: str, base: str, usuario: str, clave: str, windows_auth: bool) -> str:
-    autenticacion = "Trusted_Connection=yes;" if windows_auth else f"UID={usuario};PWD={clave.replace('}', '}}')};"
+    # PWD entre llaves: sin ellas un ';' o '{' en la clave corta/rompe la cadena y SQL Server la rechaza.
+    clave_odbc = "{" + clave.replace("}", "}}") + "}"
+    autenticacion = "Trusted_Connection=yes;" if windows_auth else f"UID={usuario};PWD={clave_odbc};"
     return (
         f"DRIVER={{{DRIVER_ODBC}}};SERVER={servidor};DATABASE={base};{autenticacion}"
         "TrustServerCertificate=yes;Connection Timeout=10;"
