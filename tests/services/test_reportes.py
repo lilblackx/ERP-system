@@ -1645,11 +1645,14 @@ def test_kardex_combina_las_4_fuentes_con_saldo_corrido(db_session):
     )
 
     assert resultado["saldo_inicial"] == Decimal("0.00")
-    assert len(resultado["filas"]) == 4
+    # La devolucion a proveedor ya no es un movimiento de stock: lo rechazado nunca entro.
+    assert len(resultado["filas"]) == 3
     tipos = [f["tipo"] for f in resultado["filas"]]
-    assert set(tipos) == {"Compra", "Recepción OC", "Venta", "Devolución a Proveedor"}
-    # 10 (compra) + 5 (recepcion) - 2 (devolucion) - 3 (venta) = 10, y el saldo corrido
-    # de la ultima fila (ya ordenadas por fecha) debe coincidir con el saldo final.
+    assert set(tipos) == {"Compra", "Recepción OC", "Venta"}
+    recepcion = next(f for f in resultado["filas"] if f["tipo"] == "Recepción OC")
+    assert recepcion["entrada"] == Decimal("3")  # 5 recibidas - 2 rechazadas
+    # 10 (compra) + 3 (recepcion aceptada) - 3 (venta) = 10, y el saldo corrido de la
+    # ultima fila (ya ordenadas por fecha) debe coincidir con el saldo final.
     assert resultado["saldo_final"] == Decimal("10")
     assert resultado["filas"][-1]["saldo"] == Decimal("10")
 
@@ -2156,6 +2159,9 @@ def test_cxc_otras_filtra_por_cliente_y_estado(db_session):
     admin = crear_usuario_admin(db_session)
     cliente_a = crear_cliente(db_session)
     cliente_b = crear_cliente(db_session)
+    # Un prestamo es dinero que sale de la empresa: se indica la caja de origen.
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("1000.00"))
 
     OtrosMovimientosService.crear_cuenta_cobrar_otro(
         db_session,
@@ -2164,6 +2170,7 @@ def test_cxc_otras_filtra_por_cliente_y_estado(db_session):
         descripcion="Anticipo A",
         fecha_vencimiento=None,
         creado_por=admin.id_usuario,
+        id_caja=caja.id_caja,
     )
     OtrosMovimientosService.crear_cuenta_cobrar_otro(
         db_session,
@@ -2172,6 +2179,7 @@ def test_cxc_otras_filtra_por_cliente_y_estado(db_session):
         descripcion="Anticipo B",
         fecha_vencimiento=None,
         creado_por=admin.id_usuario,
+        id_caja=caja.id_caja,
     )
 
     resultado = ReporteService.cxc_otras(db_session, id_usuario=admin.id_usuario, id_cliente=cliente_a.id_cliente)
@@ -2362,6 +2370,28 @@ def test_cxp_otras_estado_invalido_falla(db_session):
         ReporteService.cxp_otras(db_session, id_usuario=admin.id_usuario, estado="no_existe")
 
 
+def _partida_con_movimiento(db_session, admin, cuenta, monto):
+    """Transferencia sin identificar respaldada por un abono real en la cuenta (id_movimiento es
+    obligatorio desde migrations/0090)."""
+    movimiento = BancoMovimiento(
+        id_cuenta=cuenta.id_cuenta,
+        tipo_movimiento="abono",
+        monto_movimiento=monto,
+        fecha_movimiento=datetime.now(),
+        creado_por=admin.id_usuario,
+        fecha_creacion=datetime.now(),
+    )
+    db_session.add(movimiento)
+    db_session.commit()
+    return OtrosMovimientosService.crear_partida_no_conciliada(
+        db_session,
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        monto=monto,
+        id_movimiento=movimiento.id_movimiento,
+        creado_por=admin.id_usuario,
+    )
+
+
 def test_cxp_otras_sin_cuentas(db_session):
     admin = crear_usuario_admin(db_session)
     resultado = ReporteService.cxp_otras(db_session, id_usuario=admin.id_usuario)
@@ -2373,18 +2403,8 @@ def test_cxp_otras_filtra_por_cuenta_bancaria_y_estado(db_session):
     cuenta_a = crear_cuenta_bancaria(db_session)
     cuenta_b = crear_cuenta_bancaria(db_session)
 
-    OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=cuenta_a.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
-    OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=cuenta_b.id_cuenta,
-        monto=Decimal("50.00"),
-        creado_por=admin.id_usuario,
-    )
+    _partida_con_movimiento(db_session, admin, cuenta_a, Decimal("100.00"))
+    _partida_con_movimiento(db_session, admin, cuenta_b, Decimal("50.00"))
 
     resultado = ReporteService.cxp_otras(db_session, id_usuario=admin.id_usuario, id_cuenta_bancaria=cuenta_a.id_cuenta)
     assert len(resultado["filas"]) == 1
@@ -2789,18 +2809,8 @@ def test_conciliacion_bancaria_agrupa_pendiente_vs_conciliado_por_cuenta(db_sess
     admin = crear_usuario_admin(db_session)
     cuenta = crear_cuenta_bancaria(db_session)
 
-    OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=cuenta.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
-    conciliada = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=cuenta.id_cuenta,
-        monto=Decimal("60.00"),
-        creado_por=admin.id_usuario,
-    )
+    _partida_con_movimiento(db_session, admin, cuenta, Decimal("100.00"))
+    conciliada = _partida_con_movimiento(db_session, admin, cuenta, Decimal("60.00"))
     # Forzar el estado a "conciliado" directamente: conciliar_partida() real exige una
     # factura/CxC completa del cliente, fuera del alcance de este test (que solo prueba
     # la agregacion del reporte, no las reglas de negocio de la conciliacion).
@@ -2939,6 +2949,8 @@ def test_comisiones_pagadas_vs_pendientes_separa_pagado_de_liberada(db_session):
     _crear_comision(db_session, admin, vendedor, Decimal("1.00"), Decimal("4.00"), Decimal("2"))  # -> pagada
 
     caja = crear_caja(db_session)
+    # Pagar comisiones en efectivo exige turno abierto y saldo suficiente.
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("100.00"))
     PagoComisionService.pagar_comisiones_vendedor(
         db_session,
         id_vendedor=vendedor.id_vendedor,

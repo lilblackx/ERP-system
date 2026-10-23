@@ -4,16 +4,19 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     Caja,
     Cliente,
+    Compra,
     CuentaBancaria,
     CuentaPorCobrar,
+    CuentaPorPagar,
     FacturaVenta,
     NotaCreditoCliente,
     NotaCreditoProveedor,
+    Proveedor,
 )
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
@@ -41,8 +44,10 @@ class NotaCreditoService:
     consumirla (2026-08-27): aplicar_nota_credito_cliente() (abono a otra factura del
     mismo cliente, transferencia contable interna, sin mover caja/banco) y
     devolver_nota_credito_cliente() (egreso real de efectivo/banco, SIEMPRE con
-    autorizacion de supervisor). El lado proveedor (NotaCreditoProveedor) sigue sin un
-    flujo de consumo -- desarrollo aparte, pendiente si el negocio lo necesita.
+    autorizacion de supervisor). Del lado proveedor, simetrico:
+    aplicar_nota_credito_proveedor() (descuenta de otra cuenta por pagar del mismo
+    proveedor, sin mover caja/banco) y reembolsar_nota_credito_proveedor() (el proveedor
+    nos devuelve el dinero: ingreso real a caja/banco).
 
     NotaCreditoCliente es un documento fiscal que la empresa emite (reduce lo que el
     cliente le debe): tiene numero_nota_credito correlativo, igual que numero_factura,
@@ -57,7 +62,7 @@ class NotaCreditoService:
     def _crear_nota_credito_cliente(
         session: Session,
         id_cliente: int,
-        id_factura_origen: int,
+        id_factura_origen: int | None,
         monto,
         motivo: str,
         id_usuario: int | None,
@@ -451,6 +456,215 @@ class NotaCreditoService:
             },
         )
         return nota
+
+    @staticmethod
+    def _bloquear_nota_proveedor_disponible(session: Session, id_nota_credito: int, monto: Decimal):
+        """WITH (UPDLOCK, ROWLOCK): mismo patron que aplicar_nota_credito_cliente() --
+        evita que dos consumos concurrentes de la MISMA nota pasen ambos la validacion de
+        saldo antes de que ninguno haya comiteado."""
+        nota = session.execute(
+            select(NotaCreditoProveedor)
+            .where(NotaCreditoProveedor.id_nota_credito == id_nota_credito)
+            .with_hint(NotaCreditoProveedor, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
+        if nota is None:
+            raise ValueError("Nota de credito de proveedor no encontrada")
+        if nota.estado != "disponible":
+            raise ValueError(f"La nota de credito no esta disponible (estado: {nota.estado})")
+        if monto > nota.saldo_disponible:
+            raise ValueError(f"El monto {monto} excede el saldo disponible {nota.saldo_disponible} de la nota")
+        return nota
+
+    @staticmethod
+    def aplicar_nota_credito_proveedor(
+        session: Session,
+        id_nota_credito: int,
+        id_cuenta_por_pagar: int,
+        monto,
+        id_usuario: int | None,
+    ) -> NotaCreditoProveedor:
+        """Descuenta (total o parcialmente) el saldo a favor de una nota de credito de
+        proveedor de OTRA cuenta por pagar abierta del MISMO proveedor -- el caso tipico:
+        el proveedor compensa lo que nos debe en su proxima factura. Igual que
+        aplicar_nota_credito_cliente(), es una compensacion contable: no crea un
+        PagoProveedor ni mueve caja/banco (el dinero ya salio cuando se pago la compra
+        anulada que origino la nota), asi que decrementa saldo_pendiente/estado de la
+        cuenta por pagar a mano en vez de pasar por trg_pagos_proveedores_io."""
+        require_permiso(session, id_usuario, "notas_credito", "crear")
+
+        monto = Decimal(str(monto))
+        if monto <= 0:
+            raise ValueError("El monto a aplicar debe ser mayor a cero")
+
+        nota = NotaCreditoService._bloquear_nota_proveedor_disponible(session, id_nota_credito, monto)
+
+        cxp = session.execute(
+            select(CuentaPorPagar)
+            .where(CuentaPorPagar.id_cuenta == id_cuenta_por_pagar)
+            .with_hint(CuentaPorPagar, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
+        if cxp is None:
+            raise ValueError("Cuenta por pagar no encontrada")
+        compra_destino = session.get(Compra, cxp.id_compra)
+        if compra_destino is None or compra_destino.id_proveedor != nota.id_proveedor:
+            raise ValueError("La nota de credito pertenece a otro proveedor")
+        if cxp.estado not in ("pendiente", "parcial", "vencida"):
+            raise ValueError("La cuenta por pagar destino no tiene saldo pendiente")
+        if monto > cxp.saldo_pendiente:
+            raise ValueError(f"El monto {monto} excede el saldo pendiente {cxp.saldo_pendiente} de la cuenta por pagar")
+
+        nota.saldo_disponible -= monto
+        if nota.saldo_disponible == 0:
+            nota.estado = "aplicada"
+
+        cxp.saldo_pendiente -= monto
+        cxp.estado = "pagada" if cxp.saldo_pendiente == 0 else "parcial"
+
+        session.commit()
+        session.refresh(nota)
+
+        logger.info(
+            "Nota de credito de proveedor %s aplicada: monto=%s compra_destino=%s saldo_restante=%s usuario=%s",
+            nota.id_nota_credito,
+            monto,
+            compra_destino.numero_compra,
+            nota.saldo_disponible,
+            id_usuario,
+        )
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=id_usuario,
+            accion="APLICACION_NOTA_CREDITO_PROVEEDOR",
+            modulo="NOTAS_CREDITO",
+            detalle={
+                "id_nota_credito": nota.id_nota_credito,
+                "id_cuenta_por_pagar": id_cuenta_por_pagar,
+                "numero_compra_destino": compra_destino.numero_compra,
+                "monto": str(monto),
+                "saldo_restante_nota": str(nota.saldo_disponible),
+            },
+        )
+        return nota
+
+    @staticmethod
+    def reembolsar_nota_credito_proveedor(
+        session: Session,
+        id_nota_credito: int,
+        monto,
+        metodo_reembolso: str,
+        id_usuario: int | None,
+        id_caja: int | None = None,
+        id_cuenta_bancaria: int | None = None,
+        referencia: str | None = None,
+    ) -> NotaCreditoProveedor:
+        """Registra que el proveedor nos devolvio (total o parcialmente) el dinero de una
+        nota de credito: ingreso real, fechado HOY, a la caja (efectivo, con turno
+        abierto) o a la cuenta bancaria (pago movil/transferencia, con referencia). A
+        diferencia de devolver_nota_credito_cliente() no exige supervisor: aca el dinero
+        ENTRA, no sale, y no hay riesgo de que alguien se lo lleve."""
+        require_permiso(session, id_usuario, "notas_credito", "crear")
+
+        monto = Decimal(str(monto))
+        if monto <= 0:
+            raise ValueError("El monto del reembolso debe ser mayor a cero")
+        if metodo_reembolso not in ("efectivo", "pago_movil", "transferencia"):
+            raise ValueError("metodo_reembolso debe ser 'efectivo', 'pago_movil' o 'transferencia'")
+
+        nota = NotaCreditoService._bloquear_nota_proveedor_disponible(session, id_nota_credito, monto)
+
+        fecha = datetime.now()
+        proveedor = session.get(Proveedor, nota.id_proveedor)
+        nombre_proveedor = proveedor.nombre_razon_social if proveedor else "Desconocido"
+        compra_origen = session.get(Compra, nota.id_compra_origen)
+        numero_compra = compra_origen.numero_compra if compra_origen else str(nota.id_compra_origen)
+        descripcion = f"Reembolso de proveedor {nombre_proveedor} - compra anulada {numero_compra}"
+
+        if metodo_reembolso == "efectivo":
+            if id_caja is None:
+                raise ValueError("El reembolso en efectivo requiere indicar la caja de destino")
+            caja = session.get(Caja, id_caja)
+            if caja is None:
+                raise ValueError("Caja no encontrada")
+            if caja.fecha_apertura is None or caja.fecha_cierre is not None:
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+            CajaService._registrar_ingreso_excedente(
+                session,
+                id_caja=id_caja,
+                monto=monto,
+                descripcion=descripcion,
+                id_usuario=id_usuario,
+                fecha=fecha,
+            )
+        else:
+            if id_cuenta_bancaria is None:
+                raise ValueError("El reembolso por pago movil/transferencia requiere una cuenta bancaria de destino")
+            cuenta = session.get(CuentaBancaria, id_cuenta_bancaria)
+            if cuenta is None:
+                raise ValueError("Cuenta bancaria no encontrada")
+            if cuenta.estado_cuenta != "ACTIVO":
+                raise ValueError(f"La cuenta bancaria '{cuenta.numero_cuenta}' esta inactiva")
+            referencia = (referencia or "").strip()
+            if len(referencia) < 4:
+                raise ValueError(
+                    "El reembolso por pago movil/transferencia requiere una referencia bancaria "
+                    "de al menos 4 caracteres"
+                )
+            if len(referencia) > 50:
+                raise ValueError("La referencia bancaria no puede superar 50 caracteres")
+            BancoService._registrar_ingreso_excedente(
+                session,
+                id_cuenta=id_cuenta_bancaria,
+                monto=monto,
+                descripcion=descripcion,
+                id_usuario=id_usuario,
+                fecha=fecha,
+                referencia=referencia,
+            )
+
+        nota.saldo_disponible -= monto
+        if nota.saldo_disponible == 0:
+            nota.estado = "devuelta"
+
+        session.commit()
+        session.refresh(nota)
+
+        logger.info(
+            "Nota de credito de proveedor %s reembolsada: monto=%s metodo=%s saldo_restante=%s usuario=%s",
+            nota.id_nota_credito,
+            monto,
+            metodo_reembolso,
+            nota.saldo_disponible,
+            id_usuario,
+        )
+        AuditoriaService.registrar_evento(
+            session,
+            id_usuario=id_usuario,
+            accion="REEMBOLSO_NOTA_CREDITO_PROVEEDOR",
+            modulo="NOTAS_CREDITO",
+            detalle={
+                "id_nota_credito": nota.id_nota_credito,
+                "metodo_reembolso": metodo_reembolso,
+                "monto": str(monto),
+                "saldo_restante_nota": str(nota.saldo_disponible),
+            },
+        )
+        return nota
+
+    @staticmethod
+    def listar_notas_credito_proveedor_disponibles(
+        session: Session, id_proveedor: int | None = None, id_usuario: int | None = None
+    ) -> list[NotaCreditoProveedor]:
+        """Notas de credito de proveedor con saldo por usar (para Cuentas por Pagar), con
+        proveedor y compra de origen ya cargados."""
+        require_permiso(session, id_usuario, "notas_credito", "ver")
+        query = (
+            session.query(NotaCreditoProveedor)
+            .options(joinedload(NotaCreditoProveedor.proveedor), joinedload(NotaCreditoProveedor.compra_origen))
+            .filter(NotaCreditoProveedor.estado == "disponible", NotaCreditoProveedor.saldo_disponible > 0)
+        )
+        if id_proveedor is not None:
+            query = query.filter(NotaCreditoProveedor.id_proveedor == id_proveedor)
+        return query.order_by(NotaCreditoProveedor.fecha_creacion).all()
 
     @staticmethod
     def listar_notas_credito_cliente(

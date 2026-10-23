@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 
 import pytest
@@ -19,9 +20,16 @@ from tests.factories import (
 )
 
 
+def _caja_con_saldo(session, admin, saldo=Decimal("100000.00")):
+    caja = crear_caja(session)
+    CajaService.abrir_caja(session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=saldo)
+    return caja
+
+
 def _crear_cxc_otro(session, monto=Decimal("100.00"), **overrides):
     admin = crear_usuario_admin(session)
     cliente = overrides.pop("cliente", None) or crear_cliente(session)
+    caja = _caja_con_saldo(session, admin)
     cuenta = OtrosMovimientosService.crear_cuenta_cobrar_otro(
         session,
         id_cliente=cliente.id_cliente,
@@ -29,8 +37,32 @@ def _crear_cxc_otro(session, monto=Decimal("100.00"), **overrides):
         descripcion=None,
         fecha_vencimiento=None,
         creado_por=admin.id_usuario,
+        id_caja=caja.id_caja,
     )
     return cuenta, cliente, admin
+
+
+def _crear_partida(session, banco, admin, monto, **extra):
+    """Partida respaldada por un abono real en la cuenta (id_movimiento es obligatorio)."""
+    movimiento = BancoMovimiento(
+        id_cuenta=banco.id_cuenta,
+        tipo_movimiento="abono",
+        monto_movimiento=monto,
+        fecha_movimiento=datetime.now(),
+        referencia_movimiento="REF-TEST",
+        creado_por=admin.id_usuario,
+        fecha_creacion=datetime.now(),
+    )
+    session.add(movimiento)
+    session.commit()
+    return OtrosMovimientosService.crear_partida_no_conciliada(
+        session,
+        id_cuenta_bancaria=banco.id_cuenta,
+        monto=monto,
+        id_movimiento=movimiento.id_movimiento,
+        creado_por=admin.id_usuario,
+        **extra,
+    )
 
 
 def _crear_cxc_real(session, saldo: Decimal):
@@ -64,6 +96,8 @@ def test_crear_cuenta_cobrar_otro(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session)
 
+    caja = _caja_con_saldo(db_session, admin)
+
     cuenta = OtrosMovimientosService.crear_cuenta_cobrar_otro(
         db_session,
         id_cliente=cliente.id_cliente,
@@ -71,6 +105,7 @@ def test_crear_cuenta_cobrar_otro(db_session):
         descripcion="Prestamo",
         fecha_vencimiento=None,
         creado_por=admin.id_usuario,
+        id_caja=caja.id_caja,
     )
 
     assert cuenta.id_cuenta is not None
@@ -389,12 +424,7 @@ def test_crear_partida_no_conciliada(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
 
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("200.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("200.00"))
 
     assert partida.id_cuenta is not None
     assert partida.saldo_pendiente == Decimal("200.00")
@@ -413,12 +443,7 @@ def test_crear_partida_no_conciliada_monto_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
     with pytest.raises(ValueError, match="monto debe ser mayor a cero"):
-        OtrosMovimientosService.crear_partida_no_conciliada(
-            db_session,
-            id_cuenta_bancaria=banco.id_cuenta,
-            monto=Decimal("0.00"),
-            creado_por=admin.id_usuario,
-        )
+        _crear_partida(db_session, banco, admin, Decimal("0.00"))
 
 
 def test_crear_partida_no_conciliada_cuenta_bancaria_inexistente(db_session):
@@ -436,12 +461,7 @@ def test_crear_partida_no_conciliada_cuenta_bancaria_inactiva_falla(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session, estado_cuenta="INACTIVO")
     with pytest.raises(ValueError, match="inactiva"):
-        OtrosMovimientosService.crear_partida_no_conciliada(
-            db_session,
-            id_cuenta_bancaria=banco.id_cuenta,
-            monto=Decimal("200.00"),
-            creado_por=admin.id_usuario,
-        )
+        _crear_partida(db_session, banco, admin, Decimal("200.00"))
 
 
 def test_crear_partida_no_conciliada_movimiento_inexistente(db_session):
@@ -463,12 +483,7 @@ def test_crear_partida_no_conciliada_movimiento_inexistente(db_session):
 def test_conciliar_partida_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
     with pytest.raises(PermisoDenegadoError):
@@ -485,12 +500,7 @@ def test_conciliar_partida_sin_usuario_autorizado_falla(db_session):
 def test_conciliar_partida_monto_invalido(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
     with pytest.raises(ValueError, match="mayor a cero"):
@@ -520,12 +530,7 @@ def test_conciliar_partida_inexistente(db_session):
 def test_conciliar_partida_excede_saldo_partida(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("50.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("50.00"))
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
     with pytest.raises(ValueError, match="excede el saldo sin conciliar"):
@@ -542,12 +547,7 @@ def test_conciliar_partida_excede_saldo_partida(db_session):
 def test_conciliar_partida_cliente_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
     cxc, _cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
     with pytest.raises(ValueError, match="Cliente no encontrado"):
@@ -564,12 +564,7 @@ def test_conciliar_partida_cliente_inexistente(db_session):
 def test_conciliar_partida_cliente_inactivo_falla(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
     cliente_inactivo = crear_cliente(db_session, estado_cliente="INACTIVO")
     cxc, _cliente, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
 
@@ -587,12 +582,7 @@ def test_conciliar_partida_cliente_inactivo_falla(db_session):
 def test_conciliar_partida_cxc_inexistente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
     cliente = crear_cliente(db_session)
 
     with pytest.raises(ValueError, match="Cuenta por cobrar no encontrada"):
@@ -609,12 +599,7 @@ def test_conciliar_partida_cxc_inexistente(db_session):
 def test_conciliar_partida_cxc_no_pertenece_al_cliente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
     cxc, _dueno_real, _admin2 = _crear_cxc_real(db_session, Decimal("100.00"))
     otro_cliente = crear_cliente(db_session)
 
@@ -632,12 +617,7 @@ def test_conciliar_partida_cxc_no_pertenece_al_cliente(db_session):
 def test_conciliar_partida_excede_saldo_factura(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("500.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("500.00"))
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("50.00"))
 
     with pytest.raises(ValueError, match="excede el saldo pendiente de la factura"):
@@ -654,12 +634,7 @@ def test_conciliar_partida_excede_saldo_factura(db_session):
 def test_conciliar_partida_ya_atribuida_a_otro_cliente(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
     cxc1, cliente1, _admin2 = _crear_cxc_real(db_session, Decimal("50.00"))
     OtrosMovimientosService.conciliar_partida(
         db_session,
@@ -685,12 +660,7 @@ def test_conciliar_partida_ya_atribuida_a_otro_cliente(db_session):
 def test_conciliar_partida_exitosa_no_duplica_movimiento_bancario(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    partida = OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
     cxc, cliente, _admin2 = _crear_cxc_real(db_session, Decimal("80.00"))
 
     conteo_movimientos_antes = db_session.query(BancoMovimiento).count()
@@ -733,12 +703,7 @@ def test_listar_partidas_no_conciliadas_sin_usuario_autorizado_falla(db_session)
 def test_listar_partidas_no_conciliadas_filtra_por_estado(db_session):
     admin = crear_usuario_admin(db_session)
     banco = crear_cuenta_bancaria(db_session)
-    OtrosMovimientosService.crear_partida_no_conciliada(
-        db_session,
-        id_cuenta_bancaria=banco.id_cuenta,
-        monto=Decimal("100.00"),
-        creado_por=admin.id_usuario,
-    )
+    _crear_partida(db_session, banco, admin, Decimal("100.00"))
 
     pendientes = OtrosMovimientosService.listar_partidas_no_conciliadas(
         db_session, estado="pendiente", id_usuario=admin.id_usuario

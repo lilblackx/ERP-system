@@ -10,13 +10,16 @@ from app.db.models import (
     Caja,
     CajaMovimiento,
     Cliente,
+    ConciliacionPartida,
     CuentaBancaria,
     CuentaPorCobrar,
     CuentaPorCobrarOtro,
     CuentaPorPagarOtro,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.db_utils import aplicar_lock_timeout
 from app.services.permisos import require_permiso
+from app.services.tesoreria import BancoService, CajaService
 
 logger = logging.getLogger(__name__)
 
@@ -40,19 +43,66 @@ class OtrosMovimientosService:
         descripcion: str | None,
         fecha_vencimiento: date | None,
         creado_por: int | None,
+        id_caja: int | None = None,
+        id_cuenta_bancaria: int | None = None,
+        referencia: str | None = None,
     ) -> CuentaPorCobrarOtro:
+        """Un prestamo/anticipo es dinero que SALE de la empresa: se indica de donde (caja con
+        turno abierto o cuenta bancaria, con saldo suficiente) y el egreso se registra en la
+        misma transaccion. Antes solo se creaba la deuda y la salida de dinero no quedaba en
+        ningun lado -- la caja/banco mostraba mas plata de la que habia."""
         require_permiso(session, creado_por, "otros_movimientos", "crear")
-        if Decimal(str(monto_total)) <= 0:
+        monto_total = Decimal(str(monto_total))
+        if monto_total <= 0:
             raise ValueError("monto_total debe ser mayor a cero")
         cliente = session.get(Cliente, id_cliente)
         if cliente is None:
             raise ValueError("Cliente no encontrado")
         if cliente.estado_cliente != "ACTIVO":
             raise ValueError(f"El cliente '{cliente.nombre_razon_social}' esta inactivo")
+        _validar_origen_pago(id_caja, id_cuenta_bancaria)
+
+        aplicar_lock_timeout(session)
+        ahora = datetime.now()
+        # Valida y bloquea el origen ANTES de crear nada.
+        if id_caja is not None:
+            caja = session.execute(
+                select(Caja)
+                .where(Caja.id_caja == id_caja)
+                .with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one_or_none()
+            if caja is None:
+                raise ValueError("Caja no encontrada")
+            if caja.fecha_apertura is None or caja.fecha_cierre is not None:
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+            saldo = CajaService.calcular_saldo_actual(session, id_caja)
+            if saldo < monto_total:
+                raise ValueError(
+                    f"La caja '{caja.nombre_caja}' no tiene saldo suficiente: disponible ${saldo}, "
+                    f"requerido ${monto_total}"
+                )
+        else:
+            cuenta_bancaria = session.execute(
+                select(CuentaBancaria)
+                .where(CuentaBancaria.id_cuenta == id_cuenta_bancaria)
+                .with_hint(CuentaBancaria, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one_or_none()
+            if cuenta_bancaria is None:
+                raise ValueError("Cuenta bancaria no encontrada")
+            if cuenta_bancaria.estado_cuenta != "ACTIVO":
+                raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+            if (cuenta_bancaria.saldo_total_banco or Decimal("0")) < monto_total:
+                raise ValueError(
+                    f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' no tiene saldo suficiente: "
+                    f"disponible ${cuenta_bancaria.saldo_total_banco}, requerido ${monto_total}"
+                )
+            referencia = (referencia or "").strip()
+            if len(referencia) < 4:
+                raise ValueError("El egreso bancario requiere una referencia de al menos 4 caracteres")
 
         cuenta = CuentaPorCobrarOtro(
             monto_total=monto_total,
-            fecha_emision=datetime.now(),
+            fecha_emision=ahora,
             descripcion=descripcion,
             id_cliente=id_cliente,
             saldo_pendiente=monto_total,
@@ -61,6 +111,23 @@ class OtrosMovimientosService:
             creado_por=creado_por,
         )
         session.add(cuenta)
+        session.flush()
+
+        motivo = f"Prestamo (otros) #{cuenta.id_cuenta} a {cliente.nombre_razon_social}"[:255]
+        if id_caja is not None:
+            CajaService._registrar_egreso_vuelto(
+                session, id_caja=id_caja, monto=monto_total, descripcion=motivo, id_usuario=creado_por, fecha=ahora
+            )
+        else:
+            BancoService._registrar_egreso_vuelto(
+                session,
+                id_cuenta=id_cuenta_bancaria,
+                monto=monto_total,
+                descripcion=motivo,
+                referencia=referencia,
+                id_usuario=creado_por,
+                fecha=ahora,
+            )
         session.commit()
         session.refresh(cuenta)
 
@@ -81,6 +148,7 @@ class OtrosMovimientosService:
                 "id_cuenta": cuenta.id_cuenta,
                 "id_cliente": id_cliente,
                 "monto_total": str(cuenta.monto_total),
+                "origen": "caja" if id_caja is not None else "banco",
             },
         )
         return cuenta
@@ -224,16 +292,47 @@ class OtrosMovimientosService:
         descripcion: str | None = None,
         creado_por: int | None = None,
     ) -> CuentaPorPagarOtro:
+        """Registra una transferencia recibida sin poder identificar al cliente. Siempre
+        respaldada por el movimiento bancario real que la trajo (`id_movimiento`): tiene que
+        existir, ser un abono de ESA cuenta, no estar ya atribuido a un pago, no pasar de su
+        monto, y cada movimiento origina una sola partida. Sin esto se podia inventar dinero
+        sin respaldo, o usar una misma transferencia para saldar varias facturas."""
         require_permiso(session, creado_por, "otros_movimientos", "crear")
-        if Decimal(str(monto)) <= 0:
+        monto = Decimal(str(monto))
+        if monto <= 0:
             raise ValueError("monto debe ser mayor a cero")
         cuenta_bancaria = session.get(CuentaBancaria, id_cuenta_bancaria)
         if cuenta_bancaria is None:
             raise ValueError("Cuenta bancaria no encontrada")
         if cuenta_bancaria.estado_cuenta != "ACTIVO":
             raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
-        if id_movimiento is not None and session.get(BancoMovimiento, id_movimiento) is None:
+        if id_movimiento is None:
+            raise ValueError("Indique el movimiento bancario de la transferencia (id_movimiento)")
+
+        movimiento = session.execute(
+            select(BancoMovimiento)
+            .where(BancoMovimiento.id_movimiento == id_movimiento)
+            .with_hint(BancoMovimiento, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
+        if movimiento is None:
             raise ValueError("Movimiento bancario no encontrado")
+        if movimiento.id_cuenta != id_cuenta_bancaria:
+            raise ValueError("El movimiento bancario pertenece a otra cuenta")
+        if movimiento.tipo_movimiento != "abono":
+            raise ValueError("Solo un abono (dinero recibido) puede quedar como transferencia sin identificar")
+        if any(
+            (
+                movimiento.id_pago_cobro,
+                movimiento.id_pago_proveedor,
+                movimiento.id_pago_comision,
+                movimiento.id_pago_cobro_bcv,
+            )
+        ):
+            raise ValueError("Ese movimiento bancario ya esta asociado a un pago")
+        if monto > (movimiento.monto_movimiento or Decimal("0")):
+            raise ValueError(f"El monto excede el del movimiento bancario (${movimiento.monto_movimiento})")
+        if session.query(CuentaPorPagarOtro.id_cuenta).filter_by(id_movimiento=id_movimiento).first() is not None:
+            raise ValueError("Ese movimiento bancario ya tiene una transferencia sin identificar registrada")
 
         partida = CuentaPorPagarOtro(
             id_cuenta_bancaria=id_cuenta_bancaria,
@@ -241,7 +340,7 @@ class OtrosMovimientosService:
             monto_total=monto,
             saldo_pendiente=monto,
             fecha_recepcion=datetime.now(),
-            referencia_bancaria=referencia_bancaria,
+            referencia_bancaria=referencia_bancaria or movimiento.referencia_movimiento,
             descripcion=descripcion,
             estado="pendiente",
             creado_por=creado_por,
@@ -251,9 +350,10 @@ class OtrosMovimientosService:
         session.refresh(partida)
 
         logger.info(
-            "Partida no conciliada creada: id_cuenta=%s cuenta_bancaria=%s monto=%s usuario=%s",
+            "Partida no conciliada creada: id_cuenta=%s cuenta_bancaria=%s movimiento=%s monto=%s usuario=%s",
             partida.id_cuenta,
             id_cuenta_bancaria,
+            id_movimiento,
             monto,
             creado_por,
         )
@@ -266,6 +366,7 @@ class OtrosMovimientosService:
             detalle={
                 "id_cuenta": partida.id_cuenta,
                 "id_cuenta_bancaria": id_cuenta_bancaria,
+                "id_movimiento": id_movimiento,
                 "monto": str(monto),
             },
         )
@@ -315,6 +416,10 @@ class OtrosMovimientosService:
             raise ValueError("Cuenta por cobrar no encontrada")
         if cxc.factura.id_cliente_factura != id_cliente:
             raise ValueError("La cuenta por cobrar indicada no pertenece al cliente identificado")
+        # Solo una factura viva y con saldo: antes se podia "conciliar" contra una factura
+        # anulada o ya pagada.
+        if cxc.factura.estado_factura == "ANULADA" or cxc.estado not in ("pendiente", "parcial"):
+            raise ValueError("La factura indicada no tiene saldo pendiente (esta pagada o anulada)")
         if monto > cxc.saldo_pendiente:
             raise ValueError(f"El monto excede el saldo pendiente de la factura ({cxc.saldo_pendiente})")
 
@@ -328,6 +433,17 @@ class OtrosMovimientosService:
         partida.id_cliente_identificado = id_cliente
         partida.conciliado_por = id_usuario
         partida.fecha_conciliacion = datetime.now()
+
+        # Constancia de la aplicacion (aparece como abono en el historial del cliente).
+        session.add(
+            ConciliacionPartida(
+                id_partida=partida.id_cuenta,
+                id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+                monto=monto,
+                fecha_conciliacion=partida.fecha_conciliacion,
+                conciliado_por=id_usuario,
+            )
+        )
 
         session.commit()
         session.refresh(partida)

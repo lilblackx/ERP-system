@@ -39,6 +39,7 @@ from app.services.compra_oc import CompraOCService
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
@@ -46,6 +47,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.message_box import MessageBox
+from app.ui.notas_credito_proveedor_dialog import NotasCreditoProveedorDialog
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
@@ -821,10 +823,21 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
         )
         self.lbl_tasa.setVisible(False)
 
+        # Saldo a favor con proveedores (notas de credito por compras anuladas ya pagadas):
+        # visible solo si hay algo por usar, para que no quede olvidado en un reporte.
+        self.lbl_notas_credito = QLabel()
+        self.lbl_notas_credito.setStyleSheet(
+            f"color: {COLOR_PRIMARY}; font-size: 13px; font-weight: bold;"
+            f" background-color: {COLOR_TABLE_HEADER}; border-radius: 10px;"
+            " padding: 3px 10px;"
+        )
+        self.lbl_notas_credito.setVisible(False)
+
         h.addWidget(lbl)
         h.addWidget(self.lbl_total)
         h.addWidget(self.lbl_saldo_total)
         h.addWidget(self.lbl_tasa)
+        h.addWidget(self.lbl_notas_credito)
         h.addStretch()
         return w
 
@@ -936,10 +949,16 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
         btn_pagar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_pagar.clicked.connect(self.pagar_seleccionada)
 
+        self.btn_notas_credito = QPushButton("Notas de crédito")
+        self.btn_notas_credito.setIcon(qta.icon("fa5s.file-invoice-dollar", color=COLOR_TEXT_DARK))
+        self.btn_notas_credito.setStyleSheet(BUTTON_SECONDARY_QSS)
+        self.btn_notas_credito.clicked.connect(self.abrir_notas_credito)
+
         h.addWidget(self.lbl_pagina)
         h.addWidget(self.btn_anterior)
         h.addWidget(self.btn_siguiente)
         h.addStretch()
+        h.addWidget(self.btn_notas_credito)
         if self._puede("crear"):
             h.addWidget(btn_pagar)
         return w
@@ -1031,6 +1050,7 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
             resultado["total"] = len(cuentas_filtradas)
 
             self._poblar_tabla(resultado)
+            self._actualizar_notas_credito(session)
         except PermisoDenegadoError:
             MessageBox.warning(
                 self,
@@ -1046,6 +1066,30 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
             )
         finally:
             session.close()
+
+    def _actualizar_notas_credito(self, session) -> None:
+        """Badge de saldo a favor con proveedores. Informativo: sin permiso 'notas_credito'/
+        'ver' se oculta, nunca bloquea el panel."""
+        try:
+            notas = NotaCreditoService.listar_notas_credito_proveedor_disponibles(
+                session, id_usuario=self.usuario.id_usuario
+            )
+        except PermisoDenegadoError:
+            self.lbl_notas_credito.setVisible(False)
+            self.btn_notas_credito.setVisible(False)
+            return
+        total = sum((_as_decimal(n.saldo_disponible) for n in notas), Decimal("0"))
+        self.lbl_notas_credito.setText(
+            f"{len(notas)} nota{'s' if len(notas) != 1 else ''} de crédito · ${float(total):,.2f} a favor"
+        )
+        self.lbl_notas_credito.setVisible(bool(notas))
+        self.btn_notas_credito.setVisible(True)
+
+    def abrir_notas_credito(self) -> None:
+        dialogo = NotasCreditoProveedorDialog(self.session_factory, self.usuario.id_usuario, parent=self)
+        dialogo.exec()
+        if dialogo.hubo_cambios:
+            self.cargar_cuentas()
 
     def _poblar_tabla(self, resultado: dict) -> None:
         cuentas: list[CuentaPorPagar] = resultado["items"]
