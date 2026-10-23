@@ -68,7 +68,9 @@ def test_guardar_sin_password_conserva_la_guardada(db_session):
         modificado_por=admin.id_usuario,
     )
 
-    assert fila.password == "clave-original"
+    # Se guarda cifrada (solo el servidor la descifra): la original sigue ahi, intacta.
+    assert fila.password is None
+    assert SmtpConfigService.obtener_efectiva(db_session).password == "clave-original"
 
 
 def test_guardar_con_password_vacia_la_borra(db_session):
@@ -77,7 +79,7 @@ def test_guardar_con_password_vacia_la_borra(db_session):
 
     fila = _guardar(db_session, admin, password="")
 
-    assert fila.password is None
+    assert fila.password is None and fila.password_cifrada is None
 
 
 @pytest.mark.parametrize("host", ["", "   ", None])

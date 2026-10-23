@@ -335,7 +335,7 @@ class ConfigSmtpPanel(MixinPermisos, QWidget):
                 self.puerto_input.set_value(fila.puerto)
                 self.remitente_input.setText(fila.remitente or "")
                 self.tls_check.setChecked(bool(fila.usar_tls))
-                self._tiene_password = bool(fila.password)
+                self._tiene_password = SmtpConfigService.tiene_password(fila)
                 self.lbl_origen.setText("Esta configuración se comparte con todas las estaciones.")
             self._on_proveedor_cambiado()
             self.password_input.clear()
@@ -438,8 +438,13 @@ class ConfigSmtpPanel(MixinPermisos, QWidget):
             clave = password
             if not clave:
                 # Campo vacío = "usar la guardada": se lee acá, en el hilo del worker.
-                fila = SmtpConfigService.obtener_configuracion(session, id_usuario)
-                clave = (fila.password if fila else None) or ""
+                SmtpConfigService.obtener_configuracion(session, id_usuario)  # exige el permiso
+                clave = SmtpConfigService.obtener_efectiva(session).password
+                if not clave:
+                    raise ValueError(
+                        "Esta PC no puede leer la contraseña guardada (solo el servidor puede). "
+                        "Escríbala otra vez para probar la conexión."
+                    )
             SmtpConfigService.probar_conexion(
                 AjustesSmtp(
                     host=host,

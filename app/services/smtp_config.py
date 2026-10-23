@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.db.models import ConfiguracionSmtp
+from app.services import cifrado_servidor
 from app.services.auditoria import AuditoriaService
 from app.services.email_service import AjustesSmtp, ajustes_desde_entorno, probar_conexion
 from app.services.permisos import require_permiso
@@ -119,16 +120,38 @@ class SmtpConfigService:
         usuario autenticado. Gana lo guardado en la base si ya trae usuario y clave; si no
         (nunca se configuro desde la app, o quedo a medias) se usa el .env."""
         fila = session.query(ConfiguracionSmtp).order_by(ConfiguracionSmtp.id_config).first()
-        if fila is not None and fila.usuario and fila.password:
+        if fila is not None and fila.usuario and SmtpConfigService.tiene_password(fila):
+            # La contrasena cifrada solo se puede leer en el servidor (quien envia los correos);
+            # en una estacion queda vacia y los ajustes salen "no configurados". El texto plano
+            # es el legado previo a migrations/0089, hasta que el servidor lo migre.
+            password = cifrado_servidor.descifrar(fila.password_cifrada) if fila.password_cifrada else fila.password
             return AjustesSmtp(
                 host=fila.host,
                 puerto=fila.puerto,
                 usuario=fila.usuario,
-                password=fila.password,
+                password=password or "",
                 remitente=fila.remitente or "",
                 usar_tls=bool(fila.usar_tls),
             )
         return ajustes_desde_entorno()
+
+    @staticmethod
+    def tiene_password(fila: ConfiguracionSmtp | None) -> bool:
+        return fila is not None and bool(getattr(fila, "password_cifrada", None) or fila.password)
+
+    @staticmethod
+    def migrar_password(session: Session) -> bool:
+        """Solo el SERVIDOR: cifra la contrasena que todavia este en texto plano (legado) y
+        borra el original. Devuelve True si migro algo. Idempotente."""
+        if not cifrado_servidor.es_servidor():
+            return False
+        fila = session.query(ConfiguracionSmtp).order_by(ConfiguracionSmtp.id_config).first()
+        if fila is None or not fila.password:
+            return False
+        fila.password_cifrada = cifrado_servidor.cifrar(session, fila.password)
+        fila.password = None
+        session.commit()
+        return True
 
     @staticmethod
     def guardar_configuracion(
@@ -170,7 +193,14 @@ class SmtpConfigService:
         fila.usar_tls = usar_tls
         fila.modificado_por = modificado_por
         if password is not _SENTINEL:
-            fila.password = password or None
+            # Nunca en texto plano en la base: se cifra con la llave publica del servidor, y
+            # solo el servidor puede descifrarla. Vaciarla borra las dos columnas.
+            fila.password = None
+            try:
+                fila.password_cifrada = cifrado_servidor.cifrar(session, password) if password else None
+            except cifrado_servidor.CifradoNoDisponibleError as e:
+                session.rollback()
+                raise ValueError(str(e)) from e
 
         session.commit()
         session.refresh(fila)
@@ -186,7 +216,7 @@ class SmtpConfigService:
                 "puerto": fila.puerto,
                 "usuario": fila.usuario,
                 "usar_tls": fila.usar_tls,
-                "tiene_password": bool(fila.password),
+                "tiene_password": SmtpConfigService.tiene_password(fila),
             },
         )
         return fila

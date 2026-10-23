@@ -5,6 +5,11 @@ estaciones registradas y guarda el token renovado en SQL Server, de donde lo lee
 estaciones. Si este servicio se detiene o la licencia se revoca, el token vence en <= 7 dias
 y todas las PCs quedan en solo lectura.
 
+Ademas despacha el CORREO de la red: las estaciones no pueden enviar (no conocen la contrasena
+SMTP), dejan los correos en la tabla cola_correos y este servicio los manda cada pocos segundos
+(app/services/cola_correos.py). Los codigos de desbloqueo vencen a los 15 min, por eso la cola
+se revisa mucho mas seguido que la licencia.
+
 Uso (en una consola de PowerShell **como Administrador**, desde la carpeta del proyecto):
 
     python -m app.servicio_licencia instalar     # instala (inicio automatico) y arranca
@@ -49,6 +54,8 @@ DESCRIPCION = (
 # Cada cuanto valida. La revocacion de una licencia llega a las estaciones en <= este intervalo
 # (mas el refresco de ~30 s de su cache).
 INTERVALO_SEG = max(60, int(os.getenv("LICENCIA_SERVICIO_INTERVALO_SEG", "600")))
+# Cada cuanto revisa la cola de correos (los codigos de desbloqueo viven 15 min).
+INTERVALO_CORREOS_SEG = max(5, int(os.getenv("CORREOS_SERVICIO_INTERVALO_SEG", "15")))
 
 
 def ciclo() -> EstadoLicencia | None:
@@ -70,6 +77,33 @@ def ciclo() -> EstadoLicencia | None:
         return None
     logger.info("Licencia: %s (%s)", estado.estado, estado.mensaje)
     return estado
+
+
+def ciclo_correos() -> dict[str, int] | None:
+    """Una pasada de correo: prepara el cifrado de la contrasena SMTP (llave del servidor,
+    migracion del texto plano viejo) y despacha la cola. Nunca lanza."""
+    if config.MODO_INSTALACION != MODO_SERVIDOR:
+        return None
+    # datos_estaciones.txt (trae la clave SQL de la app) se borra solo a las 24 h de creado.
+    from app.services import datos_estaciones
+
+    datos_estaciones.borrar_si_vencido()
+    try:
+        from app.db.session import SessionLocal
+        from app.services import cifrado_servidor
+        from app.services.cola_correos import CorreoService
+        from app.services.smtp_config import SmtpConfigService
+
+        session = SessionLocal()
+        try:
+            cifrado_servidor.asegurar_clave(session)
+            SmtpConfigService.migrar_password(session)
+            return CorreoService.procesar_pendientes(session)
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("Fallo inesperado despachando la cola de correos")
+        return None
 
 
 try:
@@ -106,12 +140,21 @@ if _HAY_PYWIN32:
             servicemanager.LogMsg(
                 servicemanager.EVENTLOG_INFORMATION_TYPE, servicemanager.PYS_SERVICE_STARTED, (self._svc_name_, "")
             )
-            logger.info("Servicio de licencia iniciado (intervalo %s s)", INTERVALO_SEG)
+            logger.info(
+                "Servicio iniciado (licencia cada %s s, correos cada %s s)", INTERVALO_SEG, INTERVALO_CORREOS_SEG
+            )
+            proxima_licencia = 0.0
             while True:
-                ciclo()
-                if win32event.WaitForSingleObject(self._detener, INTERVALO_SEG * 1000) == win32event.WAIT_OBJECT_0:
+                if time.monotonic() >= proxima_licencia:
+                    ciclo()
+                    proxima_licencia = time.monotonic() + INTERVALO_SEG
+                ciclo_correos()
+                if (
+                    win32event.WaitForSingleObject(self._detener, INTERVALO_CORREOS_SEG * 1000)
+                    == win32event.WAIT_OBJECT_0
+                ):
                     break
-            logger.info("Servicio de licencia detenido")
+            logger.info("Servicio detenido")
 
 
 def _requiere_pywin32() -> None:
@@ -139,6 +182,7 @@ def main(argv: list[str]) -> None:
         inicio = time.time()
         estado = ciclo()
         print(f"{estado.estado if estado else 'sin cambios'}  ({time.time() - inicio:.1f} s)")
+        print(f"correos: {ciclo_correos() or 'sin cambios'}")
         return
     if orden == "instalar":
         _instalar()

@@ -30,9 +30,12 @@ from PySide6.QtWidgets import (
 from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
 from app.rutas import NOMBRE_APP
+from app.services import cifrado_servidor, datos_estaciones
+from app.services.cola_correos import CorreoService
 from app.services.licencia import EstadoLicencia, LicenciaService
 from app.services.notificaciones import NotificacionesService
 from app.services.permisos import PermisoDenegadoError
+from app.services.smtp_config import SmtpConfigService
 from app.services.usuarios import UsuarioService
 from app.ui.auditoria_panel import AuditoriaPanel
 from app.ui.bancos_panel import BancosPanel
@@ -226,6 +229,32 @@ class MainWindow(QMainWindow):
         self._timer_notificaciones.timeout.connect(self._refrescar_notificaciones)
         self._timer_notificaciones.start()
         QTimer.singleShot(1_000, self._refrescar_notificaciones)
+
+        # Correo de la red: solo el SERVIDOR envia (las estaciones dejan los correos en la cola,
+        # ver app/services/cola_correos.py). Con la app abierta en el servidor se despacha aca,
+        # ademas del servicio de Windows, que lo hace aunque nadie tenga la app abierta.
+        self._worker_correos: QueryWorker | None = None
+        self._timer_correos = QTimer(self)
+        self._timer_correos.setInterval(20_000)
+        self._timer_correos.timeout.connect(self._despachar_correos)
+        if cifrado_servidor.es_servidor():
+            self._timer_correos.start()
+            QTimer.singleShot(3_000, self._despachar_correos)
+
+    def _despachar_correos(self) -> None:
+        if self._worker_correos is not None and self._worker_correos.isRunning():
+            return
+
+        def _tarea(session):
+            datos_estaciones.borrar_si_vencido()  # clave SQL de las estaciones: se borra a las 24 h
+            cifrado_servidor.asegurar_clave(session)
+            SmtpConfigService.migrar_password(session)
+            return CorreoService.procesar_pendientes(session)
+
+        self._worker_correos = QueryWorker(SessionLocal, _tarea)
+        self._worker_correos.silencioso = True  # tarea de fondo: no enciende la barra de carga
+        # Si falla (QueryWorker ya lo registra en el log) se reintenta en 20 s, sin molestar al usuario.
+        self._worker_correos.start()
 
     def _refrescar_banner_licencia(self, estado: EstadoLicencia | None = None) -> None:
         estado = estado or LicenciaService.estado_actual()
@@ -451,9 +480,15 @@ class MainWindow(QMainWindow):
         QApplication.instance().removeEventFilter(self)
         self._timer_inactividad.stop()
         self._timer_notificaciones.stop()
-        # Hilos propios del shell (campana, licencia, búsqueda global de la barra superior):
+        self._timer_correos.stop()
+        # Hilos propios del shell (campana, licencia, correo, búsqueda global de la barra superior):
         # mismo motivo que el bloque de abajo.
-        for worker in (self._worker_notificaciones, self._worker_licencia, *self.topbar._workers):
+        for worker in (
+            self._worker_notificaciones,
+            self._worker_licencia,
+            self._worker_correos,
+            *self.topbar._workers,
+        ):
             if worker is not None and worker.isRunning():
                 worker.quit()
                 worker.wait(3000)

@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from app.db.models import CodigoVerificacion, ConfiguracionEmpresa, Usuario
 from app.services.auditoria import AuditoriaService
 from app.services.auth import hash_password, validar_password_policy
+from app.services.cola_correos import CorreoService
 from app.services.email_service import enviar_correo
-from app.services.smtp_config import SmtpConfigService
 
 VALIDEZ_CODIGO = timedelta(minutes=15)
 MAX_INTENTOS_VERIFICACION = 5
@@ -159,12 +159,19 @@ def _crear_y_enviar_codigo(session: Session, usuario: Usuario, tipo: str) -> Non
         f"Tu codigo es: {codigo}\n\nVence en {minutos_validez} minutos. Si no solicitaste esto, ignora este correo."
     )
     cuerpo_html = _construir_html_codigo(_nombre_empresa(session), asunto, codigo, minutos_validez)
-    enviar_correo(
+    # En el servidor se envia directo; en una estacion queda en la cola y lo manda el servidor
+    # (la estacion no puede leer la contrasena SMTP, ver app/services/cola_correos.py).
+    CorreoService.enviar_o_encolar(
+        session,
         usuario.email,
         asunto,
         cuerpo,
         cuerpo_html=cuerpo_html,
-        ajustes=SmtpConfigService.obtener_efectiva(session),
+        tipo=f"CODIGO_{tipo}",
+        referencia=str(usuario.id_usuario),
+        validez=VALIDEZ_CODIGO,
+        creado_por=usuario.id_usuario,
+        enviar=enviar_correo,
     )
 
     AuditoriaService.registrar_evento(
