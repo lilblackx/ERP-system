@@ -55,7 +55,6 @@ from app.db.models import (
     NotaCreditoCliente,
     NotaCreditoProveedor,
     NotaDevolucion,
-    NotaDevolucionDetalle,
     NotaRecepcion,
     NotaRecepcionDetalle,
     PagoCobro,
@@ -1465,14 +1464,15 @@ class ReporteService:
     ) -> dict:
         """Reconstruye el historial de movimientos de stock de un producto: no existe una
         tabla de movimientos dedicada (el stock se mueve directamente sobre
-        Inventario.cantidad_unidad via triggers), asi que se arma desde las 4 tablas de
+        Inventario.cantidad_unidad via triggers), asi que se arma desde las tablas de
         detalle que los disparan -- entradas: CompraDetalle (compra directa, sin OC, con
-        stock_ya_contabilizado=False) y NotaRecepcionDetalle (recepcion de una OC);
-        salidas: FacturaDetalle y NotaDevolucionDetalle (devolucion a proveedor) -- ver
-        las direcciones de cada trigger en migrations/0032 (lineas 333-426) y
-        schema_sqlserver.sql:894-1064. Una factura/compra ANULADA no necesita caso
-        especial: sus filas de detalle se borran (revirtiendo el stock via trigger), asi
-        que simplemente dejan de aparecer aca."""
+        stock_ya_contabilizado=False) y NotaRecepcionDetalle (recepcion de una OC, solo lo
+        ACEPTADO: recibido - rechazado, ver migrations/0086); salidas: FacturaDetalle (una
+        venta por bulto descuenta cantidad_caja unidades por bulto, ver migrations/0067).
+        La devolucion a proveedor NO aparece: lo rechazado nunca entro al stock, asi que no
+        lo mueve. Una factura/compra ANULADA no necesita caso especial: sus filas de
+        detalle se borran (revirtiendo el stock via trigger), asi que simplemente dejan de
+        aparecer aca."""
         require_permiso(session, id_usuario, "reportes", "ver")
         producto = session.get(Inventario, id_producto)
         if producto is None:
@@ -1510,7 +1510,7 @@ class ReporteService:
                     "fecha": nr.fecha_recepcion,
                     "tipo": "Recepción OC",
                     "referencia": nr.numero_nr,
-                    "entrada": detalle.cantidad_recibida,
+                    "entrada": detalle.cantidad_recibida - detalle.cantidad_rechazada,
                     "salida": Decimal("0.00"),
                 }
             )
@@ -1520,33 +1520,20 @@ class ReporteService:
             .filter(FacturaDetalle.id_producto_factura == id_producto)
             .all()
         )
+        # El stock esta en unidades: una venta por bulto descuenta cantidad_caja unidades por
+        # cada bulto (mismo calculo que trg_factura_detalle_stock_ins).
+        unidades_por_bulto = to_decimal(producto.cantidad_caja or 1)
         for detalle, factura in ventas:
+            salida = detalle.cantidad_producto
+            if detalle.tipo_venta == "bulto":
+                salida = detalle.cantidad_producto * unidades_por_bulto
             eventos.append(
                 {
                     "fecha": factura.fecha_emision,
                     "tipo": "Venta",
                     "referencia": factura.numero_factura,
                     "entrada": Decimal("0.00"),
-                    "salida": detalle.cantidad_producto,
-                }
-            )
-        devoluciones = (
-            session.query(NotaDevolucionDetalle, NotaDevolucion)
-            .join(
-                NotaDevolucion,
-                NotaDevolucionDetalle.id_devolucion == NotaDevolucion.id_devolucion,
-            )
-            .filter(NotaDevolucionDetalle.id_producto == id_producto)
-            .all()
-        )
-        for detalle, nota in devoluciones:
-            eventos.append(
-                {
-                    "fecha": nota.fecha_devolucion,
-                    "tipo": "Devolución a Proveedor",
-                    "referencia": nota.numero_nota_devolucion,
-                    "entrada": Decimal("0.00"),
-                    "salida": detalle.cantidad_devuelta,
+                    "salida": salida,
                 }
             )
 
