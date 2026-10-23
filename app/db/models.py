@@ -13,6 +13,7 @@ from sqlalchemy import (
     LargeBinary,
     Numeric,
     String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -192,13 +193,50 @@ class ConfiguracionSmtp(Base):
     host: Mapped[str] = mapped_column(String(255), nullable=False)
     puerto: Mapped[int] = mapped_column(Integer, nullable=False, server_default="587")
     usuario: Mapped[str | None] = mapped_column(String(255))
+    # Legado en texto plano: se vacia al migrar (migrations/0089). Lo vigente es password_cifrada,
+    # que solo el servidor puede descifrar (app/services/cifrado_servidor.py).
     password: Mapped[str | None] = mapped_column(String(255))
+    password_cifrada: Mapped[str | None] = mapped_column(Text)
     remitente: Mapped[str | None] = mapped_column(String(255))
     usar_tls: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
     modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_modificacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
 
     modificador = relationship("Usuario")
+
+
+class ClaveCifradoServidor(Base):
+    """Llave publica del servidor (una sola fila, id=1): las estaciones cifran con ella la
+    contrasena SMTP; la privada vive solo en el servidor (migrations/0089)."""
+
+    __tablename__ = "clave_cifrado_servidor"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    clave_publica: Mapped[str] = mapped_column(Text, nullable=False)
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+
+
+class ColaCorreo(Base):
+    """Correo pendiente de enviar por el servidor (migrations/0089). Las estaciones no
+    envian: dejan la solicitud aca y el servidor la despacha."""
+
+    __tablename__ = "cola_correos"
+
+    id_correo: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tipo: Mapped[str] = mapped_column(String(30), nullable=False)
+    referencia: Mapped[str | None] = mapped_column(String(50))
+    destinatario: Mapped[str] = mapped_column(String(255), nullable=False)
+    asunto: Mapped[str] = mapped_column(String(255), nullable=False)
+    cuerpo: Mapped[str] = mapped_column(Text, nullable=False)
+    cuerpo_html: Mapped[str | None] = mapped_column(Text)
+    estado: Mapped[str] = mapped_column(String(12), nullable=False, server_default="PENDIENTE")
+    intentos: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error: Mapped[str | None] = mapped_column(String(500))
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    fecha_actualizacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    fecha_vencimiento: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+    fecha_envio: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    creado_por: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class Auditoria(Base):
@@ -212,6 +250,26 @@ class Auditoria(Base):
     fecha_evento: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
 
     usuario = relationship("Usuario")
+
+
+class AuditoriaCambioDB(Base):
+    """Historial automatico de cambios a dinero y stock (triggers de migrations/0092): valor
+    anterior y nuevo, usuario SQL, PC y programa. `fuera_de_la_app` marca lo hecho desde Excel,
+    SSMS u otro programa (la app se identifica como "NexoERP"). Solo lectura desde Python."""
+
+    __tablename__ = "auditoria_cambios_db"
+
+    id_cambio: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fecha: Mapped[datetime.datetime] = mapped_column(DateTime)
+    tabla: Mapped[str] = mapped_column(String(128))
+    operacion: Mapped[str] = mapped_column(String(1))
+    clave: Mapped[str] = mapped_column(String(100))
+    anterior: Mapped[str | None] = mapped_column(Text)
+    nuevo: Mapped[str | None] = mapped_column(Text)
+    usuario_sql: Mapped[str] = mapped_column(String(128))
+    equipo: Mapped[str | None] = mapped_column(String(128))
+    aplicacion: Mapped[str | None] = mapped_column(String(128))
+    fuera_de_la_app: Mapped[bool] = mapped_column(Boolean)
 
 
 class CodigoVerificacion(Base):
@@ -406,6 +464,8 @@ class FacturaVenta(Base):
     # Dynamic attributes (not mapped, set by service layer for UI display)
     estado_visual: ClassVar[str] = "EMITIDA"  # Calculated by VentaService for UI display
     metodo_pago: ClassVar[str | None] = None  # Set by VentaService for cash sales
+    # Set by VentaService: total_venta - monto_descuento + monto_iva (lo que paga el cliente)
+    total_a_cobrar: ClassVar[decimal.Decimal] = decimal.Decimal("0.00")
 
     cliente = relationship("Cliente")
     usuario = relationship("Usuario", foreign_keys=[id_usuario_factura])
@@ -435,7 +495,10 @@ class FacturaDetalle(Base):
 
 
 class ComisionFactura(Base):
+    # implicit_returning=False: esta tabla tiene trigger de auditoria (migrations/0092) y SQL Server
+    # no admite OUTPUT sin INTO sobre una tabla con triggers (error 334).
     __tablename__ = "comisiones_factura"
+    __table_args__ = {"implicit_returning": False}
 
     id_comision: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     monto_base_comision: Mapped[decimal.Decimal | None] = mapped_column(Numeric(18, 2))
@@ -510,6 +573,10 @@ class CompraDetalle(Base):
     # trg_compra_detalle_stock_ins la ignora en vez de sumarla de nuevo (migrations/0032).
     # DEFAULT False preserva el flujo viejo (compra directa) sin cambios.
     stock_ya_contabilizado: Mapped[bool] = mapped_column(Boolean, server_default="0")
+    # Linea de la OC de la que salio esta linea de factura (migrations/0087); NULL en compras
+    # directas y en facturas anteriores a esa migracion donde el vinculo era ambiguo.
+    # CompraService.anular_compra lo usa para devolverle la cantidad a esa linea.
+    id_oc_detalle: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("compra_oc_detalle.id_detalle"))
 
     compra = relationship("Compra", overlaps="detalles")
     producto = relationship("Inventario")
@@ -578,6 +645,9 @@ class CompraOCEnmienda(Base):
 
     id_enmienda: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_oc: Mapped[int] = mapped_column(BigInteger, ForeignKey("compra_oc.id_oc"), nullable=False)
+    # Linea de la OC que se enmienda (migrations/0088): obligatoria para CANTIDAD y PRECIO,
+    # NULL para FECHA (campo unico de cabecera).
+    id_oc_detalle: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("compra_oc_detalle.id_detalle"))
     numero_enmienda: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     fecha_enmienda: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
     tipo_cambio: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -658,8 +728,9 @@ class NotaDevolucion(Base):
 
 
 class NotaDevolucionDetalle(Base):
-    # implicit_returning=False: trg_nota_devolucion_detalle_ins (AFTER INSERT, ver
-    # migrations/0032) esta definido sobre esta tabla.
+    # La devolucion es solo el documento que respalda lo rechazado al recibir (migrations/
+    # 0086): ya no mueve stock. implicit_returning=False se conserva por seguridad (esta
+    # tabla tuvo trigger hasta esa migracion).
     __tablename__ = "nota_devolucion_detalle"
     __table_args__ = {"implicit_returning": False}
 
@@ -761,6 +832,26 @@ class CuentaPorCobrarOtro(Base):
 
     cliente = relationship("Cliente")
     creador = relationship("Usuario")
+
+
+class ConciliacionPartida(Base):
+    """Cada aplicacion de una partida no conciliada (transferencia sin identificar) a una
+    factura del cliente. Deja constancia (monto, quien, cuando) para el historial del cliente;
+    no mueve caja/banco: el dinero ya entro con la transferencia (migrations/0090)."""
+
+    __tablename__ = "conciliaciones_partida"
+
+    id_conciliacion: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(BigInteger, ForeignKey("cuentas_por_pagar_otros.id_cuenta"), nullable=False)
+    id_cuenta_por_cobrar: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("cuentas_por_cobrar.id_cuenta_por_cobrar"), nullable=False
+    )
+    monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    fecha_conciliacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    conciliado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+
+    partida = relationship("CuentaPorPagarOtro")
+    cuenta_por_cobrar = relationship("CuentaPorCobrar")
 
 
 class CuentaPorPagarOtro(Base):
@@ -872,7 +963,10 @@ class Banco(Base):
 
 
 class CuentaBancaria(Base):
+    # implicit_returning=False: esta tabla tiene trigger de auditoria (migrations/0092) y SQL Server
+    # no admite OUTPUT sin INTO sobre una tabla con triggers (error 334).
     __tablename__ = "cuentas_bancarias"
+    __table_args__ = {"implicit_returning": False}
 
     id_cuenta: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_banco: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("bancos.id_banco"))
@@ -948,7 +1042,10 @@ class PagoCobroBCV(Base):
     PagoCobro: `monto` siempre en USD (lo que se descuenta del saldo), `moneda`/
     `monto_moneda_origen` lo recibido tal cual, `monto_bolivares`/`tasa_cambio` el detalle en Bs."""
 
+    # implicit_returning=False: esta tabla tiene trigger de auditoria (migrations/0092) y SQL Server
+    # no admite OUTPUT sin INTO sobre una tabla con triggers (error 334).
     __tablename__ = "pagos_cobros_bcv"
+    __table_args__ = {"implicit_returning": False}
 
     id_pago_cobro_bcv: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_cuenta_por_cobrar: Mapped[int] = mapped_column(

@@ -27,3 +27,8 @@ notificaciones_leidas.json
 
 # Preferencias de interfaz de esta PC (app/ui/animaciones.py), como notificaciones_leidas.json
 preferencias_ui.json
+
+# Copias de seguridad del .env (app/proteger_env.py) y llave privada del servidor
+.env.bak
+config.env.bak
+clave_servidor.bin

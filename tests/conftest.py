@@ -46,6 +46,9 @@ TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test")
 # por eso el fixture db_session deshabilita todas las FK (NOCHECK CONSTRAINT ALL)
 # antes de borrar y las reactiva (WITH CHECK CHECK CONSTRAINT ALL) despues.
 TABLES_DELETE_ORDER = [
+    "cola_correos",
+    "clave_cifrado_servidor",
+    "auditoria_cambios_db",
     "licencia_estaciones",
     "licencia_sistema",
     "comisiones_factura",
@@ -53,6 +56,7 @@ TABLES_DELETE_ORDER = [
     "caja_movimientos",
     "banco_movimientos",
     "pagos_cobros_bcv",
+    "conciliaciones_partida",
     "cuentas_por_pagar_otros",
     "cuentas_por_cobrar_otros",
     "notas_credito_clientes",
@@ -107,6 +111,9 @@ def _odbc_connect_str(database: str) -> str:
         f"DATABASE={database};"
         f"{auth_part}"
         f"TrustServerCertificate={DB_TRUST_SERVER_CERTIFICATE};"
+        # Como la app: los triggers de auditoria (0092) marcan "fuera de la app" lo que NO venga con
+        # este nombre, y la campana avisaria de cada dato que la suite inserta.
+        f"APP=NexoERP-Tests;"
     )
 
 
@@ -140,6 +147,13 @@ def _run_schema_script() -> None:
                 cursor.execute(batch)
     finally:
         conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _llave_del_servidor_en_carpeta_temporal(tmp_path, monkeypatch):
+    """Ningun test debe crear ni leer la llave privada real del equipo (app/services/
+    cifrado_servidor.py): se redirige a una carpeta temporal por test."""
+    monkeypatch.setenv("CLAVE_SERVIDOR_RUTA", str(tmp_path / "clave_servidor.bin"))
 
 
 @pytest.fixture(scope="session")
