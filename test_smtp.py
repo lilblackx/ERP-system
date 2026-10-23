@@ -1,15 +1,12 @@
-"""Script de prueba para verificar la conexión SMTP y envío de correos."""
+"""Script de prueba para verificar la conexión SMTP y envío de correos.
+
+Las credenciales se leen del .env (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM,
+SMTP_USE_TLS, ver app/config.py) -- nunca se escriben en este archivo: esta en git."""
 
 import smtplib
 from email.message import EmailMessage
 
-# Configuración SMTP
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_USER = "djcomerdistreportes@gmail.com"
-SMTP_PASSWORD = "fsxo ztot yqgf yzmy"
-SMTP_FROM = "djcomerdistreportes@gmail.com"
-SMTP_USE_TLS = True
+from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USE_TLS, SMTP_USER
 
 
 def probar_smtp():
