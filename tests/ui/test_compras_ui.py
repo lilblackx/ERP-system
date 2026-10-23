@@ -152,20 +152,38 @@ def test_orden_compra_crear_oc_recibe_items_con_precision_de_4_decimales(qtbot, 
 # =============================================================================
 
 
-def _crear_enmienda_dialogo(qtbot, cantidad_solicitada=Decimal("100.0000")):
+def _crear_enmienda_dialogo(qtbot, monkeypatch, cantidad_solicitada=Decimal("100.0000"), cantidad_recibida=0):
+    # Cantidad y precio se enmiendan POR LINEA: el dialogo lee las lineas de la OC.
+    linea = SimpleNamespace(
+        id_detalle=7,
+        cantidad_solicitada=cantidad_solicitada,
+        cantidad_recibida=Decimal(str(cantidad_recibida)),
+        precio_unitario=Decimal("5.0000"),
+        producto=SimpleNamespace(nombre_producto="Producto Uno"),
+    )
+    monkeypatch.setattr(
+        compras_mod.CompraOCService,
+        "obtener_oc",
+        staticmethod(lambda *a, **k: {"detalles": [linea]}),
+    )
     oc = SimpleNamespace(id_oc=1, numero_oc="OC-001", cantidad_solicitada=cantidad_solicitada)
     dialogo = EnmiendaOCDialog(MagicMock(), id_usuario=1, oc=oc)
     qtbot.addWidget(dialogo)
     return dialogo, oc
 
 
-def test_enmienda_cantidad_nueva_precargada_desde_oc(qtbot):
-    dialogo, oc = _crear_enmienda_dialogo(qtbot, cantidad_solicitada=Decimal("55.1234"))
+def test_enmienda_cantidad_nueva_precargada_desde_la_linea(qtbot, monkeypatch):
+    dialogo, oc = _crear_enmienda_dialogo(qtbot, monkeypatch, cantidad_solicitada=Decimal("55.1234"))
     assert dialogo.cantidad_nueva_input.get_value() == Decimal("55.1234")
 
 
-def test_enmienda_precio_nuevo_preserva_4_decimales(qtbot):
-    dialogo, _oc = _crear_enmienda_dialogo(qtbot)
+def test_enmienda_cantidad_no_baja_de_lo_ya_recibido_de_la_linea(qtbot, monkeypatch):
+    dialogo, _oc = _crear_enmienda_dialogo(qtbot, monkeypatch, cantidad_solicitada=Decimal("100"), cantidad_recibida=40)
+    assert dialogo.cantidad_nueva_input.min_value == Decimal("40")
+
+
+def test_enmienda_precio_nuevo_preserva_4_decimales(qtbot, monkeypatch):
+    dialogo, _oc = _crear_enmienda_dialogo(qtbot, monkeypatch)
     # precio_nuevo_input arranca oculto (_toggle_campos): solo se muestra, y por lo tanto
     # solo puede tomar foco, cuando tipo_combo esta en "PRECIO".
     dialogo.tipo_combo.setCurrentIndex(dialogo.tipo_combo.findData("PRECIO"))
@@ -175,7 +193,7 @@ def test_enmienda_precio_nuevo_preserva_4_decimales(qtbot):
 
 
 def test_enmienda_crear_enmienda_recibe_decimal_de_4_cifras(qtbot, monkeypatch):
-    dialogo, _oc = _crear_enmienda_dialogo(qtbot)
+    dialogo, _oc = _crear_enmienda_dialogo(qtbot, monkeypatch)
     dialogo.tipo_combo.setCurrentIndex(dialogo.tipo_combo.findData("PRECIO"))
     _escribir_y_perder_foco(qtbot, dialogo.precio_nuevo_input, "77,4321")
     dialogo.motivo_input.setText("Ajuste acordado con el proveedor")
@@ -199,6 +217,7 @@ def test_enmienda_crear_enmienda_recibe_decimal_de_4_cifras(qtbot, monkeypatch):
     dialogo._validar_y_aceptar()
 
     assert llamada["precio_nuevo"] == Decimal("77.4321")
+    assert llamada["id_oc_detalle"] == 7
 
 
 # =============================================================================

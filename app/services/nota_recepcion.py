@@ -1,8 +1,11 @@
 """Paso 2 del flujo OC -> NR -> Compra -> Pago: recibir mercancia contra una OC (con
 soporte de recepciones parciales -- multiples NR por OC) y devolver al proveedor lo que se
-rechazo en la recepcion. El stock sube en trg_nota_recepcion_detalle_ins y baja en
-trg_nota_devolucion_detalle_ins (ver migrations/0032) -- estos servicios solo validan e
-insertan, no tocan inventario.cantidad_unidad directamente."""
+rechazo en la recepcion. El stock sube en trg_nota_recepcion_detalle_ins solo por lo
+ACEPTADO (cantidad_recibida - cantidad_rechazada, ver migrations/0086): lo rechazado nunca
+entra al stock, asi que la nota de devolucion es solo el documento que lo respalda y no lo
+mueve. Estos servicios solo validan e insertan, no tocan inventario.cantidad_unidad
+directamente. El estado de cada NR (RECIBIDA/PARCIAL/FACTURADA) lo mantienen los triggers
+segun lo facturado (migrations/0085)."""
 
 import logging
 from datetime import datetime
@@ -19,6 +22,7 @@ from app.db.models import (
     NotaDevolucionDetalle,
     NotaRecepcion,
     NotaRecepcionDetalle,
+    Proveedor,
 )
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
@@ -130,12 +134,17 @@ class NotaRecepcionService:
         session.refresh(nr)
 
         # Registrar auditoría por cada línea de detalle con el formato correcto
-        for detalle_oc, cantidad_recibida, _cantidad_rechazada in lineas_validadas:
+        for detalle_oc, cantidad_recibida, cantidad_rechazada in lineas_validadas:
+            # Solo lo aceptado entra al stock (migrations/0086); una linea totalmente
+            # rechazada no mueve inventario, asi que no genera evento de stock.
+            cantidad_aceptada = cantidad_recibida - cantidad_rechazada
+            if cantidad_aceptada <= 0:
+                continue
             producto = session.get(Inventario, detalle_oc.id_producto)
             nombre_producto = producto.nombre_producto if producto else "Producto desconocido"
             detalle_texto = (
                 f"Recepción OC {oc.numero_oc} - NR {nr.numero_nr}: "
-                f"{cantidad_recibida} unidades de {nombre_producto} "
+                f"{cantidad_aceptada} unidades de {nombre_producto} "
                 f"(ID: {detalle_oc.id_producto})"
             )
             AuditoriaService.registrar_evento(
@@ -227,8 +236,7 @@ class NotaRecepcionService:
             motivo=motivo,
             cantidad_total=cantidad_total,
             # Este servicio registra la devolucion ya efectuada (no un estado intermedio
-            # "pendiente de despachar") -- coincide con que trg_nota_devolucion_detalle_ins
-            # descuenta el stock en el mismo INSERT de sus lineas.
+            # "pendiente de despachar"). No mueve stock: lo rechazado nunca entro a el.
             estado="DEVUELTO",
             observaciones=observaciones,
             id_usuario_creador=id_usuario,
@@ -277,13 +285,29 @@ class NotaRecepcionService:
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
+        texto_busqueda: str | None = None,
+        estado: str | None = None,
     ) -> dict:
         """Necesario para la pestana 'Recepciones' de app/ui/compras.py -- ningun paso
-        anterior agrego un metodo de lectura (paso 3 solo tenia escritura)."""
+        anterior agrego un metodo de lectura (paso 3 solo tenia escritura).
+
+        texto_busqueda/estado se filtran en la consulta, antes de paginar: la UI los
+        filtraba en Python sobre la pagina ya cortada, y una NR de la pagina 2 nunca
+        aparecia al buscarla."""
         require_permiso(session, id_usuario, "compras", "ver")
         query = session.query(NotaRecepcion)
         if id_oc:
             query = query.filter(NotaRecepcion.id_oc == id_oc)
+        if estado:
+            query = query.filter(NotaRecepcion.estado == estado)
+        if texto_busqueda:
+            like = f"%{texto_busqueda}%"
+            subq_oc = (
+                session.query(CompraOC.id_oc)
+                .join(Proveedor, Proveedor.id_proveedor == CompraOC.id_proveedor)
+                .filter(CompraOC.numero_oc.ilike(like) | Proveedor.nombre_razon_social.ilike(like))
+            )
+            query = query.filter(NotaRecepcion.numero_nr.ilike(like) | NotaRecepcion.id_oc.in_(subq_oc))
 
         total = query.count()
         nrs = (

@@ -48,7 +48,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CompraOC, NotaDevolucionDetalle, NotaRecepcion, Usuario
 from app.services.compra_oc import CompraOCService
-from app.services.compras import CompraService
+from app.services.compras import CompraService, cantidades_por_facturar
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import ProductoService
@@ -56,6 +56,7 @@ from app.services.nota_recepcion import NotaRecepcionService
 from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
 from app.services.usuarios import UsuarioService
+from app.ui.auto_refresco import AutoRefresco
 from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.nota_recepcion_detalle_dialog import NotaRecepcionDetalleDialog
@@ -104,6 +105,9 @@ _ETIQUETAS_METODO = {valor: etiqueta for etiqueta, valor in METODOS_PAGO}
 LIMITE_CATALOGO = 50  # mismo criterio D-01 que factura_form_dialog.py
 DEBOUNCE_BUSQUEDA_MS = 300
 POR_PAGINA = 20
+# Tope de OC candidatas en los selectores de "Nueva Recepcion"/"Nueva Factura" (ya
+# filtradas por estado en la consulta, ver CompraOCService.listar_ocs(estados=...)).
+POR_PAGINA_SELECTOR_OC = 5_000
 
 MOTIVOS_DEVOLUCION = [
     "Unidades Defectuosas",
@@ -661,9 +665,11 @@ class EnmiendaOCDialog(QDialog):
         self.id_usuario = id_usuario
         self.oc = oc
         self.enmienda_creada = None
+        # Cantidad y precio se enmiendan POR LINEA (migrations/0088).
+        self.detalles_oc = CompraOCService.obtener_oc(session, oc.id_oc, id_usuario=id_usuario)["detalles"]
 
         self.setWindowTitle(f"Enmendar ODC {oc.numero_oc}")
-        ajustar_tamano(self, 480, 480)
+        ajustar_tamano(self, 480, 560)
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self._build_ui()
@@ -685,13 +691,17 @@ class EnmiendaOCDialog(QDialog):
         layout.addWidget(titulo)
 
         filas = [
-            ("Cantidad:", "se aplica automáticamente al autorizar.", COLOR_SUCCESS),
-            ("Fecha:", "se aplica automáticamente al autorizar.", COLOR_SUCCESS),
+            (
+                "Cantidad:",
+                "cambia la cantidad de la línea elegida y recalcula el total y el estado de la ODC.",
+                COLOR_SUCCESS,
+            ),
             (
                 "Precio:",
-                "se registra como historial (cambio manual requerido en la línea de la ODC).",
-                COLOR_TEXT_MUTED,
+                "cambia el precio de la línea elegida; solo afecta lo que todavía no se ha facturado.",
+                COLOR_SUCCESS,
             ),
+            ("Fecha:", "cambia la fecha estimada de entrega de la ODC.", COLOR_SUCCESS),
         ]
         for etiqueta, texto, color in filas:
             fila = QHBoxLayout()
@@ -707,8 +717,8 @@ class EnmiendaOCDialog(QDialog):
             layout.addLayout(fila)
 
         lbl_razon = QLabel(
-            "Razón técnica: una ODC puede tener varias líneas con precios distintos, no hay "
-            "una sola linea a la cual aplicar el cambio de precio de forma automatica."
+            "Todos se aplican automáticamente cuando la enmienda queda autorizada. La cantidad "
+            "no puede quedar por debajo de lo ya recibido de esa línea."
         )
         lbl_razon.setWordWrap(True)
         lbl_razon.setStyleSheet(f"font-size: 11px; font-style: italic; color: {COLOR_TEXT_MUTED}; padding-top: 2px;")
@@ -745,16 +755,30 @@ class EnmiendaOCDialog(QDialog):
         layout.addWidget(lbl_tipo)
         layout.addWidget(self.tipo_combo)
 
-        self.lbl_cantidad = QLabel("Nueva Cantidad Solicitada (total de la ODC)")
+        self.lbl_linea = QLabel(f"Línea de la ODC {ASTERISCO_REQUERIDO}")
+        self.lbl_linea.setProperty("class", "FormLabel")
+        self.linea_combo = QComboBox()
+        for detalle in self.detalles_oc:
+            nombre = detalle.producto.nombre_producto if detalle.producto else "—"
+            self.linea_combo.addItem(
+                f"{nombre} — pedido {float(detalle.cantidad_solicitada):,.2f} · "
+                f"recibido {float(detalle.cantidad_recibida):,.2f} · ${float(detalle.precio_unitario):,.2f}",
+                detalle,
+            )
+        self.linea_combo.setFixedHeight(32)
+        self.linea_combo.currentIndexChanged.connect(self._on_linea_cambiada)
+        layout.addWidget(self.lbl_linea)
+        layout.addWidget(self.linea_combo)
+
+        self.lbl_cantidad = QLabel("Nueva Cantidad Solicitada (de la línea)")
         self.lbl_cantidad.setProperty("class", "FormLabel")
-        # CompraOC.cantidad_solicitada es Numeric(18,4) -- decimals=4 (ver app/db/models.py).
+        # compra_oc_detalle.cantidad_solicitada es Numeric(18,4) -- decimals=4 (ver app/db/models.py).
         self.cantidad_nueva_input = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, min_value=Decimal("0.01"))
-        self.cantidad_nueva_input.set_value(self.oc.cantidad_solicitada)
         self.cantidad_nueva_input.setFixedHeight(32)
         layout.addWidget(self.lbl_cantidad)
         layout.addWidget(self.cantidad_nueva_input)
 
-        self.lbl_precio = QLabel("Nuevo Precio (referencial, no ajusta lineas)")
+        self.lbl_precio = QLabel("Nuevo Precio Unitario (de la línea)")
         self.lbl_precio.setProperty("class", "FormLabel")
         # CompraOCEnmienda.precio_nuevo tambien es Numeric(18,4).
         self.precio_nuevo_input = NumericLineEdit(
@@ -802,9 +826,24 @@ class EnmiendaOCDialog(QDialog):
         root.addLayout(footer)
 
         self._toggle_campos()
+        self._on_linea_cambiada()
+
+    def _linea_elegida(self):
+        return self.linea_combo.currentData()
+
+    def _on_linea_cambiada(self) -> None:
+        detalle = self._linea_elegida()
+        if detalle is None:
+            return
+        # No se puede bajar de lo ya recibido de la linea (ver CompraOCService.crear_enmienda).
+        self.cantidad_nueva_input.min_value = max(Decimal("0.01"), _as_decimal(detalle.cantidad_recibida))
+        self.cantidad_nueva_input.set_value(detalle.cantidad_solicitada)
 
     def _toggle_campos(self) -> None:
         tipo = self.tipo_combo.currentData()
+        con_linea = tipo in ("CANTIDAD", "PRECIO")
+        self.lbl_linea.setVisible(con_linea)
+        self.linea_combo.setVisible(con_linea)
         self.lbl_cantidad.setVisible(bool(tipo == "CANTIDAD"))
         self.cantidad_nueva_input.setVisible(bool(tipo == "CANTIDAD"))
         self.lbl_precio.setVisible(bool(tipo == "PRECIO"))
@@ -818,6 +857,10 @@ class EnmiendaOCDialog(QDialog):
             MessageBox.warning(self, "Motivo requerido", "Indique el motivo de la enmienda.")
             return
         tipo = self.tipo_combo.currentData()
+        detalle = self._linea_elegida() if tipo in ("CANTIDAD", "PRECIO") else None
+        if tipo in ("CANTIDAD", "PRECIO") and detalle is None:
+            MessageBox.warning(self, "Línea requerida", "Esta orden de compra no tiene líneas para enmendar.")
+            return
 
         self.btn_proponer.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -825,6 +868,7 @@ class EnmiendaOCDialog(QDialog):
             self.enmienda_creada = CompraOCService.crear_enmienda(
                 self.session,
                 id_oc=self.oc.id_oc,
+                id_oc_detalle=(detalle.id_detalle if detalle is not None else None),
                 tipo_cambio=tipo,
                 motivo=motivo,
                 cantidad_nueva=(self.cantidad_nueva_input.get_value() if tipo == "CANTIDAD" else None),
@@ -1113,10 +1157,6 @@ class NotaDevolucionFormDialog(QDialog):
                 item_disponible = QTableWidgetItem(f"{float(disponible_decimal):,.2f}")
                 item_disponible.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(fila, 1, item_disponible)
-                precio_unitario = _as_decimal(detalle.precio_unitario)
-                item_costo = QTableWidgetItem(f"${float(precio_unitario):,.2f}")
-                item_costo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.tabla.setItem(fila, 2, item_costo)
                 # NotaDevolucionDetalle.cantidad_devuelta es Numeric(18,4).
                 spin = NumericLineEdit(NumericFieldType.QUANTITY, decimals=4, max_value=disponible)
                 self.tabla.setCellWidget(fila, 2, spin)
@@ -1213,10 +1253,11 @@ class CompraDesdeOCFormDialog(QDialog):
         self.pago: dict | None = None
         self.compra_creada = None
         datos = CompraOCService.obtener_oc(session, oc.id_oc, id_usuario=id_usuario)
+        # Mismo calculo que valida el servicio (recibido - rechazado - facturado): antes
+        # la tabla ofrecia tambien lo rechazado y el servicio lo aceptaba.
+        disponibles = cantidades_por_facturar(session, datos["detalles"])
         self.lineas_disponibles = [
-            (d, d.cantidad_recibida - d.cantidad_facturada)
-            for d in datos["detalles"]
-            if d.cantidad_recibida - d.cantidad_facturada > 0
+            (d, disponibles[d.id_detalle]) for d in datos["detalles"] if disponibles[d.id_detalle] > 0
         ]
 
         self.setWindowTitle(f"Nueva Factura — ODC {oc.numero_oc}")
@@ -1437,6 +1478,13 @@ class ComprasView(MixinPermisos, QWidget):
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self._cargar_tab_actual)
+        # OC/recepciones/facturas registradas en otras estaciones (ver
+        # app/ui/auto_refresco.py) -- recarga solo la pestana visible.
+        self._auto_refresco = AutoRefresco(
+            self,
+            self._cargar_tab_actual,
+            lambda: [self.tabla_oc, self.tabla_nr, self.tabla_compra][self.tabs.currentIndex()],
+        )
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -1828,29 +1876,17 @@ class ComprasView(MixinPermisos, QWidget):
     def cargar_nrs(self) -> None:
         session = self.session_factory()
         try:
+            # Estado y texto (numero de NR, OC o proveedor) se filtran en la consulta, antes
+            # de paginar -- ver NotaRecepcionService.listar_notas_recepcion.
             resultado = NotaRecepcionService.listar_notas_recepcion(
                 session,
                 pagina=self.paginas["nr"],
                 por_pagina=POR_PAGINA,
                 id_usuario=self.usuario.id_usuario,
+                texto_busqueda=self.nr_buscar_input.text().strip() or None,
+                estado=self.nr_estado_combo.currentData(),
             )
             nrs = resultado["items"]
-
-            # Filtro por estado
-            estado_filtro = self.nr_estado_combo.currentData()
-            if estado_filtro:
-                nrs = [n for n in nrs if n.estado == estado_filtro]
-
-            # Filtro por texto (búsqueda por número de NR, OC o proveedor)
-            texto_busqueda = self.nr_buscar_input.text().strip().lower()
-            if texto_busqueda:
-                nrs = [
-                    n
-                    for n in nrs
-                    if texto_busqueda in n.numero_nr.lower()
-                    or (n.oc and texto_busqueda in n.oc.numero_oc.lower())
-                    or (n.oc and n.oc.proveedor and texto_busqueda in n.oc.proveedor.nombre_razon_social.lower())
-                ]
 
             self.tabla_nr.setRowCount(len(nrs))
             for fila, nr in enumerate(nrs):
@@ -1893,8 +1929,13 @@ class ComprasView(MixinPermisos, QWidget):
             return
         session = self.session_factory()
         try:
-            resultado = CompraOCService.listar_ocs(session, por_pagina=200, id_usuario=self.usuario.id_usuario)
-            candidatas = [oc for oc in resultado["items"] if oc.estado in ("PENDIENTE", "PARCIAL")]
+            resultado = CompraOCService.listar_ocs(
+                session,
+                estados=("PENDIENTE", "PARCIAL"),
+                por_pagina=POR_PAGINA_SELECTOR_OC,
+                id_usuario=self.usuario.id_usuario,
+            )
+            candidatas = resultado["items"]
             if not candidatas:
                 MessageBox.information(
                     self,
@@ -2037,6 +2078,11 @@ class ComprasView(MixinPermisos, QWidget):
         btn_detalle_compra.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_detalle_compra.clicked.connect(self.ver_detalle_compra)
 
+        btn_anular_compra = QPushButton("Anular factura")
+        btn_anular_compra.setIcon(qta.icon("fa5s.ban", color=COLOR_TEXT_DARK))
+        btn_anular_compra.setStyleSheet(BUTTON_SECONDARY_QSS)
+        btn_anular_compra.clicked.connect(self.anular_compra_seleccionada)
+
         (
             footer,
             self.lbl_pagina_compra,
@@ -2045,7 +2091,7 @@ class ComprasView(MixinPermisos, QWidget):
         ) = self._make_footer(
             lambda: self._pagina_anterior("compra"),
             lambda: self._pagina_siguiente("compra"),
-            [btn_detalle_compra],
+            [btn_detalle_compra, *([btn_anular_compra] if self._puede("eliminar") else [])],
         )
         layout.addWidget(footer)
         return page
@@ -2064,19 +2110,10 @@ class ComprasView(MixinPermisos, QWidget):
                 pagina=self.paginas["compra"],
                 por_pagina=POR_PAGINA,
                 id_usuario=self.usuario.id_usuario,
+                # Numero de compra, OC o proveedor, filtrado antes de paginar.
+                texto_busqueda=self.compra_buscar_input.text().strip() or None,
             )
             compras = resultado["items"]
-
-            # Filtro por texto (búsqueda por número de compra, OC o proveedor)
-            texto_busqueda = self.compra_buscar_input.text().strip().lower()
-            if texto_busqueda:
-                compras = [
-                    c
-                    for c in compras
-                    if texto_busqueda in c.numero_compra.lower()
-                    or (c.oc and texto_busqueda in c.oc.numero_oc.lower())
-                    or (c.proveedor and texto_busqueda in c.proveedor.nombre_razon_social.lower())
-                ]
 
             self.tabla_compra.setRowCount(len(compras))
             for fila, c in enumerate(compras):
@@ -2126,8 +2163,21 @@ class ComprasView(MixinPermisos, QWidget):
             return
         session = self.session_factory()
         try:
-            resultado = CompraOCService.listar_ocs(session, por_pagina=200, id_usuario=self.usuario.id_usuario)
-            candidatas = [oc for oc in resultado["items"] if oc.cantidad_recibida > oc.cantidad_facturada]
+            # Solo OC con algo recibido (PARCIAL/COMPLETA) y, de esas, las que tengan alguna
+            # linea con saldo por facturar segun el mismo calculo que valida el servicio
+            # (descuenta lo rechazado).
+            resultado = CompraOCService.listar_ocs(
+                session,
+                estados=("PARCIAL", "COMPLETA"),
+                por_pagina=POR_PAGINA_SELECTOR_OC,
+                id_usuario=self.usuario.id_usuario,
+            )
+            candidatas = [
+                oc
+                for oc in resultado["items"]
+                if oc.cantidad_recibida > oc.cantidad_facturada
+                and any(disponible > 0 for disponible in cantidades_por_facturar(session, oc.detalles).values())
+            ]
             if not candidatas:
                 MessageBox.information(
                     self,
@@ -2160,6 +2210,52 @@ class ComprasView(MixinPermisos, QWidget):
                 )
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar compras.")
+        finally:
+            session.close()
+
+    def anular_compra_seleccionada(self) -> None:
+        """Anula una factura de compra hecha desde una ODC: lo facturado vuelve a quedar
+        disponible en la ODC (se puede volver a facturar) y el stock no cambia -- la
+        mercancia sigue recibida en el deposito. Lo ya pagado al proveedor (contado, o pagos
+        a una factura a credito) queda como nota de credito a favor, que se usa desde
+        Cuentas por Pagar."""
+        if not self._exigir_permiso("eliminar", "No tienes permiso para anular facturas de compra."):
+            return
+        id_compra = self._fila_seleccionada_id(self.tabla_compra)
+        if id_compra is None:
+            return
+
+        motivo, ok = QInputDialog.getText(self, "Anular factura de compra", "Motivo de la anulación:")
+        motivo = motivo.strip()
+        if not ok or not motivo:
+            return
+        respuesta = MessageBox.question(
+            self,
+            "Confirmar",
+            "¿Anular esta factura de compra? La mercancía seguirá recibida en el inventario y "
+            "podrá volver a facturarse desde la ODC. Lo ya pagado al proveedor queda como nota "
+            "de crédito a favor (Cuentas por Pagar > Notas de crédito). No se puede deshacer.",
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+
+        session = self.session_factory()
+        try:
+            compra = CompraService.anular_compra(session, id_compra, id_usuario=self.usuario.id_usuario, motivo=motivo)
+            numero_compra = compra.numero_compra
+            self.cargar_compras()
+            self.cargar_ocs()
+            MessageBox.information(self, "Factura anulada", f"Factura {numero_compra} anulada con éxito.")
+        except ValueError as exc:
+            session.rollback()
+            MessageBox.warning(self, "No se pudo anular la factura", str(exc))
+        except PermisoDenegadoError:
+            session.rollback()
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para anular facturas de compra.")
+        except Exception:
+            session.rollback()
+            logger.exception("Fallo al anular la compra %s", id_compra)
+            MessageBox.critical(self, "Error", "No se pudo anular la factura de compra.")
         finally:
             session.close()
 

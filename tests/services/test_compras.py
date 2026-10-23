@@ -1114,3 +1114,158 @@ def test_crear_compra_desde_oc_credito_exige_dias_de_credito_del_proveedor(db_se
             items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 10}],
             condicion_pago="credito",
         )
+
+
+def _oc_recibida(db_session, admin, proveedor, producto, solicitada, recibida, rechazada=0, precio="5.00"):
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": solicitada, "precio_unitario": precio}],
+        id_usuario=admin.id_usuario,
+    )
+    NotaRecepcionService.crear_nota_recepcion(
+        db_session,
+        id_oc=oc.id_oc,
+        items=[
+            {
+                "id_oc_detalle": oc.detalles[0].id_detalle,
+                "cantidad_recibida": recibida,
+                "cantidad_rechazada": rechazada,
+            }
+        ],
+        id_usuario=admin.id_usuario,
+    )
+    return oc
+
+
+def test_crear_compra_desde_oc_no_permite_facturar_lo_rechazado(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+    oc = _oc_recibida(db_session, admin, proveedor, producto, solicitada=10, recibida=10, rechazada=3)
+
+    with pytest.raises(ValueError, match="solo hay 7"):
+        CompraService.crear_compra_desde_oc(
+            db_session,
+            id_oc=oc.id_oc,
+            id_usuario=admin.id_usuario,
+            items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 10}],
+            condicion_pago="credito",
+        )
+    db_session.rollback()
+
+    compra = CompraService.crear_compra_desde_oc(
+        db_session,
+        id_oc=oc.id_oc,
+        id_usuario=admin.id_usuario,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 7}],
+        condicion_pago="credito",
+    )
+    assert compra.total_compra == Decimal("35.00")
+
+
+def test_crear_compra_desde_oc_linea_repetida_no_supera_lo_disponible(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+    oc = _oc_recibida(db_session, admin, proveedor, producto, solicitada=10, recibida=10)
+    id_detalle = oc.detalles[0].id_detalle
+
+    with pytest.raises(ValueError, match="solo hay 4"):
+        CompraService.crear_compra_desde_oc(
+            db_session,
+            id_oc=oc.id_oc,
+            id_usuario=admin.id_usuario,
+            items=[{"id_oc_detalle": id_detalle, "cantidad": 6}, {"id_oc_detalle": id_detalle, "cantidad": 6}],
+            condicion_pago="credito",
+        )
+
+
+def test_cantidades_por_facturar_descuenta_rechazado_y_facturado(db_session):
+    from app.services.compras import cantidades_por_facturar
+
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+    oc = _oc_recibida(db_session, admin, proveedor, producto, solicitada=10, recibida=8, rechazada=2)
+    CompraService.crear_compra_desde_oc(
+        db_session,
+        id_oc=oc.id_oc,
+        id_usuario=admin.id_usuario,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 1}],
+        condicion_pago="credito",
+    )
+    db_session.refresh(oc.detalles[0])
+
+    assert cantidades_por_facturar(db_session, oc.detalles) == {oc.detalles[0].id_detalle: Decimal("5")}
+
+
+def test_listar_ocs_filtra_por_varios_estados(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+    pendiente = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 5, "precio_unitario": "1.00"}],
+        id_usuario=admin.id_usuario,
+    )
+    parcial = _oc_recibida(db_session, admin, proveedor, producto, solicitada=10, recibida=4)
+    completa = _oc_recibida(db_session, admin, proveedor, producto, solicitada=3, recibida=3)
+
+    resultado = CompraOCService.listar_ocs(db_session, estados=("PENDIENTE", "PARCIAL"), id_usuario=admin.id_usuario)
+
+    ids = {oc.id_oc for oc in resultado["items"]}
+    assert pendiente.id_oc in ids
+    assert parcial.id_oc in ids
+    assert completa.id_oc not in ids
+
+
+def test_listar_notas_recepcion_busca_antes_de_paginar(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor_buscado = crear_proveedor(db_session, nombre_razon_social="Proveedor Buscado SA")
+    otro = crear_proveedor(db_session, nombre_razon_social="Otro Proveedor CA")
+    oc_buscada = _oc_recibida(db_session, admin, proveedor_buscado, producto, solicitada=1, recibida=1)
+    for _ in range(3):
+        _oc_recibida(db_session, admin, otro, producto, solicitada=1, recibida=1)
+
+    resultado = NotaRecepcionService.listar_notas_recepcion(
+        db_session, pagina=1, por_pagina=2, texto_busqueda="Buscado", id_usuario=admin.id_usuario
+    )
+
+    assert resultado["total"] == 1
+    assert [nr.id_oc for nr in resultado["items"]] == [oc_buscada.id_oc]
+
+
+def test_listar_compras_busca_por_numero_de_oc(db_session):
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("1000.00"))
+    oc = _oc_recibida(db_session, admin, proveedor, producto, solicitada=2, recibida=2)
+    compra = CompraService.crear_compra_desde_oc(
+        db_session,
+        id_oc=oc.id_oc,
+        id_usuario=admin.id_usuario,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad": 2}],
+        condicion_pago="credito",
+    )
+
+    resultado = CompraService.listar_compras(
+        db_session, solo_desde_oc=True, texto_busqueda=oc.numero_oc, id_usuario=admin.id_usuario
+    )
+
+    assert [c.id_compra for c in resultado["items"]] == [compra.id_compra]
+
+
+def test_recepcion_registra_un_solo_evento_de_auditoria_por_linea(db_session):
+    from app.db.models import Auditoria
+
+    admin = crear_usuario_admin(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    proveedor = crear_proveedor(db_session)
+    _oc_recibida(db_session, admin, proveedor, producto, solicitada=4, recibida=4)
+
+    eventos = db_session.query(Auditoria).filter(Auditoria.accion == "RECEPCION_MERCANCIA").all()
+    assert len(eventos) == 1
+    assert f"(ID: {producto.id_producto})" in eventos[0].detalle

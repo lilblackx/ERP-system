@@ -14,6 +14,7 @@ from app.db.models import (
     ControlDeTasa,
     CuentaPorPagar,
     Inventario,
+    NotaRecepcionDetalle,
     PagoProveedor,
     Proveedor,
 )
@@ -50,6 +51,31 @@ def _validar_items(items: list[dict]) -> None:
             raise ValueError("Cada item requiere una cantidad mayor a cero")
         if item.get("costo_unitario") is None or Decimal(str(item["costo_unitario"])) <= 0:
             raise ValueError("Cada item requiere un costo_unitario mayor a cero")
+
+
+def cantidades_por_facturar(session: Session, detalles_oc: list[CompraOCDetalle]) -> dict[int, Decimal]:
+    """Lo que todavia se puede facturar de cada linea de OC: recibido - rechazado -
+    facturado. compra_oc_detalle.cantidad_recibida es la cantidad BRUTA recibida
+    (trg_nota_recepcion_detalle_ins suma tambien lo rechazado), asi que sin restar
+    cantidad_rechazada se le terminaba pagando al proveedor mercancia devuelta. Lo usan
+    crear_compra_desde_oc y CompraDesdeOCFormDialog, para que la UI ofrezca exactamente
+    lo que el servicio acepta."""
+    ids = [d.id_detalle for d in detalles_oc]
+    rechazado_por_linea: dict[int, Decimal] = {}
+    if ids:
+        rechazado_por_linea = {
+            id_oc_detalle: Decimal(str(total))
+            for id_oc_detalle, total in session.query(
+                NotaRecepcionDetalle.id_oc_detalle,
+                func.coalesce(func.sum(NotaRecepcionDetalle.cantidad_rechazada), 0),
+            )
+            .filter(NotaRecepcionDetalle.id_oc_detalle.in_(ids))
+            .group_by(NotaRecepcionDetalle.id_oc_detalle)
+        }
+    return {
+        d.id_detalle: d.cantidad_recibida - rechazado_por_linea.get(d.id_detalle, Decimal("0")) - d.cantidad_facturada
+        for d in detalles_oc
+    }
 
 
 def _exigir_credito_habilitado(proveedor: Proveedor) -> None:
@@ -314,12 +340,59 @@ class CompraService:
         return {"compra": compra, "detalles": detalles}
 
     @staticmethod
+    def _devolver_facturado_a_oc(session: Session, compra: Compra) -> None:
+        """Resta de compra_oc_detalle.cantidad_facturada lo que esta compra facturo, y
+        recalcula compra_oc.cantidad_facturada. La linea de OC de origen la dice
+        compra_detalle.id_oc_detalle (migrations/0087); las lineas anteriores a esa
+        migracion con vinculo ambiguo (NULL) se reparten entre las lineas de la OC del
+        mismo producto que tengan algo facturado, en orden de id. El estado de las NR lo
+        recalcula trg_compra_oc_detalle_estado_nr (migrations/0085)."""
+        lineas_compra = (
+            session.query(
+                CompraDetalle.id_oc_detalle, CompraDetalle.id_producto_compra, CompraDetalle.cantidad_producto
+            )
+            .filter(CompraDetalle.id_compra == compra.id_compra)
+            .all()
+        )
+        # Mismo lock y orden por id_detalle que crear_compra_desde_oc/crear_nota_recepcion.
+        detalles_oc = {
+            d.id_detalle: d
+            for d in session.execute(
+                select(CompraOCDetalle)
+                .where(CompraOCDetalle.id_oc == compra.id_oc)
+                .order_by(CompraOCDetalle.id_detalle)
+                .with_hint(CompraOCDetalle, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalars()
+        }
+        for id_oc_detalle, id_producto, cantidad in lineas_compra:
+            restante = Decimal(str(cantidad))
+            if id_oc_detalle is not None and id_oc_detalle in detalles_oc:
+                candidatas = [detalles_oc[id_oc_detalle]]
+            else:
+                candidatas = [d for d in detalles_oc.values() if d.id_producto == id_producto]
+            for detalle_oc in candidatas:
+                a_devolver = min(restante, detalle_oc.cantidad_facturada)
+                if a_devolver > 0:
+                    detalle_oc.cantidad_facturada -= a_devolver
+                    restante -= a_devolver
+                if restante <= 0:
+                    break
+
+        oc = session.get(CompraOC, compra.id_oc)
+        if oc is not None:
+            oc.cantidad_facturada = sum((d.cantidad_facturada for d in detalles_oc.values()), Decimal("0"))
+
+    @staticmethod
     def anular_compra(session: Session, id_compra: int, id_usuario: int | None, motivo: str) -> Compra:
-        """Anula la compra: repone el stock recibido y cierra la cuenta por pagar (si la
-        hubiera). Si ya se le aplicaron pagos, no se revierten -- quedan como
+        """Anula la compra: revierte el stock que sumo (solo compra directa; la de OC ya lo
+        habia sumado la recepcion y la mercancia sigue en el deposito) y cierra la cuenta
+        por pagar (si la hubiera). Lo ya pagado al proveedor -- pagos a una compra a
+        credito, o el pago completo de una compra de contado -- no se revierte: queda como
         NotaCreditoProveedor a favor de la empresa, sin tocar pagos_proveedores ni sus
         banco_movimientos/caja_movimientos (ver la misma nota en VentaService.anular_factura
-        y migrations/0002_notas_credito_anulacion.sql).
+        y migrations/0002_notas_credito_anulacion.sql). Esa nota se consume en Cuentas por
+        Pagar: NotaCreditoService.aplicar_nota_credito_proveedor/
+        reembolsar_nota_credito_proveedor.
 
         El stock se repone eliminando las lineas de compra_detalle: dispara
         trg_compra_detalle_stock_del y trg_compra_total_del, que a su vez dispara
@@ -353,6 +426,20 @@ class CompraService:
                 .scalar()
             )
             monto_pagado = Decimal(str(monto_pagado))
+        elif compra.condicion_pago == "contado":
+            # Una compra de contado no abre cuenta por pagar (trg_compras_cxp es solo para
+            # credito): se pago completa al registrarla, con un egreso de caja/banco por el
+            # total (registrar_compra/crear_compra_desde_oc exigen pago == total, tolerancia
+            # de un centavo). Sin esto, anularla no dejaba constancia de que el proveedor
+            # nos debe ese dinero. Se lee ANTES de borrar las lineas: trg_compra_total_del
+            # deja total_compra en 0.
+            monto_pagado = Decimal(str(compra.total_compra or 0))
+
+        # Compra hecha desde una OC: lo facturado vuelve a quedar disponible en la OC, si no
+        # esa mercancia no se podria volver a facturar (ver _devolver_facturado_a_oc). Antes
+        # de borrar las lineas, que son las que dicen que se devuelve y a donde.
+        if compra.id_oc is not None:
+            CompraService._devolver_facturado_a_oc(session, compra)
 
         session.query(CompraDetalle).filter(CompraDetalle.id_compra == id_compra).delete(synchronize_session=False)
         if cxp is not None:
@@ -424,9 +511,19 @@ class CompraService:
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
+        texto_busqueda: str | None = None,
     ) -> dict:
         require_permiso(session, id_usuario, "compras", "ver")
         query = session.query(Compra)
+        # Numero de compra, numero de OC o proveedor -- filtrado antes de paginar (la UI
+        # lo hacia en Python sobre la pagina ya cortada).
+        if texto_busqueda:
+            like = f"%{texto_busqueda}%"
+            subq_proveedor = session.query(Proveedor.id_proveedor).filter(Proveedor.nombre_razon_social.ilike(like))
+            subq_oc = session.query(CompraOC.id_oc).filter(CompraOC.numero_oc.ilike(like))
+            query = query.filter(
+                Compra.numero_compra.ilike(like) | Compra.id_proveedor.in_(subq_proveedor) | Compra.id_oc.in_(subq_oc)
+            )
         if id_proveedor:
             query = query.filter(Compra.id_proveedor == id_proveedor)
         if estado:
@@ -496,7 +593,21 @@ class CompraService:
         if proveedor.estado_proveedor != "ACTIVO":
             raise ValueError(f"El proveedor '{proveedor.nombre_razon_social}' esta inactivo")
 
-        detalles_oc = {d.id_detalle: d for d in session.query(CompraOCDetalle).filter(CompraOCDetalle.id_oc == id_oc)}
+        # WITH (UPDLOCK, ROWLOCK): sin esto, dos facturas concurrentes contra la misma OC
+        # leen el mismo cantidad_facturada, ambas pasan la validacion y la segunda pisa el
+        # += de la primera -- se factura mas de lo recibido y cantidad_facturada queda
+        # por debajo de lo realmente facturado. Mismo patron (y orden por id_detalle) que
+        # NotaRecepcionService.crear_nota_recepcion.
+        detalles_oc = {
+            d.id_detalle: d
+            for d in session.execute(
+                select(CompraOCDetalle)
+                .where(CompraOCDetalle.id_oc == id_oc)
+                .order_by(CompraOCDetalle.id_detalle)
+                .with_hint(CompraOCDetalle, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalars()
+        }
+        disponibles = cantidades_por_facturar(session, list(detalles_oc.values()))
 
         lineas_validadas = []
         total_compra = Decimal("0.00")
@@ -510,12 +621,16 @@ class CompraService:
             if cantidad <= 0:
                 raise ValueError("Cada item requiere una cantidad mayor a cero")
 
-            disponible_para_facturar = detalle_oc.cantidad_recibida - detalle_oc.cantidad_facturada
+            disponible_para_facturar = disponibles[id_oc_detalle]
             if cantidad > disponible_para_facturar:
                 raise ValueError(
                     f"Se intenta facturar {cantidad} del producto {detalle_oc.id_producto}, pero solo hay "
-                    f"{disponible_para_facturar} recibidas y sin facturar en la orden de compra {oc.numero_oc}"
+                    f"{disponible_para_facturar} recibidas (sin rechazos) y sin facturar en la orden de compra "
+                    f"{oc.numero_oc}"
                 )
+            # Una OC con la misma linea repetida en items: lo ya pedido en este mismo
+            # llamado cuenta contra el disponible de la siguiente repeticion.
+            disponibles[id_oc_detalle] -= cantidad
 
             lineas_validadas.append((detalle_oc, cantidad))
             total_compra += cantidad * detalle_oc.precio_unitario
@@ -524,6 +639,13 @@ class CompraService:
             if pago is not None:
                 raise ValueError("Una compra a credito no admite pago -- se paga despues contra la cuenta por pagar")
             _exigir_credito_habilitado(proveedor)
+            # Mismo lock que registrar_compra(): serializa dos compras a credito
+            # concurrentes al mismo proveedor para que no superen juntas limite_credito.
+            session.execute(
+                select(Proveedor)
+                .where(Proveedor.id_proveedor == oc.id_proveedor)
+                .with_hint(Proveedor, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one()
             deuda_actual = (
                 session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0))
                 .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
@@ -615,6 +737,8 @@ class CompraService:
                     cantidad_producto=cantidad,
                     costo_unitario=detalle_oc.precio_unitario,
                     stock_ya_contabilizado=True,
+                    # Linea de OC de origen: anular_compra() le devuelve la cantidad.
+                    id_oc_detalle=detalle_oc.id_detalle,
                 )
             )
             detalle_oc.cantidad_facturada += cantidad

@@ -1,7 +1,7 @@
 """Paso 1 y parte del 3 del flujo OC -> NR -> Compra -> Pago: crear la orden de compra y
 gestionar enmiendas (cambios autorizados a una OC ya emitida). Ver migrations/0032 para el
-schema y los triggers (trg_compra_oc_enmienda_autorizar aplica el efecto de una enmienda de
-tipo CANTIDAD recien cuando queda AUTORIZADA)."""
+schema y los triggers (trg_compra_oc_enmienda_autorizar, migrations/0088, aplica el efecto
+de una enmienda recien cuando queda AUTORIZADA)."""
 
 import logging
 from datetime import date, datetime
@@ -145,15 +145,16 @@ class CompraOCService:
         fecha_entrega_nueva: date | None = None,
         observaciones: str | None = None,
         id_usuario: int | None = None,
+        id_oc_detalle: int | None = None,
     ) -> CompraOCEnmienda:
         """Registra el CAMBIO PROPUESTO -- no tiene efecto hasta que autorizar_enmienda()
-        la apruebe. CANTIDAD y FECHA tienen efecto automatico al autorizar (ver
-        trg_compra_oc_enmienda_autorizar, migrations/0032 y 0034): CANTIDAD ajusta
-        compra_oc.cantidad_solicitada, FECHA ajusta compra_oc.fecha_estimada_entrega --
-        ambos son campos unicos de cabecera. PRECIO queda solo para trazabilidad, sin
-        recalculo automatico -- la tabla no tiene id_oc_detalle (una OC puede tener varias
-        lineas con precios distintos, no hay "un" precio de cabecera a enmendar sin
-        definir antes a cual linea aplica); requiere editar la linea a mano."""
+        la apruebe. Al autorizar, trg_compra_oc_enmienda_autorizar (migrations/0088) lo
+        aplica: CANTIDAD y PRECIO sobre la LINEA indicada por id_oc_detalle (recalculando
+        la cabecera de la OC: cantidad, total y estado), FECHA sobre
+        compra_oc.fecha_estimada_entrega (campo unico de cabecera, no lleva linea).
+
+        CANTIDAD no puede quedar por debajo de lo ya recibido de esa linea. PRECIO afecta
+        solo lo que todavia se facture: las facturas ya hechas guardan su propio costo."""
         require_permiso(session, id_usuario, "compras", "crear_enmienda_oc")
         if tipo_cambio not in TIPOS_CAMBIO_ENMIENDA:
             raise ValueError(f"tipo_cambio debe ser uno de {TIPOS_CAMBIO_ENMIENDA}")
@@ -173,12 +174,35 @@ class CompraOCService:
         if tipo_cambio == "FECHA" and fecha_entrega_nueva is None:
             raise ValueError("fecha_entrega_nueva es requerida para una enmienda de tipo FECHA")
 
+        detalle = None
+        if tipo_cambio in ("CANTIDAD", "PRECIO"):
+            if id_oc_detalle is None:
+                raise ValueError(f"id_oc_detalle es requerido para una enmienda de tipo {tipo_cambio}")
+            detalle = session.get(CompraOCDetalle, id_oc_detalle)
+            if detalle is None or detalle.id_oc != id_oc:
+                raise ValueError(f"La linea de OC {id_oc_detalle} no pertenece a la orden de compra {id_oc}")
+            if tipo_cambio == "CANTIDAD":
+                nueva = Decimal(str(cantidad_nueva))
+                if nueva <= 0:
+                    raise ValueError("cantidad_nueva debe ser mayor a cero")
+                if nueva < detalle.cantidad_recibida:
+                    raise ValueError(
+                        f"La cantidad no puede quedar por debajo de lo ya recibido de esta linea "
+                        f"({detalle.cantidad_recibida})"
+                    )
+            elif Decimal(str(precio_nuevo)) <= 0:
+                raise ValueError("precio_nuevo debe ser mayor a cero")
+        elif id_oc_detalle is not None:
+            raise ValueError("id_oc_detalle solo aplica a enmiendas de tipo CANTIDAD o PRECIO")
+
         enmienda = CompraOCEnmienda(
             id_oc=id_oc,
+            id_oc_detalle=id_oc_detalle,
             numero_enmienda=_generar_numero_enmienda(session),
             tipo_cambio=tipo_cambio,
-            cantidad_anterior=(oc.cantidad_solicitada if tipo_cambio == "CANTIDAD" else None),
+            cantidad_anterior=(detalle.cantidad_solicitada if tipo_cambio == "CANTIDAD" and detalle else None),
             cantidad_nueva=(Decimal(str(cantidad_nueva)) if cantidad_nueva is not None else None),
+            precio_anterior=(detalle.precio_unitario if tipo_cambio == "PRECIO" and detalle else None),
             precio_nuevo=(Decimal(str(precio_nuevo)) if precio_nuevo is not None else None),
             fecha_entrega_anterior=(oc.fecha_estimada_entrega if tipo_cambio == "FECHA" else None),
             fecha_entrega_nueva=fecha_entrega_nueva,
@@ -236,12 +260,26 @@ class CompraOCService:
         if enmienda.estado_enmienda != "PENDIENTE":
             raise ValueError(f"La enmienda ya fue {enmienda.estado_enmienda.lower()}")
 
+        if aprobar and enmienda.tipo_cambio == "CANTIDAD" and enmienda.id_oc_detalle is not None:
+            # Desde que se propuso pudo haberse recibido mas: la cantidad de la linea no
+            # puede quedar por debajo de lo recibido (el trigger lo ignoraria en silencio).
+            detalle = session.execute(
+                select(CompraOCDetalle)
+                .where(CompraOCDetalle.id_detalle == enmienda.id_oc_detalle)
+                .with_hint(CompraOCDetalle, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one()
+            if enmienda.cantidad_nueva is not None and enmienda.cantidad_nueva < detalle.cantidad_recibida:
+                raise ValueError(
+                    f"No se puede autorizar: ya se recibieron {detalle.cantidad_recibida} de esta linea, "
+                    f"mas que la cantidad propuesta ({enmienda.cantidad_nueva})"
+                )
+
         enmienda.estado_enmienda = "AUTORIZADA" if aprobar else "RECHAZADA"
         enmienda.id_usuario_autorizador = id_usuario
         enmienda.fecha_autorizacion = datetime.now()
-        # Si tipo_cambio='CANTIDAD' y queda AUTORIZADA, trg_compra_oc_enmienda_autorizar
-        # (migrations/0032) ajusta compra_oc.cantidad_solicitada/estado en este mismo
-        # UPDATE -- no hace falta nada mas en Python.
+        # Si queda AUTORIZADA, trg_compra_oc_enmienda_autorizar (migrations/0088) ajusta la
+        # linea (CANTIDAD/PRECIO) y la cabecera de la OC en este mismo UPDATE -- no hace
+        # falta nada mas en Python.
         session.commit()
         session.refresh(enmienda)
 
@@ -271,9 +309,15 @@ class CompraOCService:
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
+        estados: tuple[str, ...] | None = None,
     ) -> dict:
         """Necesario para la pestana 'Ordenes de Compra' de app/ui/compras.py -- ningun
-        paso anterior agrego un metodo de lectura (paso 3 solo tenia escritura)."""
+        paso anterior agrego un metodo de lectura (paso 3 solo tenia escritura).
+
+        estados: filtra por varios estados a la vez. Lo usan los selectores de OC de
+        "Nueva Recepcion"/"Nueva Factura" para traer solo las candidatas -- antes traian
+        las 200 OC mas recientes y filtraban en Python, y una OC pendiente mas vieja no
+        aparecia."""
         require_permiso(session, id_usuario, "compras", "ver")
         query = session.query(CompraOC).join(Proveedor, Proveedor.id_proveedor == CompraOC.id_proveedor)
         if texto_busqueda:
@@ -281,6 +325,8 @@ class CompraOCService:
             query = query.filter(CompraOC.numero_oc.ilike(like) | Proveedor.nombre_razon_social.ilike(like))
         if estado:
             query = query.filter(CompraOC.estado == estado)
+        if estados:
+            query = query.filter(CompraOC.estado.in_(estados))
 
         total = query.count()
         ocs = query.order_by(CompraOC.fecha_oc.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()

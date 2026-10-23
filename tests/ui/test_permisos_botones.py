@@ -186,6 +186,7 @@ PANELES = {
             ("Enmendar", ("compras", "crear_enmienda_oc")),
             ("Rechazar (Devolución)", ("compras", "crear_nota_devolucion")),
             ("Nueva Factura", ("compras", "crear")),
+            ("Anular factura", ("compras", "eliminar")),
         ],
     ),
 }

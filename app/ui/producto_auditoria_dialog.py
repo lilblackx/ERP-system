@@ -286,11 +286,12 @@ class ProductoAuditoriaDialog(QDialog):
 
             # Filtrar por producto específico si se proporcionó
             if self.producto_id:
-                # Buscar tanto en formato JSON como en texto plano (RECEPCION_MERCANCIA)
+                # Buscar tanto en formato JSON como en texto plano (RECEPCION_MERCANCIA).
+                # No se filtra por "id_detalle: N": ese formato (trigger de 0080, ya
+                # eliminado en 0084) guardaba el id de la linea de NR, no el del producto.
                 query = query.filter(
                     or_(
                         Auditoria.detalle.like(f'%"id_producto": {self.producto_id}%'),
-                        Auditoria.detalle.like(f"%id_detalle: {self.producto_id}%"),
                         Auditoria.detalle.like(f"%(ID: {self.producto_id})%"),
                     )
                 )
