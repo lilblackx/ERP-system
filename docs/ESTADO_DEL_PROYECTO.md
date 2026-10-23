@@ -379,8 +379,20 @@ y escribe correo + contraseña: servidor/puerto/TLS salen del catálogo `PROVEED
 - No hay columna `proveedor`: el selector se reconstruye comparando servidor+puerto+TLS con el
   catálogo (`proveedor_de_servidor`).
 - Permisos: reutiliza `empresa`/`ver` y `empresa`/`editar`.
-- La contraseña se guarda en texto plano (igual que antes en el `.env`) y nunca se muestra ni
-  va a auditoría; dejar el campo vacío al guardar la conserva.
+- La contraseña se guarda **cifrada** (`password_cifrada`, migración 0089): cualquier estación la
+  cifra con la llave pública del servidor (`clave_cifrado_servidor`) y solo el servidor puede
+  descifrarla (llave privada en un archivo protegido con DPAPI de esa máquina,
+  `app/services/cifrado_servidor.py`). Nunca se muestra ni va a auditoría; dejar el campo vacío al
+  guardar la conserva. La contraseña en texto plano de versiones anteriores la cifra el servidor
+  solo al arrancar (`SmtpConfigService.migrar_password`). Si el servidor pierde su llave, la
+  contraseña guardada se descarta y hay que escribirla de nuevo.
+- **El correo lo envía solo el servidor** (`app/services/cola_correos.py`): una estación nunca
+  habla con el SMTP; deja el correo (código de desbloqueo/recuperación, aviso de seguridad) en la
+  tabla `cola_correos` y el servidor lo despacha cada ~15 s -- el servicio de Windows
+  (`app/servicio_licencia.py`) aunque nadie tenga la app abierta, y la app abierta en el
+  servidor. Cada correo se reclama con un UPDATE atómico, así que ambos pueden correr a la vez
+  sin duplicar. Reintenta 3 veces, descarta lo vencido (los códigos duran 15 min) y borra el
+  contenido del mensaje al enviarlo. Si la estación no tiene servidor encendido, el código no sale.
 - Gmail responde a una contraseña mala cerrando la conexión en vez de devolver 535 —
   `email_service._autenticar` lo convierte en `SMTPAuthenticationError`; sin eso la UI
   mostraba "revise el puerto".
@@ -440,6 +452,40 @@ y escribe correo + contraseña: servidor/puerto/TLS salen del catálogo `PROVEED
   `hacer_desplazable` pone el cuerpo en un `QScrollArea` dejando el pie de botones siempre
   visible. Aplicado a todos los diálogos con `setFixedSize`/mínimos grandes y a la ventana
   principal. Los diálogos nuevos deben usarlo en vez de `setFixedSize`.
+
+### Cuentas bloqueadas, "otros movimientos" y blindaje de la base (2026-10-23)
+
+- **Bloqueo temporal y escalonado** (`app/services/bloqueo.py`): 5 intentos fallidos bloquean 5 min;
+  si al vencer falla otra vez, 15 min, luego 1 hora. Antes era permanente y cualquiera podía dejar
+  fuera a los ADMIN a propósito. Se levanta antes con un código al correo o un ADMIN. Al bloquearse
+  se avisa por correo a los ADMIN (1 aviso por cuenta cada 30 min), la campana muestra las cuentas
+  bloqueadas y la auditoría del fallo indica desde qué PC.
+- **"Otros movimientos" trazables** (migración 0090): un préstamo/anticipo exige de dónde sale el
+  dinero (caja con turno y saldo, o banco con saldo y referencia) y registra el egreso; una
+  transferencia sin identificar exige el abono bancario real que la trajo (un movimiento = una
+  partida, no más que su monto, no atribuido ya a un pago); conciliar solo contra facturas con saldo
+  y deja un registro (`conciliaciones_partida`) que el historial del cliente muestra como abono.
+- **Historial del cliente**: el monto de la factura es lo que paga el cliente (subtotal - descuento
+  + IVA) y el SALDO PENDIENTE total suma también las cuentas BCV.
+- **Blindaje de la base**:
+  - `DB_PASSWORD` puede vivir como `DB_PASSWORD_DPAPI=dpapi:...` (cifrado con DPAPI de esa PC, no
+    sirve copiado a otra): `python -m app.proteger_env` lo aplica al `.env`/`config.env` (deja
+    `.bak`; `--revertir` lo deshace -- `docker compose` necesita `DB_PASSWORD` en claro) y el
+    instalador ya lo escribe así. La conexión va con `Encrypt=yes` y `APP=NexoERP`.
+  - Migración 0091: el rol `nexo_app_sin_borrado` (al que el instalador agrega el usuario de la
+    app) tiene DENY DELETE sobre pagos, movimientos de caja/banco, notas de crédito, conciliaciones
+    y auditoría, y DENY UPDATE sobre las bitácoras. **No aplica a sysadmin/db_owner**: la app debe
+    correr con el usuario limitado del instalador, no con `sa`.
+  - Migración 0092: triggers que guardan en `auditoria_cambios_db` el valor anterior/nuevo (JSON),
+    usuario SQL, PC y programa de cada cambio a dinero e inventario. Lo hecho por fuera de la app
+    (`APP_NAME()` distinto de `NexoERP*`) queda con `fuera_de_la_app = 1` y la campana avisa a quien
+    ve la auditoría. No impide el cambio: lo hace visible y reversible.
+  - El instalador abre el puerto de SQL Server en el Firewall de Windows solo para la red local
+    (`remoteip=LocalSubnet`).
+  - Pendiente consciente: el certificado de SQL Server sigue siendo autofirmado
+    (`TrustServerCertificate=yes`); `datos_estaciones.txt` (lo genera el instalador del servidor)
+    contiene la clave en claro y **se borra solo a las 24 h** (`app/services/datos_estaciones.py`,
+    lo ejecutan el servicio de Windows del servidor y la app abierta en el servidor).
 
 ## 5. Auditoría
 

@@ -95,7 +95,7 @@ Código de salida 0 = instalado. Si los datos de conexión son inválidos el ins
 ## Seguridad: lo que conviene saber
 
 - `config.env` guarda la contraseña del usuario SQL de la app y **cualquier usuario local de Windows puede leerla** (las estaciones la necesitan para conectarse). Es un usuario sin permisos de esquema, pero con acceso a los datos del negocio.
-- `datos_estaciones.txt` contiene esa misma contraseña en claro: bórrelo tras instalar las estaciones.
+- `datos_estaciones.txt` contiene esa misma contraseña en claro: **se borra solo a las 24 horas** de instalar el servidor (lo hace el servicio de Windows de Nexo ERP, o la aplicación si está abierta en el servidor; el propio archivo indica la fecha). Instale las estaciones dentro de ese plazo, o guarde los datos en un lugar seguro antes.
 - Sin firma, Windows SmartScreen muestra una advertencia al ejecutar el instalador. Ver la sección "Firma del instalador": con el certificado autofirmado, solo desaparece en las PCs que confían en él.
 - El empaquetado con PyInstaller **no impide** que alguien con conocimientos extraiga y lea el código; ver `licencias/README.md` ("Qué protege y qué no").
 

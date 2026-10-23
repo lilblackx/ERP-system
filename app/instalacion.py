@@ -49,9 +49,14 @@ from pathlib import Path
 import pyodbc
 from sqlalchemy import create_engine, text
 
+from app import config as app_config
 from app.rutas import ARCHIVO_CONFIG, RAIZ_PROYECTO
+from app.services import datos_estaciones
+from app.utils import dpapi
 
 DRIVER_ODBC = "ODBC Driver 18 for SQL Server"
+ROL_APP_SIN_BORRADO = "nexo_app_sin_borrado"
+NOMBRE_ARCHIVO_DATOS_ESTACIONES = datos_estaciones.NOMBRE_ARCHIVO
 _IDENTIFICADOR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{2,39}$")
 _LOCALES = {"", ".", "(local)", "localhost", "127.0.0.1", "::1"}
 
@@ -107,7 +112,21 @@ def _traducir_error(exc: Exception) -> str:
 # ── Archivos de configuracion ───────────────────────────────────────────────
 
 
-def _escribir_config(destino: Path, valores: dict[str, str]) -> None:
+def _valores_clave_db(clave: str) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Como guardar la clave de la base en config.env: protegida con DPAPI de esta PC
+    (DB_PASSWORD_DPAPI) y SIN la variable en claro, para que copiar el archivo a otra maquina no
+    entregue la clave (ver app/proteger_env.py). Sin DPAPI (no Windows) queda en claro."""
+    if dpapi.DISPONIBLE:
+        return {"DB_PASSWORD_DPAPI": app_config.proteger_clave(clave)}, ("DB_PASSWORD",)
+    return {"DB_PASSWORD": clave}, ()
+
+
+def _clave_db(config: dict[str, str]) -> str:
+    """Clave de la base de un config.env ya leido (protegida o en claro)."""
+    return app_config.desproteger_clave(config.get("DB_PASSWORD_DPAPI", "")) or config.get("DB_PASSWORD", "")
+
+
+def _escribir_config(destino: Path, valores: dict[str, str], quitar: tuple[str, ...] = ()) -> None:
     """Escribe/actualiza config.env conservando las claves que ya tenia (SMTP, etc.)."""
     existentes: dict[str, str] = {}
     if destino.exists():
@@ -116,6 +135,8 @@ def _escribir_config(destino: Path, valores: dict[str, str]) -> None:
                 clave, _, valor = linea.partition("=")
                 existentes[clave.strip()] = valor
     existentes.update(valores)
+    for nombre in quitar:
+        existentes.pop(nombre, None)
     destino.parent.mkdir(parents=True, exist_ok=True)
     cuerpo = "# Generado por el instalador de Nexo ERP. Editar con cuidado.\n"
     cuerpo += "".join(f"{k}={v}\n" for k, v in existentes.items())
@@ -195,6 +216,42 @@ def _estado_servicio(servicio: str) -> int | None:
 
 def _net(accion: str, servicio: str, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(["net", accion, servicio, *extra], capture_output=True, text=True, timeout=300)
+
+
+NOMBRE_REGLA_FIREWALL = "Nexo ERP - SQL Server (solo red local)"
+
+
+def _netsh(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["netsh", "advfirewall", "firewall", *args], capture_output=True, text=True, timeout=60)
+
+
+def _asegurar_regla_firewall(puerto: str) -> str:
+    """Abre el puerto de SQL Server en el Firewall de Windows SOLO para la red local
+    (remoteip=LocalSubnet). Sin esto, quien conectaba al servidor desde otra subred -- o, con una
+    regla generica "permitir 1433", desde cualquier lugar -- podia probar la clave de la base. La
+    regla anterior con este nombre se reemplaza. Nunca aborta la instalacion: si no hay permisos
+    de administrador solo avisa, y el firewall queda como estaba."""
+    try:
+        _netsh("delete", "rule", f"name={NOMBRE_REGLA_FIREWALL}")
+        r = _netsh(
+            "add",
+            "rule",
+            f"name={NOMBRE_REGLA_FIREWALL}",
+            "dir=in",
+            "action=allow",
+            "protocol=TCP",
+            f"localport={puerto}",
+            "remoteip=LocalSubnet",
+            "profile=any",
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"Firewall: no se pudo configurar ({exc}). Abra el puerto {puerto} solo para la red local a mano."
+    if r.returncode != 0:
+        return (
+            f"Firewall: no se pudo crear la regla (ejecute como administrador). Abra el puerto {puerto} "
+            "solo para la red local a mano."
+        )
+    return f"Firewall: el puerto {puerto} acepta conexiones solo de la red local."
 
 
 def _es_local(host: str) -> bool:
@@ -301,7 +358,8 @@ def cmd_configurar_sql(datos: dict) -> str:
 
     cambios = _cambios_necesarios(id_instancia, puerto)
     if not cambios:
-        return f"SIN CAMBIOS: la instancia '{nombre}' ya esta configurada (puerto {puerto})."
+        firewall = "" if datos.get("solo_diagnostico") else " " + _asegurar_regla_firewall(puerto)
+        return f"SIN CAMBIOS: la instancia '{nombre}' ya esta configurada (puerto {puerto}).{firewall}"
     descripcion = "; ".join(cambios)
     if datos.get("solo_diagnostico"):
         return f"CAMBIOS: {descripcion}"
@@ -317,7 +375,10 @@ def cmd_configurar_sql(datos: dict) -> str:
     except PermissionError as exc:
         raise ErrorInstalacion("Se necesitan permisos de administrador de Windows para configurar SQL Server.") from exc
     _reiniciar_servicio(nombre)
-    return f"CONFIGURADO: instancia '{nombre}' ({descripcion}). El servicio de SQL Server se reinicio."
+    return (
+        f"CONFIGURADO: instancia '{nombre}' ({descripcion}). El servicio de SQL Server se reinicio. "
+        + _asegurar_regla_firewall(puerto)
+    )
 
 
 # ── Comandos ────────────────────────────────────────────────────────────────
@@ -402,6 +463,10 @@ def _crear_usuario_app(motor, base: str, usuario: str, clave: str) -> None:
             f"ALTER ROLE db_datareader ADD MEMBER [{usuario}]",
             f"ALTER ROLE db_datawriter ADD MEMBER [{usuario}]",
             f"GRANT EXECUTE TO [{usuario}]",
+            # Rol con DENY de borrado sobre el historial de dinero (migrations/0091). Si todavia no existe
+            # (la migracion corre despues), ella misma agrega a los miembros de db_datawriter.
+            f"IF DATABASE_PRINCIPAL_ID(N'{ROL_APP_SIN_BORRADO}') IS NOT NULL "
+            f"ALTER ROLE [{ROL_APP_SIN_BORRADO}] ADD MEMBER [{usuario}]",
         ],
     )
 
@@ -477,21 +542,23 @@ def cmd_servidor(datos: dict) -> str:
     # servicio SQL Browser ni del nombre de instancia.
     if str(datos.get("puerto", "")).strip():
         servidor = f"{servidor.split(',')[0].split(chr(92))[0]},{str(datos['puerto']).strip()}"
+    valores_clave, quitar_clave = _valores_clave_db(clave_app)
     _escribir_config(
         destino,
         {
             "DB_SERVER": servidor,
             "DB_NAME": base,
             "DB_USER": usuario_app,
-            "DB_PASSWORD": clave_app,
+            **valores_clave,
             "DB_DRIVER": DRIVER_ODBC,
             "DB_TRUST_SERVER_CERTIFICATE": "yes",
             "DB_TRUSTED_CONNECTION": "no",
             "MODO_INSTALACION": "SERVIDOR",
         },
+        quitar=quitar_clave,
     )
     host_estaciones = _host_para_estaciones(servidor)
-    (destino.parent / "datos_estaciones.txt").write_text(
+    (destino.parent / NOMBRE_ARCHIVO_DATOS_ESTACIONES).write_text(
         "DATOS PARA INSTALAR LAS ESTACIONES\n"
         "==================================\n"
         "En cada PC cliente ejecute el instalador, elija 'Estacion' e ingrese:\n\n"
@@ -499,7 +566,9 @@ def cmd_servidor(datos: dict) -> str:
         f"  Base de datos: {base}\n"
         f"  Usuario SQL  : {usuario_app}\n"
         f"  Contrasena   : {clave_app}\n\n"
-        "Guarde esta informacion en un lugar seguro y elimine este archivo cuando termine.\n"
+        f"ESTE ARCHIVO SE ELIMINA SOLO el {datos_estaciones.fecha_de_borrado():%d/%m/%Y a las %H:%M} "
+        f"({datos_estaciones.HORAS_VIGENCIA} horas despues de instalar el servidor), siempre que el servicio de "
+        "Nexo ERP o la aplicacion este en marcha en este equipo. Guarde estos datos en un lugar seguro antes.\n"
         "El servidor debe aceptar conexiones TCP/IP en ese puerto y el firewall debe permitirlas.\n",
         encoding="utf-8",
     )
@@ -533,18 +602,20 @@ def cmd_estacion(datos: dict) -> str:
         raise ErrorInstalacion(_traducir_error(exc)) from exc
     finally:
         motor.dispose()
+    valores_clave, quitar_clave = _valores_clave_db(clave)
     _escribir_config(
         destino,
         {
             "DB_SERVER": servidor,
             "DB_NAME": base,
             "DB_USER": usuario,
-            "DB_PASSWORD": clave,
+            **valores_clave,
             "DB_DRIVER": DRIVER_ODBC,
             "DB_TRUST_SERVER_CERTIFICATE": "yes",
             "DB_TRUSTED_CONNECTION": "no",
             "MODO_INSTALACION": "ESTACION",
         },
+        quitar=quitar_clave,
     )
     return f"Conexion con el servidor verificada. Configuracion guardada en {destino}."
 

@@ -121,10 +121,15 @@ def test_servidor_crea_esquema_usuario_y_config(servidor_instalado):
     config = instalacion._leer_config(tmp / "config.env")
     assert config["MODO_INSTALACION"] == "SERVIDOR"
     assert config["DB_USER"] == USUARIO_APP
-    assert config["DB_PASSWORD"] == CLAVE_APP
+    assert instalacion._clave_db(config) == CLAVE_APP
+    if instalacion.dpapi.DISPONIBLE:
+        # Protegida con DPAPI de esta PC: el archivo no trae la clave en claro.
+        assert "DB_PASSWORD" not in config and CLAVE_APP not in (tmp / "config.env").read_text(encoding="utf-8")
     assert config["DB_NAME"] == BASE
     datos = (tmp / "datos_estaciones.txt").read_text(encoding="utf-8")
     assert CLAVE_APP in datos
+    # El archivo avisa que se borra solo, y cuando (24 h): ver app/services/datos_estaciones.py.
+    assert "SE ELIMINA SOLO" in datos and "24 horas" in datos
     assert BASE in datos
 
 
@@ -305,6 +310,17 @@ class _SqlFalso:
         )
         monkeypatch.setattr(instalacion, "_estado_servicio", lambda s: self.servicios.get(s))
         monkeypatch.setattr(instalacion, "_net", self._net)
+        self.firewall = []
+        monkeypatch.setattr(instalacion, "_netsh", self._netsh)
+
+    def _netsh(self, *args):
+        self.firewall.append(args)
+
+        class R:
+            stdout = stderr = ""
+            returncode = 0
+
+        return R()
 
     def _net(self, accion, servicio, *extra):
         self.acciones.append((accion, servicio))
@@ -857,3 +873,61 @@ def test_respaldos_prueba_la_carpeta_de_drive_antes_de_crear_los_trabajos(
     _, estado, mensaje = _ejecutar("respaldos", datos, tmp_path)
     assert estado == "OK", mensaje
     assert (drive / "Nexo").is_dir() and list((drive / "Nexo").iterdir()) == []
+
+
+# --- firewall: SQL Server solo para la red local --------------------------------------
+
+
+def test_configurar_sql_abre_el_puerto_solo_a_la_red_local(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+
+    assert estado == "OK" and "Firewall:" in mensaje and "solo de la red local" in mensaje
+    alta = next(a for a in sql.firewall if a[0] == "add")
+    assert "remoteip=LocalSubnet" in alta and "localport=1433" in alta and "action=allow" in alta
+    # La regla anterior con el mismo nombre se reemplaza (no se acumulan duplicadas).
+    assert sql.firewall[0][0] == "delete"
+
+
+def test_configurar_sql_reaplica_el_firewall_aunque_no_haya_otros_cambios(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+    _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+    sql.firewall.clear()
+
+    _, _, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+
+    assert mensaje.startswith("SIN CAMBIOS:") and "Firewall:" in mensaje
+    assert any(a[0] == "add" for a in sql.firewall)
+
+
+def test_configurar_sql_diagnostico_no_toca_el_firewall(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+
+    _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433", "solo_diagnostico": True}, tmp_path)
+
+    assert sql.firewall == []
+
+
+def test_si_no_hay_permisos_para_el_firewall_avisa_pero_no_aborta(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+
+    class _Denegado:
+        stdout = stderr = ""
+        returncode = 1
+
+    monkeypatch.setattr(instalacion, "_netsh", lambda *a: _Denegado())
+
+    _, estado, mensaje = _ejecutar("configurar-sql", {"servidor": "localhost", "puerto": "1433"}, tmp_path)
+
+    assert estado == "OK" and mensaje.startswith("CONFIGURADO:")
+    assert "ejecute como administrador" in mensaje
+    assert sql.acciones  # SQL Server se configuro y reinicio igual
+
+
+def test_servidor_remoto_no_toca_el_firewall_local(monkeypatch, tmp_path):
+    sql = _SqlFalso(monkeypatch)
+
+    _ejecutar("configurar-sql", {"servidor": "OTRO-PC,1433", "puerto": "1433"}, tmp_path)
+
+    assert sql.firewall == []
