@@ -2803,3 +2803,36 @@ def test_emitir_factura_venta_por_unidad_bajo_el_precio_de_lista_unitario_pide_d
                 {"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "0.90", "tipo_venta": "unidad"}
             ],
         )
+
+
+def test_listar_y_obtener_factura_exponen_total_a_cobrar_con_iva(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "100.00")
+    cliente = crear_cliente(db_session)
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+    )
+
+    listado = VentaService.listar_facturas(db_session, id_usuario=admin.id_usuario)
+    detalle = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
+
+    assert listado["items"][0].total_a_cobrar == Decimal("116.00")
+    assert detalle["factura"].total_a_cobrar == Decimal("116.00")

@@ -6,6 +6,7 @@ from typing import Literal, TypedDict
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    ConciliacionPartida,
     CuentaBancaria,
     CuentaPorCobrar,
     CuentaPorCobrarBCV,
@@ -98,6 +99,21 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         .all()
     )
 
+    # Transferencias sin identificar que se aplicaron a facturas de este cliente (migrations/
+    # 0090): son abonos reales y, sin esto, no aparecian en el historial -- la factura bajaba
+    # de saldo sin ningun movimiento que lo explicara.
+    conciliaciones = (
+        session.query(ConciliacionPartida)
+        .join(CuentaPorCobrar, ConciliacionPartida.id_cuenta_por_cobrar == CuentaPorCobrar.id_cuenta_por_cobrar)
+        .join(FacturaVenta, CuentaPorCobrar.id_factura == FacturaVenta.id_factura)
+        .filter(FacturaVenta.id_cliente_factura == id_cliente)
+        .options(joinedload(ConciliacionPartida.partida), joinedload(ConciliacionPartida.cuenta_por_cobrar))
+        .all()
+    )
+    conciliaciones_por_factura: dict[int, list[ConciliacionPartida]] = {}
+    for conciliacion in conciliaciones:
+        conciliaciones_por_factura.setdefault(conciliacion.cuenta_por_cobrar.id_factura, []).append(conciliacion)
+
     # Obtener notas de crédito disponibles del cliente
     notas_credito = (
         session.query(NotaCreditoCliente)
@@ -150,7 +166,10 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "numero_factura": factura.numero_factura or "",
             "fecha": fecha_emision_str,
             "fecha_vencimiento": fecha_vencimiento_str,
-            "monto": factura.total_venta,
+            # Lo que paga el cliente (subtotal - descuento + IVA), igual que el saldo de la cuenta
+            # por cobrar. total_venta es solo el subtotal de las lineas: con IVA o descuento el
+            # monto de la fila no cuadraba con su saldo (ni con el listado de Facturacion).
+            "monto": factura.total_venta - (factura.monto_descuento or 0) + (factura.monto_iva or 0),
             "estado_factura": factura.estado_factura or "EMITIDA",
             "condicion_pago": factura.condicion_pago or "",
             "dias_credito": factura.dias_credito_aplicados,
@@ -213,6 +232,35 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     "saldo_corrido": Decimal("0.00"),  # No aplica para pagos individuales
                 }
                 historial.append(item_pago)
+
+        for conciliacion in conciliaciones_por_factura.get(factura.id_factura, []):
+            referencia = conciliacion.partida.referencia_bancaria if conciliacion.partida else None
+            historial.append(
+                {
+                    "tipo_transaccion": "pago",
+                    "id_cuenta": conciliacion.id_cuenta_por_cobrar,
+                    "id_factura": factura.id_factura,
+                    "id_pago": None,
+                    "id_nota_credito": None,
+                    "numero_factura": factura.numero_factura or "",
+                    "fecha": (
+                        conciliacion.fecha_conciliacion.strftime("%Y-%m-%d %H:%M")
+                        if conciliacion.fecha_conciliacion
+                        else ""
+                    ),
+                    "fecha_vencimiento": None,
+                    "monto": -conciliacion.monto,
+                    "estado_factura": None,
+                    "condicion_pago": None,
+                    "dias_credito": None,
+                    "observaciones": "Transferencia sin identificar conciliada"
+                    + (f" - Ref. {referencia}" if referencia else ""),
+                    "metodo_pago": "transferencia",
+                    "monto_vuelto": Decimal("0.00"),
+                    "metodo_vuelto": None,
+                    "saldo_corrido": Decimal("0.00"),
+                }
+            )
 
     # Agregar notas de crédito disponibles como saldo a favor
     for nota in notas_credito:
@@ -287,8 +335,19 @@ def obtener_saldo_total_pendiente(session: Session, id_cliente: int) -> Decimal:
         .with_entities(CuentaPorCobrar.saldo_pendiente)
         .all()
     )
+    # Mas las cuentas BCV: una factura con porcentaje BCV deja su cuenta normal en saldo 0 y la
+    # deuda real en cuentas_por_cobrar_bcv. Sin sumarlas, el "SALDO PENDIENTE" del historial
+    # ignoraba toda esa deuda y no coincidia con las filas de la tabla.
+    total_bcv = (
+        session.query(CuentaPorCobrarBCV)
+        .join(FacturaVenta, CuentaPorCobrarBCV.id_factura == FacturaVenta.id_factura)
+        .filter(FacturaVenta.id_cliente_factura == id_cliente)
+        .filter(CuentaPorCobrarBCV.estado.in_(["pendiente", "parcial", "vencida"]))
+        .with_entities(CuentaPorCobrarBCV.saldo_pendiente)
+        .all()
+    )
 
-    return sum((saldo[0] for saldo in total), Decimal("0")) if total else Decimal("0.00")
+    return sum((saldo[0] for saldo in [*total, *total_bcv]), Decimal("0.00"))
 
 
 def obtener_saldo_total_positivo(session: Session, id_cliente: int) -> Decimal:

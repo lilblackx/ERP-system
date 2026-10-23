@@ -38,6 +38,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.auto_refresco import AutoRefresco
 from app.ui.caja_apertura_dialog import CajaAperturaDialog
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog
@@ -145,7 +146,7 @@ def _filas_facturas_query(
                 f.fecha_emision.strftime("%d/%m/%Y") if f.fecha_emision else None,
                 "Contado" if f.condicion_pago == "contado" else "Crédito",
                 ("N/A" if f.condicion_pago != "contado" else _etiqueta_metodo_pago(getattr(f, "metodo_pago", None))),
-                float(f.total_venta),
+                float(f.total_a_cobrar),
                 f.estado_visual,
             ]
             for f in items
@@ -220,6 +221,13 @@ class FacturacionPanel(MixinPermisos, QWidget):
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_facturas)
+        # Facturas emitidas/anuladas/cobradas en otras estaciones y estado de caja, sin
+        # salir y volver a entrar al modulo (ver app/ui/auto_refresco.py).
+        self._auto_refresco = AutoRefresco(self, self._refresco_periodico, lambda: self.tabla, COL_ID_INTERNO)
+
+    def _refresco_periodico(self) -> None:
+        self.cargar_facturas()
+        self._verificar_caja_abierta(ofrecer_apertura=False)
 
     def showEvent(self, event: QShowEvent) -> None:
         # Mismo problema que DashboardPanel (ver su showEvent): MainWindow
@@ -486,7 +494,9 @@ class FacturacionPanel(MixinPermisos, QWidget):
             item_metodo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 6, item_metodo)
 
-            item_total = QTableWidgetItem(f"${float(f.total_venta):,.2f}")
+            # total_a_cobrar (descuento e IVA incluidos), no total_venta: ese es solo el
+            # subtotal de las lineas y no coincide con lo que paga el cliente.
+            item_total = QTableWidgetItem(f"${float(f.total_a_cobrar):,.2f}")
             item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_total)
 

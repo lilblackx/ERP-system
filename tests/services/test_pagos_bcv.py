@@ -400,3 +400,60 @@ def test_agrupado_bcv_cuenta_pagada_no_aporta_saldo_vencido(db_session):
     fila = next(f for f in _agrupado(db_session, admin) if f.id_cliente == cliente.id_cliente)
 
     assert fila.saldo_vencido_bcv == otra.saldo_pendiente
+
+
+# ── Estado, total y anulacion de facturas BCV ──────────────────────────────
+
+
+def _cobrar_bcv(session, admin, cuenta, monto):
+    caja = _caja_abierta(session, admin)
+    PagoBCVService.registrar_pago_cobro_bcv(
+        session,
+        id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
+        monto=Decimal(monto),
+        metodo_pago="efectivo",
+        monto_moneda_origen=Decimal(monto),
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+
+def test_factura_bcv_credito_cobrada_se_lista_como_pagada(db_session):
+    admin = crear_usuario_admin(db_session)
+    factura, cuenta, _ = _emitir_credito_bcv(db_session, admin)
+    _cobrar_bcv(db_session, admin, cuenta, cuenta.saldo_pendiente)
+
+    listado = VentaService.listar_facturas(db_session, id_usuario=admin.id_usuario)
+    (fila,) = [f for f in listado["items"] if f.id_factura == factura.id_factura]
+    detalle = VentaService.obtener_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario)
+
+    assert fila.estado_visual == "PAGADA"
+    assert detalle["factura"].estado_visual == "PAGADA"
+
+
+def test_anular_factura_bcv_cierra_la_cuenta_bcv_y_devuelve_lo_cobrado_como_nota_de_credito(db_session):
+    from app.db.models import NotaCreditoCliente
+
+    admin = crear_usuario_admin(db_session)
+    factura, cuenta, cliente = _emitir_credito_bcv(db_session, admin)
+    _cobrar_bcv(db_session, admin, cuenta, "40.00")
+
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga")
+
+    db_session.refresh(cuenta)
+    assert cuenta.estado == "anulada"
+    assert cuenta.saldo_pendiente == Decimal("0.00")
+    nota = db_session.query(NotaCreditoCliente).filter_by(id_factura_origen=factura.id_factura).one()
+    assert nota.monto == Decimal("40.00")
+    assert nota.id_cliente == cliente.id_cliente
+
+
+def test_anular_factura_bcv_sin_cobros_no_deja_deuda(db_session):
+    admin = crear_usuario_admin(db_session)
+    factura, cuenta, _ = _emitir_credito_bcv(db_session, admin)
+
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Error de carga")
+
+    db_session.refresh(cuenta)
+    assert cuenta.estado == "anulada"
+    assert cuenta.saldo_pendiente == Decimal("0.00")

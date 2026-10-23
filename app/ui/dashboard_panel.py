@@ -495,7 +495,7 @@ class FilaFactura(QWidget):
         lbl_cliente = LabelElidable(factura["cliente"] or "Consumidor final")
         lbl_cliente.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_DARK}; background: transparent; border: none;")
 
-        lbl_total = QLabel(f"${float(factura['total_venta']):,.2f}")
+        lbl_total = QLabel(f"${float(factura['total_factura']):,.2f}")
         lbl_total.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         lbl_total.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_DARK}; background: transparent; border: none;")
         lbl_total.setFixedWidth(90)

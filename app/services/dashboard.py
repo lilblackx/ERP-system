@@ -188,7 +188,9 @@ class DashboardService:
             {
                 "numero_factura": factura.numero_factura,
                 "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
-                "total_venta": factura.total_venta,
+                # total_venta es solo el subtotal de las lineas: se muestra lo que paga el
+                # cliente (descuento e IVA incluidos), igual que el listado de Facturacion.
+                "total_factura": factura.total_venta - factura.monto_descuento + factura.monto_iva,
                 "estado_factura": factura.estado_factura,
             }
             for factura in facturas

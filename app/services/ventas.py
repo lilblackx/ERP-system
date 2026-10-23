@@ -20,6 +20,7 @@ from app.db.models import (
     Inventario,
     NotaCreditoCliente,
     PagoCobro,
+    PagoCobroBCV,
     ProductoPrecio,
     Vendedor,
 )
@@ -68,6 +69,11 @@ def _numero_control_temporal() -> str:
 
 
 def _deuda_pendiente_cliente(session: Session, id_cliente: int) -> Decimal:
+    """Deuda abierta del cliente: cuentas normales MAS cuentas BCV. Una factura con
+    porcentaje BCV deja su cuenta normal en saldo 0 y la deuda real en
+    cuentas_por_cobrar_bcv -- antes la BCV solo se sumaba si la factura NUEVA tambien era
+    BCV, asi que una factura a credito normal ignoraba toda la deuda BCV del cliente y se
+    podia pasar del limite de credito."""
     deuda = (
         session.query(func.coalesce(func.sum(CuentaPorCobrar.saldo_pendiente), 0))
         .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
@@ -77,14 +83,23 @@ def _deuda_pendiente_cliente(session: Session, id_cliente: int) -> Decimal:
         )
         .scalar()
     )
-    return Decimal(str(deuda))
+    deuda_bcv = (
+        session.query(func.coalesce(func.sum(CuentaPorCobrarBCV.saldo_pendiente), 0))
+        .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+        .filter(
+            FacturaVenta.id_cliente_factura == id_cliente,
+            CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial", "vencida")),
+        )
+        .scalar()
+    )
+    return Decimal(str(deuda)) + Decimal(str(deuda_bcv))
 
 
-def _cxc_vencida(cxc: CuentaPorCobrar, hoy: date) -> bool:
+def _cxc_vencida(cxc: CuentaPorCobrar | CuentaPorCobrarBCV, hoy: date) -> bool:
     return cxc.fecha_vencimiento is not None and cxc.fecha_vencimiento < hoy
 
 
-def _calcular_estado_visual(estado_factura: str, cxc: CuentaPorCobrar | None, hoy: date) -> str:
+def _calcular_estado_visual(estado_factura: str, cxc: CuentaPorCobrar | CuentaPorCobrarBCV | None, hoy: date) -> str:
     """Estado que se muestra en la UI (Emitida/Pagada/Parcial/Vencida/Anulada) --
     FacturaVenta.estado_factura en la base solo distingue EMITIDA/ANULADA (ver
     anular_factura), el resto se deriva de la cuenta por cobrar asociada. 'vencida' nunca
@@ -105,6 +120,25 @@ def _calcular_estado_visual(estado_factura: str, cxc: CuentaPorCobrar | None, ho
     if cxc.estado == "parcial":
         return "PARCIAL"
     return "EMITIDA"
+
+
+def _cxc_que_define_estado(
+    cxc_por_factura: dict[int, CuentaPorCobrar],
+    cxc_bcv_por_factura: dict[int, CuentaPorCobrarBCV],
+    id_factura: int,
+) -> CuentaPorCobrar | CuentaPorCobrarBCV | None:
+    """Una factura con porcentaje BCV deja su cuenta normal en saldo 0 y estado
+    'pendiente' para siempre (ver emitir_factura) -- su estado real (pagada/parcial/
+    vencida) lo lleva la cuenta BCV. Sin esto, una factura BCV a credito ya cobrada nunca
+    se mostraba como PAGADA. Ambas cuentas tienen estado/fecha_vencimiento con el mismo
+    significado, asi que _calcular_estado_visual sirve para las dos."""
+    return cxc_bcv_por_factura.get(id_factura) or cxc_por_factura.get(id_factura)
+
+
+def _total_a_cobrar(factura: FacturaVenta) -> Decimal:
+    """Total que paga el cliente: factura_venta.total_venta es solo el subtotal de las
+    lineas (trg_factura_total_ins), sin descuento ni IVA. Misma formula que reportes.py."""
+    return factura.total_venta - (factura.monto_descuento or 0) + (factura.monto_iva or 0)
 
 
 def _validar_items(items: list[dict]) -> None:
@@ -433,24 +467,8 @@ class VentaService:
                 .with_hint(Cliente, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
             ).scalar_one()
 
-            # Si hay porcentaje BCV, la deuda actual debe incluir también las cuentas BCV
-            if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
-                # Calcular deuda actual incluyendo cuentas BCV
-                deuda_bcv = (
-                    session.query(func.coalesce(func.sum(CuentaPorCobrarBCV.saldo_pendiente), 0))
-                    .join(
-                        FacturaVenta,
-                        FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura,
-                    )
-                    .filter(
-                        FacturaVenta.id_cliente_factura == id_cliente,
-                        CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial", "vencida")),
-                    )
-                    .scalar()
-                )
-                deuda_actual = _deuda_pendiente_cliente(session, id_cliente) + Decimal(str(deuda_bcv))
-            else:
-                deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
+            # Incluye la deuda BCV del cliente (ver _deuda_pendiente_cliente).
+            deuda_actual = _deuda_pendiente_cliente(session, id_cliente)
 
             limite_credito = cliente.limite_credito if cliente.limite_credito is not None else Decimal("0.00")
             if deuda_actual + total_a_cobrar > limite_credito:
@@ -1037,6 +1055,22 @@ class VentaService:
             )
             monto_pagado = Decimal(str(monto_pagado))
 
+        # Factura con porcentaje BCV: la deuda real vive en cuentas_por_cobrar_bcv (la
+        # cuenta normal queda en saldo 0, ver emitir_factura). Sin cerrarla, el cliente
+        # seguia debiendo una factura anulada y lo ya cobrado no volvia como nota de
+        # credito. Se marca 'anulada' en vez de borrarla: sus pagos_cobros_bcv la
+        # referencian (FK) y son historial real de caja/banco.
+        cxc_bcv = session.query(CuentaPorCobrarBCV).filter(CuentaPorCobrarBCV.id_factura == id_factura).first()
+        if cxc_bcv is not None:
+            monto_pagado_bcv = (
+                session.query(func.coalesce(func.sum(PagoCobroBCV.monto), 0))
+                .filter(PagoCobroBCV.id_cuenta_por_cobrar == cxc_bcv.id_cuenta_por_cobrar)
+                .scalar()
+            )
+            monto_pagado += Decimal(str(monto_pagado_bcv))
+            cxc_bcv.estado = "anulada"
+            cxc_bcv.saldo_pendiente = Decimal("0.00")
+
         session.query(FacturaDetalle).filter(FacturaDetalle.id_factura == id_factura).delete(synchronize_session=False)
         if cxc is not None:
             if monto_pagado > 0:
@@ -1213,10 +1247,17 @@ class VentaService:
         # para toda la pagina en vez de N+1 -- ver _calcular_estado_visual.
         ids_pagina = [f.id_factura for f in facturas]
         cxc_por_factura = {}
+        cxc_bcv_por_factura = {}
         if ids_pagina:
             cxc_por_factura = {
                 c.id_factura: c
                 for c in session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura.in_(ids_pagina)).all()
+            }
+            cxc_bcv_por_factura = {
+                c.id_factura: c
+                for c in session.query(CuentaPorCobrarBCV).filter(
+                    CuentaPorCobrarBCV.id_factura.in_(ids_pagina), CuentaPorCobrarBCV.porcentaje > 0
+                )
             }
 
         # Metodos de pago para ventas de contado -- una factura puede tener varias lineas
@@ -1231,7 +1272,10 @@ class VentaService:
                     pagos_por_cxc.setdefault(p.id_cuenta_por_cobrar, []).append(p)
 
         for f in facturas:
-            f.estado_visual = _calcular_estado_visual(f.estado_factura, cxc_por_factura.get(f.id_factura), hoy)
+            f.estado_visual = _calcular_estado_visual(
+                f.estado_factura, _cxc_que_define_estado(cxc_por_factura, cxc_bcv_por_factura, f.id_factura), hoy
+            )
+            f.total_a_cobrar = _total_a_cobrar(f)
 
             # "mixto" es un sentinel para mas de un metodo distinto -- ver
             # historial_cliente.obtener_historial_cliente() para el mismo criterio.
@@ -1271,7 +1315,13 @@ class VentaService:
             raise ValueError("Factura no encontrada")
 
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
-        factura.estado_visual = _calcular_estado_visual(factura.estado_factura, cxc, date.today())
+        cxc_bcv = (
+            session.query(CuentaPorCobrarBCV)
+            .filter(CuentaPorCobrarBCV.id_factura == id_factura, CuentaPorCobrarBCV.porcentaje > 0)
+            .first()
+        )
+        factura.estado_visual = _calcular_estado_visual(factura.estado_factura, cxc_bcv or cxc, date.today())
+        factura.total_a_cobrar = _total_a_cobrar(factura)
 
         # Todas las lineas de pago para ventas de contado -- una factura puede tener mas
         # de una (PagoLineaDialog permite repartir el total entre varios metodos/monedas),
