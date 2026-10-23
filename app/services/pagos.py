@@ -13,7 +13,6 @@ from app.db.models import (
     CuentaPorCobrar,
     CuentaPorPagar,
     FacturaVenta,
-    NotaCreditoCliente,
     PagoCobro,
     PagoProveedor,
 )
@@ -24,7 +23,9 @@ from app.services.db_utils import (
     aplicar_lock_timeout,
     traducir_error_trigger,
 )
+from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
+from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
@@ -528,6 +529,10 @@ class PagoService:
                     CuentaPorCobrar.saldo_pendiente > 0,
                 )
                 .order_by(FacturaVenta.fecha_emision.asc())
+                # WITH (UPDLOCK, ROWLOCK): dos abonos concurrentes al mismo cliente leerian
+                # los mismos saldos y repartirian el dinero dos veces sobre las mismas
+                # facturas. Mismo patron que _aplicar_pago_cobro.
+                .with_hint(CuentaPorCobrar, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
                 .all()
             )
             logger.info(f"Cuentas pendientes encontradas para cliente {id_cliente}: {len(cuentas_pendientes)}")
@@ -634,38 +639,56 @@ class PagoService:
                 # Actualizar monto restante
                 monto_restante -= monto_aplicar
 
-            # Si hay sobreabono, crear nota de crédito como saldo a favor del cliente
+            # Sobreabono: el excedente queda como nota de credito (saldo a favor del cliente)
+            # Y entra a la caja/cuenta, porque el dinero si se recibio completo. Antes solo se
+            # creaba la nota: la caja/banco quedaba corta por el excedente, y si despues se
+            # devolvia la nota, el egreso restaba un dinero que nunca habia entrado. Mismo
+            # criterio que PagoBCVService.aplicar_abono_general_cliente_bcv. Si algo de esto
+            # falla, falla todo el abono (antes se tragaba el error y el excedente quedaba sin
+            # registrar en ningun lado).
             nota_credito_id = None
             if es_sobreabono and saldo_restante > 0:
-                try:
-                    cliente = session.get(Cliente, id_cliente)
-                    if cliente:
-                        motivo = f"Sobreabono por pago en exceso - {metodo_pago}"
-                        nota_credito = NotaCreditoCliente(
-                            numero_nota_credito=f"ABONO-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                            id_cliente=id_cliente,
-                            id_factura_origen=None,  # No asociada a una factura específica
-                            monto=saldo_restante,
-                            saldo_disponible=saldo_restante,
-                            motivo=motivo,
-                            estado="disponible",
-                            creado_por=id_usuario,
-                            fecha_creacion=datetime.now(),
-                        )
-                        session.add(nota_credito)
-                        session.flush()
-                        nota_credito_id = nota_credito.id_nota_credito
-
-                        logger.info(
-                            "Nota de crédito creada por sobreabono: cliente=%s monto=%s metodo=%s nota_id=%s",
-                            id_cliente,
-                            saldo_restante,
-                            metodo_pago,
-                            nota_credito_id,
-                        )
-                except Exception as e:
-                    logger.warning("No se pudo crear nota de crédito por sobreabono: %s", e)
-                    # No fallar toda la transacción si falla la nota de crédito
+                cliente = session.get(Cliente, id_cliente)
+                if cliente is None:
+                    raise ValueError("Cliente no encontrado")
+                nota_credito = NotaCreditoService._crear_nota_credito_cliente(
+                    session,
+                    id_cliente=id_cliente,
+                    id_factura_origen=None,
+                    monto=saldo_restante,
+                    motivo=f"Sobreabono por pago en exceso - {metodo_pago}",
+                    id_usuario=id_usuario,
+                )
+                nota_credito_id = nota_credito.id_nota_credito
+                descripcion_sobreabono = f"Sobreabono (saldo a favor) de {cliente.nombre_razon_social}"[:255]
+                if id_cuenta_bancaria is not None:
+                    BancoService._registrar_ingreso_excedente(
+                        session,
+                        id_cuenta=id_cuenta_bancaria,
+                        monto=saldo_restante,
+                        descripcion=descripcion_sobreabono,
+                        id_usuario=id_usuario,
+                        fecha=datetime.now(),
+                        monto_bolivares=(saldo_restante * tasa_cambio).quantize(Decimal("0.01")),
+                        tasa_cambio=tasa_cambio.quantize(Decimal("0.01")),
+                        referencia=referencia,
+                    )
+                else:
+                    CajaService._registrar_ingreso_excedente(
+                        session,
+                        id_caja=id_caja,
+                        monto=saldo_restante,
+                        descripcion=descripcion_sobreabono,
+                        id_usuario=id_usuario,
+                        fecha=datetime.now(),
+                    )
+                logger.info(
+                    "Nota de crédito creada por sobreabono: cliente=%s monto=%s metodo=%s nota_id=%s",
+                    id_cliente,
+                    saldo_restante,
+                    metodo_pago,
+                    nota_credito_id,
+                )
 
             # Commit de la transacción
             session.commit()

@@ -17,6 +17,7 @@ from app.db.models import (
 from app.services.comisiones import ComisionService, PagoComisionService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
+from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
 from tests.factories import (
     crear_caja,
@@ -28,6 +29,15 @@ from tests.factories import (
     crear_vendedor,
     pago_contado,
 )
+
+
+def _caja_abierta(session, saldo=Decimal("100000.00")):
+    """Pagar comisiones en efectivo exige caja con turno abierto y saldo suficiente."""
+    caja = crear_caja(session)
+    CajaService.abrir_caja(
+        session, caja.id_caja, id_usuario=crear_usuario_admin(session).id_usuario, saldo_apertura=saldo
+    )
+    return caja
 
 
 def _crear_comisiones_liberadas(session, vendedor, admin, cantidades_precios: list[tuple[Decimal, Decimal, Decimal]]):
@@ -114,7 +124,7 @@ def test_pagar_comisiones_vendedor_por_caja(db_session):
         db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("3"))]
     )
     assert comisiones[0].monto_comision == Decimal("3.00")
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
 
     pago = PagoComisionService.pagar_comisiones_vendedor(
         db_session,
@@ -170,7 +180,7 @@ def test_pagar_comisiones_vendedor_agrupa_varias_lineas_pendientes(db_session):
             (Decimal("5.00"), Decimal("7.00"), Decimal("1")),
         ],
     )
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
 
     pago = PagoComisionService.pagar_comisiones_vendedor(
         db_session,
@@ -187,7 +197,7 @@ def test_pagar_comisiones_vendedor_requiere_exactamente_un_origen(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
     cuenta = crear_cuenta_bancaria(db_session)
 
     with pytest.raises(ValueError, match="exactamente un origen"):
@@ -212,7 +222,7 @@ def test_pagar_comisiones_vendedor_requiere_exactamente_un_origen(db_session):
 def test_pagar_comisiones_vendedor_sin_comisiones_pendientes_falla(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
 
     with pytest.raises(ValueError, match="No hay comisiones liberadas"):
         PagoComisionService.pagar_comisiones_vendedor(
@@ -228,7 +238,7 @@ def test_pagar_comisiones_vendedor_no_repaga_las_ya_pagadas(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
     PagoComisionService.pagar_comisiones_vendedor(
         db_session,
         id_vendedor=vendedor.id_vendedor,
@@ -251,7 +261,7 @@ def test_pagar_comisiones_vendedor_sin_usuario_autorizado_falla(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
 
     with pytest.raises(PermisoDenegadoError):
         PagoComisionService.pagar_comisiones_vendedor(
@@ -264,7 +274,7 @@ def test_pagar_comisiones_vendedor_sin_usuario_autorizado_falla(db_session):
 
 def test_pagar_comisiones_vendedor_no_encontrado_falla(db_session):
     admin = crear_usuario_admin(db_session)
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
 
     with pytest.raises(ValueError, match="Vendedor no encontrado"):
         PagoComisionService.pagar_comisiones_vendedor(
@@ -312,7 +322,7 @@ def test_listar_pagos_comision_vendedor(db_session):
     admin = crear_usuario_admin(db_session)
     vendedor = crear_vendedor(db_session)
     _crear_comisiones_liberadas(db_session, vendedor, admin, [(Decimal("1.00"), Decimal("2.00"), Decimal("1"))])
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
     PagoComisionService.pagar_comisiones_vendedor(
         db_session,
         id_vendedor=vendedor.id_vendedor,
@@ -369,7 +379,7 @@ def test_comision_credito_nace_pendiente_y_no_es_pagable(db_session):
     producto = crear_producto(db_session, cantidad_unidad=50)
     crear_precio_producto(db_session, producto, "1.00")
     cliente = crear_cliente(db_session, limite_credito=Decimal("100.00"))
-    caja = crear_caja(db_session)
+    caja = _caja_abierta(db_session)
 
     factura = VentaService.emitir_factura(
         db_session,
@@ -481,7 +491,7 @@ def _dos_comisiones_liberadas(db_session):
         ],
     )
     assert [c.monto_comision for c in comisiones] == [Decimal("3.00"), Decimal("4.00")]
-    return admin, vendedor, comisiones, crear_caja(db_session)
+    return admin, vendedor, comisiones, _caja_abierta(db_session)
 
 
 def test_pagar_con_ids_paga_solo_esas_comisiones(db_session):
@@ -711,3 +721,77 @@ def test_comision_de_articulo_bcv_no_lleva_el_porcentaje_en_la_base(db_session):
 def test_comision_de_articulo_bcv_sin_porcentaje_es_la_de_siempre(db_session):
     comision = _comision_de_una_linea(db_session, None, articulo_bcv=True)
     assert comision.monto_comision == Decimal("1.00")
+
+
+def test_pagar_comisiones_desde_caja_sin_turno_abierto_falla(db_session):
+    admin, vendedor, _comisiones, _caja = _dos_comisiones_liberadas(db_session)
+    caja_cerrada = crear_caja(db_session)
+
+    with pytest.raises(ValueError, match="turno abierto"):
+        PagoComisionService.pagar_comisiones_vendedor(
+            db_session,
+            id_vendedor=vendedor.id_vendedor,
+            metodo_pago="efectivo",
+            id_caja=caja_cerrada.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_pagar_comisiones_sin_saldo_en_caja_falla(db_session):
+    admin, vendedor, _comisiones, _caja = _dos_comisiones_liberadas(db_session)
+    caja_vacia = _caja_abierta(db_session, saldo=Decimal("0.00"))
+
+    with pytest.raises(ValueError, match="saldo suficiente"):
+        PagoComisionService.pagar_comisiones_vendedor(
+            db_session,
+            id_vendedor=vendedor.id_vendedor,
+            metodo_pago="efectivo",
+            id_caja=caja_vacia.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_bulto_vendido_con_descuento_no_genera_comision(db_session):
+    """Un bulto vendido por debajo de lista (descuento autorizado) no deja comision: antes
+    se tomaba como venta por unidad y la base quedaba en precio_lista / cantidad_caja."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=240, cantidad_caja=12)
+    crear_precio_producto(db_session, producto, "100.00")
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "90.00", "tipo_venta": "bulto"}],
+        monto_descuento=Decimal("0"),
+        motivo_descuento="Cliente mayorista",
+        id_autorizador_descuento=admin.id_usuario,
+    )
+
+    assert db_session.query(ComisionFactura).filter_by(id_vendedor=vendedor.id_vendedor).count() == 0
+
+
+def test_unidad_vendida_sobre_su_precio_si_genera_comision(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=240, cantidad_caja=12)
+    crear_precio_producto(db_session, producto, "120.00")  # $10 por unidad
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[
+            {"id_producto": producto.id_producto, "cantidad": 3, "precio_unitario": "11.00", "tipo_venta": "unidad"}
+        ],
+    )
+
+    comision = db_session.query(ComisionFactura).filter_by(id_vendedor=vendedor.id_vendedor).one()
+    assert comision.monto_comision == Decimal("3.00")

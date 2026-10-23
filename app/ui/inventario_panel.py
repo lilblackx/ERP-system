@@ -38,6 +38,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.auto_refresco import AutoRefresco
 from app.ui.message_box import MessageBox
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.producto_auditoria_dialog import ProductoAuditoriaDialog
@@ -74,7 +75,7 @@ COLS_VISIBLES = [
     "CATEGORÍA",
     "CANTIDAD",
     "CAJAS",
-    "AGRANEL",
+    "A GRANEL",
     "COSTO",
     "PRECIO 1",
     "PRECIO 2",
@@ -174,6 +175,9 @@ class InventarioPanel(MixinPermisos, QWidget):
         self._setup_ui()
         QTimer.singleShot(100, self._cargar_categorias_filtro)
         QTimer.singleShot(100, self.cargar_productos)
+        # Stock en tiempo real: ventas, recepciones y devoluciones de otras estaciones
+        # (ver app/ui/auto_refresco.py).
+        self._auto_refresco = AutoRefresco(self, self.cargar_productos, lambda: self.tabla, COL_ID_INTERNO)
 
     def showEvent(self, event: QShowEvent) -> None:
         # Mismo problema que DashboardPanel/FacturacionPanel/ClientesPanel:
@@ -671,9 +675,19 @@ class InventarioPanel(MixinPermisos, QWidget):
                     else:
                         # Usuario canceló, no actualizar
                         return
+                else:
+                    # Sin cambio de stock no se manda cantidad_unidad: el valor del formulario
+                    # es el de cuando se abrio, y reescribirlo pisaria las ventas/recepciones
+                    # que entraron mientras tanto desde otra estacion.
+                    datos.pop("cantidad_unidad", None)
 
                 ProductoService.actualizar(
-                    session, id_producto, id_usuario=self.usuario.id_usuario, motivo=motivo, **datos
+                    session,
+                    id_producto,
+                    id_usuario=self.usuario.id_usuario,
+                    motivo=motivo,
+                    cantidad_unidad_anterior=cantidad_anterior,
+                    **datos,
                 )
                 precio_1, precio_2, precio_3 = dialogo.get_precios()
                 if precio_1 > 0:

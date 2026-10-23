@@ -13,7 +13,6 @@ from app.db.models import (
     CuentaBancaria,
     CuentaPorCobrarBCV,
     FacturaVenta,
-    NotaCreditoCliente,
     PagoCobroBCV,
 )
 from app.services.auditoria import AuditoriaService
@@ -23,6 +22,7 @@ from app.services.db_utils import (
     aplicar_lock_timeout,
     traducir_error_trigger,
 )
+from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
@@ -576,6 +576,11 @@ class PagoBCVService:
                     CuentaPorCobrarBCV.saldo_pendiente > 0,
                 )
                 .order_by(CuentaPorCobrarBCV.fecha_emision.asc())
+                # WITH (UPDLOCK, ROWLOCK): no hay trigger que valide el saldo en las tablas
+                # BCV -- sin el lock, dos abonos concurrentes al mismo cliente leen el mismo
+                # saldo, ambos registran su pago e ingreso, y el segundo UPDATE pisa al
+                # primero: entra el dinero dos veces pero la deuda baja una sola.
+                .with_hint(CuentaPorCobrarBCV, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
                 .all()
             )
             logger.info(f"BCV - Cuentas pendientes encontradas para cliente {id_cliente}: {len(cuentas_pendientes)}")
@@ -683,65 +688,56 @@ class PagoBCVService:
 
             # Si hay sobreabono, crear nota de crédito como saldo a favor del cliente
             nota_credito_id = None
+            # Si algo de esto falla, falla todo el abono: antes se tragaba el error y el
+            # excedente quedaba sin nota y sin ingreso. Numeracion NC-xxxxxx via
+            # _crear_nota_credito_cliente: el "ABV-<segundo actual>" anterior chocaba si dos
+            # sobreabonos caian en el mismo segundo.
             if es_sobreabono and saldo_restante > 0:
-                try:
-                    cliente = session.get(Cliente, id_cliente)
-                    if cliente:
-                        motivo = f"Sobreabono BCV por pago en exceso - {metodo_pago}"
-                        nota_credito = NotaCreditoCliente(
-                            # numero_nota_credito es VARCHAR(20): "ABONO-BCV-" + 14 digitos (24)
-                            # no cabia y todo sobreabono BCV fallaba al insertar la nota.
-                            numero_nota_credito=f"ABV-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                            id_cliente=id_cliente,
-                            id_factura_origen=None,  # No asociada a una factura específica
-                            monto=saldo_restante,
-                            saldo_disponible=saldo_restante,
-                            motivo=motivo,
-                            estado="disponible",
-                            creado_por=id_usuario,
-                            fecha_creacion=datetime.now(),
-                        )
-                        session.add(nota_credito)
-                        session.flush()
-                        nota_credito_id = nota_credito.id_nota_credito
+                cliente = session.get(Cliente, id_cliente)
+                if cliente is None:
+                    raise ValueError("Cliente no encontrado")
+                nota_credito = NotaCreditoService._crear_nota_credito_cliente(
+                    session,
+                    id_cliente=id_cliente,
+                    id_factura_origen=None,
+                    monto=saldo_restante,
+                    motivo=f"Sobreabono BCV por pago en exceso - {metodo_pago}",
+                    id_usuario=id_usuario,
+                )
+                nota_credito_id = nota_credito.id_nota_credito
 
-                        # El excedente tambien entro a la caja/cuenta (queda como saldo a favor
-                        # del cliente en la nota de credito) -- si no se registra, la caja/banco
-                        # quedaria corta por esa diferencia.
-                        descripcion_sobreabono = f"Sobreabono BCV (saldo a favor) de {cliente.nombre_razon_social}"[
-                            :255
-                        ]
-                        if id_cuenta_bancaria is not None:
-                            BancoService._registrar_ingreso_excedente(
-                                session,
-                                id_cuenta=id_cuenta_bancaria,
-                                monto=saldo_restante,
-                                descripcion=descripcion_sobreabono,
-                                id_usuario=id_usuario,
-                                fecha=datetime.now(),
-                                monto_bolivares=(saldo_restante * tasa_cambio).quantize(Decimal("0.01")),
-                                tasa_cambio=tasa_cambio.quantize(Decimal("0.01")),
-                            )
-                        else:
-                            CajaService._registrar_ingreso_excedente(
-                                session,
-                                id_caja=id_caja,
-                                monto=saldo_restante,
-                                descripcion=descripcion_sobreabono,
-                                id_usuario=id_usuario,
-                                fecha=datetime.now(),
-                            )
+                # El excedente tambien entro a la caja/cuenta (queda como saldo a favor
+                # del cliente en la nota de credito) -- si no se registra, la caja/banco
+                # quedaria corta por esa diferencia.
+                descripcion_sobreabono = f"Sobreabono BCV (saldo a favor) de {cliente.nombre_razon_social}"[:255]
+                if id_cuenta_bancaria is not None:
+                    BancoService._registrar_ingreso_excedente(
+                        session,
+                        id_cuenta=id_cuenta_bancaria,
+                        monto=saldo_restante,
+                        descripcion=descripcion_sobreabono,
+                        id_usuario=id_usuario,
+                        fecha=datetime.now(),
+                        monto_bolivares=(saldo_restante * tasa_cambio).quantize(Decimal("0.01")),
+                        tasa_cambio=tasa_cambio.quantize(Decimal("0.01")),
+                    )
+                else:
+                    CajaService._registrar_ingreso_excedente(
+                        session,
+                        id_caja=id_caja,
+                        monto=saldo_restante,
+                        descripcion=descripcion_sobreabono,
+                        id_usuario=id_usuario,
+                        fecha=datetime.now(),
+                    )
 
-                        logger.info(
-                            "BCV - Nota de crédito creada por sobreabono: cliente=%s monto=%s metodo=%s nota_id=%s",
-                            id_cliente,
-                            saldo_restante,
-                            metodo_pago,
-                            nota_credito_id,
-                        )
-                except Exception as e:
-                    logger.warning("BCV - No se pudo crear nota de crédito por sobreabono: %s", e)
-                    # No fallar toda la transacción si falla la nota de crédito
+                logger.info(
+                    "BCV - Nota de crédito creada por sobreabono: cliente=%s monto=%s metodo=%s nota_id=%s",
+                    id_cliente,
+                    saldo_restante,
+                    metodo_pago,
+                    nota_credito_id,
+                )
 
             # Commit de la transacción
             session.commit()

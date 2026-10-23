@@ -105,6 +105,12 @@ class CuentaBancariaService:
         cuenta = session.get(CuentaBancaria, id_cuenta)
         if cuenta is None:
             raise ValueError("Cuenta bancaria no encontrada")
+        campos_saldo = {"saldo_total_banco", "saldo_total_banco_bs"} & datos.keys()
+        if campos_saldo:
+            # El saldo solo se mueve con movimientos bancarios (BancoMovimientoService.crear,
+            # pagos, cobros): editarlo directo no deja ningun movimiento que explique la
+            # diferencia. Antes esto solo lo impedia la UI (campo deshabilitado).
+            raise ValueError("El saldo de una cuenta bancaria no se edita: registre un movimiento bancario")
 
         if "numero_cuenta" in datos and not datos["numero_cuenta"]:
             raise ValueError("numero_cuenta es requerido")

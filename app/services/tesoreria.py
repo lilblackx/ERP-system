@@ -15,6 +15,7 @@ from app.db.models import (
     Usuario,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.bloqueo import esta_bloqueado
 from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
@@ -45,7 +46,7 @@ def _require_admin(session: Session, id_usuario: int | None) -> Usuario:
         raise PermisoDenegadoError(f"Usuario {id_usuario} no encontrado")
     if usuario.estado != "ACTIVO":
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta inactivo")
-    if usuario.bloqueado_desde is not None:
+    if esta_bloqueado(usuario):
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
     rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
     if rol is None or rol.nombre != "ADMIN":
@@ -217,6 +218,12 @@ class BancoService:
         cuenta = session.get(CuentaBancaria, id_cuenta)
         if cuenta is None:
             raise ValueError("Cuenta bancaria no encontrada")
+        campos_saldo = {"saldo_total_banco", "saldo_total_banco_bs"} & datos.keys()
+        if campos_saldo:
+            # El saldo solo se mueve con movimientos bancarios (BancoMovimientoService.crear,
+            # pagos, cobros): editarlo directo no deja ningun movimiento que explique la
+            # diferencia. Antes esto solo lo impedia la UI (campo deshabilitado).
+            raise ValueError("El saldo de una cuenta bancaria no se edita: registre un movimiento bancario")
         for campo, valor in datos.items():
             setattr(cuenta, campo, valor)
         try:
@@ -381,6 +388,7 @@ class BancoService:
         fecha: datetime,
         monto_bolivares: Decimal | None = None,
         tasa_cambio: Decimal | None = None,
+        referencia: str | None = None,
     ) -> BancoMovimiento:
         """Cuando una forma de pago bancaria tiende mas de lo que _aplicar_pago_cobro
         aplica a la cuenta por cobrar (capado a su saldo_pendiente -- ver VentaService.
@@ -389,7 +397,8 @@ class BancoService:
         por la diferencia, el egreso del vuelto (_registrar_egreso_vuelto) restaria dos
         veces ese excedente: una vez porque nunca se abono, y otra al registrarse como
         salida. tipo_movimiento='abono' -- mismo valor que ya usa trg_pagos_cobros_io para
-        cobros a cliente; trg_banco_movimientos_saldo lo suma automaticamente."""
+        cobros a cliente; trg_banco_movimientos_saldo lo suma automaticamente. Tambien lo
+        usa NotaCreditoService.reembolsar_nota_credito_proveedor (con referencia)."""
         movimiento = BancoMovimiento(
             id_cuenta=id_cuenta,
             tipo_movimiento="abono",
@@ -397,6 +406,7 @@ class BancoService:
             monto_bolivares=monto_bolivares,
             tasa_cambio=tasa_cambio,
             fecha_movimiento=fecha,
+            referencia_movimiento=referencia,
             descripcion_movimiento=descripcion,
             creado_por=id_usuario,
             fecha_creacion=datetime.now(),
@@ -588,12 +598,28 @@ class CajaService:
             raise ValueError(f"tipo invalido: {tipo}, debe ser uno de {TIPOS_MOVIMIENTO_CAJA}")
         if Decimal(str(monto)) <= 0:
             raise ValueError("El monto debe ser mayor a cero")
-
-        caja = session.get(Caja, id_caja)
+        aplicar_lock_timeout(session)
+        # WITH (UPDLOCK, ROWLOCK): mismo patron que los demas egresos de caja -- serializa
+        # dos salidas concurrentes para que no lean el mismo saldo.
+        caja = session.execute(
+            select(Caja).where(Caja.id_caja == id_caja).with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+        ).scalar_one_or_none()
         if caja is None:
             raise ValueError("Caja no encontrada")
         if caja.fecha_apertura is None or caja.fecha_cierre is not None:
             raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
+        # Un movimiento manual es dinero que entra o sale sin ninguna venta/compra que lo
+        # explique: sin descripcion, en un arqueo no hay forma de saber que fue.
+        descripcion = (descripcion or "").strip()
+        if not descripcion:
+            raise ValueError("Indique el motivo del movimiento de caja")
+        if tipo == "salida":
+            saldo_actual = CajaService.calcular_saldo_actual(session, id_caja)
+            if saldo_actual < Decimal(str(monto)):
+                raise ValueError(
+                    f"La caja '{caja.nombre_caja}' no tiene saldo suficiente: disponible ${saldo_actual}, "
+                    f"requerido ${Decimal(str(monto))}"
+                )
 
         movimiento = CajaMovimiento(
             id_caja=id_caja,

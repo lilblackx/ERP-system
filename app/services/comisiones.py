@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
+from app.services.tesoreria import CajaService
 from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
@@ -99,17 +100,20 @@ class ComisionService:
             cantidad = to_decimal(detalle.cantidad_producto)
             precio_unitario = to_decimal(detalle.precio_unitario)
 
-            # Determinar si la venta fue por unidad: si el producto tiene cantidad_caja configurada
-            # y el precio_unitario es cercano a precio_lista / cantidad_caja (o menor que precio_lista)
+            # Venta por unidad o por bulto: factura_detalle.tipo_venta lo dice (migrations/
+            # 0061, es lo mismo que usa el trigger de stock). Antes se ADIVINABA por el precio,
+            # y "precio menor al de lista" contaba como venta por unidad: un bulto vendido
+            # con descuento autorizado (ej. lista $100, vendido a $90, caja de 12) tomaba como
+            # base $100/12 = $8,33 y le generaba al vendedor ~$81 de comision por bulto. La
+            # adivinanza queda solo para lineas viejas sin tipo_venta, y sin esa regla.
             venta_por_unidad = False
             if producto.cantidad_caja and producto.cantidad_caja > 0:
-                cantidad_caja = to_decimal(producto.cantidad_caja)
-                precio_esperado_unidad = precio_lista / cantidad_caja
-                # Si el precio_unitario es cercano al precio esperado por unidad (tolerancia del 10%)
-                # O si es menor que precio_lista (cualquier precio menor que el de bulto sugiere venta por unidad)
-                tolerancia = precio_esperado_unidad * Decimal("0.10")
-                if abs(precio_unitario - precio_esperado_unidad) <= tolerancia or precio_unitario < precio_lista:
-                    venta_por_unidad = True
+                if detalle.tipo_venta in ("unidad", "bulto"):
+                    venta_por_unidad = detalle.tipo_venta == "unidad"
+                else:
+                    precio_esperado_unidad = precio_lista / to_decimal(producto.cantidad_caja)
+                    tolerancia = precio_esperado_unidad * Decimal("0.10")
+                    venta_por_unidad = abs(precio_unitario - precio_esperado_unidad) <= tolerancia
 
             # Ajustar precios base y venta según tipo de venta
             if venta_por_unidad and producto.cantidad_caja and producto.cantidad_caja > 0:
@@ -317,9 +321,19 @@ class PagoComisionService:
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
         else:
-            caja = session.get(Caja, id_caja)
+            # Mismo lock y validaciones que cualquier otro egreso de caja (CompraService/
+            # devolver_nota_credito_cliente): antes se podia pagar desde una caja sin turno
+            # abierto -- la salida quedaba fuera de todo turno y nunca aparecia en un arqueo
+            # -- o por mas de lo que la caja tenia.
+            caja = session.execute(
+                select(Caja)
+                .where(Caja.id_caja == id_caja)
+                .with_hint(Caja, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one_or_none()
             if caja is None:
                 raise ValueError("Caja no encontrada")
+            if caja.fecha_apertura is None or caja.fecha_cierre is not None:
+                raise ValueError(f"La caja '{caja.nombre_caja}' no tiene un turno abierto")
 
         # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18/C22/C24 -- bloquea las filas
         # hasta el commit para que un segundo pago concurrente sobre el mismo vendedor no
@@ -345,6 +359,13 @@ class PagoComisionService:
                 f"El monto a pagar (${monto_total}) no coincide con el confirmado (${to_decimal(monto_esperado)}): "
                 "las comisiones cambiaron desde que se mostraron. Actualice la pantalla e intente de nuevo."
             )
+        if id_caja is not None:
+            saldo_caja = CajaService.calcular_saldo_actual(session, id_caja)
+            if saldo_caja < monto_total:
+                raise ValueError(
+                    f"La caja '{caja.nombre_caja}' no tiene saldo suficiente: disponible ${saldo_caja}, "
+                    f"requerido ${monto_total}"
+                )
 
         pago = PagoComision(
             id_vendedor=id_vendedor,

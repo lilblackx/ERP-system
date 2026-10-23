@@ -84,12 +84,35 @@ class ProductoService:
         id_producto: int,
         id_usuario: int | None = None,
         motivo: str | None = None,
+        cantidad_unidad_anterior: Decimal | None = None,
         **datos,
     ) -> Inventario:
+        """cantidad_unidad (ajuste manual de stock) se fija como valor absoluto, asi que se
+        protege contra pisar movimientos ajenos: la fila se bloquea (UPDLOCK) y, si el caller
+        pasa cantidad_unidad_anterior (el stock que el usuario estaba viendo al editar) y ya
+        no coincide, se rechaza -- antes, guardar el formulario de un producto abierto
+        mientras otra estacion vendia o recibia mercaderia reescribia el stock viejo y lo
+        vendido "reaparecia". Un cambio de stock exige motivo (queda en la auditoria)."""
         require_permiso(session, id_usuario, "inventario", "editar")
-        producto = session.get(Inventario, id_producto)
+        if "cantidad_unidad" in datos:
+            producto = session.execute(
+                select(Inventario)
+                .where(Inventario.id_producto == id_producto)
+                .with_hint(Inventario, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            ).scalar_one_or_none()
+        else:
+            producto = session.get(Inventario, id_producto)
         if producto is None:
             raise ValueError("Producto no encontrado")
+        if "cantidad_unidad" in datos:
+            stock_actual = producto.cantidad_unidad or Decimal("0")
+            if cantidad_unidad_anterior is not None and to_decimal(cantidad_unidad_anterior) != stock_actual:
+                raise ValueError(
+                    f"El stock de '{producto.nombre_producto}' cambio mientras lo editaba (ahora {stock_actual}). "
+                    "Vuelva a abrir el producto y repita el ajuste."
+                )
+            if to_decimal(datos["cantidad_unidad"] or 0) != stock_actual and not (motivo or "").strip():
+                raise ValueError("Un ajuste manual de stock requiere un motivo")
         if "nombre_producto" in datos and not datos["nombre_producto"]:
             raise ValueError("nombre_producto es requerido")
         if "id_categoria" in datos and not datos["id_categoria"]:
