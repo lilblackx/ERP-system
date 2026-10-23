@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.models import Usuario
+from app.services.bloqueo import esta_bloqueado
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
 from app.ui.message_box import MessageBox
@@ -416,7 +417,7 @@ class UsuariosPanel(MixinPermisos, QWidget):
             if usuario is None:
                 MessageBox.warning(self, "No encontrado", "El usuario seleccionado ya no existe.")
                 return
-            if usuario.bloqueado_desde is None:
+            if not esta_bloqueado(usuario):
                 MessageBox.information(
                     self,
                     "Sin bloqueo",

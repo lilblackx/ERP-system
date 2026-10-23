@@ -266,8 +266,13 @@ class LoginWindow(QDialog):
         session = SessionLocal()
         try:
             usuario = authenticate(session, nombre_usuario, clave)
-        except CuentaBloqueadaError:
-            self._mostrar_mensaje("Cuenta bloqueada por intentos fallidos", "fa5s.exclamation-triangle")
+        except CuentaBloqueadaError as exc:
+            # El bloqueo es temporal (app/services/bloqueo.py): se muestra hasta cuando.
+            hasta = exc.bloqueado_hasta
+            mensaje = "Cuenta bloqueada por intentos fallidos"
+            if hasta is not None:
+                mensaje += f" hasta las {hasta:%H:%M}"
+            self._mostrar_mensaje(mensaje, "fa5s.exclamation-triangle")
             self.clave_input.clear()
             self.clave_input.setFocus()
             self._avisar_rechazo(self.clave_input)

@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models import Permiso, Rol, RolPermiso, Usuario, Vendedor
 from app.services.auditoria import AuditoriaService
 from app.services.auth import hash_password, validar_password_policy
-from app.services.permisos import require_permiso
+from app.services.bloqueo import esta_bloqueado
+from app.services.permisos import PermisoDenegadoError, require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
@@ -88,6 +89,33 @@ def _resolver_vinculo_vendedor(
     return id_vendedor_usuario
 
 
+def _es_rol_admin(session: Session, id_rol: int | None) -> bool:
+    if id_rol is None:
+        return False
+    rol = session.get(Rol, id_rol)
+    return rol is not None and rol.nombre == "ADMIN"
+
+
+def _exigir_admin_para_tocar_admins(session: Session, realizado_por: int | None, mensaje: str) -> None:
+    """Dar el rol ADMIN, quitarselo a alguien, o cambiarle la clave/datos a un ADMIN solo lo
+    puede hacer otro ADMIN. Sin esto, 'usuarios'/'editar' (un permiso que se le puede
+    delegar a un encargado) bastaba para asignarse ADMIN a si mismo, o para cambiarle la
+    clave a un ADMIN y entrar con su cuenta: el permiso de gestionar usuarios equivalia a
+    ser superusuario."""
+    actor = session.get(Usuario, realizado_por) if realizado_por is not None else None
+    if actor is None or not _es_rol_admin(session, actor.id_rol):
+        raise PermisoDenegadoError(mensaje)
+
+
+def _otros_admins_activos(session: Session, id_usuario: int) -> int:
+    return (
+        session.query(Usuario)
+        .join(Rol, Rol.id_rol == Usuario.id_rol)
+        .filter(Rol.nombre == "ADMIN", Usuario.estado == "ACTIVO", Usuario.id_usuario != id_usuario)
+        .count()
+    )
+
+
 class UsuarioService:
     @staticmethod
     def crear_usuario(
@@ -116,6 +144,9 @@ class UsuarioService:
             raise ValueError("clave es requerida")
         validar_password_policy(clave)
         _validar_longitudes(nombre_usuario, nombre, apellido, email)
+
+        if _es_rol_admin(session, id_rol):
+            _exigir_admin_para_tocar_admins(session, realizado_por, "Solo un administrador puede crear administradores")
 
         _validar_nombre_usuario_unico(session, nombre_usuario)
         _validar_email_unico(session, email)
@@ -160,6 +191,16 @@ class UsuarioService:
             raise ValueError("Usuario no encontrado")
 
         datos = {k: v for k, v in datos.items() if k != "clave"}
+
+        era_admin = _es_rol_admin(session, usuario.id_rol)
+        sera_admin = _es_rol_admin(session, datos["id_rol"]) if "id_rol" in datos else era_admin
+        if era_admin or sera_admin:
+            _exigir_admin_para_tocar_admins(
+                session, realizado_por, "Solo un administrador puede modificar o asignar el rol de administrador"
+            )
+        if era_admin and not sera_admin and _otros_admins_activos(session, id_usuario) == 0:
+            # Mismo motivo que en cambiar_estado(): no dejar el sistema sin ningun ADMIN.
+            raise ValueError("No se puede quitar el rol: es el unico administrador activo del sistema")
 
         if "email" in datos and not datos["email"]:
             # Mismo motivo que en crear_usuario(): no dejar que una edicion vacie el
@@ -247,24 +288,18 @@ class UsuarioService:
             if id_usuario == realizado_por:
                 raise ValueError("No puedes desactivar tu propia cuenta")
 
-            rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
-            if rol is not None and rol.nombre == "ADMIN":
+            if _es_rol_admin(session, usuario.id_rol):
                 # Sin esto, dos ADMIN podrian desactivarse mutuamente (cada uno no puede
                 # desactivarse a si mismo, pero si al otro) hasta dejar el sistema sin
                 # ningun ADMIN activo -- sin nadie que pueda gestionar Usuarios/Permisos
                 # salvo tocando la base directo.
-                otros_admins_activos = (
-                    session.query(Usuario)
-                    .join(Rol, Rol.id_rol == Usuario.id_rol)
-                    .filter(
-                        Rol.nombre == "ADMIN",
-                        Usuario.estado == "ACTIVO",
-                        Usuario.id_usuario != id_usuario,
-                    )
-                    .count()
-                )
-                if otros_admins_activos == 0:
+                if _otros_admins_activos(session, id_usuario) == 0:
                     raise ValueError("No se puede desactivar: es el unico administrador activo del sistema")
+
+        if _es_rol_admin(session, usuario.id_rol):
+            _exigir_admin_para_tocar_admins(
+                session, realizado_por, "Solo un administrador puede cambiar el estado de un administrador"
+            )
 
         usuario.estado = nuevo_estado
         session.commit()
@@ -290,6 +325,10 @@ class UsuarioService:
         usuario = session.get(Usuario, id_usuario)
         if usuario is None:
             raise ValueError("Usuario no encontrado")
+        if _es_rol_admin(session, usuario.id_rol):
+            _exigir_admin_para_tocar_admins(
+                session, realizado_por, "Solo un administrador puede desbloquear a un administrador"
+            )
 
         usuario.bloqueado_desde = None
         usuario.intentos_fallidos = 0
@@ -348,7 +387,7 @@ class UsuarioService:
         usuario = session.get(Usuario, id_usuario)
         if usuario is None or usuario.id_rol is None:
             return False
-        if usuario.estado != "ACTIVO" or usuario.bloqueado_desde is not None:
+        if usuario.estado != "ACTIVO" or esta_bloqueado(usuario):
             return False
 
         # Bypass de ADMIN: el seed no le asigna filas en rol_permisos (ver

@@ -1,5 +1,6 @@
 import logging
 import re
+import socket
 from datetime import datetime
 
 import bcrypt
@@ -7,10 +8,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Usuario
 from app.services.auditoria import AuditoriaService
+from app.services.bloqueo import MAX_INTENTOS_FALLIDOS, bloqueado_hasta
 
 logger = logging.getLogger(__name__)
-
-MAX_INTENTOS_FALLIDOS = 5
 
 PASSWORD_MIN_LENGTH = 8
 # bcrypt trunca (versiones viejas) o directamente rechaza (bcrypt>=4 para el paquete
@@ -30,13 +30,22 @@ class CuentaBloqueadaError(Exception):
 
     Distinto de "credenciales invalidas" (que sigue devolviendo None) -- aca ni
     siquiera se verifica la clave, para que agotar el bloqueo no sirva de oraculo de
-    fuerza bruta mientras la cuenta esta bloqueada. No se auto-desbloquea con el tiempo:
-    la unica salida es un codigo enviado al correo (app/services/recuperacion_acceso.py)
-    o un ADMIN via UsuarioService.desbloquear_usuario()."""
+    fuerza bruta mientras la cuenta esta bloqueada. El bloqueo es temporal y escalonado
+    (ver app/services/bloqueo.py): vence solo, o se levanta antes con un codigo enviado al
+    correo (app/services/recuperacion_acceso.py) o un ADMIN via
+    UsuarioService.desbloquear_usuario()."""
 
-    def __init__(self, bloqueado_desde: datetime):
+    def __init__(self, bloqueado_desde: datetime, bloqueado_hasta: datetime | None = None):
         self.bloqueado_desde = bloqueado_desde
-        super().__init__("Cuenta bloqueada por intentos fallidos. Solicite un código de desbloqueo a su correo.")
+        self.bloqueado_hasta = bloqueado_hasta
+        if bloqueado_hasta is not None:
+            minutos = max(1, int((bloqueado_hasta - datetime.now()).total_seconds() // 60) + 1)
+            cuando = f"Intente de nuevo en {minutos} min, "
+        else:
+            cuando = ""
+        super().__init__(
+            f"Cuenta bloqueada por intentos fallidos. {cuando}o solicite un código de desbloqueo a su correo."
+        )
 
 
 def hash_password(plain: str) -> str:
@@ -101,8 +110,13 @@ def authenticate(
         return None
 
     if usuario.bloqueado_desde is not None:
-        logger.warning("Intento de login contra cuenta bloqueada: '%s'", nombre_usuario)
-        raise CuentaBloqueadaError(usuario.bloqueado_desde)
+        hasta = bloqueado_hasta(usuario)
+        if hasta is not None and datetime.now() < hasta:
+            logger.warning("Intento de login contra cuenta bloqueada: '%s'", nombre_usuario)
+            raise CuentaBloqueadaError(usuario.bloqueado_desde, hasta)
+        # Bloqueo vencido: se levanta. intentos_fallidos NO se reinicia -- si falla de nuevo,
+        # el siguiente bloqueo es mas largo (solo un login correcto lo pone en cero).
+        usuario.bloqueado_desde = None
 
     if usuario.clave and verify_password(clave, usuario.clave):
         usuario.intentos_fallidos = 0
@@ -122,7 +136,8 @@ def authenticate(
         return usuario
 
     usuario.intentos_fallidos += 1
-    if usuario.intentos_fallidos >= MAX_INTENTOS_FALLIDOS:
+    recien_bloqueada = usuario.intentos_fallidos >= MAX_INTENTOS_FALLIDOS
+    if recien_bloqueada:
         usuario.bloqueado_desde = datetime.now()
         logger.warning(
             "Cuenta '%s' bloqueada tras %d intentos fallidos",
@@ -141,6 +156,29 @@ def authenticate(
         id_usuario=usuario.id_usuario,
         accion=accion_fallo,
         modulo="AUTH",
-        detalle=f"Intento fallido #{usuario.intentos_fallidos} para '{usuario.nombre_usuario}'",
+        # Desde que PC se intento: sin esto no hay forma de saber quien esta probando claves.
+        detalle=f"Intento fallido #{usuario.intentos_fallidos} para '{usuario.nombre_usuario}' desde {_equipo()}",
     )
+    if recien_bloqueada:
+        _avisar_bloqueo_a_administradores(session, usuario)
     return None
+
+
+def _equipo() -> str:
+    try:
+        return socket.gethostname()
+    except OSError:
+        return "equipo desconocido"
+
+
+def _avisar_bloqueo_a_administradores(session: Session, bloqueado: Usuario) -> None:
+    """Correo a los ADMIN activos cuando una cuenta se bloquea: puede ser alguien probando
+    claves. Nunca interrumpe el login -- si el correo falla (SMTP sin configurar, servidor
+    caido) solo se registra en el log; la campana de notificaciones avisa igual."""
+    try:
+        from app.services.cola_correos import CorreoService
+
+        CorreoService.avisar_bloqueo_de_cuenta(session, bloqueado, _equipo())
+    except Exception:
+        session.rollback()
+        logger.exception("No se pudo avisar a los administradores del bloqueo de '%s'", bloqueado.nombre_usuario)

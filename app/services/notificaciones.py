@@ -17,7 +17,8 @@ from decimal import Decimal
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
-from app.db.models import ControlDeTasa, CuentaPorCobrar, CuentaPorPagar, Inventario
+from app.db.models import ControlDeTasa, CuentaPorCobrar, CuentaPorPagar, Inventario, Usuario
+from app.services.bloqueo import esta_bloqueado
 from app.services.licencia import ESTADO_ACTIVA, LicenciaService
 from app.services.usuarios import UsuarioService
 
@@ -64,6 +65,8 @@ class NotificacionesService:
             NotificacionesService._productos_por_vencer,
             NotificacionesService._tasa_sin_registrar,
             NotificacionesService._licencia,
+            NotificacionesService._cuentas_bloqueadas,
+            NotificacionesService._cambios_directos_en_la_base,
         )
         notificaciones: list[Notificacion] = []
         for fuente in fuentes:
@@ -209,3 +212,51 @@ class NotificacionesService:
                 )
                 return Notificacion("licencia", "Licencia", detalle, "config_empresa", SEVERIDAD_MEDIA)
         return None
+
+    @staticmethod
+    def _cuentas_bloqueadas(session: Session, id_usuario: int, hoy: date) -> Notificacion | None:
+        """Cuentas bloqueadas ahora mismo por intentos fallidos: puede ser alguien probando
+        claves (el aviso por correo a los ADMIN es aparte, ver CorreoService)."""
+        if not UsuarioService.verificar_permiso(session, id_usuario, "usuarios", "ver"):
+            return None
+        bloqueados = [
+            u.nombre_usuario for u in session.query(Usuario).filter(Usuario.bloqueado_desde.isnot(None)).all()
+        ]
+        # esta_bloqueado descarta los bloqueos ya vencidos (la columna se limpia en el proximo login).
+        nombres = [
+            u.nombre_usuario
+            for u in session.query(Usuario).filter(Usuario.bloqueado_desde.isnot(None)).all()
+            if esta_bloqueado(u)
+        ]
+        del bloqueados
+        if not nombres:
+            return None
+        muestra = ", ".join(nombres[:3]) + ("…" if len(nombres) > 3 else "")
+        return Notificacion(
+            "cuentas_bloqueadas",
+            "Cuentas bloqueadas",
+            f"{_plural(len(nombres), 'cuenta bloqueada', 'cuentas bloqueadas')} por intentos fallidos: {muestra}",
+            "usuarios",
+            SEVERIDAD_ALTA,
+        )
+
+    @staticmethod
+    def _cambios_directos_en_la_base(session: Session, id_usuario: int, hoy: date) -> Notificacion | None:
+        """Cambios a tablas de dinero/stock hechos por fuera de la app en las ultimas 24 h
+        (Excel, SSMS, otro programa conectado con la clave de la base): ver
+        migrations/0091. Solo para quien puede ver la auditoria."""
+        if not UsuarioService.verificar_permiso(session, id_usuario, "auditoria", "ver"):
+            return None
+        from app.services.auditoria_base import AuditoriaBaseService
+
+        cantidad = AuditoriaBaseService.contar_cambios_fuera_de_la_app(session, horas=24)
+        if not cantidad:
+            return None
+        return Notificacion(
+            "cambios_directos_base",
+            "Cambios directos en la base de datos",
+            f"{_plural(cantidad, 'cambio', 'cambios')} a dinero o inventario hechos fuera de la aplicación "
+            "en las últimas 24 horas",
+            "auditoria",
+            SEVERIDAD_ALTA,
+        )

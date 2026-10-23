@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Permiso, Rol, RolPermiso, Usuario
 from app.services.auditoria import AuditoriaService
+from app.services.bloqueo import esta_bloqueado
 
 # El catalogo de permisos (recurso + accion) se mantiene fijo via schema/seed, no se
 # gestiona desde aqui. Este servicio solo administra roles y la matriz rol_permisos.
@@ -45,7 +46,7 @@ def require_permiso(session: Session, id_usuario: int | None, recurso: str, acci
     if usuario.estado != "ACTIVO":
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta inactivo")
 
-    if usuario.bloqueado_desde is not None:
+    if esta_bloqueado(usuario):
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
 
     if usuario.id_rol is None:
