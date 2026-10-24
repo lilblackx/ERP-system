@@ -93,6 +93,29 @@ def test_fundido_entrada_termina_con_opacidad_completa(qtbot):
     qtbot.waitUntil(lambda: dialogo.windowOpacity() == 1.0, timeout=2000)
 
 
+@pytest.mark.parametrize("crear", ["fundido", "contar", "sacudir"])
+def test_los_callbacks_de_una_animacion_no_mantienen_vivo_a_su_objetivo(qtbot, crear):
+    """Regresion: el cierre conectado a `finished` capturaba al objetivo (que es el padre de la animacion). Al
+    borrarse la animacion se soltaba esa ultima referencia y el objetivo se destruia a mitad de la destruccion de
+    su hija: Qt abortaba al azar (~1 de cada 8 corridas de esta suite). Ahora el cierre guarda solo una
+    referencia debil: soltar el objetivo lo libera aunque la animacion siga en curso."""
+    import gc
+    import weakref
+
+    animaciones.forzar(True)
+    objetivo = QLabel() if crear == "contar" else QDialog()
+    referencia = weakref.ref(objetivo)
+    if crear == "fundido":
+        fundido_entrada(objetivo, ms=500)
+    elif crear == "contar":
+        contar(objetivo, 10.0, lambda v: f"{v:.0f}", ms=500)
+    else:
+        sacudir(objetivo, ms=500)
+    del objetivo
+    gc.collect()
+    assert referencia() is None
+
+
 def test_sacudir_vuelve_a_la_posicion_original(qtbot):
     animaciones.forzar(True)
     ventana = QWidget()
@@ -443,6 +466,56 @@ def test_los_query_worker_encienden_el_gestor_salvo_los_silenciosos(qtbot):
         gestor.actividad.disconnect(eventos.append)
 
 
+def test_reemplazar_el_worker_apenas_termina_no_deja_la_barra_encendida(qtbot):
+    """Regresion: DashboardPanel.cargar_datos crea otro QueryWorker apenas el anterior deja de correr
+    (isRunning() False). Antes la cuenta de la barra se cerraba con la señal `finished`, encolada al propio
+    worker: si el panel lo soltaba antes de entregarla, se perdia y la barra quedaba cargando para siempre."""
+    from PySide6.QtCore import QTimer
+
+    from app.ui.workers import QueryWorker
+
+    class _Panel:
+        worker: QueryWorker | None = None
+        lanzados = 0
+
+        def cargar_datos(self):
+            if self.worker is not None and self.worker.isRunning():
+                return
+            self.worker = QueryWorker(lambda: _SesionFalsa(), lambda session: 1)
+            self.worker.start()
+            self.lanzados += 1
+
+    gestor = GestorActividad.instancia()
+    base = gestor._cuenta
+    panel = _Panel()
+    timer = QTimer()
+    timer.setInterval(0)
+    timer.timeout.connect(panel.cargar_datos)
+    timer.start()
+    qtbot.wait(1000)
+    timer.stop()
+    qtbot.waitUntil(lambda: panel.worker is not None and not panel.worker.isRunning(), timeout=3000)
+    qtbot.wait(50)
+    assert panel.lanzados > 20
+    assert gestor._cuenta == base
+
+
+def test_un_worker_que_falla_tambien_apaga_la_barra(qtbot):
+    from app.ui.workers import QueryWorker
+
+    def _falla(_session):
+        raise RuntimeError("sin base")
+
+    gestor = GestorActividad.instancia()
+    base = gestor._cuenta
+    worker = QueryWorker(lambda: _SesionFalsa(), _falla)
+    errores = []
+    worker.error.connect(errores.append)
+    worker.start()
+    qtbot.waitUntil(lambda: worker.isFinished() and gestor._cuenta == base, timeout=3000)
+    qtbot.waitUntil(lambda: errores == ["sin base"], timeout=3000)
+
+
 class _SesionFalsa:
     def close(self):
         pass
@@ -504,3 +577,38 @@ def test_grafico_sin_animar_se_dibuja_completo(qtbot):
     qtbot.addWidget(grafico)
     grafico.set_datos([{"monto": 10}, {"monto": 20}], animar=True)  # animaciones apagadas
     assert grafico._revelado == 1.0
+
+
+def test_una_tarea_lenta_queda_en_el_log_con_su_nombre(qtbot, monkeypatch, caplog):
+    """La barra de carga sigue encendida mientras una tarea corre: si una consulta se bloquea, el log dice cual."""
+    import logging
+    import time
+
+    from app.ui import workers
+    from app.ui.workers import QueryWorker
+
+    monkeypatch.setattr(workers, "SEGUNDOS_TAREA_LENTA", 0.05)
+
+    def _tarea_lenta(session):
+        time.sleep(0.3)
+        return 1
+
+    with caplog.at_level(logging.WARNING, logger="app.ui.workers"):
+        worker = QueryWorker(lambda: _SesionFalsa(), _tarea_lenta)
+        worker.start()
+        qtbot.waitUntil(worker.isFinished, timeout=3000)
+    avisos = [r.getMessage() for r in caplog.records]
+    assert any("_tarea_lenta" in m and "sin terminar" in m for m in avisos)
+    assert any("_tarea_lenta" in m and "termino tras" in m for m in avisos)
+
+
+def test_una_tarea_rapida_no_deja_aviso_en_el_log(qtbot, caplog):
+    import logging
+
+    from app.ui.workers import QueryWorker
+
+    with caplog.at_level(logging.WARNING, logger="app.ui.workers"):
+        worker = QueryWorker(lambda: _SesionFalsa(), lambda session: 1)
+        worker.start()
+        qtbot.waitUntil(worker.isFinished, timeout=3000)
+    assert caplog.records == []

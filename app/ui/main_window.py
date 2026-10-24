@@ -247,6 +247,11 @@ class MainWindow(QMainWindow):
 
         def _tarea(session):
             datos_estaciones.borrar_si_vencido()  # clave SQL de las estaciones: se borra a las 24 h
+            # Sin licencia activa el gate bloquea toda escritura de la cola y avisaria al usuario en cada
+            # pasada (cada 20 s). No es una accion suya: se omite. El servicio de Windows, que no pasa por
+            # el gate, sigue despachando la cola.
+            if not LicenciaService.estado_actual().permite_escritura:
+                return None
             cifrado_servidor.asegurar_clave(session)
             SmtpConfigService.migrar_password(session)
             return CorreoService.procesar_pendientes(session)

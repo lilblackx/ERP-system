@@ -9,6 +9,8 @@ No ayuda con las cargas que todavia corren en el hilo de la interfaz: ese hilo e
 tampoco puede pintar la barra. Esas hay que pasarlas a QueryWorker.
 """
 
+import threading
+
 from PySide6.QtCore import QEasingCurve, QObject, QRectF, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QWidget
@@ -32,6 +34,9 @@ class GestorActividad(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._cuenta = 0
+        # `terminar()` lo llama el hilo del worker al acabar su tarea (ver workers.py): la cuenta
+        # se protege con un candado, y la señal viaja encolada hasta la barra, que vive en la interfaz.
+        self._candado = threading.Lock()
 
     @classmethod
     def instancia(cls) -> "GestorActividad":
@@ -44,15 +49,19 @@ class GestorActividad(QObject):
         return self._cuenta > 0
 
     def iniciar(self) -> None:
-        self._cuenta += 1
-        if self._cuenta == 1:
+        with self._candado:
+            self._cuenta += 1
+            primera = self._cuenta == 1
+        if primera:
             self.actividad.emit(True)
 
     def terminar(self) -> None:
-        if self._cuenta == 0:
-            return
-        self._cuenta -= 1
-        if self._cuenta == 0:
+        with self._candado:
+            if self._cuenta == 0:
+                return
+            self._cuenta -= 1
+            ultima = self._cuenta == 0
+        if ultima:
             self.actividad.emit(False)
 
 

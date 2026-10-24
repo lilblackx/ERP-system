@@ -177,7 +177,7 @@ class VentasSemanaChart(QWidget):
             animacion.setEndValue(1.0)
             animacion.setEasingCurve(QEasingCurve.Type.OutCubic)
             animacion.valueChanged.connect(self._revelar)
-            animacion.finished.connect(lambda: self._revelar(1.0))
+            animacion.finished.connect(self._terminar_revelado)  # metodo, no lambda: ver animaciones._con_objetivo
             self._revelar(0.0)
             animacion.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
             return
@@ -187,6 +187,9 @@ class VentasSemanaChart(QWidget):
     def _revelar(self, fraccion) -> None:
         self._revelado = float(fraccion)
         self.update()
+
+    def _terminar_revelado(self) -> None:
+        self._revelar(1.0)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
         painter = QPainter(self)

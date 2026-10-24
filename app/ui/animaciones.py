@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import sys
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 
@@ -119,6 +120,23 @@ def animaciones_activas() -> bool:
 # ── Primitivas ──────────────────────────────────────────────────────────────
 
 
+def _con_objetivo(objetivo: QObject, accion: Callable[..., None]) -> Callable[..., None]:
+    """Callback para una señal de una animacion hija de `objetivo`: llama `accion(objetivo, *argumentos)`.
+
+    Un cierre que captura al propio objetivo lo mantiene vivo (referencia de Python) mientras exista la
+    animacion. Si es la ultima referencia, al borrarse la animacion (DeleteWhenStopped) se suelta y destruye
+    al objetivo a mitad de la destruccion de su propia hija: Qt aborta al azar. Aqui solo se guarda una
+    referencia debil, y `accion` recibe el objetivo como parametro en vez de capturarlo."""
+    referencia = weakref.ref(objetivo)
+
+    def _llamar(*argumentos) -> None:
+        destino = referencia()
+        if destino is not None:
+            accion(destino, *argumentos)
+
+    return _llamar
+
+
 def animar_propiedad(
     objetivo: QObject,
     propiedad: bytes,
@@ -157,7 +175,7 @@ def fundido_entrada(ventana: QWidget, ms: int = DURACION_MICRO) -> None:
         1.0,
         ms,
         QEasingCurve.Type.OutQuad,
-        al_terminar=lambda: ventana.setWindowOpacity(1.0),
+        al_terminar=_con_objetivo(ventana, lambda v: v.setWindowOpacity(1.0)),
     )
 
 
@@ -172,11 +190,11 @@ def sacudir(ventana: QWidget, amplitud: int = 8, ms: int = 280) -> None:
     for fraccion, factor in ((0.0, 0), (0.2, -1.0), (0.4, 0.8), (0.6, -0.5), (0.8, 0.25), (1.0, 0)):
         animacion.setKeyValueAt(fraccion, QPoint(origen.x() + int(amplitud * factor), origen.y()))
 
-    def _terminar() -> None:
-        ventana.move(origen)
-        ventana.setProperty("_sacudiendo", False)
+    def _terminar(v: QWidget) -> None:
+        v.move(origen)
+        v.setProperty("_sacudiendo", False)
 
-    animacion.finished.connect(_terminar)
+    animacion.finished.connect(_con_objetivo(ventana, _terminar))
     animacion.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
 
 
@@ -229,7 +247,7 @@ def _desvanecer(capa: _Destello, ms: int, alfa_inicial: int) -> None:
     animacion.setStartValue(float(alfa_inicial))
     animacion.setEndValue(0.0)
     animacion.setEasingCurve(QEasingCurve.Type.OutQuad)
-    animacion.valueChanged.connect(lambda valor: capa.set_alfa(int(valor)))
+    animacion.valueChanged.connect(_con_objetivo(capa, lambda c, valor: c.set_alfa(int(valor))))
     animacion.finished.connect(capa.deleteLater)
     animacion.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
 
@@ -274,13 +292,13 @@ def contar(etiqueta: QLabel, destino: float, formatear: Callable[[float], str], 
     animacion.setStartValue(0.0)
     animacion.setEndValue(float(destino))
     animacion.setEasingCurve(QEasingCurve.Type.OutCubic)
-    animacion.valueChanged.connect(lambda valor: etiqueta.setText(formatear(float(valor))))
+    animacion.valueChanged.connect(_con_objetivo(etiqueta, lambda e, valor: e.setText(formatear(float(valor)))))
 
-    def _terminar() -> None:
-        etiqueta.setText(formatear(destino))
-        etiqueta.setMinimumWidth(0)
+    def _terminar(e: QLabel) -> None:
+        e.setText(formatear(destino))
+        e.setMinimumWidth(0)
 
-    animacion.finished.connect(_terminar)
+    animacion.finished.connect(_con_objetivo(etiqueta, _terminar))
     animacion.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
 
 
@@ -296,7 +314,7 @@ def rebote(widget: QWidget, crecimiento: int = 4, ms: int = 260) -> None:
     animacion.setKeyValueAt(0.4, grande)
     animacion.setKeyValueAt(1.0, base)
     animacion.setEasingCurve(QEasingCurve.Type.OutCubic)
-    animacion.finished.connect(lambda: widget.setGeometry(base))
+    animacion.finished.connect(_con_objetivo(widget, lambda w: w.setGeometry(base)))
     animacion.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
 
 

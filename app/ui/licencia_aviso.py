@@ -22,20 +22,31 @@ class AvisoLicencia(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._ultimo_aviso = 0.0
+        # -inf y no 0.0: time.monotonic() parte del arranque del equipo, y en uno recien encendido
+        # (< INTERVALO_ENTRE_AVISOS_SEG) el primer aviso se saltaria.
+        self._ultimo_aviso = float("-inf")
+        self._mostrando = False
         self._bloqueado.connect(self._mostrar)
 
     def notificar(self, estado: EstadoLicencia) -> None:
         self._bloqueado.emit(estado.mensaje)
 
     def _mostrar(self, mensaje: str) -> None:
-        ahora = time.monotonic()
-        if ahora - self._ultimo_aviso < INTERVALO_ENTRE_AVISOS_SEG:
+        # El dialogo es modal y corre su propio bucle de eventos: mientras esta abierto siguen entrando
+        # avisos de los hilos de fondo. Sin esta guarda se apilaban uno encima de otro.
+        if self._mostrando:
             return
-        self._ultimo_aviso = ahora
-        MessageBox.warning(
-            None,
-            "Licencia",
-            f"{mensaje}\n\nLa aplicación está en modo solo lectura: no se pueden registrar ni "
-            "modificar datos. Gestione la licencia en Configuración > Licencia.",
-        )
+        if time.monotonic() - self._ultimo_aviso < INTERVALO_ENTRE_AVISOS_SEG:
+            return
+        self._mostrando = True
+        try:
+            MessageBox.warning(
+                None,
+                "Licencia",
+                f"{mensaje}\n\nLa aplicación está en modo solo lectura: no se pueden registrar ni "
+                "modificar datos. Gestione la licencia en Configuración > Licencia.",
+            )
+        finally:
+            self._mostrando = False
+            # El intervalo cuenta desde que el usuario cerro el aviso, no desde que se abrio.
+            self._ultimo_aviso = time.monotonic()

@@ -25,12 +25,18 @@ objeto QThread a mitad de ejecucion.
 """
 
 import logging
+import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 
 logger = logging.getLogger(__name__)
+
+# Una tarea que pasa de aqui sin terminar queda en el log: la barra de carga sigue encendida mientras corre, y sin este
+# aviso no hay forma de saber cual tarea (una consulta bloqueada, la red caida) la mantiene asi.
+SEGUNDOS_TAREA_LENTA = 30
 
 
 class QueryWorker(QThread):
@@ -63,21 +69,30 @@ class QueryWorker(QThread):
         # antes de start(): no deben encender la barra de carga (ver app/ui/carga.py).
         self.silencioso = False
         self._contado = False
-        self.started.connect(self._avisar_inicio)
-        self.finished.connect(self._avisar_fin)
+        self._candado_conteo = threading.Lock()
 
-    def _avisar_inicio(self) -> None:
+    def start(self, *args: Any, **kwargs: Any) -> None:
+        # La cuenta de la barra se abre aqui y se cierra al final de run(), no con las señales
+        # started/finished: esas llegan encoladas al propio worker, y si el panel lo reemplaza
+        # (`self._worker = QueryWorker(...)`) entre que el hilo termina y que la señal se entrega,
+        # Qt descarta la señal y la barra queda encendida para siempre.
         if not self.silencioso:
             from app.ui.carga import GestorActividad
 
-            self._contado = True
-            GestorActividad.instancia().iniciar()
+            with self._candado_conteo:
+                abrir = not self._contado
+                self._contado = True
+            if abrir:
+                GestorActividad.instancia().iniciar()
+        super().start(*args, **kwargs)
 
-    def _avisar_fin(self) -> None:
-        if self._contado:
+    def _cerrar_conteo(self) -> None:
+        with self._candado_conteo:
+            cerrar = self._contado
+            self._contado = False
+        if cerrar:
             from app.ui.carga import GestorActividad
 
-            self._contado = False
             GestorActividad.instancia().terminar()
 
     def emitir_progreso(self, valor: int) -> None:
@@ -85,14 +100,29 @@ class QueryWorker(QThread):
         self.progreso.emit(valor)
 
     def run(self) -> None:
-        session = self._session_factory()
+        nombre_tarea = getattr(self._tarea, "__name__", repr(self._tarea))
+        inicio = time.monotonic()
+        vigilante = threading.Timer(
+            SEGUNDOS_TAREA_LENTA,
+            logger.warning,
+            ("La tarea en segundo plano '%s' lleva mas de %d s sin terminar", nombre_tarea, SEGUNDOS_TAREA_LENTA),
+        )
+        vigilante.daemon = True
+        vigilante.start()
         try:
-            resultado = self._tarea(session, *self._args, **self._kwargs)
-        except Exception as exc:
-            nombre_tarea = getattr(self._tarea, "__name__", repr(self._tarea))
-            logger.exception("Fallo la tarea en segundo plano '%s'", nombre_tarea)
-            self.error.emit(str(exc))
-        else:
-            self.resultado.emit(resultado)
+            session = self._session_factory()
+            try:
+                resultado = self._tarea(session, *self._args, **self._kwargs)
+            except Exception as exc:
+                logger.exception("Fallo la tarea en segundo plano '%s'", nombre_tarea)
+                self.error.emit(str(exc))
+            else:
+                self.resultado.emit(resultado)
+            finally:
+                session.close()
         finally:
-            session.close()
+            vigilante.cancel()
+            duracion = time.monotonic() - inicio
+            if duracion >= SEGUNDOS_TAREA_LENTA:
+                logger.warning("La tarea en segundo plano '%s' termino tras %.0f s", nombre_tarea, duracion)
+            self._cerrar_conteo()
