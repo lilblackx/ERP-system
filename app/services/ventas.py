@@ -286,6 +286,17 @@ class VentaService:
         # require_permiso es una segunda validacion server-side, no confia en que la UI
         # lo hizo bien.
         ids_producto_items = {item["id_producto"] for item in items}
+        
+        # Verificar si hay artículos BCV en la factura
+        productos_bcv = {
+            prod.id_producto: prod
+            for prod in session.query(Inventario).filter(
+                Inventario.id_producto.in_(ids_producto_items),
+                Inventario.articulo_bcv == True
+            ).all()
+        }
+        hay_articulo_bcv = len(productos_bcv) > 0
+        
         # Existencia primero: sin este chequeo, un id_producto inexistente cae directo en
         # el gate de precio de lista de abajo (no aparece en precios_lista porque no
         # existe, ni en ninguna tabla) y el usuario ve "no tiene precio configurado" en
@@ -662,9 +673,9 @@ class VentaService:
         # ambas condiciones (antes era solo credito).
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
 
-        # Si hay porcentaje BCV, la cuenta por cobrar original debe tener saldo 0
+        # Si hay porcentaje BCV o artículos BCV, la cuenta por cobrar original debe tener saldo 0
         # (solo la cuenta BCV maneja el monto total)
-        if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
+        if (porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0) or hay_articulo_bcv:
             # La cuenta por cobrar original debe tener saldo 0
             if cxc is not None:
                 cxc.saldo_pendiente = Decimal("0.00")
@@ -673,22 +684,23 @@ class VentaService:
                 if condicion_pago == "contado":
                     cxc.estado = "pagada"
         else:
-            # Sin porcentaje BCV, comportamiento normal
+            # Sin porcentaje BCV ni artículos BCV, comportamiento normal
             ajuste_cxc = monto_iva - monto_descuento
             if cxc is not None and ajuste_cxc != 0:
                 cxc.saldo_pendiente += ajuste_cxc
 
-        # --- Cuenta por Cobrar BCV: si se especificó un porcentaje BCV, crear cuenta separada
-        # con el monto total de la factura (con porcentaje aplicado). La cuenta por cobrar
+        # --- Cuenta por Cobrar BCV: si se especificó un porcentaje BCV O hay artículos BCV,
+        # crear cuenta separada con el monto total de la factura. La cuenta por cobrar
         # original tiene saldo 0, solo la cuenta BCV maneja el monto total.
-        if porcentaje_bcv is not None:
-            porcentaje_bcv = Decimal(str(porcentaje_bcv))
-            if porcentaje_bcv > 0:
+        if porcentaje_bcv is not None or hay_articulo_bcv:
+            porcentaje_bcv_valor = Decimal(str(porcentaje_bcv)) if porcentaje_bcv is not None else Decimal("0.00")
+            if porcentaje_bcv_valor > 0 or hay_articulo_bcv:
                 # Debug: imprimir valores para verificar el cálculo
-                logger.info(f"BCV - Porcentaje: {porcentaje_bcv}%")
-                logger.info(f"BCV - Total a cobrar (con porcentaje): {total_a_cobrar}")
+                logger.info(f"BCV - Porcentaje: {porcentaje_bcv_valor}%")
+                logger.info(f"BCV - Artículos BCV: {hay_articulo_bcv}")
+                logger.info(f"BCV - Total a cobrar: {total_a_cobrar}")
 
-                # Crear cuenta por cobrar BCV con el monto total de la factura (con porcentaje)
+                # Crear cuenta por cobrar BCV con el monto total de la factura
                 estado_bcv = "pendiente" if condicion_pago == "credito" else "pagada"
                 logger.info(f"BCV - Creando cuenta con estado: {estado_bcv}, condición pago: {condicion_pago}")
                 cxc_bcv = CuentaPorCobrarBCV(
@@ -698,7 +710,7 @@ class VentaService:
                     estado=estado_bcv,
                     creado_por=id_usuario,
                     fecha_creacion=datetime.now(),
-                    porcentaje=porcentaje_bcv,
+                    porcentaje=porcentaje_bcv_valor,
                     dias_credito=(dias_credito_aplicados if condicion_pago == "credito" else None),
                     fecha_emision=(factura.fecha_emision.date() if factura.fecha_emision else date.today()),
                 )
