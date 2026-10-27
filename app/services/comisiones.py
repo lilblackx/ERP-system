@@ -205,7 +205,7 @@ class ComisionService:
             query = query.filter(ComisionFactura.estado_pago == estado_pago)
 
         if solo_con_porcentaje_bcv:
-            # Filtrar solo facturas que tienen cuenta BCV con porcentaje > 0 O productos marcados como artículo BCV
+            # Filtrar facturas con cuenta BCV (porcentaje > 0) O productos marcados como artículo BCV
             from sqlalchemy import exists, or_
 
             subquery_cuenta_bcv = exists().where(
@@ -215,13 +215,13 @@ class ComisionService:
             # Verificar si el producto del detalle está marcado como artículo BCV
             subquery_articulo_bcv = exists().where(
                 Inventario.id_producto == FacturaDetalle.id_producto_factura,
-                Inventario.articulo_bcv == True,
+                Inventario.articulo_bcv,
             )
             query = query.join(ComisionFactura.detalle).filter(or_(subquery_cuenta_bcv, subquery_articulo_bcv))
 
         if solo_sin_porcentaje_bcv:
-            # Filtrar solo facturas que NO tienen cuenta BCV con porcentaje > 0 Y NO tienen productos marcados como artículo BCV
-            from sqlalchemy import exists, and_, not_
+            # Filtrar facturas SIN cuenta BCV (porcentaje > 0) Y SIN productos artículo BCV
+            from sqlalchemy import and_, exists, not_
 
             subquery_cuenta_bcv = exists().where(
                 CuentaPorCobrarBCV.id_factura == FacturaDetalle.id_factura,
@@ -230,9 +230,11 @@ class ComisionService:
             # Verificar si el producto del detalle está marcado como artículo BCV
             subquery_articulo_bcv = exists().where(
                 Inventario.id_producto == FacturaDetalle.id_producto_factura,
-                Inventario.articulo_bcv == True,
+                Inventario.articulo_bcv,
             )
-            query = query.join(ComisionFactura.detalle).filter(and_(not_(subquery_cuenta_bcv), not_(subquery_articulo_bcv)))
+            query = query.join(ComisionFactura.detalle).filter(
+                and_(not_(subquery_cuenta_bcv), not_(subquery_articulo_bcv))
+            )
 
         return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
 
@@ -265,7 +267,7 @@ class ComisionService:
         )
 
         if solo_con_porcentaje_bcv:
-            # Filtrar solo facturas que tienen cuenta BCV con porcentaje > 0 O productos marcados como artículo BCV
+            # Filtrar facturas con cuenta BCV (porcentaje > 0) O productos marcados como artículo BCV
             from sqlalchemy import exists, or_
 
             subquery_cuenta_bcv = exists().where(
@@ -275,13 +277,13 @@ class ComisionService:
             # Verificar si el producto del detalle está marcado como artículo BCV
             subquery_articulo_bcv = exists().where(
                 Inventario.id_producto == FacturaDetalle.id_producto_factura,
-                Inventario.articulo_bcv == True,
+                Inventario.articulo_bcv,
             )
             query = query.join(ComisionFactura.detalle).filter(or_(subquery_cuenta_bcv, subquery_articulo_bcv))
 
         if solo_sin_porcentaje_bcv:
-            # Filtrar solo facturas que NO tienen cuenta BCV con porcentaje > 0 Y NO tienen productos marcados como artículo BCV
-            from sqlalchemy import exists, and_, not_
+            # Filtrar facturas SIN cuenta BCV (porcentaje > 0) Y SIN productos artículo BCV
+            from sqlalchemy import and_, exists, not_
 
             subquery_cuenta_bcv = exists().where(
                 CuentaPorCobrarBCV.id_factura == FacturaDetalle.id_factura,
@@ -290,9 +292,11 @@ class ComisionService:
             # Verificar si el producto del detalle está marcado como artículo BCV
             subquery_articulo_bcv = exists().where(
                 Inventario.id_producto == FacturaDetalle.id_producto_factura,
-                Inventario.articulo_bcv == True,
+                Inventario.articulo_bcv,
             )
-            query = query.join(ComisionFactura.detalle).filter(and_(not_(subquery_cuenta_bcv), not_(subquery_articulo_bcv)))
+            query = query.join(ComisionFactura.detalle).filter(
+                and_(not_(subquery_cuenta_bcv), not_(subquery_articulo_bcv))
+            )
 
         return query.order_by(ComisionFactura.fecha_calculo.desc()).all()
 

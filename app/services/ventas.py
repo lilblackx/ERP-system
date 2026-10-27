@@ -286,17 +286,16 @@ class VentaService:
         # require_permiso es una segunda validacion server-side, no confia en que la UI
         # lo hizo bien.
         ids_producto_items = {item["id_producto"] for item in items}
-        
+
         # Verificar si hay artículos BCV en la factura
         productos_bcv = {
             prod.id_producto: prod
-            for prod in session.query(Inventario).filter(
-                Inventario.id_producto.in_(ids_producto_items),
-                Inventario.articulo_bcv == True
-            ).all()
+            for prod in session.query(Inventario)
+            .filter(Inventario.id_producto.in_(ids_producto_items), Inventario.articulo_bcv)
+            .all()
         }
         hay_articulo_bcv = len(productos_bcv) > 0
-        
+
         # Existencia primero: sin este chequeo, un id_producto inexistente cae directo en
         # el gate de precio de lista de abajo (no aparece en precios_lista porque no
         # existe, ni en ninguna tabla) y el usuario ve "no tiene precio configurado" en
