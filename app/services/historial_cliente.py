@@ -1,5 +1,6 @@
 """Servicio para obtener el historial de facturas y pagos de un cliente."""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal, TypedDict
 
@@ -143,18 +144,30 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
 
     # Construir historial agrupado por factura
     historial: list[HistorialItem] = []
+    
+    # Calcular saldo corrido acumulativo
+    saldo_corrido_acumulado = Decimal("0.00")
+    
+    # Ordenar facturas por fecha de emisión ascendente para calcular saldo corrido
+    facturas_ordenadas = sorted(facturas, key=lambda f: f.fecha_emision or datetime.min)
 
-    for factura in facturas:
+    for factura in facturas_ordenadas:
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
-        # Una factura con porcentaje BCV deja su cuenta normal en saldo 0 y lleva la deuda real
-        # en cuentas_por_cobrar_bcv: sin mirarla, el historial mostraba saldo 0 estando pendiente.
-        cxc_bcv = (
-            session.query(CuentaPorCobrarBCV)
-            .filter(CuentaPorCobrarBCV.id_factura == factura.id_factura, CuentaPorCobrarBCV.porcentaje > 0)
-            .first()
-        )
         fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d %H:%M") if factura.fecha_emision else ""
         fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
+
+        # Calcular monto de la factura
+        monto_factura = factura.total_venta - (factura.monto_descuento or 0) + (factura.monto_iva or 0)
+        
+        # Calcular pagos aplicados a esta factura
+        pagos_aplicados = Decimal("0.00")
+        if factura.id_factura in pagos_por_factura:
+            for pago in pagos_por_factura[factura.id_factura]:
+                pagos_aplicados += pago.monto
+        
+        # Calcular saldo corrido para esta factura
+        saldo_corrido = saldo_corrido_acumulado + monto_factura - pagos_aplicados
+        saldo_corrido_acumulado = saldo_corrido
 
         # Agregar la factura
         item_factura: HistorialItem = {
@@ -169,7 +182,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             # Lo que paga el cliente (subtotal - descuento + IVA), igual que el saldo de la cuenta
             # por cobrar. total_venta es solo el subtotal de las lineas: con IVA o descuento el
             # monto de la fila no cuadraba con su saldo (ni con el listado de Facturacion).
-            "monto": factura.total_venta - (factura.monto_descuento or 0) + (factura.monto_iva or 0),
+            "monto": monto_factura,
             "estado_factura": factura.estado_factura or "EMITIDA",
             "condicion_pago": factura.condicion_pago or "",
             "dias_credito": factura.dias_credito_aplicados,
@@ -177,9 +190,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "metodo_pago": None,
             "monto_vuelto": factura.monto_vuelto,
             "metodo_vuelto": factura.metodo_vuelto,
-            "saldo_corrido": (
-                cxc_bcv.saldo_pendiente if cxc_bcv else (cxc.saldo_pendiente if cxc else Decimal("0.00"))
-            ),
+            "saldo_corrido": saldo_corrido,
         }
         historial.append(item_factura)
 
@@ -261,6 +272,9 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     "saldo_corrido": Decimal("0.00"),
                 }
             )
+
+    # Invertir el orden del historial para mostrar de más reciente a más antiguo
+    historial.reverse()
 
     # Agregar notas de crédito disponibles como saldo a favor
     for nota in notas_credito:
