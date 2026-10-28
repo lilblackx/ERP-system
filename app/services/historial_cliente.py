@@ -144,10 +144,10 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
 
     # Construir historial agrupado por factura
     historial: list[HistorialItem] = []
-    
+
     # Calcular saldo corrido acumulativo
     saldo_corrido_acumulado = Decimal("0.00")
-    
+
     # Ordenar facturas por fecha de emisión ascendente para calcular saldo corrido
     facturas_ordenadas = sorted(facturas, key=lambda f: f.fecha_emision or datetime.min)
 
@@ -158,13 +158,13 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
 
         # Calcular monto de la factura
         monto_factura = factura.total_venta - (factura.monto_descuento or 0) + (factura.monto_iva or 0)
-        
+
         # Calcular pagos aplicados a esta factura
         pagos_aplicados = Decimal("0.00")
         if factura.id_factura in pagos_por_factura:
             for pago in pagos_por_factura[factura.id_factura]:
                 pagos_aplicados += pago.monto
-        
+
         # Calcular saldo corrido para esta factura
         saldo_corrido = saldo_corrido_acumulado + monto_factura - pagos_aplicados
         saldo_corrido_acumulado = saldo_corrido
