@@ -1107,7 +1107,7 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
         self.se_realizo_cobro = False
         self.ver_todas_facturas = False
         self.pagina_actual = 0
-        self.filas_por_pagina = 10
+        self.filas_por_pagina = 20
 
         self.setWindowTitle(f"Detalle de Cuentas - {cliente.nombre_razon_social if cliente else 'Cliente'}")
         ajustar_tamano(self, 900, 600)
