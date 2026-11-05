@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models import (
     Caja,
     CuentaPorCobrar,
+    CuentaPorCobrarBCV,
     CuentaPorPagar,
     FacturaVenta,
     Inventario,
@@ -90,12 +91,23 @@ class DashboardService:
 
     @staticmethod
     def _kpi_por_cobrar(session: Session, hoy: date) -> dict:
-        saldo_total = (
+        # Sumar saldos de cuentas por cobrar normales
+        saldo_normal = (
             session.query(func.coalesce(func.sum(CuentaPorCobrar.saldo_pendiente), 0))
             .filter(CuentaPorCobrar.estado.in_(CUENTA_ABIERTA))
             .scalar()
         )
 
+        # Sumar saldos de cuentas por cobrar BCV
+        saldo_bcv = (
+            session.query(func.coalesce(func.sum(CuentaPorCobrarBCV.saldo_pendiente), 0))
+            .filter(CuentaPorCobrarBCV.estado.in_(CUENTA_ABIERTA))
+            .scalar()
+        )
+
+        saldo_total = saldo_normal + saldo_bcv
+
+        # Contar facturas vencidas (normales)
         facturas_vencidas = (
             session.query(func.count(CuentaPorCobrar.id_cuenta_por_cobrar))
             .filter(
@@ -105,7 +117,19 @@ class DashboardService:
             .scalar()
         )
 
-        return {"saldo_total": saldo_total, "facturas_vencidas": facturas_vencidas}
+        # Contar facturas vencidas BCV
+        facturas_vencidas_bcv = (
+            session.query(func.count(CuentaPorCobrarBCV.id_cuenta_por_cobrar))
+            .filter(
+                CuentaPorCobrarBCV.estado.in_(CUENTA_ABIERTA),
+                CuentaPorCobrarBCV.fecha_vencimiento < hoy,
+            )
+            .scalar()
+        )
+
+        total_vencidas = facturas_vencidas + facturas_vencidas_bcv
+
+        return {"saldo_total": saldo_total, "facturas_vencidas": total_vencidas}
 
     @staticmethod
     def _kpi_por_pagar(session: Session, hoy: date) -> dict:

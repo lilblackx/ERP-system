@@ -1107,7 +1107,7 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
         self.se_realizo_cobro = False
         self.ver_todas_facturas = False
         self.pagina_actual = 0
-        self.filas_por_pagina = 20
+        self.filas_por_pagina = 10
 
         self.setWindowTitle(f"Detalle de Cuentas - {cliente.nombre_razon_social if cliente else 'Cliente'}")
         ajustar_tamano(self, 900, 600)
@@ -1726,12 +1726,16 @@ class CuentasPorCobrarPanel(QWidget):
             self.filtro_vendedor = self.vendedor_combo.currentData()
             self._tasa_paralelo = self._cargar_tasa_actual(session)
 
+            # Si hay búsqueda, traer todos los registros para filtrar localmente
+            por_pagina = 10000 if self.texto_busqueda else POR_PAGINA
+            pagina = 1 if self.texto_busqueda else self.pagina_actual
+
             resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(
                 session,
                 estado=self.estado_combo.currentData(),
                 id_vendedor=self.filtro_vendedor,
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
+                pagina=pagina,
+                por_pagina=por_pagina,
                 id_usuario=self.usuario.id_usuario,
             )
 
@@ -1758,9 +1762,19 @@ class CuentasPorCobrarPanel(QWidget):
                     logger.warning(f"Error procesando cliente data: {e}")
                     continue
 
+            # Aplicar paginación local si hay búsqueda
+            if self.texto_busqueda:
+                total_filtrado = len(clientes_filtrados)
+                inicio = (self.pagina_actual - 1) * POR_PAGINA
+                fin = inicio + POR_PAGINA
+                clientes_filtrados = clientes_filtrados[inicio:fin]
+                total = total_filtrado
+            else:
+                total = resultado["total"]
+
             # Actualizar resultado con clientes filtrados
             resultado["items"] = clientes_filtrados
-            resultado["total"] = len(clientes_filtrados)
+            resultado["total"] = total
 
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
