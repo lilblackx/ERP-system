@@ -50,6 +50,7 @@ from app.ui.styles import (
     aplicar_sombra,
     color_con_alpha,
 )
+from app.utils.impresora_local import obtener_impresora_local
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -577,25 +578,25 @@ class FacturaDetalleDialog(MixinPermisos, QDialog):
     def imprimir(self) -> None:
         try:
             config_empresa = EmpresaService.obtener_configuracion(self.session, id_usuario=self.id_usuario)
-            if not config_empresa or not config_empresa.impresora_predeterminada:
+            nombre_impresora = obtener_impresora_local(config_empresa)
+            if not config_empresa or not nombre_impresora:
                 MessageBox.warning(
                     self,
                     "Sin impresora configurada",
-                    "No hay una impresora predeterminada configurada. Ve a Configuración > Empresa para configurarla.",
+                    "Esta estación no tiene una impresora predeterminada configurada. "
+                    "Ve a Configuración > Empresa para configurarla.",
                 )
                 return
 
             ocupar_boton(self.btn_imprimir)
             try:
-                ruta_pdf = imprimir_factura(self.datos, config_empresa, config_empresa.impresora_predeterminada)
+                ruta_pdf = imprimir_factura(self.datos, config_empresa, nombre_impresora)
             finally:
                 liberar_boton(self.btn_imprimir)
             MessageBox.information(
                 self,
                 "Impresión enviada",
-                f"PDF guardado en: {ruta_pdf}"
-                if ruta_pdf
-                else f"Factura enviada a: {config_empresa.impresora_predeterminada}",
+                f"PDF guardado en: {ruta_pdf}" if ruta_pdf else f"Factura enviada a: {nombre_impresora}",
             )
         except PermisoDenegadoError:
             MessageBox.warning(

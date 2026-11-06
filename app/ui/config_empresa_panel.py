@@ -45,6 +45,7 @@ from app.ui.styles import (
     COLOR_WHITE,
     ICON_CHEVRON_DOWN_URL,
 )
+from app.utils.impresora_local import guardar_impresora_local, obtener_impresora_local
 from app.utils.rif import formatear_rif
 
 logger = logging.getLogger(__name__)
@@ -271,7 +272,8 @@ class ConfigEmpresaPanel(MixinPermisos, QWidget):
         impresora_layout = QHBoxLayout()
         impresora_layout.setSpacing(12)
 
-        lbl_impresora = QLabel("Impresora predeterminada:")
+        lbl_impresora = QLabel("Impresora de esta estación:")
+        lbl_impresora.setToolTip("Se guarda solo en este equipo; no afecta a las demás estaciones.")
         lbl_impresora.setStyleSheet(lbl_style)
 
         # Estilo propio (copiado literal del bloque QComboBox de GLOBAL_QSS en styles.py,
@@ -376,6 +378,8 @@ class ConfigEmpresaPanel(MixinPermisos, QWidget):
         session = self.session_factory()
         try:
             config = EmpresaService.obtener_configuracion(session, self.usuario.id_usuario)
+            # La impresora es por estacion (QSettings), no parte de `config` (BD compartida).
+            self._cargar_impresoras_disponibles(obtener_impresora_local(config))
             if config:
                 self.rif_input.setText(formatear_rif(config.rif_empresa, "J"))
                 self.nombre_input.setText(config.razon_social_empresa or "")
@@ -388,7 +392,6 @@ class ConfigEmpresaPanel(MixinPermisos, QWidget):
                 # coincide con el default (desmarcado) del constructor no dispararia nada.
                 self.iva_porcentaje_input.setEnabled(self.iva_activo_check.isChecked())
                 self.iva_porcentaje_input.set_value(config.iva_porcentaje)
-                self._cargar_impresoras_disponibles(config.impresora_predeterminada)
 
                 if config.logotipo_empresa:
                     self._mostrar_logo(config.logotipo_empresa)
@@ -471,10 +474,12 @@ class ConfigEmpresaPanel(MixinPermisos, QWidget):
                 pie_pagina=self.footer_input.toPlainText().strip() or None,
                 iva_activo=self.iva_activo_check.isChecked(),
                 iva_porcentaje=self.iva_porcentaje_input.get_value(),
-                impresora_predeterminada=self.impresora_combo.currentData(),
                 modificado_por=self.usuario.id_usuario,
             )
-            MessageBox.information(self, "Éxito", "Configuración guardada correctamente.")
+            guardar_impresora_local(self.impresora_combo.currentData())
+            MessageBox.information(
+                self, "Configuración guardada", "Los datos de la empresa se guardaron correctamente."
+            )
 
             # Actualizamos también en la ventana principal (sidebar)
             main_window = self.window()

@@ -67,6 +67,7 @@ from app.ui.styles import (
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 from app.ui.workers import QueryWorker
+from app.utils.impresora_local import obtener_impresora_local
 
 logger = logging.getLogger(__name__)
 
@@ -103,11 +104,12 @@ def _imprimir_factura_en_predeterminada(session, id_factura: int, id_usuario: in
     y fallaba sin imprimir nada -- ver FacturacionPanel._disparar_impresion_automatica.
     """
     config_empresa = EmpresaService.obtener_configuracion(session, id_usuario=id_usuario)
-    if not config_empresa or not config_empresa.impresora_predeterminada:
+    nombre_impresora = obtener_impresora_local(config_empresa)
+    if not config_empresa or not nombre_impresora:
         return None
     datos_factura = VentaService.obtener_factura(session, id_factura, id_usuario=id_usuario)
-    imprimir_factura(datos_factura, config_empresa, config_empresa.impresora_predeterminada)
-    return config_empresa.impresora_predeterminada
+    imprimir_factura(datos_factura, config_empresa, nombre_impresora)
+    return nombre_impresora
 
 
 def _filas_facturas_query(

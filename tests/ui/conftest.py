@@ -1,8 +1,9 @@
 import pytest
-from PySide6.QtCore import QCoreApplication, QTimer
+from PySide6.QtCore import QCoreApplication, QSettings, QTimer
 from PySide6.QtWidgets import QWidget
 
 from app.ui import animaciones, notificaciones_leidas, permisos_ui
+from app.utils import impresora_local
 
 _single_shot_original = QTimer.singleShot
 
@@ -24,6 +25,14 @@ def _archivo_de_leidas_aislado(tmp_path, monkeypatch):
     """El estado leido/no leido de la campana se guarda en un JSON local: en los tests va a un
     directorio temporal para no leer ni ensuciar el archivo real de la instalacion."""
     monkeypatch.setattr(notificaciones_leidas, "ARCHIVO_LEIDAS", tmp_path / "notificaciones_leidas.json")
+
+
+@pytest.fixture(autouse=True)
+def _impresora_local_aislada(tmp_path, monkeypatch):
+    """La impresora de la estacion vive en QSettings (registro de Windows): en los tests va a un .ini
+    temporal para no leer ni pisar la configuracion de la PC real."""
+    ruta = str(tmp_path / "estacion.ini")
+    monkeypatch.setattr(impresora_local, "_settings", lambda: QSettings(ruta, QSettings.Format.IniFormat))
 
 
 @pytest.fixture(autouse=True)

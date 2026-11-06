@@ -89,6 +89,26 @@ def test_editar_y_guardar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     assert isinstance(llamada["iva_porcentaje"], Decimal)
 
 
+def test_la_impresora_se_guarda_en_la_estacion_y_no_en_la_bd(qtbot, monkeypatch):
+    from app.utils.impresora_local import obtener_impresora_local
+
+    panel = _crear_panel(qtbot, monkeypatch, config=None)
+    panel.impresora_combo.addItem("HP LaserJet", "HP LaserJet")
+    panel.impresora_combo.setCurrentIndex(panel.impresora_combo.findData("HP LaserJet"))
+
+    llamada = {}
+    monkeypatch.setattr(
+        "app.ui.config_empresa_panel.EmpresaService.guardar_configuracion", lambda **kw: llamada.update(kw)
+    )
+    monkeypatch.setattr("app.ui.config_empresa_panel.MessageBox.information", lambda *a, **k: None)
+    monkeypatch.setattr("app.utils.impresora_local.QPrinterInfo.availablePrinters", staticmethod(lambda: []))
+
+    panel.guardar_cambios()
+
+    assert "impresora_predeterminada" not in llamada
+    assert obtener_impresora_local(None) == "HP LaserJet"
+
+
 def test_porcentaje_se_ajusta_a_100_si_excede(qtbot, monkeypatch):
     panel = _crear_panel(qtbot, monkeypatch, config=None)
     panel.iva_activo_check.setChecked(True)

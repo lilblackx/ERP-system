@@ -55,7 +55,6 @@ class EmpresaService:
         pie_pagina: str | None = None,
         iva_activo: bool = False,
         iva_porcentaje: Decimal | int | str = Decimal("16.00"),
-        impresora_predeterminada: str | None = None,
         modificado_por: int | None = None,
     ) -> ConfiguracionEmpresa:
         """Actualiza el registro singleton, o lo crea si no existe ninguno.
@@ -66,6 +65,8 @@ class EmpresaService:
         iva_porcentaje se valida en [0, 100] independientemente de iva_activo -- guardar
         un porcentaje invalido mientras el IVA esta desactivado igual dejaria un valor
         corrupto listo para aplicarse mal el dia que se reactive.
+
+        La impresora ya NO se guarda aca: es por estacion (app/utils/impresora_local.py).
         """
         require_permiso(session, modificado_por, "empresa", "editar")
         iva_porcentaje = Decimal(str(iva_porcentaje))
@@ -85,7 +86,6 @@ class EmpresaService:
         config.pie_pagina_empresa = pie_pagina
         config.iva_activo = iva_activo
         config.iva_porcentaje = iva_porcentaje
-        config.impresora_predeterminada = impresora_predeterminada
         config.modificado_por = modificado_por
         if logo_bytes is not _SENTINEL:
             config.logotipo_empresa = logo_bytes

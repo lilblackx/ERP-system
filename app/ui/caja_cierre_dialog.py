@@ -51,6 +51,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_sombra,
 )
+from app.utils.impresora_local import obtener_impresora_local
 
 logger = logging.getLogger(__name__)
 
@@ -459,7 +460,7 @@ class CajaCierreDialog(QDialog):
                     observaciones = f"Diferencia de ${abs(diferencia):,.2f} ({tipo_dif}): {observaciones}"
 
             # Imprimir usando la impresora configurada
-            nombre_impresora = config_empresa.impresora_predeterminada if config_empresa else None
+            nombre_impresora = obtener_impresora_local(config_empresa)
             if nombre_impresora:
                 imprimir_corte_caja(
                     self.caja,
