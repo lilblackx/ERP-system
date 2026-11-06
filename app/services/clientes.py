@@ -139,7 +139,12 @@ def create_cliente(session: Session, **datos) -> Cliente:
     require_permiso(session, datos.get("creado_por"), "clientes", "crear")
     _validar_requeridos(datos)
 
-    # Generar código cliente incremental si no se proporciona
+    # codigo_cliente es opcional: ausente o None -> se autogenera incrementalmente
+    # (la UI manda None cuando el campo queda vacio). Pero un "" explicito es un
+    # intento de guardar vacio y se rechaza, mismo criterio "no permite vaciar" que
+    # update_cliente().
+    if datos.get("codigo_cliente") == "":
+        raise ValueError("codigo_cliente es requerido")
     if not datos.get("codigo_cliente"):
         datos["codigo_cliente"] = _generar_codigo_cliente_incremental(session)
 
