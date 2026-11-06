@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import CategoriaCliente, Cliente, Vendedor
+from app.services.clientes import _generar_codigo_cliente_incremental
 from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from app.ui.mapa_widget import MapaWidget
@@ -168,6 +169,12 @@ class ClienteFormDialog(QDialog):
 
         if cliente:
             self._precargar(cliente)
+        else:
+            # Para nuevos clientes, deshabilitar campo de código y generar código incremental
+            self.codigo_input.setEnabled(False)
+            self.codigo_input.setStyleSheet("background-color: #f1f5f9; color: #64748b;")
+            codigo_generado = _generar_codigo_cliente_incremental(self.session)
+            self.codigo_input.setText(codigo_generado)
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -233,12 +240,13 @@ class ClienteFormDialog(QDialog):
         grid1.setColumnStretch(1, 1)
 
         # Código
-        lbl_cod = QLabel(f"Código {ASTERISCO_REQUERIDO}")
+        lbl_cod = QLabel("Código")
         lbl_cod.setProperty("class", "FormLabel")
         self.codigo_input = QLineEdit()
-        self.codigo_input.setPlaceholderText("Ej: CLI-001")
+        self.codigo_input.setPlaceholderText("Generado automáticamente")
         self.codigo_input.setMaxLength(20)
         self.codigo_input.setFixedHeight(32)
+        self.codigo_input.setReadOnly(True)
         grid1.addWidget(lbl_cod, 0, 0, 1, 2)
         grid1.addWidget(self.codigo_input, 1, 0, 1, 2)
 
@@ -514,6 +522,9 @@ class ClienteFormDialog(QDialog):
 
     def _precargar(self, cliente: Cliente):
         self.codigo_input.setText(cliente.codigo_cliente or "")
+        # Mantener el campo de código como read-only siempre
+        self.codigo_input.setEnabled(False)
+        self.codigo_input.setStyleSheet("background-color: #f1f5f9; color: #64748b;")
 
         # id_legal contiene solo la letra (V, J, G, E, P)
         # identificacion_cliente contiene solo el número
@@ -546,10 +557,7 @@ class ClienteFormDialog(QDialog):
             self._sugerir_vendedor_por_ubicacion(lat, lng)
 
     def _validar_y_aceptar(self):
-        if not self.codigo_input.text().strip():
-            MessageBox.warning(self, "Dato requerido", "El código del cliente es obligatorio.")
-            self.codigo_input.setFocus()
-            return
+        # El código no requiere validación ya que es generado automáticamente y read-only
         if not self.identificacion_input.text().strip():
             MessageBox.warning(
                 self,

@@ -29,6 +29,28 @@ def _validar_requeridos(datos: dict) -> None:
         raise ValueError("longitud es requerida")
 
 
+def _generar_codigo_cliente_incremental(session: Session) -> str:
+    """Genera un código de cliente incremental basado en el código numérico mayor existente."""
+    # Buscar todos los códigos de cliente que sean numéricos
+    codigos = session.query(Cliente.codigo_cliente).filter(Cliente.codigo_cliente.isnot(None)).all()
+
+    max_codigo = 0
+    for codigo_row in codigos:
+        if codigo_row.codigo_cliente:
+            try:
+                # Intentar convertir a entero directamente
+                numero = int(codigo_row.codigo_cliente)
+                if numero > max_codigo:
+                    max_codigo = numero
+            except (ValueError, TypeError):
+                # Ignorar códigos que no sean puramente numéricos
+                continue
+
+    # Sumar 1 al código máximo encontrado
+    nuevo_codigo = max_codigo + 1
+    return str(nuevo_codigo)
+
+
 def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | None = None) -> None:
     query = session.query(Cliente).filter(getattr(Cliente, campo) == valor)
     if excluir_id is not None:
@@ -117,9 +139,9 @@ def create_cliente(session: Session, **datos) -> Cliente:
     require_permiso(session, datos.get("creado_por"), "clientes", "crear")
     _validar_requeridos(datos)
 
-    # codigo_cliente must be provided by the caller (tests expect this)
+    # Generar código cliente incremental si no se proporciona
     if not datos.get("codigo_cliente"):
-        raise ValueError("codigo_cliente es requerido")
+        datos["codigo_cliente"] = _generar_codigo_cliente_incremental(session)
 
     # Validate uniqueness for both identificacion_cliente and codigo_cliente
     _validar_unico(session, "identificacion_cliente", datos["identificacion_cliente"])
