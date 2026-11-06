@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    FetchedValue,
     Float,
     ForeignKey,
     Integer,
@@ -109,7 +110,10 @@ class Cliente(Base):
 
     id_cliente: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_legal: Mapped[str | None] = mapped_column(String(20))
-    codigo_cliente: Mapped[str | None] = mapped_column(String(20), unique=True)
+    # Autoincremental en SQL con formato CLI-000123 (migrations/0093 y 0094): DEFAULT sobre la secuencia
+    # dbo.seq_codigo_cliente.
+    # Si no se asigna, el INSERT lo omite y lo llena el motor; hacer refresh() tras el commit.
+    codigo_cliente: Mapped[str | None] = mapped_column(String(20), unique=True, server_default=FetchedValue())
     identificacion_cliente: Mapped[str | None] = mapped_column(String(20), unique=True)
     nombre_razon_social: Mapped[str] = mapped_column(String(200), nullable=False)
     telefono: Mapped[str | None] = mapped_column(String(20))

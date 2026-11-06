@@ -1,4 +1,9 @@
+import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
+from sqlalchemy.orm import sessionmaker
 
 from app.services import clientes as clientes_service
 from app.services.permisos import PermisoDenegadoError
@@ -46,6 +51,92 @@ def test_create_cliente_requiere_codigo(db_session):
 
     with pytest.raises(ValueError):
         clientes_service.create_cliente(db_session, **_datos_cliente(codigo_cliente="", creado_por=admin.id_usuario))
+
+
+def test_create_cliente_sin_codigo_lo_asigna_sql_y_es_incremental(db_session):
+    """codigo_cliente es autoincremental en SQL (SEQUENCE + DEFAULT, migrations/0093-0094) con el
+    formato CLI-000123: no se manda y el motor lo asigna. La secuencia no se reinicia entre tests,
+    asi que se verifica el formato y que el siguiente sea exactamente +1."""
+    admin = crear_usuario_admin(db_session)
+
+    primero = clientes_service.create_cliente(
+        db_session, **_datos_cliente(codigo_cliente=None, identificacion_cliente="1", creado_por=admin.id_usuario)
+    )
+    # Sin la clave en absoluto (lo que manda la UI) tambien lo asigna SQL.
+    datos = _datos_cliente(identificacion_cliente="2", creado_por=admin.id_usuario)
+    datos.pop("codigo_cliente")
+    segundo = clientes_service.create_cliente(db_session, **datos)
+
+    assert re.fullmatch(r"CLI-\d{6,}", primero.codigo_cliente)
+    assert int(segundo.codigo_cliente[4:]) == int(primero.codigo_cliente[4:]) + 1
+
+
+def test_codigo_explicito_gana_sobre_el_default_y_no_consume_la_secuencia(db_session):
+    admin = crear_usuario_admin(db_session)
+    antes = clientes_service.create_cliente(
+        db_session, **_datos_cliente(codigo_cliente=None, identificacion_cliente="1", creado_por=admin.id_usuario)
+    )
+    manual = clientes_service.create_cliente(
+        db_session, **_datos_cliente(codigo_cliente="CLI-999", identificacion_cliente="2", creado_por=admin.id_usuario)
+    )
+    despues = clientes_service.create_cliente(
+        db_session, **_datos_cliente(codigo_cliente=None, identificacion_cliente="3", creado_por=admin.id_usuario)
+    )
+
+    assert manual.codigo_cliente == "CLI-999"
+    assert int(despues.codigo_cliente[4:]) == int(antes.codigo_cliente[4:]) + 1
+
+
+def test_altas_simultaneas_desde_varias_estaciones_no_repiten_codigo(db_session, test_engine):
+    """La carrera real: N hilos, cada uno con su propia conexion (una estacion cada uno),
+    dan de alta un cliente a la vez. Antes (SELECT MAX + 1 en Python) colisionaban contra el
+    UNIQUE; con la SEQUENCE todas las altas salen bien y con codigos distintos."""
+    admin = crear_usuario_admin(db_session)
+    id_admin = admin.id_usuario
+    fabrica = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
+    n = 8
+    barrera = threading.Barrier(n)
+
+    def alta(i: int) -> str:
+        with fabrica() as sesion:
+            barrera.wait()  # todos arrancan a la vez
+            cliente = clientes_service.create_cliente(
+                sesion, **_datos_cliente(codigo_cliente=None, identificacion_cliente=f"9{i}", creado_por=id_admin)
+            )
+            return cliente.codigo_cliente
+
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        codigos = list(pool.map(alta, range(n)))
+
+    assert len(set(codigos)) == n
+    assert all(re.fullmatch(r"CLI-\d{6,}", c) for c in codigos)
+
+
+def test_create_cliente_codigo_explicito_duplicado_falla(db_session):
+    admin = crear_usuario_admin(db_session)
+    clientes_service.create_cliente(
+        db_session, **_datos_cliente(codigo_cliente="5", identificacion_cliente="1", creado_por=admin.id_usuario)
+    )
+
+    with pytest.raises(ValueError):
+        clientes_service.create_cliente(
+            db_session, **_datos_cliente(codigo_cliente="5", identificacion_cliente="2", creado_por=admin.id_usuario)
+        )
+
+
+def test_update_cliente_no_permite_cambiar_el_codigo(db_session):
+    """codigo_cliente es de solo lectura una vez asignado: cambiarlo se rechaza en el
+    servicio, no solo en la UI."""
+    admin = crear_usuario_admin(db_session)
+    cliente = clientes_service.create_cliente(db_session, **_datos_cliente(creado_por=admin.id_usuario))
+
+    with pytest.raises(ValueError, match="solo lectura"):
+        clientes_service.update_cliente(
+            db_session, cliente.id_cliente, id_usuario=admin.id_usuario, codigo_cliente="OTRO-1"
+        )
+
+    db_session.refresh(cliente)
+    assert cliente.codigo_cliente == "CLI-001"
 
 
 def test_create_cliente_requiere_identificacion(db_session):

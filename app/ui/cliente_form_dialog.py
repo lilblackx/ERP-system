@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import CategoriaCliente, Cliente, Vendedor
-from app.services.clientes import _generar_codigo_cliente_incremental
 from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
 from app.ui.mapa_widget import MapaWidget
@@ -169,12 +168,12 @@ class ClienteFormDialog(QDialog):
 
         if cliente:
             self._precargar(cliente)
-        else:
-            # Para nuevos clientes, deshabilitar campo de código y generar código incremental
-            self.codigo_input.setEnabled(False)
-            self.codigo_input.setStyleSheet("background-color: #f1f5f9; color: #64748b;")
-            codigo_generado = _generar_codigo_cliente_incremental(self.session)
-            self.codigo_input.setText(codigo_generado)
+        # El codigo es de solo lectura SIEMPRE (alta y edicion): lo asigna SQL Server al
+        # guardar (secuencia, migrations/0093) y no se puede adelantar ni editar. En alta
+        # queda vacio con el aviso del placeholder; antes se mostraba un numero calculado
+        # en Python que era una suposicion y se mandaba como si el usuario lo hubiera escrito.
+        self.codigo_input.setEnabled(False)
+        self.codigo_input.setStyleSheet("background-color: #f1f5f9; color: #64748b;")
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -243,7 +242,7 @@ class ClienteFormDialog(QDialog):
         lbl_cod = QLabel("Código")
         lbl_cod.setProperty("class", "FormLabel")
         self.codigo_input = QLineEdit()
-        self.codigo_input.setPlaceholderText("Generado automáticamente")
+        self.codigo_input.setPlaceholderText("Se asigna automáticamente al guardar")
         self.codigo_input.setMaxLength(20)
         self.codigo_input.setFixedHeight(32)
         self.codigo_input.setReadOnly(True)
@@ -522,9 +521,6 @@ class ClienteFormDialog(QDialog):
 
     def _precargar(self, cliente: Cliente):
         self.codigo_input.setText(cliente.codigo_cliente or "")
-        # Mantener el campo de código como read-only siempre
-        self.codigo_input.setEnabled(False)
-        self.codigo_input.setStyleSheet("background-color: #f1f5f9; color: #64748b;")
 
         # id_legal contiene solo la letra (V, J, G, E, P)
         # identificacion_cliente contiene solo el número
@@ -661,7 +657,7 @@ class ClienteFormDialog(QDialog):
         lat, lng = self._leer_coordenadas()
 
         return {
-            "codigo_cliente": self.codigo_input.text().strip() or None,
+            # Sin "codigo_cliente" a proposito: es de solo lectura y lo asigna SQL al crear.
             "id_legal": tipo if tipo else None,
             "identificacion_cliente": num if num else None,
             "nombre_razon_social": self.nombre_input.text().strip(),

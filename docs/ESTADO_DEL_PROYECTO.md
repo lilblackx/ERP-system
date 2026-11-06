@@ -343,6 +343,16 @@ No hay `down`/rollback: revertir un cambio ya aplicado es una migración nueva q
 deshace el anterior, igual que se viene manejando con los `ALTER TRIGGER` manuales hasta
 ahora.
 
+**Código de cliente autoincremental (`0093`/`0094`, 2026-11-05).** `clientes.codigo_cliente`
+lo asigna SQL Server (secuencia `dbo.seq_codigo_cliente` como `DEFAULT`) con formato
+`CLI-000123`; el calculado en Python (`SELECT MAX + 1`) tenía una carrera entre estaciones y se
+eliminó. El formulario lo muestra siempre de solo lectura y no lo envía, y `update_cliente`
+rechaza cambiarlo. La `0094` renumera los clientes existentes **y modifica datos**: ver
+`docs/RENUMERACION_CODIGOS_CLIENTE.md` (respaldo + ensayo en copia antes de producción). Las
+estaciones nuevas no abren hasta que el servidor tenga las migraciones aplicadas.
+La impresora predeterminada pasó a ser **por estación** (`app/utils/impresora_local.py`,
+`QSettings`), ya no de la BD compartida.
+
 ## 4. Cuentas por pagar "otros": transferencias sin conciliar
 
 El módulo de "cuentas por pagar otros" **no modela pasivos comerciales** (alquileres,

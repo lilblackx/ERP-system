@@ -29,28 +29,6 @@ def _validar_requeridos(datos: dict) -> None:
         raise ValueError("longitud es requerida")
 
 
-def _generar_codigo_cliente_incremental(session: Session) -> str:
-    """Genera un código de cliente incremental basado en el código numérico mayor existente."""
-    # Buscar todos los códigos de cliente que sean numéricos
-    codigos = session.query(Cliente.codigo_cliente).filter(Cliente.codigo_cliente.isnot(None)).all()
-
-    max_codigo = 0
-    for codigo_row in codigos:
-        if codigo_row.codigo_cliente:
-            try:
-                # Intentar convertir a entero directamente
-                numero = int(codigo_row.codigo_cliente)
-                if numero > max_codigo:
-                    max_codigo = numero
-            except (ValueError, TypeError):
-                # Ignorar códigos que no sean puramente numéricos
-                continue
-
-    # Sumar 1 al código máximo encontrado
-    nuevo_codigo = max_codigo + 1
-    return str(nuevo_codigo)
-
-
 def _validar_unico(session: Session, campo: str, valor: str, excluir_id: int | None = None) -> None:
     query = session.query(Cliente).filter(getattr(Cliente, campo) == valor)
     if excluir_id is not None:
@@ -139,18 +117,21 @@ def create_cliente(session: Session, **datos) -> Cliente:
     require_permiso(session, datos.get("creado_por"), "clientes", "crear")
     _validar_requeridos(datos)
 
-    # codigo_cliente es opcional: ausente o None -> se autogenera incrementalmente
-    # (la UI manda None cuando el campo queda vacio). Pero un "" explicito es un
-    # intento de guardar vacio y se rechaza, mismo criterio "no permite vaciar" que
-    # update_cliente().
+    # codigo_cliente es autoincremental en SQL (DEFAULT = NEXT VALUE FOR
+    # dbo.seq_codigo_cliente, migrations/0093): lo normal es NO mandarlo y que el motor lo
+    # asigne de forma atomica entre estaciones (la UI nunca lo manda). Un codigo explicito
+    # se sigue aceptando -- importaciones de datos, tests -- y gana sobre el DEFAULT. Un ""
+    # explicito es un intento de guardar vacio y se rechaza, mismo criterio "no permite
+    # vaciar" que update_cliente().
     if datos.get("codigo_cliente") == "":
         raise ValueError("codigo_cliente es requerido")
-    if not datos.get("codigo_cliente"):
-        datos["codigo_cliente"] = _generar_codigo_cliente_incremental(session)
+    if datos.get("codigo_cliente") is None:
+        datos.pop("codigo_cliente", None)  # omitido del INSERT -> lo llena el DEFAULT
 
     # Validate uniqueness for both identificacion_cliente and codigo_cliente
     _validar_unico(session, "identificacion_cliente", datos["identificacion_cliente"])
-    _validar_unico(session, "codigo_cliente", datos["codigo_cliente"])
+    if "codigo_cliente" in datos:
+        _validar_unico(session, "codigo_cliente", datos["codigo_cliente"])
 
     _validar_rango_coordenadas(datos.get("latitud"), datos.get("longitud"))
 
@@ -164,7 +145,7 @@ def create_cliente(session: Session, **datos) -> Cliente:
         # Prefer a descriptive message; tests usually only check exception type.
         raise ValueError("Error al crear cliente: código o identificación duplicado") from e
 
-    session.refresh(cliente)
+    session.refresh(cliente)  # trae el codigo_cliente asignado por la secuencia
 
     AuditoriaService.registrar_evento(
         session,
@@ -185,8 +166,13 @@ def update_cliente(session: Session, id_cliente: int, id_usuario: int | None = N
     if cliente is None:
         raise ValueError("Cliente no encontrado")
 
-    if "codigo_cliente" in datos and not datos["codigo_cliente"]:
-        raise ValueError("codigo_cliente es requerido")
+    # codigo_cliente es de solo lectura una vez creado: lo asigna SQL y no se reasigna. Mandar
+    # el mismo valor que ya tiene (ej. un formulario que reenvia todos sus campos) es inocuo.
+    if "codigo_cliente" in datos:
+        if not datos["codigo_cliente"]:
+            raise ValueError("codigo_cliente es requerido")
+        if datos["codigo_cliente"] != cliente.codigo_cliente:
+            raise ValueError("codigo_cliente es de solo lectura: lo asigna el sistema y no se puede modificar")
     if "id_legal" in datos and not datos["id_legal"]:
         raise ValueError("id_legal (tipo de identificación) es requerido")
     if "identificacion_cliente" in datos and not datos["identificacion_cliente"]:
@@ -195,10 +181,6 @@ def update_cliente(session: Session, id_cliente: int, id_usuario: int | None = N
         raise ValueError("latitud es requerida")
     if "longitud" in datos and datos["longitud"] is None:
         raise ValueError("longitud es requerida")
-
-    nuevo_codigo = datos.get("codigo_cliente")
-    if nuevo_codigo and nuevo_codigo != cliente.codigo_cliente:
-        _validar_unico(session, "codigo_cliente", nuevo_codigo, excluir_id=id_cliente)
 
     nueva_identificacion = datos.get("identificacion_cliente")
     if nueva_identificacion and nueva_identificacion != cliente.identificacion_cliente:
