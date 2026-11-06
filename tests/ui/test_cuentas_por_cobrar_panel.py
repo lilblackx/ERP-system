@@ -368,6 +368,10 @@ def _detalle(qtbot, cuentas, tasa_paralelo=None):
     return dialogo
 
 
+def _elegir_vista(dialogo, vista):
+    dialogo.vista_combo.setCurrentIndex(dialogo.vista_combo.findData(vista))
+
+
 def _facturas_visibles(dialogo):
     return [dialogo.tabla.item(f, 1).text() for f in range(dialogo.tabla.rowCount())]
 
@@ -383,12 +387,12 @@ def test_detalle_por_defecto_oculta_las_cuentas_pagadas(qtbot):
 def test_detalle_ver_todas_las_facturas_incluye_pagadas_y_cambia_el_titulo(qtbot):
     dialogo = _detalle(qtbot, [_cuenta(1, "pendiente"), _cuenta(2, "pagada")])
 
-    dialogo.chk_ver_todas.setChecked(True)
+    _elegir_vista(dialogo, cxc.VISTA_TODAS)
 
     assert _facturas_visibles(dialogo) == ["F-001", "F-002"]
     assert dialogo.windowTitle().endswith("(Todas las facturas)")
 
-    dialogo.chk_ver_todas.setChecked(False)
+    _elegir_vista(dialogo, cxc.VISTA_PENDIENTES)
 
     assert _facturas_visibles(dialogo) == ["F-001"]
     assert "(Todas las facturas)" not in dialogo.windowTitle()
@@ -421,7 +425,7 @@ def test_detalle_al_marcar_ver_todas_vuelve_a_la_primera_pagina(qtbot):
     dialogo.btn_siguiente.click()
     assert dialogo.pagina_actual == 2  # las paginas se numeran desde 1 en toda la app
 
-    dialogo.chk_ver_todas.setChecked(True)
+    _elegir_vista(dialogo, cxc.VISTA_TODAS)
 
     assert dialogo.pagina_actual == 1
     assert dialogo.lbl_paginacion.text() == "Página 1 de 3"
@@ -508,3 +512,12 @@ def test_detalle_recargar_tras_un_cobro_trae_todas_las_facturas_y_no_solo_la_pri
 
     assert llamadas[0].get("por_pagina", 20) > 20
     assert dialogo.lbl_paginacion.text() == "Página 1 de 2"
+
+
+def test_el_selector_ver_arranca_en_pendientes_y_ofrece_pendientes_y_todas(qtbot):
+    dialogo = _detalle(qtbot, [_cuenta(1, "pendiente"), _cuenta(2, "pagada")])
+
+    combo = dialogo.vista_combo
+    assert combo.currentData() == cxc.VISTA_PENDIENTES
+    assert [combo.itemText(i) for i in range(combo.count())] == ["Pendientes", "Todas las facturas"]
+    assert not hasattr(dialogo, "chk_ver_todas")  # el checkbox viejo ya no existe

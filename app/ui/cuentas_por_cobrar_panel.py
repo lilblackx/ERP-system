@@ -23,7 +23,6 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -1088,7 +1087,13 @@ class AbonoGeneralDialog(QDialog):
         return "\n".join(lines)
 
 
-class DetalleClienteDialog(MixinPermisos, QDialog):
+# Vistas de las facturas de un cliente en su detalle de cuentas por cobrar.
+VISTA_PENDIENTES = "pendientes"
+VISTA_TODAS = "todas"
+VISTAS_FACTURAS = {VISTA_PENDIENTES: "Pendientes", VISTA_TODAS: "Todas las facturas"}
+
+
+class DetalleClienteDialog(MixinPermisos, MixinPaginacion, QDialog):
     """Diálogo para mostrar el detalle de facturas de un cliente y permitir cobros individuales."""
 
     recurso_permisos = "pagos"
@@ -1145,22 +1150,22 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
         self.lbl_saldo_favor.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
         header_layout.addWidget(self.lbl_saldo_favor)
 
+        # Selector "Ver:" con el mismo aspecto y lugar que el del historial del cliente (antes: un checkbox "Ver todas
+        # las facturas" en una fila aparte). Por defecto solo las facturas con saldo; "Todas" incluye las pagadas.
+        lbl_vista = QLabel("Ver:")
+        lbl_vista.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        self.vista_combo = QComboBox()
+        for clave, etiqueta in VISTAS_FACTURAS.items():
+            self.vista_combo.addItem(etiqueta, clave)
+        self.vista_combo.setFixedHeight(34)
+        self.vista_combo.setMinimumWidth(200)
+        self.vista_combo.setToolTip("Qué facturas mostrar de este cliente.")
+        self.vista_combo.currentIndexChanged.connect(self._on_vista_cambiada)
+        header_layout.addSpacing(12)
+        header_layout.addWidget(lbl_vista)
+        header_layout.addWidget(self.vista_combo)
+
         root.addWidget(header)
-
-        # Filtros
-        filtros = QWidget()
-        filtros.setStyleSheet("background: transparent;")
-        filtros_layout = QHBoxLayout(filtros)
-        filtros_layout.setContentsMargins(0, 0, 0, 0)
-        filtros_layout.setSpacing(12)
-
-        self.chk_ver_todas = QCheckBox("Ver todas las facturas")
-        self.chk_ver_todas.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_DARK};")
-        self.chk_ver_todas.toggled.connect(self._on_ver_todas_toggled)
-        filtros_layout.addWidget(self.chk_ver_todas)
-        filtros_layout.addStretch()
-
-        root.addWidget(filtros)
 
         # Tabla de facturas
         self.tabla = self._crear_tabla_detalle()
@@ -1318,8 +1323,9 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
         else:
             self.lbl_saldo_favor.setText("")
 
-    def _on_ver_todas_toggled(self, checked: bool) -> None:
-        """Maneja el cambio del checkbox 'Ver todas las facturas'."""
+    def _on_vista_cambiada(self) -> None:
+        """Maneja el cambio del selector "Ver:" (Pendientes / Todas las facturas)."""
+        checked = self.vista_combo.currentData() == VISTA_TODAS
         self.ver_todas_facturas = checked
         self.lbl_titulo.setText(
             "Todas las Facturas" if checked else "Facturas Pendientes"

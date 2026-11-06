@@ -38,6 +38,48 @@ class HistorialItem(TypedDict):
     monto_vuelto: Decimal
     metodo_vuelto: str | None
     saldo_corrido: Decimal
+    # Solo en las filas de factura: lo abonado a esa factura (suma de sus abonos) y lo que queda
+    # (monto - abonado, la misma cuenta del saldo corrido). Las demas filas llevan 0: el historial
+    # puede mostrarse SIN las filas de abono y asi se sigue viendo cuanto se pago de cada factura.
+    monto_pagado: Decimal
+    saldo_factura: Decimal
+
+
+# Vistas del historial: que filas se muestran (y se exportan). Por defecto se ocultan los abonos: el
+# detalle de cada pago esta en "Solo pagos" o en "Todos los movimientos".
+VISTA_FACTURAS = "facturas"
+VISTA_TODOS = "todos"
+VISTA_PAGOS = "pagos"
+ETIQUETAS_VISTA = {
+    VISTA_FACTURAS: "Facturas y notas de crédito",
+    VISTA_TODOS: "Todos los movimientos",
+    VISTA_PAGOS: "Solo pagos",
+}
+
+
+def filtrar_historial(historial: list[HistorialItem], vista: str) -> list[HistorialItem]:
+    """Filas del historial que corresponden a `vista`. No toca los datos ni los saldos: el saldo corrido de
+    cada factura ya incluye sus abonos, se vean o no."""
+    if vista == VISTA_TODOS:
+        return list(historial)
+    if vista == VISTA_FACTURAS:
+        return [item for item in historial if item["tipo_transaccion"] != "pago"]
+    if vista == VISTA_PAGOS:
+        return [item for item in historial if item["tipo_transaccion"] == "pago"]
+    raise ValueError(f"Vista de historial desconocida: {vista!r}")
+
+
+def monto_para_vista(item: HistorialItem, vista: str) -> Decimal:
+    """Monto tal como se muestra: los abonos se guardan en negativo (restan del saldo), pero en la vista
+    "Solo pagos" son pagos y se muestran en positivo. En el resto de vistas se conserva el signo."""
+    if vista == VISTA_PAGOS and item["tipo_transaccion"] == "pago":
+        return -item["monto"]
+    return item["monto"]
+
+
+def total_pagado(historial: list[HistorialItem]) -> Decimal:
+    """Suma de todos los abonos del historial (en positivo)."""
+    return sum((-item["monto"] for item in historial if item["tipo_transaccion"] == "pago"), Decimal("0.00"))
 
 
 def obtener_historial_cliente(session: Session, id_cliente: int) -> list[HistorialItem]:
@@ -191,6 +233,8 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "monto_vuelto": factura.monto_vuelto,
             "metodo_vuelto": factura.metodo_vuelto,
             "saldo_corrido": saldo_corrido,
+            "monto_pagado": pagos_aplicados,
+            "saldo_factura": monto_factura - pagos_aplicados,
         }
         historial.append(item_factura)
 
@@ -241,6 +285,8 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     "monto_vuelto": Decimal("0.00"),
                     "metodo_vuelto": None,
                     "saldo_corrido": Decimal("0.00"),  # No aplica para pagos individuales
+                    "monto_pagado": Decimal("0.00"),
+                    "saldo_factura": Decimal("0.00"),
                 }
                 historial.append(item_pago)
 
@@ -270,6 +316,8 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                     "monto_vuelto": Decimal("0.00"),
                     "metodo_vuelto": None,
                     "saldo_corrido": Decimal("0.00"),
+                    "monto_pagado": Decimal("0.00"),
+                    "saldo_factura": Decimal("0.00"),
                 }
             )
 
@@ -298,6 +346,8 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "monto_vuelto": Decimal("0.00"),
             "metodo_vuelto": None,
             "saldo_corrido": nota.saldo_disponible,
+            "monto_pagado": Decimal("0.00"),
+            "saldo_factura": Decimal("0.00"),
         }
         historial.append(item_nota)
 
@@ -323,6 +373,8 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
             "monto_vuelto": Decimal("0.00"),
             "metodo_vuelto": None,
             "saldo_corrido": Decimal("0.00"),
+            "monto_pagado": Decimal("0.00"),
+            "saldo_factura": Decimal("0.00"),
         }
         historial.append(item_devolucion)
 

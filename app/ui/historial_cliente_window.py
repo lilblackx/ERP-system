@@ -11,6 +11,7 @@ import qtawesome as qta
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QShowEvent
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -26,9 +27,16 @@ from PySide6.QtWidgets import (
 from app.db.models import Cliente
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.historial_cliente import (
+    ETIQUETAS_VISTA,
+    VISTA_FACTURAS,
+    VISTA_PAGOS,
+    VISTA_TODOS,
+    filtrar_historial,
+    monto_para_vista,
     obtener_historial_cliente,
     obtener_saldo_total_pendiente,
     obtener_saldo_total_positivo,
+    total_pagado,
 )
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
@@ -124,72 +132,88 @@ COLS_HISTORIAL = [
     "Días",
     "Observaciones",
     "Monto",
+    "Pagado",
+    "Saldo Factura",
     "Saldo Corrido",
 ]
 
+# Etiqueta de cada tipo de fila (misma en la tabla y en la exportacion).
+ETIQUETAS_TIPO = {
+    "factura": "Factura",
+    "pago": "Abono",
+    "nota_credito": "Nota Crédito",
+    "devolucion_nota_credito": "Devolución NC",
+}
 
-def _filas_historial_para_exportar(session, id_cliente: int) -> list[list]:
-    historial = obtener_historial_cliente(session, id_cliente)
+# Anchos relativos de las columnas en el PDF (12 columnas: Observaciones es la mas ancha).
+COL_WIDTHS_PDF = [0.9, 1.2, 1.3, 0.9, 0.9, 0.9, 0.5, 2.0, 1.0, 1.0, 1.0, 1.0]
+
+
+def _filas_historial_para_exportar(session, id_cliente: int, vista: str = VISTA_TODOS) -> list[list]:
+    """Filas del historial para Excel/PDF, SOLO las de `vista` (la misma que el usuario ve en pantalla).
+    Los montos van como Decimal (numeros), no como texto."""
+    historial = filtrar_historial(obtener_historial_cliente(session, id_cliente), vista)
     filas = []
     for item in historial:
-        # Calcular días transcurridos desde la fecha de emisión
+        tipo = item["tipo_transaccion"]
+        es_factura = tipo == "factura"
+
+        # Dias transcurridos desde la fecha de emision (solo facturas)
         dias_transcurridos = "—"
-        if item["tipo_transaccion"] == "factura" and item["fecha"]:
+        if es_factura and item["fecha"]:
             try:
                 fecha_emision = datetime.strptime(item["fecha"], "%Y-%m-%d %H:%M").date()
-                fecha_actual = date.today()
-                dias_calc = (fecha_actual - fecha_emision).days
-                dias_transcurridos = str(dias_calc)
+                dias_transcurridos = str((date.today() - fecha_emision).days)
             except Exception:
                 dias_transcurridos = "—"
-        elif item["tipo_transaccion"] in (
-            "pago",
-            "nota_credito",
-            "devolucion_nota_credito",
-        ):
-            dias_transcurridos = "—"
 
-        # Determinar estado para mostrar
-        if item["tipo_transaccion"] == "factura":
-            estado = item["estado_factura"]
-        elif item["tipo_transaccion"] in ("nota_credito", "devolucion_nota_credito"):
-            estado = item["estado_factura"]
-        else:
-            estado = "—"
+        estado = item["estado_factura"] if tipo in ("factura", "nota_credito", "devolucion_nota_credito") else "—"
 
-        fila = [
-            item["id_cuenta"] or "N/A",
-            item["numero_factura"],
-            item["fecha"],
-            estado,
-            item["condicion_pago"] if item["tipo_transaccion"] == "factura" else "—",
-            (_etiqueta_metodo_pago(item["metodo_pago"]) if item["tipo_transaccion"] in ("factura", "pago") else "—"),
-            dias_transcurridos,
-            item["observaciones"] or "",
-            str(item["monto"]),
-            str(item["saldo_corrido"]),
-        ]
-        filas.append(fila)
+        filas.append(
+            [
+                ETIQUETAS_TIPO.get(tipo, tipo),
+                item["numero_factura"],
+                item["fecha"],
+                estado,
+                item["condicion_pago"] if es_factura else "—",
+                _etiqueta_metodo_pago(item["metodo_pago"]) if tipo in ("factura", "pago") else "—",
+                dias_transcurridos,
+                item["observaciones"] or "",
+                # Numeros reales (Decimal), NO str(): con texto, los abonos ("-100.00") llegaban a Excel como
+                # texto y el escritor los alteraba; asi conservan su signo y se pueden sumar.
+                monto_para_vista(item, vista),
+                item["monto_pagado"] if es_factura else None,
+                item["saldo_factura"] if es_factura else None,
+                None if tipo == "pago" else item["saldo_corrido"],
+            ]
+        )
     return filas
 
 
-def _tarea_exportar_historial_excel(session, ruta: str, id_cliente: int) -> str:
+def _titulo_excel_historial(cliente_nombre: str | None, vista: str) -> str:
+    cliente = ": " + cliente_nombre if cliente_nombre else ""
+    return "Historial del Cliente" + cliente + " - " + ETIQUETAS_VISTA[vista]
+
+
+def _tarea_exportar_historial_excel(session, ruta: str, id_cliente: int, vista: str, cliente_nombre: str | None) -> str:
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el historial
     completo del cliente a un archivo (openpyxl) es lo bastante lento como para
     congelar la ventana si se hace en el hilo de GUI."""
-    filas = _filas_historial_para_exportar(session, id_cliente)
-    exportar_excel(ruta, COLS_HISTORIAL, filas)
+    filas = _filas_historial_para_exportar(session, id_cliente, vista)
+    exportar_excel(ruta, COLS_HISTORIAL, filas, titulo=_titulo_excel_historial(cliente_nombre, vista))
     return ruta
 
 
-def _tarea_exportar_historial_pdf(session, ruta: str, id_cliente: int, cliente_nombre: str | None) -> str:
-    filas = _filas_historial_para_exportar(session, id_cliente)
+def _tarea_exportar_historial_pdf(session, ruta: str, id_cliente: int, vista: str, cliente_nombre: str | None) -> str:
+    filas = _filas_historial_para_exportar(session, id_cliente, vista)
     exportar_pdf(
         ruta,
         "Historial del Cliente",
         COLS_HISTORIAL,
         filas,
         cliente_nombre=cliente_nombre,
+        filtros={"Vista": ETIQUETAS_VISTA[vista]},
+        col_widths=COL_WIDTHS_PDF,
     )
     return ruta
 
@@ -218,6 +242,10 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         # DevolverNotaCreditoDialog (ver NotaCreditoService).
         self._notas_disponibles: list = []
         self._facturas_pendientes: list[dict] = []
+        # Historial completo cargado + vista activa. Por defecto se ocultan los abonos (los pagos se ven en
+        # "Solo pagos" o "Todos los movimientos"); la tabla y las exportaciones muestran solo la vista activa.
+        self._historial: list = []
+        self._vista: str = VISTA_FACTURAS
         # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
@@ -279,9 +307,21 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         titulos.addWidget(lbl_titulo)
         titulos.addWidget(lbl_subtitulo)
 
+        lbl_vista = QLabel("Ver:")
+        lbl_vista.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        self.vista_combo = QComboBox()
+        for clave in (VISTA_FACTURAS, VISTA_TODOS, VISTA_PAGOS):
+            self.vista_combo.addItem(ETIQUETAS_VISTA[clave], clave)
+        self.vista_combo.setFixedHeight(34)
+        self.vista_combo.setMinimumWidth(230)
+        self.vista_combo.setToolTip("Qué movimientos mostrar. La exportación (Excel/PDF) sigue la vista elegida.")
+        self.vista_combo.currentIndexChanged.connect(self._on_vista_cambiada)
+
         h.addWidget(icon_lbl)
         h.addLayout(titulos)
         h.addStretch()
+        h.addWidget(lbl_vista)
+        h.addWidget(self.vista_combo)
         return w
 
     def _make_saldo_pendiente(self) -> QWidget:
@@ -311,11 +351,17 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         self.lbl_notas_credito.setStyleSheet(f"color: {COLOR_PRIMARY}; font-size: 12px; font-weight: 600;")
         self.lbl_notas_credito.hide()
 
+        # Total de abonos -- solo visible en la vista "Solo pagos".
+        self.lbl_total_pagado = QLabel()
+        self.lbl_total_pagado.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 14px; font-weight: 600;")
+        self.lbl_total_pagado.hide()
+
         h.addWidget(lbl_icono)
         h.addWidget(self.lbl_saldo_pendiente)
         h.addSpacing(16)
         h.addWidget(self.lbl_saldo_positivo)
         h.addWidget(self.lbl_notas_credito)
+        h.addWidget(self.lbl_total_pagado)
         h.addStretch()
         return card
 
@@ -335,6 +381,8 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
                 7: Qt.AlignmentFlag.AlignLeft,
                 8: Qt.AlignmentFlag.AlignRight,
                 9: Qt.AlignmentFlag.AlignRight,
+                10: Qt.AlignmentFlag.AlignRight,
+                11: Qt.AlignmentFlag.AlignRight,
             },
         )
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -345,18 +393,11 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.doubleClicked.connect(self.ver_detalle_factura)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
-        self.tabla.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabla.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.ResizeToContents)
+        # Todas se ajustan a su contenido salvo Observaciones, que absorbe el ancho que sobra.
+        encabezado = self.tabla.horizontalHeader()
+        for columna in range(len(COLS_HISTORIAL)):
+            encabezado.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
+        encabezado.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(45)
@@ -448,7 +489,8 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         try:
             # Cargar historial
             historial = obtener_historial_cliente(session, self.id_cliente)
-            self._poblar_tabla(historial)
+            self._historial = historial
+            self._aplicar_vista()
 
             # Cargar saldo total pendiente
             saldo_total = obtener_saldo_total_pendiente(session, self.id_cliente)
@@ -479,6 +521,20 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
             MessageBox.critical(self, "Error de conexión", "No se pudo cargar el historial del cliente.")
         finally:
             session.close()
+
+    def _on_vista_cambiada(self) -> None:
+        self._vista = self.vista_combo.currentData() or VISTA_FACTURAS
+        self._aplicar_vista()
+
+    def _aplicar_vista(self) -> None:
+        """Pinta en la tabla solo las filas de la vista activa. El historial completo (`self._historial`) no se
+        toca: los saldos, las notas de credito y el boton de aplicar se calculan siempre con todo."""
+        self._poblar_tabla(filtrar_historial(self._historial, self._vista))
+        if self._vista == VISTA_PAGOS:
+            self.lbl_total_pagado.setText(f"TOTAL PAGADO : $ {float(total_pagado(self._historial)):,.2f}")
+            self.lbl_total_pagado.show()
+        else:
+            self.lbl_total_pagado.hide()
 
     def _actualizar_notas_credito(self, session, historial: list) -> None:
         """Notas de credito disponibles del cliente + facturas del historial con saldo
@@ -565,24 +621,23 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
             # Tipo de transacción (Factura, Pago, Nota Crédito o Devolución)
             tipo = item["tipo_transaccion"]
             if tipo == "factura":
-                tipo_label = "Factura"
                 color = QColor(COLOR_DANGER)
             elif tipo == "pago":
-                tipo_label = "Abono"
                 color = QColor(COLOR_SUCCESS)
             elif tipo == "nota_credito":
-                tipo_label = "Nota Crédito"
                 color = QColor(COLOR_PRIMARY)
             elif tipo == "devolucion_nota_credito":
-                tipo_label = "Devolución NC"
                 color = QColor("#FF9800")  # Naranja para devoluciones
             else:
-                tipo_label = tipo
                 color = QColor(COLOR_TEXT_DARK)
+            tipo_label = ETIQUETAS_TIPO.get(tipo, tipo)
 
             item_tipo = QTableWidgetItem(tipo_label)
             item_tipo.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             item_tipo.setData(Qt.ItemDataRole.ForegroundRole, color)
+            # Datos de la fila: con filas ocultas por la vista, el numero de fila de la tabla ya no coincide con
+            # el indice del historial, asi que el detalle de factura sale de aqui y no de la posicion.
+            item_tipo.setData(Qt.ItemDataRole.UserRole, {"tipo": tipo, "id_factura": item["id_factura"]})
             self.tabla.setItem(fila, 0, item_tipo)
 
             # N° Factura/Nota
@@ -648,11 +703,13 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
             item_observaciones.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_observaciones)
 
-            # Monto (positivo para facturas, negativo para pagos)
-            monto = f"${float(item['monto']):,.2f}"
+            # Monto: positivo para facturas; los abonos van en negativo (restan del saldo) salvo en la vista
+            # "Solo pagos", donde son pagos y se muestran en positivo.
+            monto_visible = monto_para_vista(item, self._vista)
+            monto = f"${float(monto_visible):,.2f}"
             item_monto = QTableWidgetItem(monto)
             item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            if item["monto"] < 0:
+            if tipo == "pago" or item["monto"] < 0:
                 item_monto.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS))
             else:
                 item_monto.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_DANGER))
@@ -661,8 +718,26 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
             item_monto.setFont(font)
             self.tabla.setItem(fila, 8, item_monto)
 
-            # Saldo Corrido
-            saldo_corrido = f"${float(item['saldo_corrido']):,.2f}"
+            # Pagado / Saldo Factura (solo facturas): al ocultar los abonos sigue viendose cuanto se pago de
+            # cada factura y cuanto falta.
+            es_factura = tipo == "factura"
+            item_pagado = QTableWidgetItem(f"${float(item['monto_pagado']):,.2f}" if es_factura else "—")
+            item_pagado.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            if es_factura and item["monto_pagado"] > 0:
+                item_pagado.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS))
+            self.tabla.setItem(fila, 9, item_pagado)
+
+            item_saldo_factura = QTableWidgetItem(f"${float(item['saldo_factura']):,.2f}" if es_factura else "—")
+            item_saldo_factura.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            if es_factura:
+                item_saldo_factura.setData(
+                    Qt.ItemDataRole.ForegroundRole,
+                    QColor(COLOR_DANGER if item["saldo_factura"] > 0 else COLOR_SUCCESS),
+                )
+            self.tabla.setItem(fila, 10, item_saldo_factura)
+
+            # Saldo Corrido (no aplica a un abono suelto)
+            saldo_corrido = "—" if tipo == "pago" else f"${float(item['saldo_corrido']):,.2f}"
             item_corrido = QTableWidgetItem(saldo_corrido)
             item_corrido.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if item["saldo_corrido"] > 0:
@@ -672,12 +747,12 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
             font_corrido = item_corrido.font()
             font_corrido.setBold(True)
             item_corrido.setFont(font_corrido)
-            self.tabla.setItem(fila, 9, item_corrido)
+            self.tabla.setItem(fila, 11, item_corrido)
 
     def exportar_excel(self) -> None:
         session = self.session_factory()
         try:
-            nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
+            nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}_{self._vista}"
             ruta, _ = QFileDialog.getSaveFileName(
                 self,
                 "Exportar Historial a Excel",
@@ -693,6 +768,8 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
                 _tarea_exportar_historial_excel,
                 ruta=ruta,
                 id_cliente=self.id_cliente,
+                vista=self._vista,
+                cliente_nombre=self.cliente.nombre_razon_social,
             )
             self._worker_export_excel.resultado.connect(self._on_exportar_excel_ok)
             self._worker_export_excel.error.connect(self._on_exportar_excel_error)
@@ -703,7 +780,7 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
     def exportar_pdf(self) -> None:
         session = self.session_factory()
         try:
-            nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}"
+            nombre_archivo = f"historial_{self.cliente.nombre_razon_social or 'cliente'}_{self._vista}"
             ruta, _ = QFileDialog.getSaveFileName(
                 self, "Exportar Historial a PDF", f"{nombre_archivo}.pdf", "PDF (*.pdf)"
             )
@@ -716,6 +793,7 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
                 _tarea_exportar_historial_pdf,
                 ruta=ruta,
                 id_cliente=self.id_cliente,
+                vista=self._vista,
                 cliente_nombre=self.cliente.nombre_razon_social,
             )
             self._worker_export_pdf.resultado.connect(self._on_exportar_pdf_ok)
@@ -743,34 +821,22 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         MessageBox.critical(self, "Error", "No se pudo exportar el historial a PDF.")
 
     def _fila_seleccionada_id_factura(self) -> int | None:
+        """Id de la factura de la fila seleccionada: la propia factura o la factura a la que se abono (en la
+        vista "Solo pagos" no hay facturas, y abrir la del pago es lo natural). Sale de los datos guardados en
+        la fila, no de su posicion: con filas ocultas por la vista el indice de la tabla no coincide con el
+        del historial."""
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            MessageBox.information(self, "Selección requerida", "Selecciona una factura de la lista.")
+            MessageBox.information(self, "Selección requerida", "Selecciona una factura o un pago de la lista.")
             return None
-        # El ID de factura está en la columna 1 (N° Factura) pero necesitamos el ID interno
-        # Lo obtenemos del historial cargado usando el índice de la fila
-        fila = filas[0].row()
-        # Obtener el historial actual (ya cargado en la tabla)
-        session = self.session_factory()
-        try:
-            historial = obtener_historial_cliente(session, self.id_cliente)
-            if fila >= len(historial):
-                logger.warning(
-                    "Fila seleccionada fuera de rango: %d (total: %d)",
-                    fila,
-                    len(historial),
-                )
-                return None
-            # Solo permitir seleccionar facturas, no pagos
-            if historial[fila]["tipo_transaccion"] == "factura":
-                return historial[fila]["id_factura"]
-            else:
-                MessageBox.information(self, "Selección inválida", "Selecciona una factura, no un pago.")
-                return None
-        except Exception:
-            logger.exception("Fallo al obtener el ID de factura de la fila seleccionada")
-        finally:
-            session.close()
+        celda = self.tabla.item(filas[0].row(), 0)
+        datos = celda.data(Qt.ItemDataRole.UserRole) if celda is not None else None
+        if not datos:
+            logger.warning("Fila seleccionada sin datos de factura (fila %d)", filas[0].row())
+            return None
+        if datos["tipo"] in ("factura", "pago") and datos["id_factura"]:
+            return datos["id_factura"]
+        MessageBox.information(self, "Selección inválida", "Selecciona una factura o un pago, no una nota de crédito.")
         return None
 
     def ver_detalle_factura(self) -> None:
