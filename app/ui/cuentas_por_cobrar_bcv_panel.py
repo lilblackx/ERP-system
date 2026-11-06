@@ -37,6 +37,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.permisos_ui import MixinPermisos
@@ -1465,7 +1466,7 @@ class DetalleCuentasBCVDialog(MixinPermisos, QDialog):
             MessageBox.critical(self, "Error", "No se pudo aplicar el abono general BCV.")
 
 
-class CuentasPorCobrarBCVPanel(QWidget):
+class CuentasPorCobrarBCVPanel(MixinPaginacion, QWidget):
     """Panel principal del modulo Cuentas por Cobrar BCV."""
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
@@ -1473,8 +1474,6 @@ class CuentasPorCobrarBCVPanel(QWidget):
         self.session_factory = session_factory
         self.usuario = usuario
         self.id_usuario = usuario.id_usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         self.texto_busqueda = ""
         self._estado_filtro = None
         self._tasa_bcv = None
@@ -1642,9 +1641,11 @@ class CuentasPorCobrarBCVPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_paginacion = QLabel("Página 1 de 1")
-        self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
-        h.addWidget(self.lbl_paginacion)
+        # Antes solo habia la etiqueta "Página 1 de N": los metodos de pagina anterior/siguiente existian pero
+        # ningun boton los llamaba, asi que no se podia pasar de la primera pagina.
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self.cargar_cuentas())
+        h.addWidget(self.paginacion)
         h.addStretch()
 
         btn_ver_detalle = QPushButton("Ver Detalle")
@@ -1763,7 +1764,6 @@ class CuentasPorCobrarBCVPanel(QWidget):
         self._cuentas_cargadas = items
         total = resultado.get("total", 0)
         pagina = resultado.get("pagina", 1)
-        por_pagina = resultado.get("por_pagina", POR_PAGINA)
 
         for item in items:
             fila = self.tabla.rowCount()
@@ -1814,9 +1814,8 @@ class CuentasPorCobrarBCVPanel(QWidget):
             badge = EstadoBadge(estado, COLORES_ESTADO_CXC_BCV.get(estado, COLOR_TEXT_MEDIUM))
             self.tabla.setCellWidget(fila, 7, badge)
 
-        # Actualizar paginación
-        self.total_paginas = (total + por_pagina - 1) // por_pagina if total > 0 else 1
-        self.lbl_paginacion.setText(f"Página {pagina} de {self.total_paginas}")
+        # Pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
+        self.paginacion.actualizar_desde(resultado)
 
         logger.info(f"Mostrando {len(items)} clientes agrupados de {total} total, página {pagina}")
 
@@ -1832,16 +1831,6 @@ class CuentasPorCobrarBCVPanel(QWidget):
 
     def _buscar_desde_inicio(self) -> None:
         self._on_filtro_cambiado()
-
-    def _pagina_anterior(self) -> None:
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self.cargar_cuentas()
-
-    def _pagina_siguiente(self) -> None:
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self.cargar_cuentas()
 
     def _on_fila_doble_click(self) -> None:
         """Maneja el doble clic en una fila para mostrar las cuentas individuales del cliente."""

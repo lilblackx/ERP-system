@@ -28,10 +28,12 @@ from PySide6.QtWidgets import (
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Banco, Usuario
+from app.services.paginacion import paginar_lista
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService
 from app.ui.banco_form_dialog import BancoFormDialog
 from app.ui.message_box import MessageBox
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -78,7 +80,7 @@ COLORES_ESTADO_BANCO = {
 }
 
 
-class BancosPanel(MixinPermisos, QWidget):
+class BancosPanel(MixinPermisos, MixinPaginacion, QWidget):
     """
     Panel principal del módulo Bancos.
     Encapsula la barra de herramientas y la tabla de datos en un solo widget
@@ -91,8 +93,6 @@ class BancosPanel(MixinPermisos, QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         self.bancos = []
         self._search_timer = None
         # Doble-click en la tabla dispara editar_banco(), que consulta la base y abre un
@@ -222,22 +222,8 @@ class BancosPanel(MixinPermisos, QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_paginacion = QLabel("Página 1 de 1")
-        self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
-
-        self.btn_anterior = QPushButton()
-        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setFixedWidth(40)
-        self.btn_anterior.setEnabled(False)
-        self.btn_anterior.clicked.connect(self.pagina_anterior)
-
-        self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setFixedWidth(40)
-        self.btn_siguiente.setEnabled(False)
-        self.btn_siguiente.clicked.connect(self.pagina_siguiente)
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self._actualizar_tabla())
 
         # Sin boton "Eliminar" a proposito -- igual que vendedores/rutas/cuentas
         # bancarias, un banco nunca se borra fisicamente (ver BancoService.eliminar_banco,
@@ -256,9 +242,7 @@ class BancosPanel(MixinPermisos, QWidget):
         self.btn_cambiar_estado.setEnabled(False)
         self.btn_cambiar_estado.clicked.connect(self.cambiar_estado_banco)
 
-        h.addWidget(self.lbl_paginacion)
-        h.addWidget(self.btn_anterior)
-        h.addWidget(self.btn_siguiente)
+        h.addWidget(self.paginacion)
         h.addStretch()
         if self._puede("editar"):
             h.addWidget(self.btn_editar)
@@ -296,17 +280,14 @@ class BancosPanel(MixinPermisos, QWidget):
 
             self.bancos = bancos
             self._actualizar_tabla()
-            self._actualizar_paginacion()
         except PermisoDenegadoError:
             self.bancos = []
             self._actualizar_tabla()
-            self._actualizar_paginacion()
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar bancos.")
         except Exception:
             logger.exception("Fallo al cargar la lista de bancos")
             self.bancos = []
             self._actualizar_tabla()
-            self._actualizar_paginacion()
             MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de bancos.")
         finally:
             session.close()
@@ -315,11 +296,10 @@ class BancosPanel(MixinPermisos, QWidget):
         """Actualiza la tabla con los bancos cargados (respetando paginación)."""
         self.tabla.setRowCount(0)
 
-        # Calcular índices para la página actual
-        inicio = (self.pagina_actual - 1) * POR_PAGINA
-        fin = min(inicio + POR_PAGINA, len(self.bancos))
-
-        bancos_pagina = self.bancos[inicio:fin]
+        # Paginacion central (app/services/paginacion.py): normaliza y lleva la pagina a la ultima si sobra.
+        resultado = paginar_lista(self.bancos, self.pagina_actual, POR_PAGINA)
+        self.paginacion.actualizar_desde(resultado)
+        bancos_pagina = resultado["items"]
 
         for _idx, banco in enumerate(bancos_pagina):
             row = self.tabla.rowCount()
@@ -354,14 +334,6 @@ class BancosPanel(MixinPermisos, QWidget):
 
         self.lbl_total.setText(f"{len(self.bancos)} bancos")
 
-    def _actualizar_paginacion(self):
-        """Actualiza los controles de paginación."""
-        total = len(self.bancos)
-        self.total_paginas = max(1, (total + POR_PAGINA - 1) // POR_PAGINA)
-        self.lbl_paginacion.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 1)
-        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
-
     # ── Búsqueda y filtros ─────────────────────────────────────────────────
 
     def _buscar_desde_inicio(self):
@@ -374,20 +346,6 @@ class BancosPanel(MixinPermisos, QWidget):
         if hasattr(self, "_search_timer") and self._search_timer is not None:
             self._search_timer.stop()
         self._search_timer = QTimer.singleShot(300, self._buscar_desde_inicio)
-
-    # ── Paginación ────────────────────────────────────────────────────────
-
-    def pagina_anterior(self):
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self._actualizar_tabla()
-            self._actualizar_paginacion()
-
-    def pagina_siguiente(self):
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self._actualizar_tabla()
-            self._actualizar_paginacion()
 
     # ── CRUD ─────────────────────────────────────────────────────────────
 

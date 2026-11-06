@@ -45,6 +45,7 @@ from app.ui.factura_detalle_dialog import FacturaDetalleDialog
 from app.ui.factura_form_dialog import FacturaFormDialog
 from app.ui.factura_pdf import imprimir_factura
 from app.ui.message_box import MessageBox
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -202,7 +203,7 @@ CONDICIONES_FILTRO = [
 ]
 
 
-class FacturacionPanel(MixinPermisos, QWidget):
+class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
     """Panel principal del módulo Facturación: listado de facturas con búsqueda por
     número, filtro por estado/condición de pago, paginación, emisión de nuevas
     facturas (carrito), ver detalle y anulación."""
@@ -213,8 +214,6 @@ class FacturacionPanel(MixinPermisos, QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         self._verificando_caja = False
         # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
@@ -382,20 +381,8 @@ class FacturacionPanel(MixinPermisos, QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_pagina = QLabel("Página 1")
-        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-
-        self.btn_anterior = QPushButton()
-        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setFixedWidth(40)
-        self.btn_anterior.clicked.connect(self._pagina_anterior)
-
-        self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setFixedWidth(40)
-        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self.cargar_facturas())
 
         btn_detalle = QPushButton("Ver detalle")
         btn_detalle.setIcon(qta.icon("fa5s.eye", color=COLOR_TEXT_DARK))
@@ -407,9 +394,7 @@ class FacturacionPanel(MixinPermisos, QWidget):
         btn_anular.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_anular.clicked.connect(self.anular_factura_seleccionada)
 
-        h.addWidget(self.lbl_pagina)
-        h.addWidget(self.btn_anterior)
-        h.addWidget(self.btn_siguiente)
+        h.addWidget(self.paginacion)
         h.addStretch()
         h.addWidget(btn_detalle)
         if self._puede("eliminar"):
@@ -428,16 +413,6 @@ class FacturacionPanel(MixinPermisos, QWidget):
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
         self.cargar_facturas()
-
-    def _pagina_anterior(self) -> None:
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self.cargar_facturas()
-
-    def _pagina_siguiente(self) -> None:
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self.cargar_facturas()
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
@@ -505,13 +480,10 @@ class FacturacionPanel(MixinPermisos, QWidget):
             self.tabla.setCellWidget(fila, 8, badge)
 
         total = resultado["total"]
-        self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math
-        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+        # pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
+        self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} factura{'s' if total != 1 else ''}")
-        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 1)
-        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()

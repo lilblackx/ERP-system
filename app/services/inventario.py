@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Inventario, ProductoPrecio
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 from app.utils.decimal_utils import to_decimal
 
@@ -368,14 +369,7 @@ class ProductoService:
         if solo_con_stock:
             query = query.filter(Inventario.cantidad_unidad > 0)
 
-        total = query.count()
-        productos = query.order_by(Inventario.nombre_producto).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {
-            "items": productos,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, Inventario.nombre_producto, Inventario.id_producto)
 
     @staticmethod
     def obtener_alertas_stock(

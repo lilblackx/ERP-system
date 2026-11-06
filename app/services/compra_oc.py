@@ -18,6 +18,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 logger = logging.getLogger(__name__)
@@ -328,14 +329,7 @@ class CompraOCService:
         if estados:
             query = query.filter(CompraOC.estado.in_(estados))
 
-        total = query.count()
-        ocs = query.order_by(CompraOC.fecha_oc.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {
-            "items": ocs,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, CompraOC.fecha_oc.desc(), CompraOC.id_oc.desc())
 
     @staticmethod
     def obtener_oc(session: Session, id_oc: int, id_usuario: int | None = None) -> dict:

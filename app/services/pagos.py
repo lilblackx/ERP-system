@@ -24,6 +24,7 @@ from app.services.db_utils import (
     traducir_error_trigger,
 )
 from app.services.notas_credito import NotaCreditoService
+from app.services.paginacion import paginar, paginar_lista
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
@@ -365,16 +366,7 @@ class PagoService:
         if estado:
             query = query.filter(CuentaPorPagar.estado == estado)
 
-        total = query.count()
-        cuentas = (
-            query.order_by(CuentaPorPagar.fecha_vencimiento).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        )
-        return {
-            "items": cuentas,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, CuentaPorPagar.fecha_vencimiento, CuentaPorPagar.id_cuenta)
 
     @staticmethod
     def listar_cuentas_por_cobrar(
@@ -422,10 +414,10 @@ class PagoService:
         elif estado:
             query = query.filter(CuentaPorCobrar.estado == estado)
 
-        total = query.count()
-        cuentas = (
-            query.order_by(CuentaPorCobrar.fecha_vencimiento).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+        resultado = paginar(
+            query, pagina, por_pagina, CuentaPorCobrar.fecha_vencimiento, CuentaPorCobrar.id_cuenta_por_cobrar
         )
+        cuentas = resultado["items"]
 
         # estado_visual: atributo Python plano (no mapeado), mismo criterio que
         # VentaService._calcular_estado_visual -- 'vencida' es una etiqueta de UI, no un
@@ -439,12 +431,7 @@ class PagoService:
                 else cuenta.estado
             )
 
-        return {
-            "items": cuentas,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return resultado
 
     @staticmethod
     def aplicar_abono_general_cliente(
@@ -751,6 +738,7 @@ class PagoService:
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
+        texto_busqueda: str | None = None,
     ) -> dict:
         """Lista cuentas por cobrar agrupadas por cliente con el saldo total pendiente.
         Retorna una fila por cliente con la suma de todos los saldos pendientes de sus facturas.
@@ -810,6 +798,7 @@ class PagoService:
                         saldo_favor = Decimal("0.00")
 
                     clientes_deuda[id_cliente_key] = {
+                        "id_cliente": id_cliente_key,
                         "cliente": cliente,
                         "saldo_total": Decimal("0.00"),
                         "saldo_favor": saldo_favor,
@@ -866,18 +855,25 @@ class PagoService:
                             fecha_emision,
                         )
 
+        # Solo clientes con deuda o con saldo a favor, y (opcional) cuyo nombre contenga el texto buscado. Se filtra
+        # ANTES de paginar para que `total`, `total_paginas` y las filas de cada pagina coincidan.
+        texto = (texto_busqueda or "").strip().lower()
+        clientes_deuda = {
+            clave: datos
+            for clave, datos in clientes_deuda.items()
+            if (datos["saldo_total"] > 0 or (datos["saldo_favor"] or Decimal("0.00")) > 0)
+            and (not texto or texto in (datos["cliente"].nombre_razon_social or "").lower())
+        }
+
         # Convertir a lista y ordenar por saldo total (de mayor a menor)
+        # Mayor saldo primero; el id_cliente desempata para que el orden (y las paginas) sea estable.
         clientes_lista = sorted(
             clientes_deuda.values(),
-            key=lambda x: x["saldo_total"],
-            reverse=True,
+            key=lambda x: (-x["saldo_total"], x["id_cliente"]),
         )
 
-        # Aplicar paginación
-        total = len(clientes_lista)
-        inicio = (pagina - 1) * por_pagina
-        fin = inicio + por_pagina
-        clientes_paginados = clientes_lista[inicio:fin]
+        resultado = paginar_lista(clientes_lista, pagina, por_pagina)
+        clientes_paginados = resultado["items"]
 
         # Calcular días transcurridos para cada cliente
         for cliente_data in clientes_paginados:
@@ -888,9 +884,4 @@ class PagoService:
             else:
                 cliente_data["dias_transcurridos"] = 0
 
-        return {
-            "items": clientes_paginados,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return resultado

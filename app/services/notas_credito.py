@@ -19,6 +19,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
 
@@ -704,19 +705,13 @@ class NotaCreditoService:
         if estado:
             query = query.filter(NotaCreditoCliente.estado == estado)
 
-        total = query.count()
-        notas = (
-            query.order_by(NotaCreditoCliente.numero_nota_credito.desc())
-            .offset((pagina - 1) * por_pagina)
-            .limit(por_pagina)
-            .all()
+        return paginar(
+            query,
+            pagina,
+            por_pagina,
+            NotaCreditoCliente.numero_nota_credito.desc(),
+            NotaCreditoCliente.id_nota_credito.desc(),
         )
-        return {
-            "items": notas,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
 
     @staticmethod
     def listar_notas_credito_proveedor(

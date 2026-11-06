@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Ruta
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
@@ -79,16 +80,7 @@ class RutaService:
             query = query.filter(Ruta.nombre_ruta.ilike(like) | Ruta.descripcion_ruta.ilike(like))
         if estado_ruta:
             query = query.filter(Ruta.estado_ruta == estado_ruta)
-        query = query.order_by(Ruta.nombre_ruta)
-
-        total = query.count()
-        rutas = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {
-            "items": rutas,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, Ruta.nombre_ruta, Ruta.id_ruta)
 
     @staticmethod
     def crear(session: Session, **datos) -> Ruta:

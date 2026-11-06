@@ -49,6 +49,7 @@ from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.message_box import MessageBox
 from app.ui.notas_credito_proveedor_dialog import NotasCreditoProveedorDialog
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.permisos_ui import MixinPermisos
@@ -755,7 +756,7 @@ class DetalleCuentaPorPagarDialog(QDialog):
             MessageBox.warning(self, "Error", f"No se pudo cargar los pagos: {str(e)}")
 
 
-class CuentasPorPagarPanel(MixinPermisos, QWidget):
+class CuentasPorPagarPanel(MixinPermisos, MixinPaginacion, QWidget):
     """Panel principal del modulo Cuentas por Pagar: listado con filtro por estado,
     paginacion y pago contra PagoService.registrar_pago_proveedor."""
 
@@ -765,8 +766,6 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         self._tasa_bcv: float | None = None
         self.texto_busqueda = ""
         self.setObjectName("ContentArea")
@@ -929,20 +928,8 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_pagina = QLabel("Página 1")
-        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-
-        self.btn_anterior = QPushButton()
-        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setFixedWidth(40)
-        self.btn_anterior.clicked.connect(self._pagina_anterior)
-
-        self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setFixedWidth(40)
-        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self.cargar_cuentas())
 
         btn_pagar = QPushButton("Pagar")
         btn_pagar.setIcon(qta.icon("fa5s.money-bill-wave", color=COLOR_TEXT_DARK))
@@ -954,9 +941,7 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
         self.btn_notas_credito.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_notas_credito.clicked.connect(self.abrir_notas_credito)
 
-        h.addWidget(self.lbl_pagina)
-        h.addWidget(self.btn_anterior)
-        h.addWidget(self.btn_siguiente)
+        h.addWidget(self.paginacion)
         h.addStretch()
         h.addWidget(self.btn_notas_credito)
         if self._puede("crear"):
@@ -974,16 +959,6 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
         self.texto_busqueda = self.buscar_input.text().strip()
         self.pagina_actual = 1
         self.cargar_cuentas()
-
-    def _pagina_anterior(self) -> None:
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self.cargar_cuentas()
-
-    def _pagina_siguiente(self) -> None:
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self.cargar_cuentas()
 
     # ── Logica de datos ────────────────────────────────────────────────────
 
@@ -1164,14 +1139,11 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
             saldo_total += float(saldo_pendiente)
 
         total = resultado["total"]
-        self.total_paginas = max(1, -(-total // POR_PAGINA))
-        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+        # pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
+        self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} cuenta{'s' if total != 1 else ''} por pagar")
         self.lbl_saldo_total.setText(f"${_as_decimal(saldo_total):,.2f}")
-        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 1)
-        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()

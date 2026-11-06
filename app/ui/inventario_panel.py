@@ -40,6 +40,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.auto_refresco import AutoRefresco
 from app.ui.message_box import MessageBox
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.producto_auditoria_dialog import ProductoAuditoriaDialog
 from app.ui.producto_form_dialog import ProductoFormDialog
@@ -151,7 +152,7 @@ def _tarea_exportar_productos_pdf(
     return ruta, len(filas)
 
 
-class InventarioPanel(MixinPermisos, QWidget):
+class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
     """Panel principal del módulo Inventario: catálogo de productos con búsqueda,
     filtro por categoría, paginación, alta/edición (con precio de venta) y export."""
 
@@ -161,8 +162,6 @@ class InventarioPanel(MixinPermisos, QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         self.es_vendedor = usuario.id_vendedor_usuario is not None
         # Que botones de escritura se muestran depende del permiso real del rol, no solo de si el
         # usuario es vendedor: un CAJERO ve el catalogo (inventario:ver) pero no puede crear,
@@ -353,24 +352,10 @@ class InventarioPanel(MixinPermisos, QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_pagina = QLabel("Página 1")
-        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self.cargar_productos())
 
-        self.btn_anterior = QPushButton()
-        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setFixedWidth(40)
-        self.btn_anterior.clicked.connect(self._pagina_anterior)
-
-        self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setFixedWidth(40)
-        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
-
-        h.addWidget(self.lbl_pagina)
-        h.addWidget(self.btn_anterior)
-        h.addWidget(self.btn_siguiente)
+        h.addWidget(self.paginacion)
         h.addStretch()
         # Edición y cambio de estado: no para vendedores y solo con el permiso correspondiente
         if not self.es_vendedor and self.puede_editar:
@@ -399,16 +384,6 @@ class InventarioPanel(MixinPermisos, QWidget):
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
         self.cargar_productos()
-
-    def _pagina_anterior(self) -> None:
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self.cargar_productos()
-
-    def _pagina_siguiente(self) -> None:
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self.cargar_productos()
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
@@ -571,13 +546,10 @@ class InventarioPanel(MixinPermisos, QWidget):
             self.tabla.setCellWidget(fila, 11, badge)
 
         total = resultado["total"]
-        self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math
-        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+        # pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
+        self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} producto{'s' if total != 1 else ''}")
-        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 1)
-        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()

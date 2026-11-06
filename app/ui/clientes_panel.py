@@ -41,6 +41,7 @@ from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.historial_cliente_window import HistorialClienteWindow
 from app.ui.message_box import MessageBox
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -157,7 +158,7 @@ def _tarea_exportar_clientes_pdf(
     return ruta, len(filas)
 
 
-class ClientesPanel(MixinPermisos, QWidget):
+class ClientesPanel(MixinPermisos, MixinPaginacion, QWidget):
     """
     Panel principal del módulo Clientes.
     Encapsula la barra de herramientas y la tabla de datos en un solo widget
@@ -170,8 +171,6 @@ class ClientesPanel(MixinPermisos, QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         # Guard anti-reentrancia para ver_historial_cliente() -- ver bancos_panel.py para
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
@@ -348,20 +347,8 @@ class ClientesPanel(MixinPermisos, QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_pagina = QLabel("Página 1")
-        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-
-        self.btn_anterior = QPushButton()
-        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setFixedWidth(40)
-        self.btn_anterior.clicked.connect(self._pagina_anterior)
-
-        self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setFixedWidth(40)
-        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self.cargar_clientes())
 
         btn_editar = QPushButton("Editar seleccionado")
         btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
@@ -381,9 +368,7 @@ class ClientesPanel(MixinPermisos, QWidget):
         btn_historial.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_historial.clicked.connect(self.ver_historial_cliente)
 
-        h.addWidget(self.lbl_pagina)
-        h.addWidget(self.btn_anterior)
-        h.addWidget(self.btn_siguiente)
+        h.addWidget(self.paginacion)
         h.addStretch()
         if self._puede("editar"):
             h.addWidget(btn_editar)
@@ -404,16 +389,6 @@ class ClientesPanel(MixinPermisos, QWidget):
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
         self.cargar_clientes()
-
-    def _pagina_anterior(self) -> None:
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self.cargar_clientes()
-
-    def _pagina_siguiente(self) -> None:
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self.cargar_clientes()
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
@@ -480,13 +455,10 @@ class ClientesPanel(MixinPermisos, QWidget):
             self.tabla.setCellWidget(fila, 9, badge)
 
         total = resultado["total"]
-        self.total_paginas = max(1, -(-total // POR_PAGINA))  # ceil sin importar math
-        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+        # pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
+        self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''}")
-        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 1)
-        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
     def _filtros_actuales_exportar(self) -> dict:
         return {

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Banco
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
@@ -45,15 +46,7 @@ class BancoService:
         if estado_banco:
             query = query.filter(Banco.estado_banco == estado_banco)
 
-        query = query.order_by(Banco.nombre_banco)
-        total = query.count()
-        bancos = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {
-            "items": bancos,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, Banco.nombre_banco, Banco.id_banco)
 
     @staticmethod
     def _validar_requeridos(datos: dict) -> None:

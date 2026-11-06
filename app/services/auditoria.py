@@ -4,6 +4,7 @@ from datetime import date, datetime
 from sqlalchemy.orm import Session
 
 from app.db.models import Auditoria, Usuario
+from app.services.paginacion import paginar
 
 # Modulos que efectivamente llaman a registrar_evento() hoy (grep de `modulo="..."` en
 # app/services/*.py). El campo es VARCHAR libre en la BD -- este set no se enforce alli --
@@ -106,13 +107,4 @@ class AuditoriaService:
                 | Auditoria.usuario.has(Usuario.nombre_usuario.ilike(patron))
             )
 
-        total = query.count()
-        eventos = (
-            query.order_by(Auditoria.fecha_evento.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        )
-        return {
-            "items": eventos,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, Auditoria.fecha_evento.desc(), Auditoria.id_auditoria.desc())

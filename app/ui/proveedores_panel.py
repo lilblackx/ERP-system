@@ -37,6 +37,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.proveedor_form_dialog import ProveedorFormDialog
 from app.ui.styles import (
@@ -139,7 +140,7 @@ def _tarea_exportar_proveedores_pdf(
     return ruta, len(filas)
 
 
-class ProveedoresPanel(MixinPermisos, QWidget):
+class ProveedoresPanel(MixinPermisos, MixinPaginacion, QWidget):
     """Panel principal del módulo Proveedores: listado con búsqueda, alta/edición
     y activar/desactivar -- lo mínimo necesario para poder registrar compras
     (OrdenCompraFormDialog exige un proveedor activo, ver app/ui/compras.py)."""
@@ -150,8 +151,6 @@ class ProveedoresPanel(MixinPermisos, QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_proveedores)
@@ -277,20 +276,8 @@ class ProveedoresPanel(MixinPermisos, QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_pagina = QLabel("Página 1")
-        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-
-        self.btn_anterior = QPushButton()
-        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setFixedWidth(40)
-        self.btn_anterior.clicked.connect(self._pagina_anterior)
-
-        self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setFixedWidth(40)
-        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self.cargar_proveedores())
 
         btn_editar = QPushButton("Editar seleccionado")
         btn_editar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
@@ -302,9 +289,7 @@ class ProveedoresPanel(MixinPermisos, QWidget):
         btn_estado.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_estado.clicked.connect(self.cambiar_estado_proveedor_seleccionado)
 
-        h.addWidget(self.lbl_pagina)
-        h.addWidget(self.btn_anterior)
-        h.addWidget(self.btn_siguiente)
+        h.addWidget(self.paginacion)
         h.addStretch()
         if self._puede("editar"):
             h.addWidget(btn_editar)
@@ -324,16 +309,6 @@ class ProveedoresPanel(MixinPermisos, QWidget):
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
         self.cargar_proveedores()
-
-    def _pagina_anterior(self) -> None:
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self.cargar_proveedores()
-
-    def _pagina_siguiente(self) -> None:
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self.cargar_proveedores()
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
@@ -382,13 +357,10 @@ class ProveedoresPanel(MixinPermisos, QWidget):
             self.tabla.setCellWidget(fila, 7, badge)
 
         total = resultado["total"]
-        self.total_paginas = max(1, -(-total // POR_PAGINA))
-        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+        # pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
+        self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} proveedor{'es' if total != 1 else ''}")
-        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 1)
-        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
     def _filtros_actuales_exportar(self) -> dict:
         return {

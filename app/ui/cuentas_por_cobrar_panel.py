@@ -43,6 +43,7 @@ from app.db.models import ConfiguracionEmpresa, CuentaPorCobrar, FacturaVenta, U
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf, valor_para_exportar
+from app.services.paginacion import paginar_lista
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
@@ -50,6 +51,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.permisos_ui import MixinPermisos
@@ -1108,7 +1110,6 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
         self.id_usuario = id_usuario
         self.se_realizo_cobro = False
         self.ver_todas_facturas = False
-        self.pagina_actual = 0
         self.filas_por_pagina = 20
 
         self.setWindowTitle(f"Detalle de Cuentas - {cliente.nombre_razon_social if cliente else 'Cliente'}")
@@ -1172,24 +1173,14 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
         paginacion_layout.setContentsMargins(0, 0, 0, 0)
         paginacion_layout.setSpacing(8)
 
-        self.lbl_paginacion = QLabel("Página 1 de 1")
-        self.lbl_paginacion.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
-        paginacion_layout.addWidget(self.lbl_paginacion)
+        # Control central de paginacion (antes: etiqueta y botones propios, con la pagina numerada desde 0).
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self._poblar_tabla_detalle())
+        self.lbl_paginacion = self.paginacion.lbl_pagina
+        self.btn_anterior = self.paginacion.btn_anterior
+        self.btn_siguiente = self.paginacion.btn_siguiente
+        paginacion_layout.addWidget(self.paginacion)
         paginacion_layout.addStretch()
-
-        self.btn_anterior = QPushButton("Anterior")
-        self.btn_anterior.setObjectName("BtnSecondary")
-        self.btn_anterior.setFixedHeight(30)
-        self.btn_anterior.setEnabled(False)
-        self.btn_anterior.clicked.connect(self._pagina_anterior)
-        paginacion_layout.addWidget(self.btn_anterior)
-
-        self.btn_siguiente = QPushButton("Siguiente")
-        self.btn_siguiente.setObjectName("BtnSecondary")
-        self.btn_siguiente.setFixedHeight(30)
-        self.btn_siguiente.setEnabled(False)
-        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
-        paginacion_layout.addWidget(self.btn_siguiente)
 
         root.addWidget(paginacion)
 
@@ -1262,18 +1253,10 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
             # Mostrar solo pendientes, parciales y vencidas (no pagadas)
             cuentas_a_mostrar = [c for c in self.cuentas if c.estado in ("pendiente", "parcial", "vencida")]
 
-        # Calcular paginación
-        total_filas = len(cuentas_a_mostrar)
-        total_paginas = (total_filas + self.filas_por_pagina - 1) // self.filas_por_pagina if total_filas > 0 else 1
-
-        # Ajustar página actual si es necesario
-        if self.pagina_actual >= total_paginas:
-            self.pagina_actual = max(0, total_paginas - 1)
-
-        # Calcular índices de la página actual
-        inicio = self.pagina_actual * self.filas_por_pagina
-        fin = min(inicio + self.filas_por_pagina, total_filas)
-        cuentas_pagina = cuentas_a_mostrar[inicio:fin]
+        # Paginacion central (en memoria): normaliza y lleva la pagina a la ultima si sobra.
+        resultado = paginar_lista(cuentas_a_mostrar, self.pagina_actual, self.filas_por_pagina)
+        self.paginacion.actualizar_desde(resultado)
+        cuentas_pagina = resultado["items"]
 
         self.tabla.setRowCount(len(cuentas_pagina))
 
@@ -1310,11 +1293,6 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
             color = COLORES_ESTADO_CXC.get(estado_visual, COLOR_TEXT_MUTED)
             self.tabla.setCellWidget(fila, 5, EstadoBadge(estado_visual.capitalize(), color))
 
-        # Actualizar controles de paginación
-        self.lbl_paginacion.setText(f"Página {self.pagina_actual + 1} de {total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 0)
-        self.btn_siguiente.setEnabled(self.pagina_actual < total_paginas - 1)
-
         # Calcular y mostrar saldo a favor del cliente (desde la primera cuenta por cobrar)
         saldo_favor = Decimal("0.00")
         if self.cliente:
@@ -1343,24 +1321,16 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
     def _on_ver_todas_toggled(self, checked: bool) -> None:
         """Maneja el cambio del checkbox 'Ver todas las facturas'."""
         self.ver_todas_facturas = checked
-        self.pagina_actual = 0  # Reiniciar a la primera página
+        self.lbl_titulo.setText(
+            "Todas las Facturas" if checked else "Facturas Pendientes"
+        )  # el titulo sigue a la vista
+        self.pagina_actual = 1  # Reiniciar a la primera página
         # Actualizar el título según el estado del checkbox
         nombre_cliente = self.cliente.nombre_razon_social if self.cliente else "Cliente"
         if checked:
             self.setWindowTitle(f"Detalle de Cuentas - {nombre_cliente} (Todas las facturas)")
         else:
             self.setWindowTitle(f"Detalle de Cuentas - {nombre_cliente}")
-        self._poblar_tabla_detalle()
-
-    def _pagina_anterior(self) -> None:
-        """Navega a la página anterior."""
-        if self.pagina_actual > 0:
-            self.pagina_actual -= 1
-            self._poblar_tabla_detalle()
-
-    def _pagina_siguiente(self) -> None:
-        """Navega a la página siguiente."""
-        self.pagina_actual += 1
         self._poblar_tabla_detalle()
 
     def _on_double_click_cuenta(self) -> None:
@@ -1464,7 +1434,7 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
             MessageBox.critical(self, "Error", "No se pudo aplicar el abono general.")
 
 
-class CuentasPorCobrarPanel(QWidget):
+class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
     """Panel principal del modulo Cuentas por Cobrar: listado con filtro por estado,
     paginacion y cobro contra PagoService.registrar_pago_cobro."""
 
@@ -1472,8 +1442,6 @@ class CuentasPorCobrarPanel(QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         self.texto_busqueda = ""
         self.filtro_vendedor = None
         self._tasa_paralelo: float | None = None
@@ -1631,29 +1599,15 @@ class CuentasPorCobrarPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_pagina = QLabel("Página 1")
-        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-
-        self.btn_anterior = QPushButton()
-        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setFixedWidth(40)
-        self.btn_anterior.clicked.connect(self._pagina_anterior)
-
-        self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setFixedWidth(40)
-        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self.cargar_cuentas())
 
         btn_cobrar = QPushButton("Ver Detalle")
         btn_cobrar.setIcon(qta.icon("fa5s.list", color=COLOR_TEXT_DARK))
         btn_cobrar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_cobrar.clicked.connect(self.cobrar_seleccionada)
 
-        h.addWidget(self.lbl_pagina)
-        h.addWidget(self.btn_anterior)
-        h.addWidget(self.btn_siguiente)
+        h.addWidget(self.paginacion)
         h.addStretch()
         h.addWidget(btn_cobrar)
         return w
@@ -1688,16 +1642,6 @@ class CuentasPorCobrarPanel(QWidget):
             self._search_timer.stop()
         self._search_timer = QTimer.singleShot(300, self._buscar_desde_inicio)
 
-    def _pagina_anterior(self) -> None:
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self.cargar_cuentas()
-
-    def _pagina_siguiente(self) -> None:
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self.cargar_cuentas()
-
     # ── Logica de datos ────────────────────────────────────────────────────
 
     def _cargar_tasa_actual(self, session) -> float | None:
@@ -1726,55 +1670,18 @@ class CuentasPorCobrarPanel(QWidget):
             self.filtro_vendedor = self.vendedor_combo.currentData()
             self._tasa_paralelo = self._cargar_tasa_actual(session)
 
-            # Si hay búsqueda, traer todos los registros para filtrar localmente
-            por_pagina = 10000 if self.texto_busqueda else POR_PAGINA
-            pagina = 1 if self.texto_busqueda else self.pagina_actual
-
+            # La busqueda por nombre y el filtro "con deuda o saldo a favor" los hace el servicio ANTES de paginar:
+            # antes se traian 10000 filas y se recortaban aqui, y los clientes sin saldo se descartaban DESPUES de
+            # paginar (el total anunciado no coincidia con las filas de cada pagina).
             resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(
                 session,
                 estado=self.estado_combo.currentData(),
                 id_vendedor=self.filtro_vendedor,
-                pagina=pagina,
-                por_pagina=por_pagina,
+                texto_busqueda=self.texto_busqueda or None,
+                pagina=self.pagina_actual,
+                por_pagina=POR_PAGINA,
                 id_usuario=self.usuario.id_usuario,
             )
-
-            # Aplicar filtros de búsqueda manualmente
-            clientes_filtrados = []
-            for cliente_data in resultado["items"]:
-                try:
-                    cliente = cliente_data["cliente"]
-
-                    # Filtro de búsqueda (nombre del cliente)
-                    if self.texto_busqueda:
-                        nombre = cliente.nombre_razon_social or ""
-                        if self.texto_busqueda.lower() not in nombre.lower():
-                            continue
-
-                    # Incluir clientes con saldo pendiente > 0 o saldo a favor > 0
-                    saldo_favor = cliente_data.get("saldo_favor", Decimal("0.00"))
-                    if cliente_data["saldo_total"] <= 0 and saldo_favor <= 0:
-                        continue
-
-                    clientes_filtrados.append(cliente_data)
-                except (AttributeError, TypeError, KeyError) as e:
-                    # Si hay error al acceder a atributos, saltar este cliente
-                    logger.warning(f"Error procesando cliente data: {e}")
-                    continue
-
-            # Aplicar paginación local si hay búsqueda
-            if self.texto_busqueda:
-                total_filtrado = len(clientes_filtrados)
-                inicio = (self.pagina_actual - 1) * POR_PAGINA
-                fin = inicio + POR_PAGINA
-                clientes_filtrados = clientes_filtrados[inicio:fin]
-                total = total_filtrado
-            else:
-                total = resultado["total"]
-
-            # Actualizar resultado con clientes filtrados
-            resultado["items"] = clientes_filtrados
-            resultado["total"] = total
 
             self._poblar_tabla(resultado)
         except PermisoDenegadoError:
@@ -1854,14 +1761,10 @@ class CuentasPorCobrarPanel(QWidget):
             saldo_total += float(saldo_total_cliente)
 
         total = resultado["total"]
-        self.total_paginas = max(1, -(-total // POR_PAGINA))
-        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+        self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''} con deuda")
         self.lbl_saldo_total.setText(f"${_as_decimal(saldo_total):,.2f}")
-        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 1)
-        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
     def _determinar_estado_cliente(self, cuentas: list) -> str:
         """Determina el estado general de un cliente basado en sus cuentas por cobrar."""

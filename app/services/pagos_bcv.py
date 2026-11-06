@@ -23,6 +23,7 @@ from app.services.db_utils import (
     traducir_error_trigger,
 )
 from app.services.notas_credito import NotaCreditoService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
@@ -338,16 +339,16 @@ class PagoBCVService:
         elif estado:
             query = query.filter(CuentaPorCobrarBCV.estado == estado)
 
-        total = query.count()
-        logger.info(f"BCV - Listar cuentas: estado filtro={estado}, busqueda={busqueda}, total encontrado={total}")
-
-        cuentas = (
-            query.options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
-            .order_by(CuentaPorCobrarBCV.fecha_vencimiento.desc())
-            .offset((pagina - 1) * por_pagina)
-            .limit(por_pagina)
-            .all()
+        resultado = paginar(
+            query.options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente)),
+            pagina,
+            por_pagina,
+            CuentaPorCobrarBCV.fecha_vencimiento.desc(),
+            CuentaPorCobrarBCV.id_cuenta_por_cobrar.desc(),
         )
+        total = resultado["total"]
+        cuentas = resultado["items"]
+        logger.info(f"BCV - Listar cuentas: estado filtro={estado}, busqueda={busqueda}, total encontrado={total}")
 
         logger.info(f"BCV - Cuentas recuperadas: {len(cuentas)}")
 
@@ -365,12 +366,7 @@ class PagoBCVService:
                 f"estado_visual={cuenta.estado_visual}, saldo={cuenta.saldo_pendiente}"
             )
 
-        return {
-            "items": cuentas,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return resultado
 
     @staticmethod
     def listar_cuentas_por_cobrar_bcv_agrupadas(
@@ -439,15 +435,13 @@ class PagoBCVService:
         # Solo mostrar clientes con saldo pendiente > 0
         query = query.having(func.sum(CuentaPorCobrarBCV.saldo_pendiente) > 0)
 
-        total = query.count()
+        resultado = paginar(query, pagina, por_pagina, Cliente.nombre_razon_social, Cliente.id_cliente)
+        total = resultado["total"]
         logger.info(
             f"BCV - Listar cuentas agrupadas: estado filtro={estado}, busqueda={busqueda}, total clientes={total}"
         )
 
-        # Ejecutar query con paginación
-        resultados = (
-            query.order_by(Cliente.nombre_razon_social).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        )
+        resultados = resultado["items"]
 
         # Construir lista de objetos agrupados
         items = []
@@ -484,12 +478,7 @@ class PagoBCVService:
 
         logger.info(f"BCV - Clientes agrupados recuperados: {len(items)}")
 
-        return {
-            "items": items,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return {**resultado, "items": items}
 
     @staticmethod
     def aplicar_abono_general_cliente_bcv(

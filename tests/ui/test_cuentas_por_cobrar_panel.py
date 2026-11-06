@@ -419,11 +419,11 @@ def test_detalle_pagina_de_a_20_facturas_y_navega(qtbot):
 def test_detalle_al_marcar_ver_todas_vuelve_a_la_primera_pagina(qtbot):
     dialogo = _detalle(qtbot, [_cuenta(i, "pendiente") for i in range(1, 46)])
     dialogo.btn_siguiente.click()
-    assert dialogo.pagina_actual == 1
+    assert dialogo.pagina_actual == 2  # las paginas se numeran desde 1 en toda la app
 
     dialogo.chk_ver_todas.setChecked(True)
 
-    assert dialogo.pagina_actual == 0
+    assert dialogo.pagina_actual == 1
     assert dialogo.lbl_paginacion.text() == "Página 1 de 3"
 
 

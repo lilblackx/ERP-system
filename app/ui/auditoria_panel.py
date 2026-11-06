@@ -41,6 +41,7 @@ from app.services.auditoria import MODULOS_SUGERIDOS, AuditoriaService
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
 from app.ui.message_box import MessageBox
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
     COLOR_BORDER,
@@ -342,7 +343,7 @@ def _resumir_detalle(detalle: str | None) -> str:
     return texto[:LIMITE_RESUMEN_DETALLE].rstrip() + "…"
 
 
-class AuditoriaPanel(QWidget):
+class AuditoriaPanel(MixinPaginacion, QWidget):
     """Panel principal del modulo Auditoria: listado filtrable y paginado de
     AuditoriaService.consultar_auditoria(), gateado con el permiso 'auditoria'/'ver'."""
 
@@ -350,8 +351,6 @@ class AuditoriaPanel(QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.pagina_actual = 1
-        self.total_paginas = 1
         self._eventos_pagina: list[Auditoria] = []
         self.setObjectName("ContentArea")
         self._setup_ui()
@@ -500,29 +499,15 @@ class AuditoriaPanel(QWidget):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
 
-        self.lbl_pagina = QLabel("Página 1")
-        self.lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-
-        self.btn_anterior = QPushButton()
-        self.btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        self.btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_anterior.setFixedWidth(40)
-        self.btn_anterior.clicked.connect(self._pagina_anterior)
-
-        self.btn_siguiente = QPushButton()
-        self.btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        self.btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        self.btn_siguiente.setFixedWidth(40)
-        self.btn_siguiente.clicked.connect(self._pagina_siguiente)
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self.cargar_eventos())
 
         btn_ver_detalle = QPushButton("Ver detalle")
         btn_ver_detalle.setIcon(qta.icon("fa5s.info-circle", color=COLOR_TEXT_DARK))
         btn_ver_detalle.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_ver_detalle.clicked.connect(self.ver_detalle_seleccionado)
 
-        h.addWidget(self.lbl_pagina)
-        h.addWidget(self.btn_anterior)
-        h.addWidget(self.btn_siguiente)
+        h.addWidget(self.paginacion)
         h.addStretch()
         h.addWidget(btn_ver_detalle)
         return w
@@ -554,16 +539,6 @@ class AuditoriaPanel(QWidget):
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
         self.cargar_eventos()
-
-    def _pagina_anterior(self) -> None:
-        if self.pagina_actual > 1:
-            self.pagina_actual -= 1
-            self.cargar_eventos()
-
-    def _pagina_siguiente(self) -> None:
-        if self.pagina_actual < self.total_paginas:
-            self.pagina_actual += 1
-            self.cargar_eventos()
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
@@ -623,13 +598,10 @@ class AuditoriaPanel(QWidget):
             self.tabla.setItem(fila, 4, QTableWidgetItem(_resumir_detalle(evento.detalle)))
 
         total = resultado["total"]
-        self.total_paginas = max(1, -(-total // POR_PAGINA))
-        self.pagina_actual = min(self.pagina_actual, self.total_paginas)
+        # pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
+        self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} evento{'s' if total != 1 else ''}")
-        self.lbl_pagina.setText(f"Página {self.pagina_actual} de {self.total_paginas}")
-        self.btn_anterior.setEnabled(self.pagina_actual > 1)
-        self.btn_siguiente.setEnabled(self.pagina_actual < self.total_paginas)
 
     def ver_detalle_seleccionado(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()

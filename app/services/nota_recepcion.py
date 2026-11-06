@@ -25,6 +25,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 logger = logging.getLogger(__name__)
@@ -309,19 +310,7 @@ class NotaRecepcionService:
             )
             query = query.filter(NotaRecepcion.numero_nr.ilike(like) | NotaRecepcion.id_oc.in_(subq_oc))
 
-        total = query.count()
-        nrs = (
-            query.order_by(NotaRecepcion.fecha_recepcion.desc())
-            .offset((pagina - 1) * por_pagina)
-            .limit(por_pagina)
-            .all()
-        )
-        return {
-            "items": nrs,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, NotaRecepcion.fecha_recepcion.desc(), NotaRecepcion.id_nr.desc())
 
     @staticmethod
     def obtener_nota_recepcion(session: Session, id_nr: int, id_usuario: int | None = None) -> dict:

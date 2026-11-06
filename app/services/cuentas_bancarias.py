@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CuentaBancaria
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 from app.services.tesoreria import _enmascarar_numero_cuenta
 
@@ -51,15 +52,7 @@ class CuentaBancariaService:
         if id_banco:
             query = query.filter(CuentaBancaria.id_banco == id_banco)
 
-        query = query.order_by(CuentaBancaria.numero_cuenta)
-        total = query.count()
-        cuentas = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {
-            "items": cuentas,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, CuentaBancaria.numero_cuenta, CuentaBancaria.id_cuenta)
 
     @staticmethod
     def _validar_requeridos(datos: dict) -> None:

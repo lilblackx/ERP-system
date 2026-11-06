@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Cliente, Vendedor
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
@@ -101,16 +102,7 @@ def list_clientes(
         query = query.filter(Cliente.vendedor_cliente == id_vendedor)
     if id_categoria:
         query = query.filter(Cliente.id_categoria_cliente == id_categoria)
-    query = query.order_by(Cliente.nombre_razon_social)
-
-    total = query.count()
-    clientes = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-    return {
-        "items": clientes,
-        "total": total,
-        "pagina": pagina,
-        "por_pagina": por_pagina,
-    }
+    return paginar(query, pagina, por_pagina, Cliente.nombre_razon_social, Cliente.id_cliente)
 
 
 def create_cliente(session: Session, **datos) -> Cliente:

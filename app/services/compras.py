@@ -26,6 +26,7 @@ from app.services.db_utils import (
     traducir_error_trigger,
 )
 from app.services.notas_credito import NotaCreditoService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
 from app.services.ventas import _convertir_a_usd
@@ -538,14 +539,7 @@ class CompraService:
         if solo_desde_oc:
             query = query.filter(Compra.id_oc.isnot(None))
 
-        total = query.count()
-        compras = query.order_by(Compra.fecha_emision.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {
-            "items": compras,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, Compra.fecha_emision.desc(), Compra.id_compra.desc())
 
     @staticmethod
     def crear_compra_desde_oc(

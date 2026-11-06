@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Cliente, FacturaVenta, Ruta, Vendedor
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
@@ -68,16 +69,7 @@ class VendedorService:
             )
         if estado_vendedor:
             query = query.filter(Vendedor.estado_vendedor == estado_vendedor)
-        query = query.order_by(Vendedor.nombre_vendedor)
-
-        total = query.count()
-        vendedores = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {
-            "items": vendedores,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, Vendedor.nombre_vendedor, Vendedor.id_vendedor)
 
     @staticmethod
     def crear(session: Session, **datos) -> Vendedor:

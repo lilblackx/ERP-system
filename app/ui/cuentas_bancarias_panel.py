@@ -30,6 +30,7 @@ from app.ui.conciliacion_bancos_dialog import ConciliacionBancosDialog
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
 from app.ui.message_box import MessageBox
 from app.ui.movimientos_cuenta_dialog import MovimientosCuentaDialog
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
@@ -138,7 +139,7 @@ def _tarea_exportar_cuentas_bancarias_pdf(
     return ruta, len(filas)
 
 
-class CuentasBancariasPanel(MixinPermisos, QWidget):
+class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
     """Panel de gestión de cuentas bancarias."""
 
     recurso_permisos = "bancos"
@@ -148,7 +149,6 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         self.session_factory = session_factory
         self.usuario = usuario
         self._cuentas = []
-        self._pagina_actual = 1
         self._por_pagina = 20
         self._total_registros = 0
         self._filtro_estado = None
@@ -279,23 +279,10 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         self.lbl_paginacion.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px;")
         footer_layout.addWidget(self.lbl_paginacion)
 
-        btn_anterior = QPushButton()
-        btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_anterior.setFixedWidth(40)
-        btn_anterior.clicked.connect(self._on_pagina_anterior)
-        footer_layout.addWidget(btn_anterior)
-
-        self.lbl_pagina_actual = QLabel("Página 1")
-        self.lbl_pagina_actual.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 13px; font-weight: 600;")
-        footer_layout.addWidget(self.lbl_pagina_actual)
-
-        btn_siguiente = QPushButton()
-        btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_siguiente.setFixedWidth(40)
-        btn_siguiente.clicked.connect(self._on_pagina_siguiente)
-        footer_layout.addWidget(btn_siguiente)
+        # Antes: botones propios y "Página N" sin el total de paginas. Ahora el control central.
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self._cargar_datos())
+        footer_layout.addWidget(self.paginacion)
 
         footer_layout.addStretch()
 
@@ -362,11 +349,12 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
                 estado_cuenta=self._filtro_estado,
                 id_banco=self._filtro_banco,
                 id_usuario=self.usuario.id_usuario,
-                pagina=self._pagina_actual,
+                pagina=self.pagina_actual,
                 por_pagina=self._por_pagina,
             )
             self._cuentas = resultado["items"]
             self._total_registros = resultado["total"]
+            self.paginacion.actualizar_desde(resultado)
             self._actualizar_tabla()
             self._actualizar_paginacion()
         except PermisoDenegadoError:
@@ -430,27 +418,29 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
 
     def _actualizar_paginacion(self):
         """Actualiza los controles de paginación."""
-        inicio = (self._pagina_actual - 1) * self._por_pagina + 1
+        if self._total_registros == 0:
+            self.lbl_paginacion.setText("Mostrando 0 de 0 registros")  # antes salia "1-0"
+            return
+        inicio = (self.pagina_actual - 1) * self._por_pagina + 1
         fin = min(inicio + self._por_pagina - 1, self._total_registros)
         self.lbl_paginacion.setText(f"Mostrando {inicio}-{fin} de {self._total_registros} registros")
-        self.lbl_pagina_actual.setText(f"Página {self._pagina_actual}")
 
     def _on_busqueda_cambiada(self, texto: str):
         """Maneja el cambio en el texto de búsqueda."""
         self._texto_busqueda = texto.strip()
-        self._pagina_actual = 1
+        self.pagina_actual = 1
         self._cargar_datos()
 
     def _on_banco_cambiado(self, index: int):
         """Maneja el cambio en el filtro de banco."""
         self._filtro_banco = self.banco_combo.currentData()
-        self._pagina_actual = 1
+        self.pagina_actual = 1
         self._cargar_datos()
 
     def _on_estado_cambiado(self, index: int):
         """Maneja el cambio en el filtro de estado."""
         self._filtro_estado = self.estado_combo.currentData()
-        self._pagina_actual = 1
+        self.pagina_actual = 1
         self._cargar_datos()
 
     def _on_nueva_cuenta(self):
@@ -641,19 +631,6 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
             MessageBox.critical(self, "Error", "No se pudo abrir la conciliación de bancos.")
         finally:
             session.close()
-
-    def _on_pagina_anterior(self):
-        """Retrocede a la página anterior."""
-        if self._pagina_actual > 1:
-            self._pagina_actual -= 1
-            self._cargar_datos()
-
-    def _on_pagina_siguiente(self):
-        """Avanza a la página siguiente."""
-        total_paginas = (self._total_registros + self._por_pagina - 1) // self._por_pagina
-        if self._pagina_actual < total_paginas:
-            self._pagina_actual += 1
-            self._cargar_datos()
 
     def _filtros_actuales_exportar(self) -> dict:
         return {

@@ -62,6 +62,7 @@ from app.ui.message_box import MessageBox
 from app.ui.nota_recepcion_detalle_dialog import NotaRecepcionDetalleDialog
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.orden_compra_detalle_dialog import OrdenCompraDetalleDialog
+from app.ui.paginacion import ControlPaginacion, PaginasPorClave
 from app.ui.pago_linea_dialog import METODOS_PAGO, PagoLineaDialog
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.permisos_ui import MixinPermisos
@@ -1472,8 +1473,11 @@ class ComprasView(MixinPermisos, QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.paginas = {"oc": 1, "nr": 1, "compra": 1}
-        self.total_paginas = {"oc": 1, "nr": 1, "compra": 1}
+        # Un ControlPaginacion por pestaña (control central, app/ui/paginacion.py). `paginas[clave]` y
+        # `total_paginas[clave]` siguen funcionando como antes, pero leen/escriben en el control.
+        self.paginacion = {clave: ControlPaginacion() for clave in ("oc", "nr", "compra")}
+        self.paginas = PaginasPorClave(self.paginacion)
+        self.total_paginas = PaginasPorClave(self.paginacion, total=True)
         # Guard anti-reentrancia para ver_detalle_oc() -- ver bancos_panel.py para el
         # motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
@@ -1563,30 +1567,18 @@ class ComprasView(MixinPermisos, QWidget):
         tabla.verticalHeader().setDefaultSectionSize(42)
         return tabla
 
-    def _make_footer(self, on_anterior, on_siguiente, botones_secundarios: list[QPushButton]) -> tuple:
+    def _make_footer(self, clave: str, cargar, botones_secundarios: list[QPushButton]) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
-        lbl_pagina = QLabel("Página 1")
-        lbl_pagina.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-        btn_anterior = QPushButton()
-        btn_anterior.setIcon(qta.icon("fa5s.chevron-left", color=COLOR_TEXT_DARK))
-        btn_anterior.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_anterior.setFixedWidth(40)
-        btn_anterior.clicked.connect(on_anterior)
-        btn_siguiente = QPushButton()
-        btn_siguiente.setIcon(qta.icon("fa5s.chevron-right", color=COLOR_TEXT_DARK))
-        btn_siguiente.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_siguiente.setFixedWidth(40)
-        btn_siguiente.clicked.connect(on_siguiente)
-        h.addWidget(lbl_pagina)
-        h.addWidget(btn_anterior)
-        h.addWidget(btn_siguiente)
+        control = self.paginacion[clave]
+        control.pagina_cambiada.connect(lambda _pagina: cargar())
+        h.addWidget(control)
         h.addStretch()
         for btn in botones_secundarios:
             h.addWidget(btn)
-        return w, lbl_pagina, btn_anterior, btn_siguiente
+        return w
 
     def _fila_seleccionada_id(self, tabla: QTableWidget) -> int | None:
         filas = tabla.selectionModel().selectedRows()
@@ -1660,9 +1652,9 @@ class ComprasView(MixinPermisos, QWidget):
         btn_enmendar.setIcon(qta.icon("fa5s.edit", color=COLOR_TEXT_DARK))
         btn_enmendar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_enmendar.clicked.connect(self.enmendar_oc_seleccionada)
-        footer, self.lbl_pagina_oc, self.btn_oc_anterior, self.btn_oc_siguiente = self._make_footer(
-            lambda: self._pagina_anterior("oc"),
-            lambda: self._pagina_siguiente("oc"),
+        footer = self._make_footer(
+            "oc",
+            self.cargar_ocs,
             [btn_ver_detalle, *([btn_enmendar] if self._puede("crear_enmienda_oc") else [])],
         )
         layout.addWidget(footer)
@@ -1714,13 +1706,7 @@ class ComprasView(MixinPermisos, QWidget):
                 self.tabla_oc.setItem(fila, 6, item_total)
                 color = COLORES_ESTADO_OC.get(oc.estado, COLOR_TEXT_MUTED)
                 self.tabla_oc.setCellWidget(fila, 7, EstadoBadge(oc.estado.capitalize(), color))
-            self._actualizar_paginacion(
-                "oc",
-                resultado["total"],
-                self.lbl_pagina_oc,
-                self.btn_oc_anterior,
-                self.btn_oc_siguiente,
-            )
+            self.paginacion["oc"].actualizar_desde(resultado, mostrar_total=True)
         except PermisoDenegadoError:
             MessageBox.warning(
                 self,
@@ -1861,9 +1847,9 @@ class ComprasView(MixinPermisos, QWidget):
         btn_rechazar.setIcon(qta.icon("fa5s.undo", color=COLOR_TEXT_DARK))
         btn_rechazar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_rechazar.clicked.connect(self.rechazar_nr_seleccionada)
-        footer, self.lbl_pagina_nr, self.btn_nr_anterior, self.btn_nr_siguiente = self._make_footer(
-            lambda: self._pagina_anterior("nr"),
-            lambda: self._pagina_siguiente("nr"),
+        footer = self._make_footer(
+            "nr",
+            self.cargar_nrs,
             [btn_detalle_nr, *([btn_rechazar] if self._puede("crear_nota_devolucion") else [])],
         )
         layout.addWidget(footer)
@@ -1909,13 +1895,7 @@ class ComprasView(MixinPermisos, QWidget):
                 self.tabla_nr.setItem(fila, 5, QTableWidgetItem(usuario.nombre if usuario else ""))
                 color = COLORES_ESTADO_NR.get(nr.estado, COLOR_TEXT_MUTED)
                 self.tabla_nr.setCellWidget(fila, 6, EstadoBadge(nr.estado.capitalize(), color))
-            self._actualizar_paginacion(
-                "nr",
-                resultado["total"],
-                self.lbl_pagina_nr,
-                self.btn_nr_anterior,
-                self.btn_nr_siguiente,
-            )
+            self.paginacion["nr"].actualizar_desde(resultado, mostrar_total=True)
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar recepciones.")
         except Exception:
@@ -2083,14 +2063,9 @@ class ComprasView(MixinPermisos, QWidget):
         btn_anular_compra.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_anular_compra.clicked.connect(self.anular_compra_seleccionada)
 
-        (
-            footer,
-            self.lbl_pagina_compra,
-            self.btn_compra_anterior,
-            self.btn_compra_siguiente,
-        ) = self._make_footer(
-            lambda: self._pagina_anterior("compra"),
-            lambda: self._pagina_siguiente("compra"),
+        footer = self._make_footer(
+            "compra",
+            self.cargar_compras,
             [btn_detalle_compra, *([btn_anular_compra] if self._puede("eliminar") else [])],
         )
         layout.addWidget(footer)
@@ -2143,13 +2118,7 @@ class ComprasView(MixinPermisos, QWidget):
                 estado = c.estado_compra or "EMITIDA"
                 color = COLORES_ESTADO_COMPRA.get(estado, COLOR_TEXT_MUTED)
                 self.tabla_compra.setCellWidget(fila, 7, EstadoBadge(estado.capitalize(), color))
-            self._actualizar_paginacion(
-                "compra",
-                resultado["total"],
-                self.lbl_pagina_compra,
-                self.btn_compra_anterior,
-                self.btn_compra_siguiente,
-            )
+            self.paginacion["compra"].actualizar_desde(resultado, mostrar_total=True)
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar compras.")
         except Exception:
@@ -2258,32 +2227,6 @@ class ComprasView(MixinPermisos, QWidget):
             MessageBox.critical(self, "Error", "No se pudo anular la factura de compra.")
         finally:
             session.close()
-
-    # ── Paginacion compartida ────────────────────────────────────────────
-
-    def _actualizar_paginacion(
-        self,
-        clave: str,
-        total: int,
-        lbl_pagina: QLabel,
-        btn_anterior: QPushButton,
-        btn_siguiente: QPushButton,
-    ) -> None:
-        self.total_paginas[clave] = max(1, -(-total // POR_PAGINA))
-        self.paginas[clave] = min(self.paginas[clave], self.total_paginas[clave])
-        lbl_pagina.setText(f"Página {self.paginas[clave]} de {self.total_paginas[clave]} ({total})")
-        btn_anterior.setEnabled(self.paginas[clave] > 1)
-        btn_siguiente.setEnabled(self.paginas[clave] < self.total_paginas[clave])
-
-    def _pagina_anterior(self, clave: str) -> None:
-        if self.paginas[clave] > 1:
-            self.paginas[clave] -= 1
-            [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][["oc", "nr", "compra"].index(clave)]()
-
-    def _pagina_siguiente(self, clave: str) -> None:
-        if self.paginas[clave] < self.total_paginas[clave]:
-            self.paginas[clave] += 1
-            [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][["oc", "nr", "compra"].index(clave)]()
 
     # ── Exportación ───────────────────────────────────────────────────────
 

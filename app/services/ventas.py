@@ -33,6 +33,7 @@ from app.services.db_utils import (
     traducir_error_trigger,
 )
 from app.services.notas_credito import NotaCreditoService
+from app.services.paginacion import paginar
 from app.services.pagos import PagoService
 from app.services.pagos_bcv import PagoBCVService
 from app.services.permisos import require_permiso
@@ -1249,10 +1250,10 @@ class VentaService:
                     ),
                 )
 
-        total = query.count()
-        facturas = (
-            query.order_by(FacturaVenta.fecha_emision.desc()).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+        resultado = paginar(
+            query, pagina, por_pagina, FacturaVenta.fecha_emision.desc(), FacturaVenta.id_factura.desc()
         )
+        facturas = resultado["items"]
 
         # estado_visual: atributo Python plano (no mapeado), calculado en un solo batch
         # para toda la pagina en vez de N+1 -- ver _calcular_estado_visual.
@@ -1302,12 +1303,7 @@ class VentaService:
                     elif len(metodos_distintos) > 1:
                         f.metodo_pago = "mixto"
 
-        return {
-            "items": facturas,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return resultado
 
     @staticmethod
     def obtener_factura(session: Session, id_factura: int, id_usuario: int | None = None) -> dict:

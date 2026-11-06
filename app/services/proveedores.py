@@ -4,6 +4,7 @@ from sqlalchemy.sql import func
 
 from app.db.models import Proveedor
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
@@ -59,15 +60,7 @@ class ProveedorService:
         if estado_proveedor:
             query = query.filter(Proveedor.estado_proveedor == estado_proveedor)
 
-        query = query.order_by(Proveedor.nombre_razon_social)
-        total = query.count()
-        proveedores = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
-        return {
-            "items": proveedores,
-            "total": total,
-            "pagina": pagina,
-            "por_pagina": por_pagina,
-        }
+        return paginar(query, pagina, por_pagina, Proveedor.nombre_razon_social, Proveedor.id_proveedor)
 
     @staticmethod
     def _validar_requeridos(datos: dict) -> None:
