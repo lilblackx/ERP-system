@@ -5,14 +5,14 @@ import logging
 from datetime import datetime
 
 import qtawesome as qta
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
-    QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -25,24 +25,54 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.models import Auditoria, Usuario
+from app.ui.auditoria_detalle_dialog import DetalleAuditoriaDialog
+from app.ui.auditoria_detalle_dialog import filas_de_cambios as _filas_de_cambios
 from app.ui.message_box import MessageBox
 from app.ui.pantalla import ajustar_tamano
 from app.ui.styles import (
-    BUTTON_SECONDARY_QSS,
-    COLOR_BORDER,
-    COLOR_CARD_BG,
+    COLOR_BLUE_LIGHTER,
     COLOR_DANGER,
     COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_SUCCESS,
+    COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MEDIUM,
     COLOR_TEXT_MUTED,
+    DIALOGO_QSS,
+    SEARCH_QSS,
     TABLE_QSS,
     alinear_encabezados,
+    aplicar_sombra,
+    estilizar_campo_fecha,
 )
 
 logger = logging.getLogger(__name__)
+
+COLUMNAS = ["Fecha", "Usuario", "Acción", "Módulo", "Detalle", "Categoría", "Nombre", "ID Producto"]
+COL_DETALLE = 4
+
+ETIQUETAS_CAMPO = {
+    "cantidad_unidad": "Cantidad (unidades)",
+    "cantidad_caja": "Cantidad (cajas)",
+    "costo_producto": "Costo",
+    "descripcion_producto": "Descripción",
+    "nombre_producto": "Nombre",
+    "cod_producto": "Código",
+    "id_categoria": "Categoría",
+    "estado_producto": "Estado",
+    "cantidad_minima": "Cantidad mínima",
+}
+
+
+def _etiqueta_campo(campo: str) -> str:
+    return ETIQUETAS_CAMPO.get(campo, campo.replace("_", " ").capitalize())
+
+
+def filas_de_cambios(detalle: str | None) -> list[tuple[str, str, str]]:
+    """Cambios (campo, antes, despues) de un registro de producto, con las etiquetas de los campos de producto.
+    La logica esta en auditoria_detalle_dialog.filas_de_cambios (compartida con la auditoria general)."""
+    return _filas_de_cambios(detalle, _etiqueta_campo)
 
 
 class ProductoAuditoriaDialog(QDialog):
@@ -70,7 +100,7 @@ class ProductoAuditoriaDialog(QDialog):
 
         self.setWindowTitle(titulo)
         ajustar_tamano(self, 1200, 700, 1000, 600)
-        self.setStyleSheet(TABLE_QSS)
+        self.setStyleSheet(DIALOGO_QSS)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._build_ui()
@@ -90,45 +120,62 @@ class ProductoAuditoriaDialog(QDialog):
             return None
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        # Misma plantilla que el historial de clientes: encabezado con icono, tarjetas SectionCard (sin reglas sin
+        # selector: antes `border/padding` en la tarjeta se heredaban a cada texto y cada uno se dibujaba en una caja),
+        # tabla estandar de solo lectura y botones secundarios.
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(16)
+        root.addWidget(self._make_header())
+        root.addWidget(self._make_filtros())
+        root.addWidget(self._make_tabla(), stretch=1)
+        root.addWidget(self._make_resumen())
+        root.addLayout(self._make_footer())
 
-        # Header
-        header = QWidget()
-        header.setStyleSheet("background: transparent;")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(12)
+    def _make_header(self) -> QWidget:
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(12)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(qta.icon("fa5s.history", color=COLOR_PRIMARY).pixmap(28, 28))
+        icon_lbl.setPixmap(qta.icon("fa5s.history", color=COLOR_PRIMARY).pixmap(QSize(22, 22)))
         icon_lbl.setStyleSheet(
-            f"background-color: {COLOR_INFO_BG}; border: 2px solid {COLOR_PRIMARY}; border-radius: 10px; padding: 8px;"
+            f"background-color: {COLOR_INFO_BG}; border: 1.5px solid {COLOR_BLUE_LIGHTER}; "
+            "border-radius: 8px; padding: 6px;"
         )
-        icon_lbl.setMinimumSize(44, 44)
+        icon_lbl.setFixedSize(38, 38)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        titulos = QVBoxLayout()
+        titulos.setSpacing(1)
+        titulos.setContentsMargins(0, 0, 0, 0)
         lbl_titulo = QLabel("Auditoría de Productos")
-        lbl_titulo.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        lbl_subtitulo = QLabel(self.producto_nombre or "Todos los productos")
+        lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        titulos.addWidget(lbl_titulo)
+        titulos.addWidget(lbl_subtitulo)
 
-        header_layout.addWidget(icon_lbl)
-        header_layout.addWidget(lbl_titulo)
-        header_layout.addStretch()
+        h.addWidget(icon_lbl)
+        h.addLayout(titulos)
+        h.addStretch()
+        return w
 
-        layout.addWidget(header)
+    @staticmethod
+    def _etiqueta(texto: str) -> QLabel:
+        lbl = QLabel(texto)
+        lbl.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        return lbl
 
-        # Filtros
-        filtros_card = QWidget()
-        filtros_card.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 12px;"
-        )
-        filtros_layout = QGridLayout(filtros_card)
-        filtros_layout.setSpacing(12)
+    def _make_filtros(self) -> QWidget:
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        h = QHBoxLayout(card)
+        h.setContentsMargins(16, 12, 16, 12)
+        h.setSpacing(10)
 
-        # Filtro por acción
-        lbl_accion = QLabel("Acción:")
-        lbl_accion.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.accion_combo = QComboBox()
         self.accion_combo.addItem("Todas las acciones")
         self.accion_combo.addItem("Creación", "CREAR_PRODUCTO")
@@ -140,144 +187,151 @@ class ProductoAuditoriaDialog(QDialog):
         self.accion_combo.addItem("Cambio de Nombre", "CAMBIO_NOMBRE")
         self.accion_combo.addItem("Eliminación de Precio", "ELIMINAR_PRECIO")
         self.accion_combo.addItem("Recepción de Mercancía", "RECEPCION_MERCANCIA")
-        self.accion_combo.setMinimumHeight(32)
+        self.accion_combo.setFixedHeight(34)
+        self.accion_combo.setMinimumWidth(190)
         self.accion_combo.currentIndexChanged.connect(self._aplicar_filtros)
 
-        # Filtro por nombre de producto
-        lbl_nombre = QLabel("Nombre Producto:")
-        lbl_nombre.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.nombre_input = QLineEdit()
         self.nombre_input.setPlaceholderText("Filtrar por nombre...")
-        self.nombre_input.setMinimumHeight(32)
+        self.nombre_input.setStyleSheet(SEARCH_QSS)
+        self.nombre_input.setFixedHeight(34)
+        self.nombre_input.setMinimumWidth(180)
         self.nombre_input.textChanged.connect(self._aplicar_filtros)
 
-        # Filtro por rango de fechas
-        lbl_fecha_inicio = QLabel("Desde:")
-        lbl_fecha_inicio.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.fecha_inicio = QDateEdit()
-        self.fecha_inicio.setCalendarPopup(True)
-        self.fecha_inicio.setDate(self.fecha_inicio.date().addDays(-30))
-        self.fecha_inicio.setMinimumHeight(32)
+        estilizar_campo_fecha(self.fecha_inicio)
+        self.fecha_inicio.setDisplayFormat("dd/MM/yyyy")
+        self.fecha_inicio.setDate(self._fecha_desde_defecto())
+        self.fecha_inicio.setFixedSize(130, 34)
         self.fecha_inicio.dateChanged.connect(self._aplicar_filtros)
 
-        lbl_fecha_fin = QLabel("Hasta:")
-        lbl_fecha_fin.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.fecha_fin = QDateEdit()
-        self.fecha_fin.setCalendarPopup(True)
-        self.fecha_fin.setDate(self.fecha_fin.date().currentDate())
-        self.fecha_fin.setMinimumHeight(32)
+        estilizar_campo_fecha(self.fecha_fin)
+        self.fecha_fin.setDisplayFormat("dd/MM/yyyy")
+        self.fecha_fin.setDate(QDate.currentDate())
+        self.fecha_fin.setFixedSize(130, 34)
         self.fecha_fin.dateChanged.connect(self._aplicar_filtros)
 
-        # Botón limpiar filtros
-        btn_limpiar = QPushButton("Limpiar Filtros")
+        btn_limpiar = QPushButton("Limpiar filtros")
         btn_limpiar.setIcon(qta.icon("fa5s.times", color=COLOR_TEXT_MEDIUM))
-        btn_limpiar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_limpiar.setMinimumHeight(32)
+        btn_limpiar.setObjectName("BtnSecondary")
+        btn_limpiar.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_limpiar.setFixedHeight(34)
         btn_limpiar.clicked.connect(self._limpiar_filtros)
 
-        filtros_layout.addWidget(lbl_accion, 0, 0)
-        filtros_layout.addWidget(self.accion_combo, 0, 1)
-        filtros_layout.addWidget(lbl_nombre, 0, 2)
-        filtros_layout.addWidget(self.nombre_input, 0, 3)
-        filtros_layout.addWidget(lbl_fecha_inicio, 0, 4)
-        filtros_layout.addWidget(self.fecha_inicio, 0, 5)
-        filtros_layout.addWidget(lbl_fecha_fin, 0, 6)
-        filtros_layout.addWidget(self.fecha_fin, 0, 7)
-        filtros_layout.addWidget(btn_limpiar, 0, 8)
-        filtros_layout.setColumnStretch(1, 1)
-        filtros_layout.setColumnStretch(3, 1)
-        filtros_layout.setColumnStretch(5, 1)
-        filtros_layout.setColumnStretch(7, 1)
+        h.addWidget(self._etiqueta("Acción"))
+        h.addWidget(self.accion_combo)
+        h.addSpacing(8)
+        h.addWidget(self._etiqueta("Producto"))
+        h.addWidget(self.nombre_input, stretch=1)
+        h.addSpacing(8)
+        h.addWidget(self._etiqueta("Desde"))
+        h.addWidget(self.fecha_inicio)
+        h.addWidget(self._etiqueta("Hasta"))
+        h.addWidget(self.fecha_fin)
+        h.addSpacing(8)
+        h.addWidget(btn_limpiar)
+        return card
 
-        layout.addWidget(filtros_card)
-
-        # Tabla de auditoría
+    def _make_tabla(self) -> QTableWidget:
         self.table = QTableWidget()
-        self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels(
-            [
-                "Fecha",
-                "Usuario",
-                "Acción",
-                "Módulo",
-                "Detalle",
-                "Categoría",
-                "Nombre",
-                "ID Producto",
-            ]
-        )
-        self.table.setMinimumHeight(350)
+        self.table.setColumnCount(len(COLUMNAS))
+        self.table.setHorizontalHeaderLabels(COLUMNAS)
+        # Estandar de las tablas de la app: SOLO LECTURA (antes se podia escribir dentro de las celdas), sin
+        # numeracion de filas, sin rejilla, filas alternas y sin barra de desplazamiento horizontal.
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setColumnWidth(0, 140)
-        self.table.setColumnWidth(1, 150)
-        self.table.setColumnWidth(2, 130)
-        self.table.setColumnWidth(3, 90)
-        self.table.setColumnWidth(4, 350)
-        self.table.setColumnWidth(5, 100)
-        self.table.setColumnWidth(6, 150)
-        self.table.setColumnWidth(7, 90)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
+        self.table.setWordWrap(False)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(42)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table.setMinimumHeight(300)
+        self.table.doubleClicked.connect(self._ver_detalle)  # el detalle completo, en su propia ventana
+        self._resultados: list = []
+
+        encabezado = self.table.horizontalHeader()
+        for columna in range(len(COLUMNAS)):
+            encabezado.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
+        encabezado.setSectionResizeMode(COL_DETALLE, QHeaderView.ResizeMode.Stretch)  # absorbe el ancho que sobra
+        encabezado.setStretchLastSection(False)
 
         alinear_encabezados(
             self.table,
             {
-                0: Qt.AlignmentFlag.AlignLeft,
+                0: Qt.AlignmentFlag.AlignCenter,
                 1: Qt.AlignmentFlag.AlignLeft,
                 2: Qt.AlignmentFlag.AlignLeft,
-                3: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignCenter,
                 4: Qt.AlignmentFlag.AlignLeft,
                 5: Qt.AlignmentFlag.AlignCenter,
                 6: Qt.AlignmentFlag.AlignLeft,
                 7: Qt.AlignmentFlag.AlignCenter,
             },
         )
+        self.table.setStyleSheet(TABLE_QSS)
+        aplicar_sombra(self.table)
+        return self.table
 
-        layout.addWidget(self.table, stretch=1)
-
-        # Resumen
-        resumen_card = QWidget()
-        resumen_card.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 12px;"
+    @staticmethod
+    def _chip(color: str) -> QLabel:
+        """Etiqueta tipo "chip" del resumen: fondo y radio PROPIOS, para no heredar nada del contenedor."""
+        lbl = QLabel()
+        lbl.setStyleSheet(
+            f"background-color: {COLOR_TABLE_HEADER}; color: {color}; border-radius: 10px; "
+            "padding: 3px 12px; font-size: 12px; font-weight: 600;"
         )
-        resumen_layout = QHBoxLayout(resumen_card)
-        resumen_layout.setSpacing(20)
+        return lbl
 
-        self.lbl_total_registros = QLabel("Total registros: 0")
-        self.lbl_total_registros.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+    def _make_resumen(self) -> QWidget:
+        card = QWidget()
+        card.setObjectName("SectionCard")
+        aplicar_sombra(card)
+        h = QHBoxLayout(card)
+        h.setContentsMargins(16, 10, 16, 10)
+        h.setSpacing(10)
 
-        self.lbl_cambios_precio = QLabel("Cambios de precio: 0")
-        self.lbl_cambios_precio.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_SUCCESS};")
+        self.lbl_total_registros = self._chip(COLOR_TEXT_MEDIUM)
+        self.lbl_total_registros.setText("Total registros: 0")
+        self.lbl_cambios_precio = self._chip(COLOR_SUCCESS)
+        self.lbl_cambios_precio.setText("Cambios de precio: 0")
+        self.lbl_movimientos_stock = self._chip(COLOR_PRIMARY)
+        self.lbl_movimientos_stock.setText("Movimientos de stock: 0")
+        self.lbl_ediciones = self._chip(COLOR_TEXT_MUTED)
+        self.lbl_ediciones.setText("Ediciones: 0")
 
-        self.lbl_movimientos_stock = QLabel("Movimientos de stock: 0")
-        self.lbl_movimientos_stock.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_PRIMARY};")
+        for lbl in (
+            self.lbl_total_registros,
+            self.lbl_cambios_precio,
+            self.lbl_movimientos_stock,
+            self.lbl_ediciones,
+        ):
+            h.addWidget(lbl)
+        h.addStretch()
+        return card
 
-        self.lbl_ediciones = QLabel("Ediciones: 0")
-        self.lbl_ediciones.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
-
-        resumen_layout.addWidget(self.lbl_total_registros)
-        resumen_layout.addWidget(self.lbl_cambios_precio)
-        resumen_layout.addWidget(self.lbl_movimientos_stock)
-        resumen_layout.addWidget(self.lbl_ediciones)
-        resumen_layout.addStretch()
-
-        layout.addWidget(resumen_card)
-
-        # Footer
-        footer_layout = QHBoxLayout()
-        footer_layout.setContentsMargins(0, 8, 0, 0)
-        footer_layout.setSpacing(10)
-
-        footer_layout.addStretch()
-
+    def _make_footer(self) -> QHBoxLayout:
+        h = QHBoxLayout()
+        h.setContentsMargins(0, 4, 0, 0)
+        btn_detalle = QPushButton("Ver detalle")
+        btn_detalle.setIcon(qta.icon("fa5s.eye", color=COLOR_TEXT_DARK))
+        btn_detalle.setObjectName("BtnSecondary")
+        btn_detalle.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_detalle.setAutoDefault(False)
+        btn_detalle.clicked.connect(self._ver_detalle)
+        h.addWidget(btn_detalle)
+        h.addStretch()
         btn_cerrar = QPushButton("Cerrar")
-        btn_cerrar.setIcon(qta.icon("fa5s.times", color=COLOR_TEXT_DARK))
-        btn_cerrar.setStyleSheet(BUTTON_SECONDARY_QSS)
-        btn_cerrar.setMinimumHeight(32)
+        btn_cerrar.setIcon(qta.icon("fa5s.times", color=COLOR_PRIMARY))
+        btn_cerrar.setObjectName("BtnSecondary")
         btn_cerrar.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cerrar.setAutoDefault(False)
         btn_cerrar.clicked.connect(self.accept)
-        footer_layout.addWidget(btn_cerrar)
-
-        layout.addLayout(footer_layout)
+        h.addWidget(btn_cerrar)
+        return h
 
     def _cargar_datos(self):
         """Carga los datos de auditoría desde la base de datos."""
@@ -344,6 +398,7 @@ class ProductoAuditoriaDialog(QDialog):
     def _poblar_tabla(self, resultados):
         """Puebla la tabla con los resultados de auditoría."""
         self.table.setRowCount(0)
+        self._resultados = list(resultados)
 
         for row, aud in enumerate(resultados):
             self.table.insertRow(row)
@@ -351,6 +406,7 @@ class ProductoAuditoriaDialog(QDialog):
             # Fecha
             fecha_item = QTableWidgetItem(aud.fecha_evento.strftime("%d/%m/%Y %H:%M:%S"))
             fecha_item.setData(Qt.ItemDataRole.UserRole, aud.fecha_evento)
+            fecha_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 0, fecha_item)
 
             # Usuario
@@ -367,16 +423,20 @@ class ProductoAuditoriaDialog(QDialog):
 
             # Módulo
             modulo_item = QTableWidgetItem(aud.modulo)
+            modulo_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 3, modulo_item)
 
             # Detalle (formateado para mejor legibilidad)
             detalle_formateado = self._formatear_detalle(aud.detalle)
             detalle_item = QTableWidgetItem(detalle_formateado)
+            # El texto completo (la columna lo corta al ancho): al pasar el mouse, o doble clic para la ventana.
+            detalle_item.setToolTip(detalle_formateado.replace(" | ", "\n"))
             self.table.setItem(row, 4, detalle_item)
 
             # Tipo (extraído del detalle)
             tipo = self._extraer_tipo(aud.accion, aud.detalle)
             tipo_item = QTableWidgetItem(tipo)
+            tipo_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 5, tipo_item)
 
             # Nombre del producto (extraído del detalle)
@@ -387,37 +447,29 @@ class ProductoAuditoriaDialog(QDialog):
             # ID relacionado (extraído del detalle)
             id_relacionado = self._extraer_id_relacionado(aud.detalle)
             id_item = QTableWidgetItem(str(id_relacionado) if id_relacionado else "N/A")
+            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 7, id_item)
 
     def _colorear_accion(self, row, accion, item):
-        """Colorea la celda de acción según el tipo."""
-        if accion == "CREAR_PRODUCTO":
-            item.setBackground(QColor(COLOR_SUCCESS))
-            item.setForeground(Qt.GlobalColor.white)
-        elif accion == "ELIMINAR_PRECIO":
-            item.setBackground(QColor(COLOR_DANGER))
-            item.setForeground(Qt.GlobalColor.white)
-        elif accion == "CAMBIO_PRECIO":
-            item.setBackground(QColor("#FEF3C7"))
-            item.setForeground(QColor("#D97706"))
-        elif accion == "CAMBIAR_ESTADO_PRODUCTO":
-            item.setBackground(QColor(COLOR_INFO_BG))
-            item.setForeground(QColor(COLOR_PRIMARY))
-        elif accion == "MOVIMIENTO_STOCK":
-            item.setBackground(QColor("#ECFDF5"))
-            item.setForeground(QColor("#059669"))
-        elif accion == "CAMBIO_DESCRIPCION":
-            item.setBackground(QColor("#F3E8FF"))
-            item.setForeground(QColor("#7C3AED"))
-        elif accion == "CAMBIO_NOMBRE":
-            item.setBackground(QColor("#FFEDD5"))
-            item.setForeground(QColor("#C2410C"))
-        elif accion == "ACTUALIZAR_PRODUCTO":
-            item.setBackground(QColor("#E0E7FF"))
-            item.setForeground(QColor("#4338CA"))
-        elif accion == "RECEPCION_MERCANCIA":
-            item.setBackground(QColor("#D1FAE5"))
-            item.setForeground(QColor("#047857"))
+        """Color del TEXTO de la accion segun su tipo (en negrita). Antes se pintaba la celda entera con colores
+        saturados (verde/rojo con texto blanco), que desentonaban con el resto de tablas de la app."""
+        colores = {
+            "CREAR_PRODUCTO": COLOR_SUCCESS,
+            "ELIMINAR_PRECIO": COLOR_DANGER,
+            "CAMBIO_PRECIO": "#D97706",
+            "CAMBIAR_ESTADO_PRODUCTO": COLOR_PRIMARY,
+            "MOVIMIENTO_STOCK": "#059669",
+            "CAMBIO_DESCRIPCION": "#7C3AED",
+            "CAMBIO_NOMBRE": "#C2410C",
+            "ACTUALIZAR_PRODUCTO": "#4338CA",
+            "RECEPCION_MERCANCIA": "#047857",
+        }
+        color = colores.get(accion)
+        if color:
+            item.setForeground(QColor(color))
+            fuente = item.font()
+            fuente.setBold(True)
+            item.setFont(fuente)
 
     def _formatear_accion(self, accion: str | None) -> str:
         """Formatea la acción para mostrarla de forma legible."""
@@ -728,14 +780,47 @@ class ProductoAuditoriaDialog(QDialog):
         )
         self.lbl_ediciones.setText(resumen_texto)
 
+    def _datos_de_detalle(self, aud) -> dict:
+        """Todo lo que muestra la ventana de detalle de un registro de auditoria."""
+        id_prod = self._extraer_id_relacionado(aud.detalle)
+        return {
+            "fecha": aud.fecha_evento.strftime("%d/%m/%Y %H:%M:%S"),
+            "usuario": aud.usuario.nombre_usuario if aud.usuario else "Sistema",
+            "accion": self._formatear_accion(aud.accion),
+            "modulo": aud.modulo,
+            "extras": [
+                ("Producto", self._extraer_nombre_producto(aud.detalle) or "N/A"),
+                ("ID producto", id_prod if id_prod else "N/A"),
+            ],
+            "cambios": filas_de_cambios(aud.detalle),
+            "detalle": self._formatear_detalle(aud.detalle).replace(" | ", "\n"),
+        }
+
+    def _ver_detalle(self, *_args):
+        filas = self.table.selectionModel().selectedRows()
+        if not filas:
+            MessageBox.information(self, "Selección requerida", "Selecciona un registro de la lista.")
+            return
+        fila = filas[0].row()
+        if not 0 <= fila < len(self._resultados):
+            return
+        DetalleAuditoriaDialog(self._datos_de_detalle(self._resultados[fila]), parent=self).exec()
+
     def _aplicar_filtros(self):
         """Aplica los filtros seleccionados y recarga los datos."""
         self._cargar_datos()
+
+    @staticmethod
+    def _fecha_desde_defecto() -> QDate:
+        """Inicio del rango por defecto: los ultimos 12 meses desde HOY. Antes se restaban 30 dias a
+        `QDateEdit().date()`, que arranca en 01/01/2000: salia "02/12/1999" (todo el historial) y cada
+        "Limpiar filtros" retrocedia otros 30 dias."""
+        return QDate.currentDate().addYears(-1)
 
     def _limpiar_filtros(self):
         """Limpia todos los filtros y recarga los datos."""
         self.accion_combo.setCurrentIndex(0)
         self.nombre_input.clear()
-        self.fecha_inicio.setDate(self.fecha_inicio.date().addDays(-30))
-        self.fecha_fin.setDate(self.fecha_fin.date().currentDate())
+        self.fecha_inicio.setDate(self._fecha_desde_defecto())
+        self.fecha_fin.setDate(QDate.currentDate())
         self._cargar_datos()

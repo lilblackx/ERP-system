@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSpacerItem,
@@ -40,6 +39,7 @@ from app.db.models import Auditoria, Usuario
 from app.services.auditoria import MODULOS_SUGERIDOS, AuditoriaService
 from app.services.permisos import PermisoDenegadoError
 from app.services.usuarios import UsuarioService
+from app.ui.auditoria_detalle_dialog import CLAVES_DE_CAMBIOS, DetalleAuditoriaDialog, filas_de_cambios
 from app.ui.message_box import MessageBox
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.styles import (
@@ -343,6 +343,54 @@ def _resumir_detalle(detalle: str | None) -> str:
     return texto[:LIMITE_RESUMEN_DETALLE].rstrip() + "…"
 
 
+# Campos del detalle cuyo valor es un monto en bolivares (se muestran con el sufijo "Bs").
+CAMPOS_EN_BS = frozenset({"monto_abono", "monto_total_aplicado", "saldo_restante"})
+
+
+def _filas_registro(detalle: str | None) -> list[tuple[str, str]]:
+    """(etiqueta, valor) con los datos del evento que NO son un cambio antes/despues (los datos con que se creo
+    un cliente, una factura, etc.), ya traducidos y sin truncar. Texto plano o JSON que no es un objeto -> []."""
+    if not detalle:
+        return []
+    try:
+        datos = json.loads(detalle)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(datos, dict):
+        return []
+    filas = []
+    for clave, valor in datos.items():
+        if valor is None or clave in CLAVES_DE_CAMBIOS:
+            continue
+        texto = _formatear_valor_detalle(valor)
+        if clave in CAMPOS_EN_BS:
+            texto += " Bs"
+        filas.append((_etiqueta_campo(clave), texto))
+    return filas
+
+
+def datos_de_detalle(evento) -> dict:
+    """Todo lo que muestra la ventana "Detalle del cambio" para un evento de la bitacora."""
+    cambios = filas_de_cambios(evento.detalle, _etiqueta_campo)
+    registro = _filas_registro(evento.detalle)
+    if registro or cambios:
+        lineas = [f"{campo}: {valor}" for campo, valor in registro]
+        lineas += [f"{campo}: {antes} → {despues}" for campo, antes, despues in cambios]
+        texto = "\n".join(lineas)
+    else:
+        texto = evento.detalle or "Sin información adicional."  # frase ya armada (inicio de sesion, etc.)
+    return {
+        "fecha": evento.fecha_evento.strftime("%d/%m/%Y %H:%M:%S") if evento.fecha_evento else "—",
+        "usuario": evento.usuario.nombre_usuario if evento.usuario else "Sistema",
+        "accion": evento.accion,
+        "modulo": evento.modulo,
+        "extras": [],
+        "cambios": cambios,
+        "registro": registro,
+        "detalle": texto,
+    }
+
+
 class AuditoriaPanel(MixinPaginacion, QWidget):
     """Panel principal del modulo Auditoria: listado filtrable y paginado de
     AuditoriaService.consultar_auditoria(), gateado con el permiso 'auditoria'/'ver'."""
@@ -485,6 +533,7 @@ class AuditoriaPanel(MixinPaginacion, QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabla.doubleClicked.connect(self.ver_detalle_seleccionado)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -595,7 +644,10 @@ class AuditoriaPanel(MixinPaginacion, QWidget):
             self.tabla.setItem(fila, 1, QTableWidgetItem(usuario_texto))
             self.tabla.setItem(fila, 2, QTableWidgetItem(evento.modulo))
             self.tabla.setItem(fila, 3, QTableWidgetItem(evento.accion))
-            self.tabla.setItem(fila, 4, QTableWidgetItem(_resumir_detalle(evento.detalle)))
+            item_detalle = QTableWidgetItem(_resumir_detalle(evento.detalle))
+            # La columna corta el texto: completo al pasar el mouse, o doble clic para la ventana de detalle.
+            item_detalle.setToolTip("\n".join(_formatear_detalle(evento.detalle)))
+            self.tabla.setItem(fila, 4, item_detalle)
 
         total = resultado["total"]
         # pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
@@ -603,35 +655,13 @@ class AuditoriaPanel(MixinPaginacion, QWidget):
 
         self.lbl_total.setText(f"{total} evento{'s' if total != 1 else ''}")
 
-    def ver_detalle_seleccionado(self) -> None:
+    def ver_detalle_seleccionado(self, *_args) -> None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
             MessageBox.information(self, "Selección requerida", "Selecciona un evento de la lista.")
             return
         evento = cast(Auditoria, self._eventos_pagina[filas[0].row()])
-        fecha_texto = evento.fecha_evento.strftime("%d/%m/%Y %H:%M:%S") if evento.fecha_evento else "—"
-        usuario_texto = evento.usuario.nombre_usuario if evento.usuario else "Sistema"
-        lineas_detalle = _formatear_detalle(evento.detalle)
-        detalle_texto = (
-            "\n".join(f"• {linea}" for linea in lineas_detalle) if lineas_detalle else "Sin información adicional."
-        )
-        cuerpo = (
-            f"Fecha: {fecha_texto}\n"
-            f"Usuario: {usuario_texto}\n"
-            f"Módulo: {evento.modulo}\n"
-            f"Acción: {evento.accion}\n\n"
-            f"Detalle:\n{detalle_texto}"
-        )
-        # Se arma con QMessageBox nativo, no con MessageBox.information() (app/ui/message_box.py)
-        # -- este ultimo no expone textFormat, y hace falta forzar PlainText a mano: el `detalle` de un
-        # evento viene de campos de texto libre (motivo, observaciones) que un usuario
-        # pudo escribir con "<b>" o una etiqueta "<a href=...>", y por defecto Qt decide
-        # con una heuristica (Qt::AutoText) si interpretarlo como HTML -- sin esto, ese
-        # texto podia renderizarse como markup real (spoofing de un enlace falso) dentro
-        # del dialogo administrativo (hallazgo de auditoria, 2026-09-01).
-        cuadro = QMessageBox(self)
-        cuadro.setIcon(QMessageBox.Icon.Information)
-        cuadro.setWindowTitle("Detalle del evento")
-        cuadro.setTextFormat(Qt.TextFormat.PlainText)
-        cuadro.setText(cuerpo)
-        cuadro.exec()
+        # Ventana compartida con la auditoria de productos. Muestra todo como TEXTO PLANO: el `detalle` de un evento
+        # viene en parte de campos de texto libre (motivo, observaciones) y un "<a href=...>" escrito ahi no debe
+        # renderizarse como un enlace real (hallazgo de auditoria, 2026-09-01).
+        DetalleAuditoriaDialog(datos_de_detalle(evento), parent=self).exec()
