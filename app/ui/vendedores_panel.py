@@ -44,9 +44,6 @@ from app.ui.rutas_panel import RutasPanel
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
-    COLOR_BORDER,
-    COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
@@ -58,7 +55,9 @@ from app.ui.styles import (
     TABS_QSS,
     EstadoBadge,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar
 from app.ui.vendedor_form_dialog import VendedorFormDialog
@@ -199,7 +198,7 @@ class VendedoresPanel(MixinPermisos, QWidget):
         self.tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self.tabs, stretch=1)
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _asegurar_tab_mapa(self) -> None:
         if self.tab_mapa is not None:
@@ -254,9 +253,7 @@ class VendedoresPanel(MixinPermisos, QWidget):
 
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(w, padding=4, radio=8)
         h = QHBoxLayout(w)
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)

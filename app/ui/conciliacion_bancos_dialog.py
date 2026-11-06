@@ -274,6 +274,7 @@ class ConciliacionBancosDialog(QDialog):
 
         # ── Tabla de movimientos del día ──
         self.table = QTableWidget()
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # solo lectura
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(
             [

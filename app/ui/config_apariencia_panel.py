@@ -7,13 +7,19 @@ estación elige las suyas y no hace falta ningún permiso.
 from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
 from app.ui import animaciones
-from app.ui.styles import COLOR_BORDER, COLOR_CARD_BG, COLOR_CONTENT_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED
+from app.ui.styles import (
+    COLOR_BORDER,
+    COLOR_CARD_BG,
+    COLOR_TEXT_DARK,
+    COLOR_TEXT_MUTED,
+    aplicar_fondo_panel,
+)
 
 
 class ConfigAparienciaPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
         tarjeta = QWidget()
         tarjeta.setObjectName("SectionCard")

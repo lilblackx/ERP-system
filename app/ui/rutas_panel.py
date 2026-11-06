@@ -35,9 +35,6 @@ from app.ui.ruta_form_dialog import RutaFormDialog
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
-    COLOR_BORDER,
-    COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_SUCCESS,
     COLOR_TEXT_DARK,
@@ -47,7 +44,9 @@ from app.ui.styles import (
     TABLE_QSS,
     EstadoBadge,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,7 +74,7 @@ class RutasPanel(MixinPermisos, QWidget):
         self.usuario = usuario
         self.pagina_actual = 1
         self.total_paginas = 1
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
         self._setup_ui()
 
     def cargar(self) -> None:
@@ -97,9 +96,7 @@ class RutasPanel(MixinPermisos, QWidget):
 
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(w, padding=4, radio=8)
         h = QHBoxLayout(w)
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)

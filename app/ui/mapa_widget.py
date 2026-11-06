@@ -76,7 +76,7 @@ from PySide6.QtWidgets import (
 
 from app.ui.geo_http import HttpWorker, buscar_lugares, obtener_ubicacion_dispositivo
 from app.ui.geo_windows import obtener_ubicacion_precisa_windows
-from app.ui.styles import COLOR_PRIMARY, COLOR_WHITE
+from app.ui.styles import COLOR_PRIMARY, COLOR_WHITE, estilizar_completer
 
 logger = logging.getLogger(__name__)
 
@@ -504,6 +504,7 @@ class MapaWidget(QWidget):
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.completer.activated.connect(self._on_sugerencia_seleccionada)
         self.busqueda_input.setCompleter(self.completer)
+        estilizar_completer(self.completer)  # sin esto la lista de sugerencias salia oscura e ilegible
 
         # Feedback transitorio (errores de geolocalizacion precisa) -- oculto salvo
         # cuando hay algo que mostrar, se auto-oculta solo (ver _mostrar_estado_temporal).

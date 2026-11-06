@@ -11,14 +11,14 @@ from app.ui.config_apariencia_panel import ConfigAparienciaPanel
 from app.ui.config_empresa_panel import ConfigEmpresaPanel
 from app.ui.config_licencia_panel import LicenciaPanel
 from app.ui.config_smtp_panel import ConfigSmtpPanel
-from app.ui.styles import COLOR_CONTENT_BG, TABS_QSS
+from app.ui.styles import TABS_QSS, aplicar_fondo_panel
 
 
 class ConfiguracionPanel(QWidget):
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
         self.setObjectName("ContentArea")
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
         self.empresa_panel = ConfigEmpresaPanel(session_factory, usuario)
         self.licencia_panel = LicenciaPanel(session_factory, usuario)

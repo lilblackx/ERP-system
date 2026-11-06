@@ -56,6 +56,7 @@ from app.ui.styles import (
     FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     TABLE_QSS,
+    alinear_encabezados,
     aplicar_sombra,
 )
 
@@ -462,6 +463,17 @@ class NotasCreditoProveedorDialog(QDialog):
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.setColumnHidden(0, True)
+        # Encabezados alineados como sus celdas: texto a la izquierda y los montos a la derecha.
+        alinear_encabezados(
+            self.tabla,
+            {
+                1: Qt.AlignmentFlag.AlignLeft,
+                2: Qt.AlignmentFlag.AlignLeft,
+                3: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignRight,
+                5: Qt.AlignmentFlag.AlignRight,
+            },
+        )
         self.tabla.setStyleSheet(TABLE_QSS)
         root.addWidget(self.tabla, stretch=1)
 

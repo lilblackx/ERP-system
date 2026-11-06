@@ -85,6 +85,7 @@ COLOR_SIDEBAR_BG = "#12459B"
 COLOR_SIDEBAR_TEXT = "#FFFFFF"
 COLOR_SIDEBAR_ACTIVE = "#1B62B9"
 COLOR_SIDEBAR_HOVER = "#104C99"
+COLOR_SIDEBAR_SECCION = "#93C5FD"  # Titulo de grupo del sidebar: un celeste que ningun boton usa
 
 COLOR_TOPBAR_BG = "#FFFFFF"
 COLOR_TOPBAR_BORDER = "#E2E8F0"
@@ -141,6 +142,56 @@ TOPBAR_HEIGHT = 60
 FONT_FAMILY = "Segoe UI"
 
 
+# Barras de desplazamiento de TODA la app (se aplican via GLOBAL_QSS a nivel de QApplication, asi que cubren tablas,
+# QScrollArea, cuadros de texto y las listas desplegables de los combos). Antes solo se estilizaba la vertical y de
+# forma incompleta: sin las zonas "page" Windows dibujaba su patron rayado junto al asa, y la horizontal quedaba con el
+# aspecto nativo (flechas incluidas). Diseño: pista transparente, asa delgada y redondeada (6px dentro de una pista de
+# 12px) que se oscurece al pasar el mouse y al arrastrar, sin flechas, igual en vertical y en horizontal.
+# Un widget con un estilo propio (la barra lateral oscura) lo sobrescribe a proposito.
+SCROLLBAR_QSS = f"""
+QScrollBar:vertical {{
+    background: transparent;
+    width: 12px;
+    margin: 0;
+}}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: 12px;
+    margin: 0;
+}}
+QScrollBar::handle:vertical {{
+    background: {COLOR_BORDER};
+    border-radius: 3px;
+    min-height: 36px;
+    margin: 2px 3px;
+}}
+QScrollBar::handle:horizontal {{
+    background: {COLOR_BORDER};
+    border-radius: 3px;
+    min-width: 36px;
+    margin: 3px 2px;
+}}
+QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {{
+    background: {COLOR_TEXT_LIGHT};
+}}
+QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {{
+    background: {COLOR_TEXT_MUTED};
+}}
+QScrollBar::add-line, QScrollBar::sub-line {{
+    height: 0;
+    width: 0;
+    border: none;
+    background: none;
+}}
+QScrollBar::add-page, QScrollBar::sub-page {{
+    background: transparent;
+}}
+QAbstractScrollArea::corner {{
+    background: transparent;
+    border: none;
+}}
+"""
+
 # ── Hojas de estilo (QSS) ───────────────────────────────────────────────────
 GLOBAL_QSS = f"""
 * {{
@@ -151,19 +202,7 @@ GLOBAL_QSS = f"""
 QMainWindow, QWidget#ContentArea {{
     background-color: {COLOR_CONTENT_BG};
 }}
-QScrollBar:vertical {{
-    background: {COLOR_BORDER};
-    width: 8px;
-    border-radius: 4px;
-}}
-QScrollBar::handle:vertical {{
-    background: {COLOR_TEXT_LIGHT};
-    border-radius: 4px;
-    min-height: 20px;
-}}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-    height: 0;
-}}
+{SCROLLBAR_QSS}
 QToolTip {{
     background-color: {COLOR_TEXT_DARK};
     color: white;
@@ -286,6 +325,177 @@ QCheckBox::indicator:disabled {{
 }}
 """
 
+# Fondo de pagina de un panel. NO usar `widget.setStyleSheet("background-color: ...")` sin selector: en Qt esa regla
+# equivale a `* { ... }` y se aplica al panel Y A TODOS SUS HIJOS, asi que cada texto (QLabel, casillas...) recibia
+# tambien el gris de la pagina y, dentro de una tarjeta blanca, se veia una franja gris detras de cada texto.
+# Aqui el gris sigue en el panel y los textos quedan transparentes (se ve lo que tengan debajo). Un widget con su
+# PROPIO estilo (un "chip" gris, un campo de solo lectura) conserva el suyo: el estilo propio gana al heredado.
+FONDO_PANEL_QSS = f"""
+* {{
+    background-color: {COLOR_CONTENT_BG};
+}}
+QLabel, QCheckBox, QRadioButton {{
+    background: transparent;
+}}
+"""
+
+
+def estilizar_tarjeta(widget, padding: int = 4, radio: int = 8) -> None:
+    """Fondo blanco + borde de tarjeta SOLO en el contenedor (se aplica por objectName, no a sus hijos).
+
+    No usar `widget.setStyleSheet("background-color: ...; border: ...; padding: ...")` sin selector: esa regla
+    equivale a `* {...}` y se hereda a TODOS los widgets que contiene, de modo que cada texto se dibuja en su
+    propia caja con borde, relleno y fondo (se veia asi en la auditoria de productos y en las barras de
+    herramientas)."""
+    nombre = widget.objectName() or "TarjetaBarra"
+    widget.setObjectName(nombre)
+    widget.setStyleSheet(
+        f"QWidget#{nombre} {{ background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; "
+        f"border-radius: {radio}px; padding: {padding}px; }}"
+    )
+
+
+# Lista emergente de un QCompleter (autocompletado de un campo de texto). Es una ventana propia que no hereda el fondo
+# de ningun contenedor: sin estilo salia con fondo OSCURO y texto oscuro (ilegible). Se aplica a su popup.
+POPUP_COMPLETER_QSS = f"""
+QListView {{
+    background-color: {COLOR_CARD_BG};
+    color: {COLOR_TEXT_DARK};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 4px;
+    outline: none;
+    selection-background-color: {COLOR_TABLE_SELECTED};
+    selection-color: {COLOR_TEXT_DARK};
+}}
+QListView::item {{
+    padding: 6px 10px;
+}}
+"""
+
+
+def estilizar_completer(completer) -> None:
+    """Hace legible la lista de sugerencias de un QCompleter (fondo claro, texto oscuro, seleccion de la app)."""
+    completer.popup().setStyleSheet(POPUP_COMPLETER_QSS)
+
+
+def aplicar_fondo_panel(widget) -> None:
+    """Pone el fondo de pagina a un panel sin pintar de gris los textos que contiene."""
+    widget.setStyleSheet(FONDO_PANEL_QSS)
+
+
+# Plantilla de los dialogos de consulta (mismo aspecto que el historial de clientes): fondo de pagina, tarjetas
+# `SectionCard` y boton secundario. Se aplica al QDialog; las tarjetas se marcan con setObjectName("SectionCard").
+# NO poner reglas sin selector (`border`, `padding`, `background`) en una tarjeta: se heredan a TODOS los textos que
+# contiene y cada uno se dibuja como una caja propia.
+DIALOGO_QSS = f"""
+QDialog {{
+    background-color: {COLOR_CONTENT_BG};
+    font-family: '{FONT_FAMILY}', Arial, sans-serif;
+}}
+QWidget#SectionCard {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 10px;
+}}
+QPushButton#BtnSecondary {{
+    background-color: {COLOR_FIELD_BG};
+    color: {COLOR_TEXT_MEDIUM};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton#BtnSecondary:hover {{
+    background-color: {COLOR_TABLE_HEADER};
+    color: {COLOR_TEXT_DARK};
+}}
+"""
+
+# Campo de fecha con el mismo aspecto que QLineEdit/QComboBox (fondo blanco, borde, radio 6). Distinto de FECHA_QSS de
+# reportes_panel, que es un campo sin borde pensado para vivir dentro de una barra de herramientas.
+CAMPO_FECHA_QSS = f"""
+QDateEdit {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 6px;
+    padding: 6px 8px 6px 12px;
+    font-size: 13px;
+    color: {COLOR_TEXT_DARK};
+}}
+QDateEdit:hover {{
+    border-color: {COLOR_TEXT_MUTED};
+}}
+QDateEdit:focus {{
+    border-color: {COLOR_PRIMARY};
+}}
+QDateEdit::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 24px;
+    border: none;
+    background: transparent;
+}}
+QDateEdit::down-arrow {{
+    image: url({ICON_CHEVRON_DOWN_URL});
+    width: 12px;
+    height: 12px;
+}}
+"""
+
+CALENDARIO_QSS = f"""
+QCalendarWidget {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 8px;
+    font-family: '{FONT_FAMILY}', Arial, sans-serif;
+}}
+QCalendarWidget QWidget#qt_calendar_navigationbar {{
+    background-color: {COLOR_PRIMARY};
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}}
+QCalendarWidget QToolButton {{
+    color: {COLOR_WHITE};
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QCalendarWidget QToolButton:hover {{
+    background-color: {COLOR_PRIMARY_LIGHT};
+}}
+QCalendarWidget QToolButton::menu-indicator {{
+    image: none;
+}}
+QCalendarWidget QMenu {{
+    background-color: {COLOR_CARD_BG};
+    border: 1px solid {COLOR_BORDER};
+    color: {COLOR_TEXT_DARK};
+}}
+QCalendarWidget QAbstractItemView:enabled {{
+    background-color: {COLOR_CARD_BG};
+    color: {COLOR_TEXT_DARK};
+    selection-background-color: {COLOR_PRIMARY};
+    selection-color: {COLOR_WHITE};
+    outline: none;
+}}
+QCalendarWidget QAbstractItemView:disabled {{
+    color: {COLOR_TEXT_LIGHT};
+}}
+"""
+
+
+def estilizar_campo_fecha(date_edit) -> None:
+    """Campo de fecha estandar: borde y radio como el resto de campos, y calendario con el estilo corporativo."""
+    date_edit.setStyleSheet(CAMPO_FECHA_QSS)
+    date_edit.setCalendarPopup(True)
+    date_edit.calendarWidget().setStyleSheet(CALENDARIO_QSS)
+
+
 SIDEBAR_QSS = f"""
 QWidget#Sidebar {{
     background-color: {COLOR_SIDEBAR_BG};
@@ -402,7 +612,9 @@ QHeaderView::section {{
     font-weight: bold;
     font-size: 11px;
     letter-spacing: 0.5px;
-    padding: 10px 12px;
+    /* 15px y no 12px como las celdas: el texto de una celda lleva ~3px de margen interno propio, y con el mismo
+       padding el encabezado quedaba corrido 3px a la izquierda de sus datos. */
+    padding: 10px 15px;
     border: none;
     border-bottom: 2px solid {COLOR_BORDER};
     text-transform: uppercase;

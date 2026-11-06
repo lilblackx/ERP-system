@@ -65,7 +65,9 @@ from app.ui.styles import (
     TABLE_QSS,
     EstadoBadge,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
     fijar_columna_estado,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
@@ -637,6 +639,8 @@ class SeleccionarCuentaBCVDialog(QDialog):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Encabezados alineados como sus celdas (texto a la izquierda); antes quedaban centrados sobre ellas.
+        alinear_encabezados(self.tabla, {i: Qt.AlignmentFlag.AlignLeft for i in range(len(headers))})
         self.tabla.setStyleSheet(TABLE_QSS)
         self.tabla.verticalHeader().setDefaultSectionSize(40)
 
@@ -1497,7 +1501,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
         root.addWidget(self._make_table())
         root.addWidget(self._make_footer())
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _make_header(self) -> QWidget:
         w = QWidget()
@@ -1540,9 +1544,7 @@ class CuentasPorCobrarBCVPanel(QWidget):
 
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(w, padding=4, radio=8)
         h = QHBoxLayout(w)
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)

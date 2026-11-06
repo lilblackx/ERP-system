@@ -36,15 +36,14 @@ from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
-    COLOR_BORDER,
-    COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     FlowLayout,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,7 +62,7 @@ class RolesPermisosPanel(MixinPermisos, QWidget):
         self.usuario = usuario
         self._rol_seleccionado_id: int | None = None
         self._checkboxes: dict[int, QCheckBox] = {}  # id_permiso -> checkbox
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
         self._setup_ui()
 
     def cargar(self) -> None:
@@ -86,7 +85,7 @@ class RolesPermisosPanel(MixinPermisos, QWidget):
     def _make_card_roles(self) -> QWidget:
         card = QWidget()
         card.setFixedWidth(260)
-        card.setStyleSheet(f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 10px;")
+        estilizar_tarjeta(card, padding=0, radio=10)
         aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
@@ -139,7 +138,7 @@ class RolesPermisosPanel(MixinPermisos, QWidget):
 
     def _make_card_matriz(self) -> QWidget:
         card = QWidget()
-        card.setStyleSheet(f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 10px;")
+        estilizar_tarjeta(card, padding=0, radio=10)
         aplicar_sombra(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 12, 16, 14)

@@ -95,7 +95,9 @@ from app.ui.styles import (
     TABS_QSS,
     EstadoBadge,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 
@@ -1509,13 +1511,11 @@ class ComprasView(MixinPermisos, QWidget):
         self.tabs.currentChanged.connect(lambda _i: self._cargar_tab_actual())
         root.addWidget(self.tabs, stretch=1)
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _make_toolbar(self, estados: list[tuple], on_filtro_cambiado, on_nuevo=None, texto_nuevo="") -> tuple:
         w = QWidget()
-        w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(w, padding=4, radio=8)
         h = QHBoxLayout(w)
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)

@@ -34,9 +34,6 @@ from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
-    COLOR_BORDER,
-    COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
@@ -46,7 +43,9 @@ from app.ui.styles import (
     TABLE_QSS,
     EstadoBadge,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 from app.ui.workers import QueryWorker
@@ -196,9 +195,7 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         # ── Toolbar ── (GUIA_ESTILO_UI.md §3.4: Buscar — stretch — Nuevo X — Filtrar —
         # Exportar; banco+estado agrupados en un solo BotonFiltros, no dropdowns sueltos)
         toolbar = QWidget()
-        toolbar.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(toolbar, padding=4, radio=8)
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(12, 8, 12, 8)
         toolbar_layout.setSpacing(10)
@@ -336,7 +333,7 @@ class CuentasBancariasPanel(MixinPermisos, QWidget):
         # en los pixeles que TABLE_QSS deja fuera del border-radius de la tabla (las
         # "esquinas negras" reportadas por el usuario, 2026-09-02) -- todos los demas
         # paneles del sistema (bancos_panel.py, vendedores_panel.py, etc.) ya lo hacen.
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _cargar_bancos(self):
         """Carga la lista de bancos en el combo de filtro via BancoService (antes hacia

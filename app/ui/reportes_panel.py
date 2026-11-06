@@ -21,7 +21,6 @@ from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtGui import QColor, QShowEvent, QTextCharFormat
 from PySide6.QtWidgets import (
     QComboBox,
-    QCompleter,
     QDateEdit,
     QFileDialog,
     QHBoxLayout,
@@ -52,29 +51,27 @@ from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
+    CALENDARIO_QSS,
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_FIELD_BG,
     COLOR_INFO,
     COLOR_INFO_BG,
     COLOR_PRIMARY,
-    COLOR_PRIMARY_LIGHT,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
     COLOR_TABLE_SELECTED,
     COLOR_TEXT_DARK,
-    COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
-    COLOR_WHITE,
-    FONT_FAMILY,
     ICON_CHEVRON_DOWN_URL,
     TABLE_QSS,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar
 from app.ui.workers import QueryWorker
@@ -443,50 +440,6 @@ QComboBox QAbstractItemView {{
     outline: none;
     selection-background-color: {COLOR_TABLE_SELECTED};
     selection-color: {COLOR_TEXT_DARK};
-}}
-"""
-
-CALENDARIO_QSS = f"""
-QCalendarWidget {{
-    background-color: {COLOR_CARD_BG};
-    border: 1px solid {COLOR_BORDER};
-    border-radius: 8px;
-    font-family: '{FONT_FAMILY}', Arial, sans-serif;
-}}
-QCalendarWidget QWidget#qt_calendar_navigationbar {{
-    background-color: {COLOR_PRIMARY};
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-}}
-QCalendarWidget QToolButton {{
-    color: {COLOR_WHITE};
-    background-color: transparent;
-    border: none;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 13px;
-    font-weight: 600;
-}}
-QCalendarWidget QToolButton:hover {{
-    background-color: {COLOR_PRIMARY_LIGHT};
-}}
-QCalendarWidget QToolButton::menu-indicator {{
-    image: none;
-}}
-QCalendarWidget QMenu {{
-    background-color: {COLOR_CARD_BG};
-    border: 1px solid {COLOR_BORDER};
-    color: {COLOR_TEXT_DARK};
-}}
-QCalendarWidget QAbstractItemView:enabled {{
-    background-color: {COLOR_CARD_BG};
-    color: {COLOR_TEXT_DARK};
-    selection-background-color: {COLOR_PRIMARY};
-    selection-color: {COLOR_WHITE};
-    outline: none;
-}}
-QCalendarWidget QAbstractItemView:disabled {{
-    color: {COLOR_TEXT_LIGHT};
 }}
 """
 
@@ -961,7 +914,7 @@ class ReportesPanel(QWidget):
         root.addWidget(self._make_resumen())
         root.addWidget(self._make_table(), stretch=1)
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _make_header(self) -> QWidget:
         w = QWidget()
@@ -1012,9 +965,7 @@ class ReportesPanel(QWidget):
         # dos filas acota el ancho minimo real al MAX de cada fila por separado (~880px)
         # en vez de la SUMA de ambas (~1600px+), hallazgo del usuario 2026-08-31.
         w = QWidget()
-        w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(w, padding=4, radio=8)
         v = QVBoxLayout(w)
         v.setContentsMargins(12, 8, 12, 8)
         v.setSpacing(8)
@@ -1076,21 +1027,10 @@ class ReportesPanel(QWidget):
         self.tipo_combo.addItem("Productos Próximos a Vencer", REPORTE_PRODUCTOS_PROXIMOS_VENCER)
         self.tipo_combo.currentIndexChanged.connect(self._on_tipo_cambiado)
 
-        # Con 41 reportes en un solo combo plano, encontrar uno por nombre exacto en la
-        # lista es lento -- setEditable + QCompleter con MatchContains permite escribir
-        # cualquier parte del nombre para saltar directo (ej. "caja" filtra Arqueo de Caja/
-        # Movimientos de Caja/Cierre por Cajero/Flujo de Caja). InsertPolicy.NoInsert +
-        # el comportamiento nativo de Qt evitan que quede texto libre sin corresponder a
-        # ningun item: si no hay match exacto al perder foco, revierte al item ya
-        # seleccionado (hallazgo de auditoria UX, 2026-09-01).
-        self.tipo_combo.setEditable(True)
-        self.tipo_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.tipo_combo.lineEdit().setPlaceholderText("Buscar reporte…")
-        completer = QCompleter([self.tipo_combo.itemText(i) for i in range(self.tipo_combo.count())], self)
-        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        self.tipo_combo.setCompleter(completer)
+        # Selector NORMAL (no editable), igual que el resto de combos de la app. Antes era editable con un QCompleter
+        # ("Buscar reporte...") para saltar entre los reportes: dejaba escribir texto libre en el selector ("jjjjj"),
+        # mostraba un cursor de texto y abria una lista de autocompletado oscura e ilegible. Para ir rapido a un
+        # reporte, un combo no editable ya permite teclear las primeras letras de su nombre.
 
         # QStackedWidget (usado antes aca) hereda de QFrame, y anidado dentro del
         # QStackedWidget de MainWindow (el que conmuta entre modulos), Qt le pinta un

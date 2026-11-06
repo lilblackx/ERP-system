@@ -54,6 +54,7 @@ from app.ui.styles import (
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
+    aplicar_fondo_panel,
     aplicar_sombra,
 )
 from app.ui.workers import QueryWorker
@@ -382,7 +383,7 @@ class LicenciaPanel(QWidget):
         layout.addWidget(self.panel_renovar)
         layout.addStretch()
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
         # Una estacion no activa ni renueva nada: solo relee el estado desde el servidor, asi que
         # no hay formulario que plegar: queda unicamente el boton, siempre visible.

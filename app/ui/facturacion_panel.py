@@ -49,9 +49,6 @@ from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
-    COLOR_BORDER,
-    COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
@@ -63,7 +60,9 @@ from app.ui.styles import (
     TABLE_QSS,
     EstadoBadge,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 from app.ui.workers import QueryWorker
@@ -260,7 +259,7 @@ class FacturacionPanel(MixinPermisos, QWidget):
         root.addWidget(self._make_table())
         root.addWidget(self._make_footer())
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _make_header(self) -> QWidget:
         w = QWidget()
@@ -289,9 +288,7 @@ class FacturacionPanel(MixinPermisos, QWidget):
 
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(w, padding=4, radio=8)
         h = QHBoxLayout(w)
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)

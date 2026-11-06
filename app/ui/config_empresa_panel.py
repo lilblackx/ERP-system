@@ -44,6 +44,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     COLOR_WHITE,
     ICON_CHEVRON_DOWN_URL,
+    aplicar_fondo_panel,
 )
 from app.utils.impresora_local import guardar_impresora_local, obtener_impresora_local
 from app.utils.rif import formatear_rif
@@ -351,7 +352,7 @@ class ConfigEmpresaPanel(MixinPermisos, QWidget):
         scroll.setWidget(card)
         root.addWidget(scroll, stretch=1)
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _cargar_impresoras_disponibles(self, seleccionada: str | None = None) -> None:
         """Puebla el combo con las impresoras que Qt detecta instaladas en el sistema

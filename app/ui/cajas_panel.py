@@ -57,6 +57,7 @@ from app.ui.styles import (
     TABLE_QSS,
     EstadoBadge,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
 )
 
@@ -437,7 +438,7 @@ class CajasPanel(MixinPermisos, QWidget):
         root.addWidget(self._make_table())
         root.addWidget(self._make_footer())
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _make_header(self) -> QWidget:
         w = QWidget()

@@ -87,6 +87,7 @@ class MovimientosCuentaDialog(QDialog):
 
         # ── Tabla de Movimientos ──
         self.table = QTableWidget()
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # solo lectura
         self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels(
             [

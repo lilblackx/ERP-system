@@ -8,9 +8,9 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from app.ui.styles import (
     COLOR_BORDER,
-    COLOR_CONTENT_BG,
     COLOR_PRIMARY,
     COLOR_TEXT_MUTED,
+    aplicar_fondo_panel,
 )
 
 
@@ -59,4 +59,4 @@ class PlaceholderView(QWidget):
         inner.addWidget(lbl_desc)
 
         layout.addWidget(container)
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)

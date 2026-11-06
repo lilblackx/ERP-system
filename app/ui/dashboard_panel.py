@@ -37,7 +37,6 @@ from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     CARD_QSS,
     COLOR_BORDER,
-    COLOR_CONTENT_BG,
     COLOR_DANGER,
     COLOR_INFO,
     COLOR_PRIMARY,
@@ -48,6 +47,7 @@ from app.ui.styles import (
     COLOR_WARNING,
     COLORES_ESTADO_FACTURA,
     LabelElidable,
+    aplicar_fondo_panel,
     aplicar_sombra,
     color_con_alpha,
 )
@@ -558,7 +558,7 @@ class DashboardPanel(QWidget):
         root.addWidget(self._make_fila_grafico_y_cajas(), stretch=1)
         root.addWidget(self._make_fila_facturas_e_inventario(), stretch=1)
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _make_header(self) -> QWidget:
         w = QWidget()

@@ -34,10 +34,9 @@ from app.services.rutas import RutaService
 from app.ui.mapa_widget import MapaWidget
 from app.ui.message_box import MessageBox
 from app.ui.styles import (
-    COLOR_BORDER,
-    COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_TEXT_MUTED,
+    aplicar_fondo_panel,
+    estilizar_tarjeta,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ class MapaRutasPanel(QWidget):
         super().__init__(parent)
         self.session_factory = session_factory
         self.usuario = usuario
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
         self._setup_ui()
 
     def cargar(self) -> None:
@@ -75,9 +74,7 @@ class MapaRutasPanel(QWidget):
 
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(w, padding=4, radio=8)
         h = QHBoxLayout(w)
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)

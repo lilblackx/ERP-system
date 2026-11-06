@@ -28,6 +28,7 @@ from app.ui.animaciones import animaciones_activas
 from app.ui.styles import (
     COLOR_SIDEBAR_ACTIVE,
     COLOR_SIDEBAR_BG,
+    COLOR_SIDEBAR_SECCION,
     COLOR_WHITE,
 )
 
@@ -162,12 +163,14 @@ _SIDEBAR_CSS = f"""
     }}
 
     /* Etiquetas de sección */
+    /* Titulo de grupo: celeste (color que ningun boton usa) y en negrita, para que NO se confunda con los botones de
+       modulo (antes era blanco tenue, con el mismo borde izquierdo que ellos). */
     QLabel#SidebarSection {{
-        color: rgba(255, 255, 255, 179);
+        color: {COLOR_SIDEBAR_SECCION};
         font-size: 10px;
-        font-weight: bold;
-        letter-spacing: 0.8px;
-        padding-left: 10px;
+        font-weight: 800;
+        letter-spacing: 1.8px;
+        padding: 12px 10px 2px 10px;
         background-color: {COLOR_SIDEBAR_BG};
     }}
 
@@ -185,7 +188,7 @@ _SIDEBAR_CSS = f"""
         color: rgba(255,255,255,0.88);
         border: none;
         border-radius: 6px;
-        padding: 11px 10px;
+        padding: 11px 10px 11px 20px;  /* sangria: los botones quedan "dentro" del grupo que encabeza el titulo */
         text-align: left;
         font-size: 15px;
         font-weight: 500;
@@ -447,7 +450,7 @@ class Sidebar(QWidget):
 
             lbl_seccion = QLabel(nombre_seccion)
             lbl_seccion.setObjectName("SidebarSection")
-            lbl_seccion.setFixedHeight(24)
+            lbl_seccion.setFixedHeight(26 if not self._lbl_secciones else 36)  # el primer titulo, mas bajo
             self._lbl_secciones.append(lbl_seccion)
             self._nav_layout.addWidget(lbl_seccion)
 

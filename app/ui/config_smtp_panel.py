@@ -44,12 +44,12 @@ from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
     COLOR_BORDER,
     COLOR_CARD_BG,
-    COLOR_CONTENT_BG,
     COLOR_PRIMARY,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     COLOR_WHITE,
     ICON_CHEVRON_DOWN_URL,
+    aplicar_fondo_panel,
 )
 from app.ui.workers import QueryWorker
 
@@ -263,7 +263,7 @@ class ConfigSmtpPanel(MixinPermisos, QWidget):
         scroll.setWidget(card)
         root.addWidget(scroll, stretch=1)
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     @staticmethod
     def _crear_input(placeholder: str) -> QLineEdit:

@@ -79,7 +79,9 @@ from app.ui.styles import (
     TABLE_QSS,
     EstadoBadge,
     alinear_encabezados,
+    aplicar_fondo_panel,
     aplicar_sombra,
+    estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 
@@ -1128,9 +1130,9 @@ class DetalleClienteDialog(MixinPermisos, QDialog):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
 
-        lbl_titulo = QLabel("Facturas Pendientes")
-        lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
-        header_layout.addWidget(lbl_titulo)
+        self.lbl_titulo = QLabel("Facturas Pendientes")
+        self.lbl_titulo.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        header_layout.addWidget(self.lbl_titulo)
         header_layout.addStretch()
 
         lbl_cliente = QLabel(self.cliente.nombre_razon_social if self.cliente else "Cliente")
@@ -1496,7 +1498,7 @@ class CuentasPorCobrarPanel(QWidget):
         root.addWidget(self._make_table())
         root.addWidget(self._make_footer())
 
-        self.setStyleSheet(f"background-color: {COLOR_CONTENT_BG};")
+        aplicar_fondo_panel(self)
 
     def _make_header(self) -> QWidget:
         w = QWidget()
@@ -1542,9 +1544,7 @@ class CuentasPorCobrarPanel(QWidget):
 
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(
-            f"background-color: {COLOR_CARD_BG}; border: 1px solid {COLOR_BORDER}; border-radius: 8px; padding: 4px;"
-        )
+        estilizar_tarjeta(w, padding=4, radio=8)
         h = QHBoxLayout(w)
         h.setContentsMargins(12, 8, 12, 8)
         h.setSpacing(10)
