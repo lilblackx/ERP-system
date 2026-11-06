@@ -3,7 +3,7 @@ from PySide6.QtCore import QCoreApplication, QSettings, QTimer
 from PySide6.QtWidgets import QWidget
 
 from app.ui import animaciones, notificaciones_leidas, permisos_ui
-from app.utils import impresora_local
+from app.utils import impresora_local, novedades_local
 
 _single_shot_original = QTimer.singleShot
 
@@ -33,6 +33,13 @@ def _impresora_local_aislada(tmp_path, monkeypatch):
     temporal para no leer ni pisar la configuracion de la PC real."""
     ruta = str(tmp_path / "estacion.ini")
     monkeypatch.setattr(impresora_local, "_settings", lambda: QSettings(ruta, QSettings.Format.IniFormat))
+
+
+@pytest.fixture(autouse=True)
+def _novedades_local_aislada(tmp_path, monkeypatch):
+    """Lo "ya visto" de las novedades tambien va a un .ini temporal, para no leer ni pisar el registro de la PC real."""
+    ruta = str(tmp_path / "novedades.ini")
+    monkeypatch.setattr(novedades_local, "_settings", lambda: QSettings(ruta, QSettings.Format.IniFormat))
 
 
 @pytest.fixture(autouse=True)

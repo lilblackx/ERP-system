@@ -543,6 +543,30 @@ Comisiones sobre alguna línea (solo aplica a ventas, C14 resuelto 2026-08-23, v
 tocan cuentas en estado `'pendiente'`, así que si ya hay pagos aplicados (`'parcial'`/
 `'pagada'`) el trigger no la altera y fijar `estado='anulada'` después es seguro.
 
+## 5.1 Novedades por versión y saludo al entrar (2026-11-06)
+
+Al abrir la app (justo después de mostrar la ventana principal, `MainWindow.mostrar_bienvenida`) se muestra UNA cosa:
+
+- **Primer ingreso del usuario** (un solo `LOGIN` en auditoría): saludo "¡Bienvenido, Luis!".
+- **Versión nueva** desde la última que vio ese usuario en esa estación: ventana "Novedades", filtrada por los módulos
+  que su rol puede ver (cada cambio puede declarar `modulos`; sin `modulos` es general).
+- **Cualquier otro caso**: toast breve que se quita solo ("Buenos días, Luis · Bienvenido de nuevo").
+
+La última versión vista se guarda por estación y usuario en QSettings (`app/utils/novedades_local.py`), igual que
+la impresora: no toca la base de datos. Un fallo al mostrarla se registra y nunca impide trabajar. El pie del menú
+lateral ("Novedades · vX") reabre la ventana a pedido.
+
+**Cómo publicar novedades de una versión:** (1) subir `VERSION` en `app/version.py` (única fuente: la usan la app, el
+sidebar y `packaging/construir.ps1`); (2) agregar la entrada en `app/assets/novedades.json` con tipos
+`nuevo|mejorado|general` y, si aplica, los `modulos` (claves del sidebar). `tests/test_novedades.py` falla si
+`VERSION` no tiene entrada o si hay un tipo/módulo inexistente.
+
+**Criterio editorial (discreción):** se cuenta solo lo útil y visible (máx. 6 líneas de una frase, sin detalle técnico),
+lo más útil con `"destacado": true`. **No se acumulan entre versiones:** se muestra solo la entrada de la versión
+instalada (quien se salta versiones no ve las intermedias; tampoco al reabrirla desde el menú lateral). Los arreglos de algo que no debió fallar no se anuncian: van todos en la única línea
+`general` "Mejoras de estabilidad y funcionamiento." (no existe el tipo `corregido`). Las pruebas hacen cumplir estos límites. Lógica pura en `app/novedades.py`; diálogo en
+`app/ui/novedades_dialog.py`; el saludo reutiliza `Toast` con el tipo `"saludo"`.
+
 ## 6. Panel general (`dashboard.py`)
 
 `get_panel_general_data()` devuelve en una sola llamada:

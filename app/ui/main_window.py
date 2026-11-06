@@ -29,8 +29,10 @@ from PySide6.QtWidgets import (
 
 from app.db.models import ConfiguracionEmpresa, Usuario
 from app.db.session import SessionLocal
+from app.novedades import cargar_entregas, entregas_a_mostrar, filtrar_por_modulos, preparar_bienvenida, primer_nombre
 from app.rutas import NOMBRE_APP
 from app.services import cifrado_servidor, datos_estaciones
+from app.services.auth import es_primer_ingreso
 from app.services.cola_correos import CorreoService
 from app.services.licencia import EstadoLicencia, LicenciaService
 from app.services.notificaciones import NotificacionesService
@@ -54,6 +56,7 @@ from app.ui.dashboard_panel import DashboardPanel
 from app.ui.facturacion_panel import FacturacionPanel
 from app.ui.inventario_panel import InventarioPanel
 from app.ui.message_box import MessageBox
+from app.ui.novedades_dialog import NovedadesDialog
 from app.ui.pantalla import ajustar_tamano
 from app.ui.placeholder_view import PlaceholderView
 from app.ui.proveedores_panel import ProveedoresPanel
@@ -62,10 +65,13 @@ from app.ui.sidebar import Sidebar
 from app.ui.styles import GLOBAL_QSS
 from app.ui.tasa_ticker import TasaTicker
 from app.ui.tasas_panel import TasasPanel
+from app.ui.toast import Toast
 from app.ui.topbar import TopBar
 from app.ui.usuarios_panel import UsuariosPanel
 from app.ui.vendedores_panel import VendedoresPanel
 from app.ui.workers import QueryWorker
+from app.utils.novedades_local import marcar_version_vista, ultima_version_vista
+from app.version import VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +316,41 @@ class MainWindow(QMainWindow):
         )
         self.close()
 
+    # ── Bienvenida y novedades ────────────────────────────────────────────
+
+    def mostrar_bienvenida(self) -> None:
+        """Al entrar: bienvenida al primer ingreso, novedades si hubo una actualizacion, o un saludo que se quita solo.
+
+        Lo llama app/main.py justo despues de mostrar la ventana. Nunca debe impedir trabajar: cualquier fallo se
+        registra y la app sigue normal."""
+        try:
+            with SessionLocal() as session:
+                primer_ingreso = es_primer_ingreso(session, self.usuario.id_usuario)
+            nombre = primer_nombre(self.usuario.nombre, self.usuario.nombre_usuario)
+            bienvenida = preparar_bienvenida(
+                nombre=nombre,
+                ultima_vista=ultima_version_vista(self.usuario.id_usuario),
+                version_actual=VERSION,
+                primer_ingreso=primer_ingreso,
+                modulos_visibles=self._modulos_visibles,
+                entregas=cargar_entregas(),
+            )
+            if bienvenida.mostrar_novedades:
+                NovedadesDialog(list(bienvenida.entregas), bienvenida.titulo, bienvenida.subtitulo, parent=self).exec()
+            else:
+                Toast.mostrar(self, bienvenida.titulo, bienvenida.subtitulo, "saludo", duracion_ms=4500, inicial=nombre)
+            marcar_version_vista(self.usuario.id_usuario, VERSION)
+        except Exception:
+            logger.exception("No se pudo mostrar la bienvenida/novedades")
+
+    def mostrar_novedades(self) -> None:
+        """Abre la ventana de novedades a pedido (clic en "Novedades · vX" del menu lateral)."""
+        entregas = filtrar_por_modulos(entregas_a_mostrar(cargar_entregas(), VERSION), self._modulos_visibles)
+        if not entregas:
+            MessageBox.information(self, "Novedades", "Todavía no hay novedades para mostrar.")
+            return
+        NovedadesDialog(entregas, "Novedades", f"{NOMBRE_APP} {VERSION}", parent=self).exec()
+
     # ── RBAC del sidebar ───────────────────────────────────────────────────
 
     def _calcular_modulos_visibles(self) -> set[str]:
@@ -362,6 +403,7 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar(empresa_nombre, self.usuario, modulos_visibles=self._modulos_visibles)
         self.sidebar.modulo_seleccionado.connect(self._ir_a_modulo)
         self.sidebar.cerrar_sesion.connect(self._confirmar_cerrar_sesion)
+        self.sidebar.novedades_solicitadas.connect(self.mostrar_novedades)
         main_h.addWidget(self.sidebar)
 
         # Área derecha: franja de tasas + TopBar + contenido

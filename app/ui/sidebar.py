@@ -31,6 +31,7 @@ from app.ui.styles import (
     COLOR_SIDEBAR_SECCION,
     COLOR_WHITE,
 )
+from app.version import VERSION
 
 # ── Constantes de tamaño ────────────────────────────────────────────────────
 SIDEBAR_EXPANDED = 230  # px cuando está abierto
@@ -291,6 +292,7 @@ class Sidebar(QWidget):
     modulo_seleccionado = Signal(str)
     toggled = Signal(bool)  # True = expandido, False = colapsado
     cerrar_sesion = Signal()
+    novedades_solicitadas = Signal()  # clic en "Novedades · vX" del pie
 
     def __init__(
         self,
@@ -502,6 +504,19 @@ class Sidebar(QWidget):
         )
 
         v.addWidget(lbl_nombre)
+
+        # Version de la app + acceso a las novedades (se pueden reabrir cuando se quiera).
+        self.btn_novedades = QPushButton(f"Novedades · v{VERSION}")
+        self.btn_novedades.setFlat(True)
+        self.btn_novedades.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_novedades.setToolTip("Ver las novedades de esta versión")
+        self.btn_novedades.setStyleSheet(
+            "QPushButton { color: rgba(255, 255, 255, 140); font-size: 10px; text-align: left; border: none;"
+            " background: transparent; padding: 0; }"
+            "QPushButton:hover { color: rgba(255, 255, 255, 235); text-decoration: underline; }"
+        )
+        self.btn_novedades.clicked.connect(self.novedades_solicitadas.emit)
+        v.addWidget(self.btn_novedades)
 
         self.btn_cerrar_sesion = QPushButton()
         self.btn_cerrar_sesion.setObjectName("BtnCerrarSesion")

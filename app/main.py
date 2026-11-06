@@ -30,7 +30,7 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 # Agregar la raíz del proyecto (ERP-system) al PYTHONPATH para permitir ejecución directa
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -160,6 +160,8 @@ def main():
         # grandes la dejaba con bordes muertos alrededor. setMinimumSize(900, 600) sigue
         # protegiendo el piso si el usuario la restaura/desmaximiza a mano.
         window.showMaximized()
+        # Bienvenida / novedades: un instante despues de mostrar la ventana, para que ya este pintada.
+        QTimer.singleShot(450, window.mostrar_bienvenida)
         app.exec()
 
     sys.exit(0)

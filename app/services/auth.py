@@ -4,9 +4,10 @@ import socket
 from datetime import datetime
 
 import bcrypt
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import Usuario
+from app.db.models import Auditoria, Usuario
 from app.services.auditoria import AuditoriaService
 from app.services.bloqueo import MAX_INTENTOS_FALLIDOS, bloqueado_hasta
 
@@ -162,6 +163,22 @@ def authenticate(
     if recien_bloqueada:
         _avisar_bloqueo_a_administradores(session, usuario)
     return None
+
+
+def contar_ingresos(session: Session, id_usuario: int) -> int:
+    """Cuantas veces inicio sesion este usuario (eventos LOGIN de la auditoria, incluido el de la sesion actual)."""
+    return int(
+        session.query(func.count(Auditoria.id_auditoria))
+        .filter(Auditoria.id_usuario == id_usuario, Auditoria.modulo == "AUTH", Auditoria.accion == "LOGIN")
+        .scalar()
+        or 0
+    )
+
+
+def es_primer_ingreso(session: Session, id_usuario: int) -> bool:
+    """True si esta es la PRIMERA vez que el usuario entra a la app (el login actual ya quedo registrado, por eso el
+    umbral es 1). Se usa para darle una bienvenida en vez de las novedades de una actualizacion."""
+    return contar_ingresos(session, id_usuario) <= 1
 
 
 def _equipo() -> str:

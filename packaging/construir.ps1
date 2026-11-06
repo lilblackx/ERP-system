@@ -19,7 +19,7 @@
     instalador con ese certificado autofirmado. La contrasena sale de la variable de entorno DJ_FIRMA_CLAVE o se pide.
 #>
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "",
     [switch]$SinLicencia,
     [switch]$SoloEmpaquetar,
     [switch]$SinFirma
@@ -28,6 +28,15 @@ param(
 $ErrorActionPreference = "Stop"
 $raiz = Split-Path -Parent $PSScriptRoot
 Set-Location $raiz
+
+# La version sale de UNA sola fuente: app/version.py (la misma que muestra la app y usa la ventana de novedades).
+# Con -Version se puede forzar otra (p. ej. una build de prueba).
+if (-not $Version) {
+    $coincidencia = Select-String -Path (Join-Path $raiz "app\version.py") -Pattern '^VERSION\s*=\s*"([^"]+)"'
+    if (-not $coincidencia) { throw "No se encontro VERSION en app\version.py" }
+    $Version = $coincidencia.Matches[0].Groups[1].Value
+}
+Write-Host "Version: $Version"
 $python = Join-Path $raiz ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { throw "No se encontro .venv. Cree el entorno virtual (ver README.md)." }
 
@@ -39,6 +48,11 @@ $signtool = $null; $claveFirma = $null
 if ($firmar) {
     $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+    if (-not $signtool) {
+        # Alternativa: el signtool que trae ClickOnce (Visual Studio / .NET SDK), con los mismos parametros de firma.
+        $alterno = "${env:ProgramFiles(x86)}\Microsoft SDKs\ClickOnce\SignTool\signtool.exe"
+        if (Test-Path $alterno) { $signtool = $alterno }
+    }
     if (-not $signtool) { throw "No se encontro signtool.exe (Windows SDK). Instale el Windows SDK o use -SinFirma." }
     $claveFirma = $env:DJ_FIRMA_CLAVE
     $nuevo = -not (Test-Path $pfx)
