@@ -586,7 +586,7 @@ class PagoCobroBCVDialog(QDialog):
                     )
                 )
                 self.pago_creado = True
-                MessageBox.information(self, "Éxito", "Cobro BCV registrado correctamente.")
+                MessageBox.information(self, "Cobro registrado", "El cobro BCV se registró correctamente.")
                 self.accept()
             finally:
                 session.close()

@@ -21,12 +21,12 @@ from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_DANGER,
+    COLOR_PRIMARY,
     COLOR_SUCCESS,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MEDIUM,
     COLOR_WARNING,
     FONT_FAMILY,
-    color_con_alpha,
 )
 
 MARGEN = 24
@@ -40,6 +40,10 @@ _TIPOS = {
     "exito": ("fa5s.check-circle", COLOR_SUCCESS),
     "aviso": ("fa5s.exclamation-triangle", COLOR_WARNING),
     "error": ("fa5s.times-circle", COLOR_DANGER),
+    "saludo": (
+        "fa5s.user",
+        COLOR_PRIMARY,
+    ),  # bienvenida al entrar a la app: en vez de icono lleva la inicial del usuario
 }
 
 
@@ -65,6 +69,8 @@ _PALABRAS_DE_EXITO = (
     "activada",
     "cerrad",
     "desbloqueado",
+    "cuenta desbloqueada",
+    "clave actualizada",
     "listo",
 )
 # Aunque el titulo suene a exito, estos deben leerse con calma o aparecen justo antes de cerrar la ventana.
@@ -92,7 +98,9 @@ def _ventana_anfitriona(parent: QWidget | None) -> QWidget | None:
 class Toast(QWidget):
     _actual: "Toast | None" = None
 
-    def __init__(self, anfitriona: QWidget | None, titulo: str, texto: str, tipo: str = "exito"):
+    def __init__(
+        self, anfitriona: QWidget | None, titulo: str, texto: str, tipo: str = "exito", inicial: str | None = None
+    ):
         super().__init__(
             None,
             Qt.WindowType.ToolTip
@@ -115,7 +123,6 @@ class Toast(QWidget):
             QFrame#ToastCard {{
                 background-color: {COLOR_CARD_BG};
                 border: 1px solid {COLOR_BORDER};
-                border-left: 4px solid {color};
                 border-radius: 8px;
             }}
             QLabel {{ background: transparent; border: none; font-family: '{FONT_FAMILY}', Arial, sans-serif; }}
@@ -125,11 +132,18 @@ class Toast(QWidget):
         fila.setContentsMargins(14, 12, 18, 12)
         fila.setSpacing(12)
 
+        # Un solo diseno para todos los avisos: circulo del color del tipo con un glifo blanco dentro (el icono del
+        # tipo o, en el saludo, la inicial de quien entra). El tipo solo cambia el color y el glifo.
         lbl_icono = QLabel()
-        lbl_icono.setPixmap(qta.icon(icono, color=color).pixmap(QSize(20, 20)))
         lbl_icono.setFixedSize(30, 30)
         lbl_icono.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_icono.setStyleSheet(f"background-color: {color_con_alpha(color, 26)}; border-radius: 15px;")
+        if inicial is not None:
+            lbl_icono.setText(inicial[:1].upper())
+        else:
+            lbl_icono.setPixmap(qta.icon(icono, color="white").pixmap(QSize(16, 16)))
+        lbl_icono.setStyleSheet(
+            f"background-color: {color}; color: white; border-radius: 15px; font-size: 14px; font-weight: 600;"
+        )
         fila.addWidget(lbl_icono, 0, Qt.AlignmentFlag.AlignTop)
 
         columna = QVBoxLayout()
@@ -159,10 +173,19 @@ class Toast(QWidget):
     # ── API ──────────────────────────────────────────────────────────────
 
     @staticmethod
-    def mostrar(parent: QWidget | None, titulo: str, texto: str = "", tipo: str = "exito") -> "Toast":
+    def mostrar(
+        parent: QWidget | None,
+        titulo: str,
+        texto: str = "",
+        tipo: str = "exito",
+        duracion_ms: int | None = None,
+        inicial: str | None = None,
+    ) -> "Toast":
         if Toast._actual is not None:
             Toast._actual._cerrar_ya()
-        toast = Toast(_ventana_anfitriona(parent), titulo, texto, tipo)
+        toast = Toast(_ventana_anfitriona(parent), titulo, texto, tipo, inicial)
+        if duracion_ms is not None:
+            toast.duracion_ms = duracion_ms
         Toast._actual = toast
         toast._presentar()
         return toast

@@ -319,12 +319,12 @@ class SolicitarCodigoDialog(QDialog):
         try:
             if self.tipo == TIPO_DESBLOQUEO:
                 RecuperacionAccesoService.verificar_codigo_desbloqueo(session, self._nombre_usuario_confirmado, codigo)
-                MessageBox.information(self, "Listo", "Cuenta desbloqueada. Ya puede iniciar sesion.")
+                MessageBox.information(self, "Cuenta desbloqueada", "Ya puede iniciar sesión con su usuario.")
             else:
                 RecuperacionAccesoService.verificar_codigo_y_cambiar_clave(
                     session, self._nombre_usuario_confirmado, codigo, nueva_clave
                 )
-                MessageBox.information(self, "Listo", "Clave actualizada. Ya puede iniciar sesion.")
+                MessageBox.information(self, "Clave actualizada", "Ya puede iniciar sesión con la nueva clave.")
         except ValueError as exc:
             # Mensajes ya pensados para el usuario final (codigo invalido/vencido,
             # politica de clave) -- no son un str(exc) tecnico, mismo criterio que C3.

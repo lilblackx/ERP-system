@@ -395,7 +395,9 @@ class ConfigSmtpPanel(MixinPermisos, QWidget):
                 usar_tls=usar_tls,
                 modificado_por=self.usuario.id_usuario,
             )
-            MessageBox.information(self, "Éxito", "Configuración de correo guardada correctamente.")
+            MessageBox.information(
+                self, "Configuración guardada", "La configuración de correo se guardó correctamente."
+            )
             self.cargar_datos()
         except ValueError as exc:
             session.rollback()
