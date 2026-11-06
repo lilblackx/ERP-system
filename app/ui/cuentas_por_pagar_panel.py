@@ -38,7 +38,7 @@ from app.db.models import ConfiguracionEmpresa, CuentaPorPagar, Usuario
 from app.services.compra_oc import CompraOCService
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
-from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.exportacion import exportar_excel, exportar_pdf, valor_para_exportar
 from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
@@ -1379,17 +1379,10 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
             ]
 
             # Calcular total del saldo pendiente
-            total_saldo = 0.0
-            for fila in filas:
-                # La columna de saldo pendiente es el índice 2
-                saldo_str = fila[2].replace("$", "").replace(",", "").strip()
-                try:
-                    total_saldo += float(saldo_str)
-                except (ValueError, IndexError):
-                    continue
+            total_saldo = self._total_saldo_pendiente(filas)
 
             # Crear fila de totales
-            total_row = ["", "", f"${total_saldo:,.2f}", "", "", "", ""]
+            total_row = ["", "", total_saldo, "", "", "", ""]
             total_label = "TOTAL:"
 
             exportar_excel(
@@ -1432,17 +1425,10 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
             col_widths = [1.5, 2.5, 1.5, 1.2, 0.8, 1.2, 1.0]
 
             # Calcular total del saldo pendiente
-            total_saldo = 0.0
-            for fila in filas:
-                # La columna de saldo pendiente es el índice 2
-                saldo_str = fila[2].replace("$", "").replace(",", "").strip()
-                try:
-                    total_saldo += float(saldo_str)
-                except (ValueError, IndexError):
-                    continue
+            total_saldo = self._total_saldo_pendiente(filas)
 
             # Crear fila de totales
-            total_row = ["", "", f"${total_saldo:,.2f}", "", "", "", ""]
+            total_row = ["", "", total_saldo, "", "", "", ""]
             total_label = "TOTAL:"
 
             exportar_pdf(
@@ -1461,6 +1447,20 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
             logger.exception("Fallo al exportar a PDF")
             MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
 
+    @staticmethod
+    def _total_saldo_pendiente(filas: list[list]) -> Decimal:
+        """Suma de la columna "Saldo Pendiente" (indice 2) de las filas exportadas. Las celdas ya son numeros
+        (valor_para_exportar); si alguna quedo como texto no reconocible se ignora, igual que antes."""
+        total = Decimal("0")
+        for fila in filas:
+            try:
+                valor = fila[2]
+            except IndexError:
+                continue
+            if isinstance(valor, (int, float, Decimal)) and not isinstance(valor, bool):
+                total += Decimal(str(valor))
+        return total
+
     def _obtener_filas_para_exportar(self) -> list[list]:
         """Obtiene las filas de la tabla actual para exportación."""
         filas = []
@@ -1469,7 +1469,9 @@ class CuentasPorPagarPanel(MixinPermisos, QWidget):
             for col in range(1, self.tabla.columnCount()):  # Saltar columna ID (0)
                 item = self.tabla.item(row, col)
                 if item:
-                    fila.append(item.text())
+                    # Montos de la pantalla ("$1,234.50", "$-5.00") -> numero, para que Excel los reciba
+                    # como numeros con su signo y no como texto.
+                    fila.append(valor_para_exportar(item.text()))
                 else:
                     # Para widgets como EstadoBadge
                     widget = self.tabla.cellWidget(row, col)

@@ -16,13 +16,18 @@ acotados.
 """
 
 import logging
+import math
+import re
 from collections.abc import Iterable, Sequence
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -46,18 +51,72 @@ logger = logging.getLogger(__name__)
 _COLOR_PRIMARIO = colors.HexColor("#12459B")
 _COLOR_MUTED = colors.HexColor("#64748B")
 
-# Excel/LibreOffice interpretan una celda de texto que empieza con estos caracteres
-# como formula (CSV/Formula Injection, OWASP) -- un nombre de cliente/proveedor/motivo
-# como "=HYPERLINK(...)" o "=cmd|'/c calc'!A1" se ejecuta al abrir el .xlsx. Se antepone
-# un apostrofe (fuerza texto literal en Excel, invisible al abrir) a cualquier string que
-# venga de datos editables por el usuario antes de escribirlo en una celda.
+# Excel/LibreOffice interpretan como formula un TEXTO que empieza con estos caracteres cuando se
+# edita la celda o se abre un CSV (CSV/Formula Injection, OWASP). En un .xlsx las celdas de texto se
+# guardan como texto y no se evaluan, asi que NO hace falta alterar el valor: antes se le anteponia un
+# apostrofe literal, y eso corrompia los datos (un "-100.00" salia como "'-100.00", un telefono
+# "+58414..." como "'+58414..."). Ahora el valor se guarda intacto, forzado a texto y con la marca
+# "quotePrefix" de Excel (el apostrofe invisible), para que tampoco se evalue si el usuario edita la celda.
 _PREFIJOS_FORMULA = ("=", "+", "-", "@")
 
+# Dos decimales como minimo y hasta cuatro si el dato los tiene (costos/cantidades), con separador de
+# miles; los negativos salen con "-". Solo cambia como SE VE el numero: el valor guardado no se redondea.
+_FORMATO_NUMERO_EXCEL = "#,##0.00##"
+_FORMATO_FECHA_EXCEL = "dd/mm/yyyy"
+_FORMATO_FECHA_HORA_EXCEL = "dd/mm/yyyy hh:mm"
 
-def _neutralizar_formula(valor: Any) -> Any:
-    if isinstance(valor, str) and valor.startswith(_PREFIJOS_FORMULA):
-        return "'" + valor
-    return valor
+# Montos tal como los muestra la interfaz ("$1,234.50", "$-5.00", "-$5.00", "1,234.50"): solo se
+# reconocen formatos estrictos, para no convertir por error un codigo o un numero de factura.
+_PATRON_MONTO_TEXTO = re.compile(r"^(?P<neg>-)?\$?(?P<neg2>-)?(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+)$")
+_PATRON_MONTO_CON_SIMBOLO = re.compile(r"^-?\$-?\d+(?:,\d{3})*(?:\.\d+)?$|^-?\$-?\d+$")
+
+
+def valor_para_exportar(valor: Any) -> Any:
+    """Convierte a `Decimal` un texto que es claramente un monto de la interfaz ("$1,234.50", "$-5.00",
+    "-$5.00", "1,234.50", "-5.00") para que Excel lo reciba como numero (sumable, con su signo) y no como
+    texto. Todo lo demas (codigos, fechas, textos, numeros de factura como "FV-000123", porcentajes) se
+    devuelve igual."""
+    if not isinstance(valor, str):
+        return valor
+    texto = valor.strip()
+    if not texto:
+        return valor
+    if not (_PATRON_MONTO_CON_SIMBOLO.match(texto) or _PATRON_MONTO_TEXTO.match(texto)):
+        return valor
+    negativo = texto.startswith("-") or "$-" in texto
+    limpio = texto.replace("$", "").replace(",", "").lstrip("-")
+    try:
+        numero = Decimal(limpio)
+    except Exception:
+        return valor
+    return -numero if negativo else numero
+
+
+def _poner_valor_excel(celda, valor: Any) -> None:
+    """Escribe `valor` en la celda conservando su tipo: numeros como numeros (con su signo y formato),
+    fechas como fechas y texto como texto literal, sin modificarlo."""
+    if valor is None or isinstance(valor, bool):
+        celda.value = valor
+    elif isinstance(valor, (int,)):
+        celda.value = valor
+    elif isinstance(valor, (float, Decimal)):
+        if isinstance(valor, float) and not math.isfinite(valor):
+            celda.value = None
+            return
+        celda.value = valor + 0 if isinstance(valor, float) else valor  # -0.0 -> 0.0
+        celda.number_format = _FORMATO_NUMERO_EXCEL
+    elif isinstance(valor, datetime):
+        celda.value = valor.replace(tzinfo=None)
+        celda.number_format = _FORMATO_FECHA_HORA_EXCEL
+    elif isinstance(valor, date):
+        celda.value = valor
+        celda.number_format = _FORMATO_FECHA_EXCEL
+    else:
+        texto = ILLEGAL_CHARACTERS_RE.sub("", str(valor))
+        celda.value = texto
+        if texto.startswith(_PREFIJOS_FORMULA):
+            celda.data_type = "s"  # texto literal: nunca una formula (openpyxl marca "=..." como formula)
+            celda.quotePrefix = True
 
 
 def exportar_excel(
@@ -100,7 +159,8 @@ def exportar_excel(
         for indice, (valor, fuente) in enumerate(lineas_empresa):
             if not valor:
                 continue
-            celda = hoja.cell(row=fila_actual, column=1, value=_neutralizar_formula(valor))
+            celda = hoja.cell(row=fila_actual, column=1)
+            _poner_valor_excel(celda, valor)
             celda.font = fuente
             if indice == 0:
                 # mas alto que el resto -- separa visualmente la razon social del RIF que
@@ -131,7 +191,7 @@ def exportar_excel(
     cantidad_filas = 0
     for fila in filas:
         for col_idx, valor in enumerate(fila, start=1):
-            hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
+            _poner_valor_excel(hoja.cell(row=fila_actual, column=col_idx), valor)
         fila_actual += 1
         cantidad_filas += 1
 
@@ -144,7 +204,8 @@ def exportar_excel(
             total_row = total_row_con_label
 
         for col_idx, valor in enumerate(total_row, start=1):
-            celda = hoja.cell(row=fila_actual, column=col_idx, value=_neutralizar_formula(valor))
+            celda = hoja.cell(row=fila_actual, column=col_idx)
+            _poner_valor_excel(celda, valor)
             # Aplicar formato negrita a la fila de totales
             celda.font = Font(bold=True)
             # Si es la columna de saldo (índice 2 en cuentas por pagar), aplicar color
@@ -222,6 +283,45 @@ def _bloque_empresa_pdf(config_empresa: ConfiguracionEmpresa, styles) -> Table |
         )
     )
     return fila
+
+
+def _formatear_numero(valor: Any) -> str:
+    """Numero con separador de miles y, como minimo, 2 decimales (hasta 4 si el dato los tiene). El signo
+    negativo se conserva ("-1,234.50"); un cero negativo sale como "0.00"."""
+    try:
+        d = valor if isinstance(valor, Decimal) else Decimal(repr(float(valor)))
+    except (ValueError, ArithmeticError):
+        return str(valor)
+    if not d.is_finite():
+        return ""
+    exponente = d.as_tuple().exponent
+    decimales = min(max(2, -exponente if isinstance(exponente, int) else 2), 4)
+    texto = f"{d:,.{decimales}f}"
+    if texto.startswith("-") and not any(c in "123456789" for c in texto):
+        texto = texto[1:]
+    return texto
+
+
+def _es_numero(valor: Any) -> bool:
+    return isinstance(valor, (int, float, Decimal)) and not isinstance(valor, bool)
+
+
+def _texto_celda_pdf(valor: Any) -> str:
+    """Texto con que se imprime un valor en una celda del PDF: numeros formateados (con su signo), fechas
+    dd/mm/aaaa y vacio para None -- antes salia el repr crudo ("1234.5", "None", "2026-01-02 00:00:00")."""
+    if valor is None:
+        return ""
+    if isinstance(valor, bool):
+        return "Sí" if valor else "No"
+    if isinstance(valor, int):
+        return str(valor)
+    if isinstance(valor, (float, Decimal)):
+        return _formatear_numero(valor)
+    if isinstance(valor, datetime):
+        return valor.strftime("%d/%m/%Y %H:%M")
+    if isinstance(valor, date):
+        return valor.strftime("%d/%m/%Y")
+    return str(valor)
 
 
 def exportar_pdf(
@@ -313,20 +413,35 @@ def exportar_pdf(
         )
         elements.append(Paragraph(f"Cliente: {cliente_nombre}", cliente_style))
 
-    # Datos de la tabla
-    data = [list(encabezados)]
-    for fila in filas:
-        data.append(list(fila))
-
-    # Agregar fila de totales si se proporciona
+    # Datos de la tabla. Las columnas con numeros se alinean a la derecha; el texto de las filas de datos se
+    # envuelve en un Paragraph para que un texto largo (observaciones, motivo, nombre) baje de linea dentro
+    # de su columna en vez de salirse sobre la columna vecina.
+    filas_lista = [list(fila) for fila in filas]
+    total_fila = None
     if total_row is not None:
+        total_fila = list(total_row)
         if total_label:
-            # Reemplazar la primera celda con la etiqueta de total
-            total_row_con_label = list(total_row)
-            total_row_con_label[0] = total_label
-            data.append(total_row_con_label)
-        else:
-            data.append(list(total_row))
+            total_fila[0] = total_label  # reemplaza la primera celda con la etiqueta de total
+
+    columnas_numericas = {
+        i
+        for i in range(len(encabezados))
+        if any(i < len(fila) and _es_numero(fila[i]) for fila in [*filas_lista, *([total_fila] if total_fila else [])])
+    }
+
+    estilo_celda = ParagraphStyle("CeldaTabla", parent=styles["Normal"], fontSize=8, leading=10)
+
+    def _celda_dato(valor: Any):
+        texto = _texto_celda_pdf(valor)
+        if _es_numero(valor) or not texto:
+            return texto
+        return Paragraph(escape(texto).replace("\n", "<br/>"), estilo_celda)
+
+    data = [[_texto_celda_pdf(h) for h in encabezados]]
+    for fila in filas_lista:
+        data.append([_celda_dato(v) for v in fila])
+    if total_fila is not None:
+        data.append([_texto_celda_pdf(v) for v in total_fila])  # sin Paragraph: lleva texto blanco en negrita
 
     # Estilo de la tabla
     table_style = TableStyle(
@@ -352,6 +467,9 @@ def exportar_pdf(
             ),  # Permite mejor ajuste de texto largo
         ]
     )
+
+    for col in columnas_numericas:
+        table_style.add("ALIGN", (col, 0), (col, -1), "RIGHT")
 
     # Alternar colores de filas
     for i in range(1, len(data)):

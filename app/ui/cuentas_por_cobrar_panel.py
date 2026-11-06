@@ -42,7 +42,7 @@ from sqlalchemy.orm import Session
 from app.db.models import ConfiguracionEmpresa, CuentaPorCobrar, FacturaVenta, Usuario
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
-from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.exportacion import exportar_excel, exportar_pdf, valor_para_exportar
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
@@ -2055,7 +2055,9 @@ class CuentasPorCobrarPanel(QWidget):
             for col in range(1, self.tabla.columnCount()):  # Saltar columna ID (0)
                 item = self.tabla.item(row, col)
                 if item:
-                    fila.append(item.text())
+                    # Montos de la pantalla ("$1,234.50", "$-5.00") -> numero, para que Excel los reciba
+                    # como numeros con su signo y no como texto.
+                    fila.append(valor_para_exportar(item.text()))
                 else:
                     # Para widgets como EstadoBadge
                     widget = self.tabla.cellWidget(row, col)
