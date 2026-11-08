@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
+from app.services.moneda_cuentas import filtrar_cuentas_por_metodo, moneda_para_metodo, nombre_moneda
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
@@ -49,6 +50,7 @@ from app.ui.styles import (
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
 )
+from app.utils.caja_local import cajas_de_esta_estacion
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -169,10 +171,13 @@ class PagoLineaDialog(QDialog):
         id_usuario: int | None,
         monto_sugerido: float | None = None,
         parent=None,
+        solo_caja_estacion: bool = False,
     ):
         super().__init__(parent)
         self.session = session
         self.id_usuario = id_usuario
+        # Facturacion cobra en efectivo solo contra la caja de esta estacion; compras puede usar cualquiera.
+        self._solo_caja_estacion = solo_caja_estacion
         self._cajas_abiertas: list = []
         self._cuentas_activas: list = []
         # Saldo pendiente de la factura, siempre en USD. Se convierte a la moneda elegida
@@ -196,6 +201,7 @@ class PagoLineaDialog(QDialog):
         self._toggle_origen()
         self._toggle_campos_bolivares()
         self.moneda_combo.currentIndexChanged.connect(self._aplicar_monto_sugerido)
+        self.moneda_combo.currentIndexChanged.connect(self._toggle_origen)  # la cuenta debe ser de esa moneda
         self.monto_input.textEdited.connect(self._marcar_monto_editado)
         self.bolivares_input.textEdited.connect(self._marcar_monto_editado)
 
@@ -381,6 +387,8 @@ class PagoLineaDialog(QDialog):
         except PermisoDenegadoError:
             cajas = []
         self._cajas_abiertas = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        if self._solo_caja_estacion:
+            self._cajas_abiertas = cajas_de_esta_estacion(self._cajas_abiertas)
 
         try:
             cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
@@ -436,12 +444,14 @@ class PagoLineaDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas")
+            moneda_requerida = moneda_para_metodo(metodo, self.moneda_combo.currentData())
+            cuentas = filtrar_cuentas_por_metodo(self._cuentas_activas, metodo, self.moneda_combo.currentData())
+            if not cuentas:
+                self.origen_combo.addItem(f"Sin cuentas bancarias en {nombre_moneda(moneda_requerida)}")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas:
+                for cuenta in cuentas:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     etiqueta = f"{nombre_banco} - {_enmascarar(cuenta.numero_cuenta)}"
                     self.origen_combo.addItem(etiqueta, ("banco", cuenta.id_cuenta))

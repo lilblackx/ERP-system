@@ -1,12 +1,15 @@
 import datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import CuentaBancaria
+from app.db.models import BancoMovimiento, CuentaBancaria, PagoCobro, PagoCobroBCV, PagoComision, PagoProveedor
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.moneda_cuentas import MONEDAS_CUENTA
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
-from app.services.tesoreria import _enmascarar_numero_cuenta
+from app.services.tesoreria import _enmascarar_numero_cuenta, _require_admin
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 TIPOS_CUENTA_VALIDOS = {"AHORRO", "CORRIENTE"}
@@ -37,20 +40,23 @@ class CuentaBancariaService:
         id_usuario: int | None = None,
         pagina: int = 1,
         por_pagina: int = 20,
+        moneda: str | None = None,
     ) -> dict:
         require_permiso(session, id_usuario, "bancos", "ver")
-        query = session.query(CuentaBancaria)
+        query = session.query(CuentaBancaria).options(joinedload(CuentaBancaria.banco))
         if texto_busqueda:
-            like = f"%{texto_busqueda}%"
+            like = patron_contiene(texto_busqueda)
             query = query.filter(
-                CuentaBancaria.numero_cuenta.ilike(like)
-                | CuentaBancaria.nombre_titular.ilike(like)
-                | CuentaBancaria.identificacion_titular.ilike(like)
+                contiene(session, CuentaBancaria.numero_cuenta, like)
+                | contiene(session, CuentaBancaria.nombre_titular, like)
+                | contiene(session, CuentaBancaria.identificacion_titular, like)
             )
         if estado_cuenta:
             query = query.filter(CuentaBancaria.estado_cuenta == estado_cuenta)
         if id_banco:
             query = query.filter(CuentaBancaria.id_banco == id_banco)
+        if moneda:
+            query = query.filter(CuentaBancaria.moneda == moneda)
 
         return paginar(query, pagina, por_pagina, CuentaBancaria.numero_cuenta, CuentaBancaria.id_cuenta)
 
@@ -66,6 +72,8 @@ class CuentaBancariaService:
             raise ValueError("identificacion_titular es requerido")
         if datos.get("tipo_cuenta_banco") and datos.get("tipo_cuenta_banco") not in TIPOS_CUENTA_VALIDOS:
             raise ValueError(f"tipo_cuenta_banco debe ser uno de {TIPOS_CUENTA_VALIDOS}")
+        if datos.get("moneda") and datos["moneda"] not in MONEDAS_CUENTA:
+            raise ValueError(f"moneda debe ser una de {MONEDAS_CUENTA}")
 
     @staticmethod
     def crear(session: Session, **datos) -> CuentaBancaria:
@@ -93,12 +101,60 @@ class CuentaBancariaService:
         return cuenta
 
     @staticmethod
-    def actualizar(session: Session, id_cuenta: int, id_usuario: int | None = None, **datos) -> CuentaBancaria:
+    def _reclasificar_saldo_local(cuenta: CuentaBancaria, moneda_anterior: str | None) -> None:
+        """El monto "local" de los movimientos va a `saldo_total_banco_bs` (cuentas VES/USD) o a
+        `saldo_total_banco_cop` (cuentas COP). Si la cuenta pasa de VES a COP (o al reves) su saldo local pasa
+        de una columna a la otra, para que los pesos no queden contados como bolivares ni al reves."""
+        nueva = cuenta.moneda
+        if moneda_anterior == nueva:
+            return
+        bs = cuenta.saldo_total_banco_bs or 0
+        cop = cuenta.saldo_total_banco_cop or 0
+        if moneda_anterior != "COP" and nueva == "COP":
+            cuenta.saldo_total_banco_cop = cop + bs
+            cuenta.saldo_total_banco_bs = 0
+        elif moneda_anterior == "COP" and nueva != "COP":
+            cuenta.saldo_total_banco_bs = bs + cop
+            cuenta.saldo_total_banco_cop = 0
+
+    @staticmethod
+    def resumen_uso(session: Session, id_cuenta: int, id_usuario: int | None = None) -> dict:
+        """Cuanto se ha usado una cuenta: total de movimientos y pagos por metodo ({"zelle": 3, ...}). Lo muestra el
+        aviso de confirmacion antes de cambiarle la moneda a una cuenta con historial."""
+        require_permiso(session, id_usuario, "bancos", "ver")
+        movimientos = (
+            session.query(func.count(BancoMovimiento.id_movimiento))
+            .filter(BancoMovimiento.id_cuenta == id_cuenta)
+            .scalar()
+        )
+        por_metodo: dict[str, int] = {}
+        for modelo in (PagoCobro, PagoCobroBCV, PagoProveedor, PagoComision):
+            filas = (
+                session.query(modelo.metodo_pago, func.count())
+                .filter(modelo.id_cuenta_bancaria == id_cuenta)
+                .group_by(modelo.metodo_pago)
+                .all()
+            )
+            for metodo, cantidad in filas:
+                por_metodo[metodo] = por_metodo.get(metodo, 0) + int(cantidad)
+        return {"movimientos": int(movimientos or 0), "por_metodo": dict(sorted(por_metodo.items()))}
+
+    @staticmethod
+    def actualizar(
+        session: Session,
+        id_cuenta: int,
+        id_usuario: int | None = None,
+        confirmar_cambio_moneda: bool = False,
+        **datos,
+    ) -> CuentaBancaria:
+        """`confirmar_cambio_moneda`: cambiarle la moneda a una cuenta que ya tiene movimientos solo lo hace un ADMIN
+        y solo con esta confirmacion explicita (la pantalla la pide tras mostrar el resumen de uso); el cambio no
+        toca el historial, solo decide que pagos futuros acepta la cuenta, y queda en la auditoria."""
         require_permiso(session, id_usuario, "bancos", "editar")
         cuenta = session.get(CuentaBancaria, id_cuenta)
         if cuenta is None:
             raise ValueError("Cuenta bancaria no encontrada")
-        campos_saldo = {"saldo_total_banco", "saldo_total_banco_bs"} & datos.keys()
+        campos_saldo = {"saldo_total_banco", "saldo_total_banco_bs", "saldo_total_banco_cop"} & datos.keys()
         if campos_saldo:
             # El saldo solo se mueve con movimientos bancarios (BancoMovimientoService.crear,
             # pagos, cobros): editarlo directo no deja ningun movimiento que explique la
@@ -115,12 +171,34 @@ class CuentaBancariaService:
             if datos["tipo_cuenta_banco"] and datos["tipo_cuenta_banco"] not in TIPOS_CUENTA_VALIDOS:
                 raise ValueError(f"tipo_cuenta_banco debe ser uno de {TIPOS_CUENTA_VALIDOS}")
 
+        cambio_moneda_con_historial: dict | None = None
+        if "moneda" in datos:
+            if datos["moneda"] not in MONEDAS_CUENTA:
+                raise ValueError(f"moneda debe ser una de {MONEDAS_CUENTA}")
+            if datos["moneda"] != cuenta.moneda:
+                tiene_movimientos = (
+                    session.query(BancoMovimiento.id_movimiento).filter(BancoMovimiento.id_cuenta == id_cuenta).first()
+                )
+                if tiene_movimientos is not None:
+                    _require_admin(session, id_usuario, "cambiar la moneda de una cuenta bancaria con movimientos")
+                    if not confirmar_cambio_moneda:
+                        raise ValueError(
+                            "Cambiar la moneda de una cuenta con movimientos requiere confirmación explícita"
+                        )
+                    cambio_moneda_con_historial = {
+                        "moneda_anterior": cuenta.moneda,
+                        "moneda_nueva": datos["moneda"],
+                        **CuentaBancariaService.resumen_uso(session, id_cuenta, id_usuario),
+                    }
+
         nuevo_numero = datos.get("numero_cuenta")
         if nuevo_numero and nuevo_numero != cuenta.numero_cuenta:
             CuentaBancariaService._validar_unico(session, "numero_cuenta", nuevo_numero, excluir_id=id_cuenta)
 
+        moneda_anterior = cuenta.moneda
         for campo, valor in datos.items():
             setattr(cuenta, campo, valor)
+        CuentaBancariaService._reclasificar_saldo_local(cuenta, moneda_anterior)
         session.commit()
         session.refresh(cuenta)
 
@@ -131,6 +209,14 @@ class CuentaBancariaService:
             modulo="CUENTAS_BANCARIAS",
             detalle={"id_cuenta": cuenta.id_cuenta, "campos": list(datos.keys())},
         )
+        if cambio_moneda_con_historial is not None:
+            AuditoriaService.registrar_evento(
+                session,
+                id_usuario=id_usuario,
+                accion="CAMBIAR_MONEDA_CUENTA_BANCARIA",
+                modulo="CUENTAS_BANCARIAS",
+                detalle={"id_cuenta": cuenta.id_cuenta, **cambio_moneda_con_historial},
+            )
         return cuenta
 
     @staticmethod

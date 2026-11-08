@@ -980,9 +980,14 @@ class CuentaBancaria(Base):
     identificacion_titular: Mapped[str | None] = mapped_column(String(20))
     saldo_total_banco: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
     saldo_total_banco_bs: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), server_default="0.00")
+    # Saldo en pesos de las cuentas COP (migracion 0098): el monto "local" de cada movimiento
+    # (banco_movimientos.monto_bolivares) va a este saldo si la cuenta es COP y a saldo_total_banco_bs si no.
+    saldo_total_banco_cop: Mapped[decimal.Decimal] = mapped_column(Numeric(20, 2), server_default="0.00")
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
     estado_cuenta: Mapped[str] = mapped_column(String(20), server_default="ACTIVO")
+    # 'VES' (bolivares) o 'USD' (dolares), migracion 0096: decide que metodos de pago pueden usar la cuenta.
+    moneda: Mapped[str] = mapped_column(String(3), server_default="VES")
 
     banco = relationship("Banco")
     creador = relationship("Usuario")

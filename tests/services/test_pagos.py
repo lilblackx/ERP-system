@@ -172,7 +172,7 @@ def test_registrar_pago_cobro_por_banco_actualiza_saldo(db_session):
 def test_registrar_pago_cobro_por_banco_con_tasa_y_bolivares(db_session):
     """Verifica que el pago bancario con tasa y bolivares se registre correctamente en el movimiento bancario."""
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
-    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("500.00"))
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("500.00"), moneda="USD")  # Zelle: cuenta USD
 
     # Registrar pago con tasa y bolivares
     pago = PagoService.registrar_pago_cobro(
@@ -343,7 +343,7 @@ def test_registrar_pago_cobro_caja_con_turno_ya_cerrado_falla(db_session):
 
 def test_registrar_pago_cobro_guarda_moneda_y_monto_moneda_origen(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
-    cuenta = crear_cuenta_bancaria(db_session)
+    cuenta = crear_cuenta_bancaria(db_session, moneda="USD")
 
     pago = PagoService.registrar_pago_cobro(
         db_session,
@@ -1294,3 +1294,36 @@ def test_listar_cuentas_por_cobrar_sin_usuario_autorizado_falla(db_session):
     _crear_cxc(db_session, Decimal("100.00"))
     with pytest.raises(PermisoDenegadoError):
         PagoService.listar_cuentas_por_cobrar(db_session)
+
+
+def test_listar_cuentas_por_cobrar_por_cliente_no_trae_las_ya_pagadas_y_usa_pocas_consultas(db_session):
+    """El listado por defecto no carga el historial de cuentas ya pagadas (la mayor parte de la tabla) y trae la
+    factura y el cliente de todas las cuentas en la misma consulta, sin pedir cada uno por separado."""
+    from sqlalchemy import event
+
+    cxc_pagada, admin = _crear_cxc(db_session, Decimal("80.00"))
+    cxc_pagada.estado = "pagada"
+    cxc_pagada.saldo_pendiente = Decimal("0.00")
+    db_session.commit()
+    _crear_cxc(db_session, Decimal("100.00"))
+    _crear_cxc(db_session, Decimal("120.00"))
+    db_session.expire_all()
+
+    consultas = []
+    motor = db_session.get_bind()
+
+    def _contar(conn, cursor, statement, parameters, context, executemany):
+        consultas.append(statement)
+
+    event.listen(motor, "before_cursor_execute", _contar)
+    try:
+        resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(db_session, id_usuario=admin.id_usuario)
+        for fila in resultado["items"]:  # el panel toca la factura y el cliente de cada cuenta
+            for cuenta in fila["cuentas"]:
+                _ = cuenta.factura.cliente.nombre_razon_social
+    finally:
+        event.remove(motor, "before_cursor_execute", _contar)
+
+    assert sorted(f["saldo_total"] for f in resultado["items"]) == [Decimal("100.00"), Decimal("120.00")]
+    # permiso (1) + listado (1): sin una consulta extra por cuenta
+    assert len(consultas) <= 3, consultas

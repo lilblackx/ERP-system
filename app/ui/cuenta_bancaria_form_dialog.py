@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import Banco, CuentaBancaria
+from app.db.models import Banco, BancoMovimiento, CuentaBancaria
+from app.services.moneda_cuentas import MONEDAS_CUENTA, etiqueta_moneda
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
@@ -131,10 +132,15 @@ QPushButton#BtnSecondary:hover {{
 class CuentaBancariaFormDialog(QDialog):
     """Diálogo de creación/edición de cuentas bancarias."""
 
-    def __init__(self, session: Session, cuenta: CuentaBancaria | None = None, parent=None):
+    def __init__(
+        self, session: Session, cuenta: CuentaBancaria | None = None, parent=None, precargado: dict | None = None
+    ):
         super().__init__(parent)
         self.session = session
         self.cuenta = cuenta
+        # Bancos y (al editar) si la cuenta tiene movimientos, ya consultados por el panel en un hilo aparte
+        # ({"bancos": [...], "tiene_movimientos": bool}); sin ellos el dialogo los consulta el mismo.
+        self._precargado = precargado
         self.setWindowTitle("Editar Cuenta Bancaria" if cuenta else "Nueva Cuenta Bancaria")
         self.setFixedWidth(800)
         self.setStyleSheet(DIALOG_STYLE)
@@ -232,25 +238,80 @@ class CuentaBancariaFormDialog(QDialog):
         grid.addWidget(lbl_tipo, 4, 0)
         grid.addWidget(self.tipo_combo, 5, 0)
 
+        # Moneda de la cuenta: decide que pagos puede recibir (Zelle/Binance a USD, pagos en pesos a COP, el resto de
+        # los metodos bancarios a VES) y que saldo se muestra (ver _aplicar_moneda_a_los_saldos). Se puede cambiar
+        # mientras la cuenta no tenga movimientos.
+        self.lbl_moneda = QLabel(f"Moneda de la Cuenta {ASTERISCO_REQUERIDO}")
+        self.lbl_moneda.setProperty("class", "FormLabel")
+        self.moneda_combo = QComboBox()
+        for moneda in MONEDAS_CUENTA:
+            self.moneda_combo.addItem(etiqueta_moneda(moneda), moneda)
+        self.moneda_combo.setFixedHeight(36)
+        grid.addWidget(self.lbl_moneda, 4, 1)
+        grid.addWidget(self.moneda_combo, 5, 1)
+
+        # Solo al editar una cuenta con historial (ver _precargar).
+        self.lbl_aviso_moneda = QLabel(
+            "Esta cuenta ya tiene movimientos: cambiarle la moneda pide confirmación, solo la hace un "
+            "administrador y queda en la auditoría. El historial no cambia."
+        )
+        self.lbl_aviso_moneda.setWordWrap(True)
+        self.lbl_aviso_moneda.setStyleSheet("font-size: 11px; font-style: italic; color: #64748B;")
+        self.lbl_aviso_moneda.hide()
+        grid.addWidget(self.lbl_aviso_moneda, 6, 0, 1, 2)
+
+        # Saldos. Solo se muestra el de la moneda de la cuenta (Bs, USD o COP): los otros se ocultan y quedan en 0.
+        self.saldos_widget = QWidget()
+        saldos_layout = QHBoxLayout(self.saldos_widget)
+        saldos_layout.setContentsMargins(0, 0, 0, 0)
+        saldos_layout.setSpacing(16)
+
         # Saldo Inicial USD -- solo editable al CREAR la cuenta. En edicion se deshabilita
         # (ver _precargar): cambiarlo a mano ahi rompe la trazabilidad, porque no genera
         # ningun BancoMovimiento que explique el ajuste -- BancoMovimientoService.crear()
         # es el unico camino que debe modificar saldo_total_banco despues de la creacion.
+        self.saldo_usd_widget = QWidget()
+        col_usd = QVBoxLayout(self.saldo_usd_widget)
+        col_usd.setContentsMargins(0, 0, 0, 0)
+        col_usd.setSpacing(6)
         self.lbl_saldo = QLabel("Saldo Inicial USD")
         self.lbl_saldo.setProperty("class", "FormLabel")
         self.saldo_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.saldo_input.setFixedHeight(36)
-        grid.addWidget(self.lbl_saldo, 4, 1)
-        grid.addWidget(self.saldo_input, 5, 1)
+        col_usd.addWidget(self.lbl_saldo)
+        col_usd.addWidget(self.saldo_input)
 
         # Saldo Inicial BS -- solo editable al CREAR la cuenta. En edicion se deshabilita
         # por la misma razón que el saldo USD.
+        self.saldo_bs_widget = QWidget()
+        col_bs = QVBoxLayout(self.saldo_bs_widget)
+        col_bs.setContentsMargins(0, 0, 0, 0)
+        col_bs.setSpacing(6)
         self.lbl_saldo_bs = QLabel("Saldo Inicial BS")
         self.lbl_saldo_bs.setProperty("class", "FormLabel")
         self.saldo_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=False, decimals=2)
         self.saldo_bs_input.setFixedHeight(36)
-        grid.addWidget(self.lbl_saldo_bs, 6, 1)
-        grid.addWidget(self.saldo_bs_input, 7, 1)
+        col_bs.addWidget(self.lbl_saldo_bs)
+        col_bs.addWidget(self.saldo_bs_input)
+
+        # Saldo Inicial COP (pesos colombianos) -- mismo criterio que los otros dos saldos.
+        self.saldo_cop_widget = QWidget()
+        col_cop = QVBoxLayout(self.saldo_cop_widget)
+        col_cop.setContentsMargins(0, 0, 0, 0)
+        col_cop.setSpacing(6)
+        self.lbl_saldo_cop = QLabel("Saldo Inicial COP")
+        self.lbl_saldo_cop.setProperty("class", "FormLabel")
+        self.saldo_cop_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=False, decimals=2)
+        self.saldo_cop_input.setFixedHeight(36)
+        col_cop.addWidget(self.lbl_saldo_cop)
+        col_cop.addWidget(self.saldo_cop_input)
+
+        saldos_layout.addWidget(self.saldo_usd_widget, stretch=1)
+        saldos_layout.addWidget(self.saldo_bs_widget, stretch=1)
+        saldos_layout.addWidget(self.saldo_cop_widget, stretch=1)
+        grid.addWidget(self.saldos_widget, 7, 0, 1, 2)
+        self.moneda_combo.currentIndexChanged.connect(self._aplicar_moneda_a_los_saldos)
+        self._aplicar_moneda_a_los_saldos()
 
         # Nombre del Titular
         lbl_nom = QLabel(f"Nombre del Titular {ASTERISCO_REQUERIDO}")
@@ -324,10 +385,32 @@ class CuentaBancariaFormDialog(QDialog):
 
     def _cargar_bancos(self):
         """Carga la lista de bancos activos en el combo."""
-        bancos = self.session.query(Banco).filter(Banco.estado_banco == "ACTIVO").order_by(Banco.nombre_banco).all()
+        if self._precargado is not None:
+            bancos = self._precargado["bancos"]
+        else:
+            bancos = self.session.query(Banco).filter(Banco.estado_banco == "ACTIVO").order_by(Banco.nombre_banco).all()
         self.banco_combo.clear()
         for banco in bancos:
             self.banco_combo.addItem(f"{banco.nombre_banco} ({banco.codigo_banco})", banco.id_banco)
+
+    def _aplicar_moneda_a_los_saldos(self) -> None:
+        """Muestra solo el saldo de la moneda de la cuenta: bolivares, dolares o pesos. Los saldos que se ocultan al
+        CREAR la cuenta se limpian para no guardar un monto en la moneda equivocada."""
+        moneda = self.moneda_combo.currentData()
+        visibles = {
+            self.saldo_usd_widget: moneda == "USD",
+            self.saldo_bs_widget: moneda == "VES",
+            self.saldo_cop_widget: moneda == "COP",
+        }
+        for widget, mostrar in visibles.items():
+            widget.setVisible(mostrar)
+        if self.cuenta is None:
+            if moneda != "USD":
+                self.saldo_input.set_value(0)
+            if moneda != "VES":
+                self.saldo_bs_input.set_value(0)
+            if moneda != "COP":
+                self.saldo_cop_input.set_value(0)
 
     def _precargar(self, cuenta: CuentaBancaria):
         self.numero_input.setText(cuenta.numero_cuenta or "")
@@ -345,6 +428,13 @@ class CuentaBancariaFormDialog(QDialog):
         )
         self.lbl_saldo_bs.setText("Saldo Actual BS (solo lectura)")
 
+        self.saldo_cop_input.set_value(cuenta.saldo_total_banco_cop or 0)
+        self.saldo_cop_input.setEnabled(False)
+        self.saldo_cop_input.setToolTip(
+            "El saldo en COP se actualiza registrando movimientos bancarios, no editando este campo."
+        )
+        self.lbl_saldo_cop.setText("Saldo Actual COP (solo lectura)")
+
         # Seleccionar banco
         idx_banco = self.banco_combo.findData(cuenta.id_banco)
         if idx_banco >= 0:
@@ -354,6 +444,22 @@ class CuentaBancariaFormDialog(QDialog):
         idx_tipo = self.tipo_combo.findText(cuenta.tipo_cuenta_banco or "CORRIENTE")
         if idx_tipo >= 0:
             self.tipo_combo.setCurrentIndex(idx_tipo)
+
+        idx_moneda = self.moneda_combo.findData(cuenta.moneda or "VES")
+        if idx_moneda >= 0:
+            self.moneda_combo.setCurrentIndex(idx_moneda)
+        self._aplicar_moneda_a_los_saldos()
+        if self._precargado is not None and "tiene_movimientos" in self._precargado:
+            tiene_movimientos = self._precargado["tiene_movimientos"]
+        else:
+            tiene_movimientos = (
+                self.session.query(BancoMovimiento.id_movimiento)
+                .filter(BancoMovimiento.id_cuenta == cuenta.id_cuenta)
+                .first()
+                is not None
+            )
+        self.tiene_movimientos = tiene_movimientos
+        self.lbl_aviso_moneda.setVisible(tiene_movimientos)
 
         # Mostrar información de auditoría solo en edición
         self.auditoria_widget.setVisible(True)
@@ -393,6 +499,7 @@ class CuentaBancariaFormDialog(QDialog):
             "id_banco": self.banco_combo.currentData(),
             "numero_cuenta": self.numero_input.text().strip(),
             "tipo_cuenta_banco": self.tipo_combo.currentText(),
+            "moneda": self.moneda_combo.currentData(),
             "nombre_titular": self.nombre_input.text().strip(),
             "identificacion_titular": self.identificacion_input.text().strip(),
         }
@@ -403,4 +510,5 @@ class CuentaBancariaFormDialog(QDialog):
         if self.cuenta is None:
             datos["saldo_total_banco"] = self.saldo_input.get_value()
             datos["saldo_total_banco_bs"] = self.saldo_bs_input.get_value()
+            datos["saldo_total_banco_cop"] = self.saldo_cop_input.get_value()
         return datos

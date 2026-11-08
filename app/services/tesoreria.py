@@ -22,6 +22,7 @@ from app.services.db_utils import (
     aplicar_lock_timeout,
     traducir_error_trigger,
 )
+from app.services.moneda_cuentas import MONEDA_BS, moneda_para_metodo, nombre_moneda
 from app.services.permisos import PermisoDenegadoError, require_permiso
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,11 @@ TIPOS_MOVIMIENTO_CAJA = {"entrada", "salida"}
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
-def _require_admin(session: Session, id_usuario: int | None) -> Usuario:
+def _require_admin(
+    session: Session,
+    id_usuario: int | None,
+    accion: str = "gestionar cajas (crear, abrir o cerrar turnos)",
+) -> Usuario:
     """Crear una caja o abrir/cerrar su turno fija el saldo inicial/final -- mas sensible
     que "editar" un registro cualquiera, asi que se restringe especificamente a ADMIN en
     vez del RBAC generico de 'cajas'/'editar' (un rol podria tener ese permiso para otras
@@ -50,7 +55,7 @@ def _require_admin(session: Session, id_usuario: int | None) -> Usuario:
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
     rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
     if rol is None or rol.nombre != "ADMIN":
-        raise PermisoDenegadoError("Solo un administrador puede gestionar cajas (crear, abrir o cerrar turnos)")
+        raise PermisoDenegadoError(f"Solo un administrador puede {accion}")
     return usuario
 
 
@@ -171,13 +176,39 @@ class BancoService:
 
     @staticmethod
     def listar_cuentas(
-        session: Session, id_banco: int | None = None, id_usuario: int | None = None
+        session: Session,
+        id_banco: int | None = None,
+        id_usuario: int | None = None,
+        moneda: str | None = None,
     ) -> list[CuentaBancaria]:
         require_permiso(session, id_usuario, "bancos", "ver")
         query = session.query(CuentaBancaria).options(joinedload(CuentaBancaria.banco))
         if id_banco:
             query = query.filter(CuentaBancaria.id_banco == id_banco)
+        if moneda:
+            query = query.filter(CuentaBancaria.moneda == moneda)
         return query.order_by(CuentaBancaria.id_cuenta).all()
+
+    @staticmethod
+    def validar_cuenta_para_pago(
+        session: Session, id_cuenta: int | None, metodo_pago: str | None, moneda_pago: str | None = None
+    ) -> None:
+        """Una cuenta bancaria solo recibe pagos en su moneda: Zelle/Binance a una cuenta en dolares, un pago en
+        pesos a una en pesos y el resto de los metodos bancarios a una en bolivares (ver moneda_cuentas.py).
+        Sin cuenta (efectivo/caja) no valida nada."""
+        if id_cuenta is None:
+            return
+        cuenta = session.get(CuentaBancaria, id_cuenta)
+        if cuenta is None:
+            return  # el servicio que llama ya valida que la cuenta exista
+        esperada = moneda_para_metodo(metodo_pago, moneda_pago)
+        actual = cuenta.moneda or MONEDA_BS
+        if actual != esperada:
+            raise ValueError(
+                f"Un pago por '{metodo_pago}' en {nombre_moneda(esperada)} no puede ir a la cuenta "
+                f"{_enmascarar_numero_cuenta(cuenta.numero_cuenta)}, que es en {nombre_moneda(actual)}. "
+                "Elija una cuenta en la moneda del pago."
+            )
 
     @staticmethod
     def crear_cuenta(session: Session, **datos) -> CuentaBancaria:
@@ -218,7 +249,7 @@ class BancoService:
         cuenta = session.get(CuentaBancaria, id_cuenta)
         if cuenta is None:
             raise ValueError("Cuenta bancaria no encontrada")
-        campos_saldo = {"saldo_total_banco", "saldo_total_banco_bs"} & datos.keys()
+        campos_saldo = {"saldo_total_banco", "saldo_total_banco_bs", "saldo_total_banco_cop"} & datos.keys()
         if campos_saldo:
             # El saldo solo se mueve con movimientos bancarios (BancoMovimientoService.crear,
             # pagos, cobros): editarlo directo no deja ningun movimiento que explique la

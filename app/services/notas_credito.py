@@ -333,6 +333,7 @@ class NotaCreditoService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta.numero_cuenta}' esta inactiva")
+            BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria, metodo_devolucion)
             referencia = (referencia or "").strip()
             if len(referencia) < 4:
                 raise ValueError(

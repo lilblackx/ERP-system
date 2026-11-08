@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.orm import Session
 
 from app.db.models import NotaCreditoCliente
+from app.services.moneda_cuentas import filtrar_cuentas_por_metodo, moneda_para_metodo, nombre_moneda
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
@@ -299,12 +300,14 @@ class DevolverNotaCreditoDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas")
+            moneda_requerida = moneda_para_metodo(metodo, None)
+            cuentas = filtrar_cuentas_por_metodo(self._cuentas_activas, metodo, None)
+            if not cuentas:
+                self.origen_combo.addItem(f"Sin cuentas bancarias en {nombre_moneda(moneda_requerida)}")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas:
+                for cuenta in cuentas:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     etiqueta = f"{nombre_banco} - {cuenta.numero_cuenta}"
                     self.origen_combo.addItem(etiqueta, ("banco", cuenta.id_cuenta))

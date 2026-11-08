@@ -22,7 +22,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.permisos import require_permiso
-from app.services.tesoreria import CajaService
+from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
@@ -344,6 +344,7 @@ class PagoComisionService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+            BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria, metodo_pago)
         else:
             # Mismo lock y validaciones que cualquier otro egreso de caja (CompraService/
             # devolver_nota_credito_cliente): antes se podia pagar desde una caja sin turno

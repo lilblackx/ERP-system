@@ -2,8 +2,8 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func, or_, select
+from sqlalchemy.orm import Session, contains_eager, joinedload
 
 from app.db.models import (
     Caja,
@@ -15,8 +15,10 @@ from app.db.models import (
     FacturaVenta,
     PagoCobro,
     PagoProveedor,
+    Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
@@ -95,6 +97,7 @@ class PagoService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+            BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria, metodo_pago, moneda)
 
         if id_caja is not None:
             # Mismo criterio que CajaService.registrar_movimiento_manual: un pago en
@@ -112,6 +115,10 @@ class PagoService:
         # del SQL Server podria dejar un pago fuera del rango del turno (C12).
         if fecha_pago is None:
             fecha_pago = datetime.now()
+
+        if monto_bolivares is None and moneda == "COP" and monto_moneda_origen is not None:
+            # El monto "local" del movimiento (el que lleva el saldo de la cuenta) en un pago en pesos son los pesos.
+            monto_bolivares = monto_moneda_origen
 
         pago = PagoCobro(
             id_cuenta_por_cobrar=id_cuenta_por_cobrar,
@@ -255,6 +262,7 @@ class PagoService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+            BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria, metodo_pago)
 
         if id_caja is not None:
             # Mismo lock que registrar_compra -- serializa dos pagos concurrentes contra
@@ -341,6 +349,10 @@ class PagoService:
         require_permiso(session, id_usuario, "pagos", "ver")
         return (
             session.query(PagoProveedor)
+            .options(
+                joinedload(PagoProveedor.caja),
+                joinedload(PagoProveedor.cuenta_bancaria).joinedload(CuentaBancaria.banco),
+            )
             .filter(PagoProveedor.id_cuenta_por_pagar == id_cuenta_por_pagar)
             .order_by(PagoProveedor.fecha_pago.desc())
             .all()
@@ -354,17 +366,42 @@ class PagoService:
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
+        texto_busqueda: str | None = None,
     ) -> dict:
         """Necesario para la pestana 'CxP' de app/ui/compras.py -- no existia ningun
         metodo de lectura sobre cuentas_por_pagar hasta ahora (el flujo OC->NR->Compra->Pago
         es el primero en necesitar mostrarlas en una pantalla, ver auditoria de Compras/
         Proveedores previa a este trabajo)."""
         require_permiso(session, id_usuario, "pagos", "ver")
-        query = session.query(CuentaPorPagar).join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
+        # joinedload: las pantallas muestran compra, proveedor y OC de cada cuenta; sin esto cada fila disparaba
+        # sus propias consultas al pintarse.
+        query = (
+            session.query(CuentaPorPagar)
+            .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
+            .options(joinedload(CuentaPorPagar.compra).joinedload(Compra.proveedor))
+            .options(joinedload(CuentaPorPagar.compra).joinedload(Compra.oc))
+        )
         if id_proveedor:
             query = query.filter(Compra.id_proveedor == id_proveedor)
         if estado:
             query = query.filter(CuentaPorPagar.estado == estado)
+        if texto_busqueda:
+            # La busqueda se resuelve ANTES de paginar: filtrar las filas ya paginadas dejaba el total y las
+            # paginas inconsistentes y solo encontraba coincidencias de la pagina actual.
+            like = patron_contiene(texto_busqueda)
+            rif_completo = func.concat(
+                func.coalesce(Proveedor.id_legal, ""),
+                case((Proveedor.id_legal.isnot(None), "-"), else_=""),
+                func.coalesce(Proveedor.identificacion_proveedor, ""),
+            )
+            query = query.join(Proveedor, Proveedor.id_proveedor == Compra.id_proveedor).filter(
+                or_(
+                    contiene(session, Proveedor.nombre_razon_social, like),
+                    contiene(session, Proveedor.identificacion_proveedor, like),
+                    contiene(session, Proveedor.id_legal, like),
+                    contiene(session, rif_completo, like),
+                )
+            )
 
         return paginar(query, pagina, por_pagina, CuentaPorPagar.fecha_vencimiento, CuentaPorPagar.id_cuenta)
 
@@ -445,6 +482,7 @@ class PagoService:
         id_tasa: int | None = None,
         referencia: str | None = None,
         id_usuario: int | None = None,
+        moneda_pago: str | None = None,
     ) -> dict:
         """Aplica un abono general a un cliente usando el método FIFO (First In, First Out).
 
@@ -463,6 +501,8 @@ class PagoService:
             id_tasa: ID del registro de tasa (opcional)
             referencia: Referencia del pago (opcional)
             id_usuario: ID del usuario que realiza la operación
+            moneda_pago: 'COP' si se paga en pesos (la cuenta destino debe ser en pesos); en otro caso la
+                moneda de la cuenta se deduce del metodo (ver moneda_cuentas.py)
 
         Returns:
             dict con información del proceso:
@@ -495,6 +535,7 @@ class PagoService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' está inactiva")
+            BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria, metodo_pago, moneda_pago)
 
         if id_caja is not None:
             caja = session.get(Caja, id_caja)
@@ -761,6 +802,11 @@ class PagoService:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if id_vendedor:
             query = query.filter(Cliente.vendedor_cliente == id_vendedor)
+        texto = (texto_busqueda or "").strip()
+        if texto:
+            # El nombre se filtra en la base, ANTES de agrupar: antes se traian las cuentas de todos los clientes con
+            # deuda y se descartaban en Python los que no coincidian.
+            query = query.filter(contiene(session, Cliente.nombre_razon_social, patron_contiene(texto)))
         if estado == "vencida":
             query = query.filter(
                 CuentaPorCobrar.estado.in_(("pendiente", "parcial")),
@@ -776,6 +822,21 @@ class PagoService:
             )
         elif estado:
             query = query.filter(CuentaPorCobrar.estado == estado)
+        elif not id_cliente:
+            # Sin filtro de estado, las cuentas ya pagadas y sin saldo a favor no aportan nada al listado: no suman
+            # al saldo, no cambian el estado del cliente (solo cuenta "pagada" si no tiene otra cosa) y un cliente
+            # que solo las tiene se descarta mas abajo. Son la mayor parte del historial, asi que dejarlas fuera de
+            # la consulta evita traer decenas de miles de filas en cada carga.
+            query = query.filter(
+                or_(
+                    CuentaPorCobrar.estado != "pagada",
+                    CuentaPorCobrar.saldo_favor > 0,
+                )
+            )
+
+        # Una sola consulta con la factura y el cliente (ya estan unidos arriba): sin esto cada cuenta pedia su
+        # factura y su cliente por separado (2 consultas por cuenta).
+        query = query.options(contains_eager(CuentaPorCobrar.factura).contains_eager(FacturaVenta.cliente))
 
         # Obtener todas las cuentas (sin paginación para agrupar correctamente)
         todas_las_cuentas = query.all()
@@ -857,12 +918,10 @@ class PagoService:
 
         # Solo clientes con deuda o con saldo a favor, y (opcional) cuyo nombre contenga el texto buscado. Se filtra
         # ANTES de paginar para que `total`, `total_paginas` y las filas de cada pagina coincidan.
-        texto = (texto_busqueda or "").strip().lower()
         clientes_deuda = {
             clave: datos
             for clave, datos in clientes_deuda.items()
-            if (datos["saldo_total"] > 0 or (datos["saldo_favor"] or Decimal("0.00")) > 0)
-            and (not texto or texto in (datos["cliente"].nombre_razon_social or "").lower())
+            if datos["saldo_total"] > 0 or (datos["saldo_favor"] or Decimal("0.00")) > 0
         }
 
         # Convertir a lista y ordenar por saldo total (de mayor a menor)
