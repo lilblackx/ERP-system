@@ -117,17 +117,68 @@ def test_una_respuesta_vieja_de_facturas_se_descarta(qtbot, monkeypatch):
     assert pintados == ["vigente"]
 
 
-def test_el_refresco_periodico_sigue_siendo_sincrono_para_conservar_la_seleccion(qtbot, monkeypatch):
+def test_el_refresco_periodico_carga_en_un_hilo_y_avisa_al_terminar_de_repoblar(qtbot, monkeypatch):
     panel = _panel_con_worker_falso(qtbot, monkeypatch)
-    monkeypatch.setattr(panel, "_verificar_caja_abierta", lambda **k: None)
-    pintados = []
-    panel._poblar_tabla = pintados.append
-    monkeypatch.setattr(fp.VentaService, "listar_facturas", staticmethod(lambda session, **kw: "listado"))
+    monkeypatch.setattr(panel, "_refrescar_estado_caja", lambda: None)
+    orden = []
+    panel._poblar_tabla = lambda resultado: orden.append(("tabla", resultado))
+    # el refresco ya no consulta en el hilo de la interfaz
+    monkeypatch.setattr(fp.VentaService, "listar_facturas", staticmethod(lambda *a, **k: pytest.fail("sincrono")))
 
-    panel._refresco_periodico()
+    panel._refresco_periodico(lambda: orden.append("reseleccion"))
 
-    assert pintados == ["listado"]  # ya repoblada al volver: AutoRefresco reselecciona la fila justo despues
-    assert _WorkerFalso.creados == []
+    worker = _WorkerFalso.creados[-1]
+    assert worker.iniciado and worker.silencioso is True
+    assert orden == []  # nada se pinto todavia: la ventana siguio libre mientras la base respondia
+    panel._on_facturas_cargadas({"id_carga": panel._id_carga, "resultado": "listado"})
+    assert orden == [("tabla", "listado"), "reseleccion"]  # la fila se vuelve a seleccionar con la tabla ya repoblada
+
+
+def test_una_respuesta_vieja_no_dispara_la_reseleccion_del_refresco(qtbot, monkeypatch):
+    panel = _panel_con_worker_falso(qtbot, monkeypatch)
+    panel._poblar_tabla = lambda resultado: None
+    llamadas = []
+    panel.cargar_facturas(silencioso=True, al_terminar=lambda: llamadas.append(1))
+    id_refresco = panel._id_carga
+    panel.cargar_facturas()  # el usuario pidio otra cosa (busqueda, pagina) mientras tanto
+
+    panel._on_facturas_cargadas({"id_carga": id_refresco, "resultado": "viejo"})
+
+    assert llamadas == []
+
+
+def test_el_refresco_periodico_consulta_la_caja_sin_detener_la_ventana(qtbot, monkeypatch):
+    panel = _panel_con_worker_falso(qtbot, monkeypatch)
+    monkeypatch.setattr(fp, "cajas_de_esta_estacion", lambda cajas: cajas)
+    caja = SimpleNamespace(id_caja=3, nombre_caja="Caja 1", fecha_apertura="hoy", fecha_cierre=None)
+    monkeypatch.setattr(fp.CajaService, "listar_cajas", staticmethod(lambda session, **k: [caja]))
+    monkeypatch.setattr(panel, "_verificar_caja_abierta", lambda **k: pytest.fail("sincrono"))
+
+    panel._refrescar_estado_caja()  # WorkerInmediato (conftest) corre la tarea en el acto
+
+    assert panel.lbl_caja_estado.text() == "Caja abierta: Caja 1"
+
+
+def test_la_tarea_de_estado_de_caja_ignora_las_cajas_cerradas_y_no_rompe_si_falla(monkeypatch):
+    cerrada = SimpleNamespace(fecha_apertura="ayer", fecha_cierre="hoy")
+    monkeypatch.setattr(fp, "cajas_de_esta_estacion", lambda cajas: cajas)
+    monkeypatch.setattr(fp.CajaService, "listar_cajas", staticmethod(lambda session, **k: [cerrada]))
+    assert fp._tarea_estado_caja(None, 1) == {"caja": None}
+
+    def _falla(session, **k):
+        raise RuntimeError("sin conexion")
+
+    monkeypatch.setattr(fp.CajaService, "listar_cajas", staticmethod(_falla))
+    assert fp._tarea_estado_caja(None, 1) == {"fallo": True}
+
+
+def test_un_fallo_al_consultar_la_caja_deja_el_badge_como_estaba(qtbot, monkeypatch):
+    panel = _panel_con_worker_falso(qtbot, monkeypatch)
+    panel._actualizar_estado_caja(SimpleNamespace(nombre_caja="Caja 1", id_caja=3))
+
+    panel._mostrar_estado_caja({"fallo": True})
+
+    assert panel.lbl_caja_estado.text() == "Caja abierta: Caja 1"
 
 
 def test_una_carga_sincrona_invalida_la_respuesta_asincrona_en_vuelo(qtbot, monkeypatch):

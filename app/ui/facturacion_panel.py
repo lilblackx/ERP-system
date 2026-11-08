@@ -7,6 +7,7 @@ VentaService.listar_facturas()) y exportación a Excel/PDF (R-10).
 """
 
 import logging
+from collections.abc import Callable
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
@@ -205,6 +206,20 @@ CONDICIONES_FILTRO = [
 ]
 
 
+def _tarea_estado_caja(session, id_usuario: int | None) -> dict:
+    """Corre en un hilo aparte: la caja de ESTA estacion si tiene turno abierto (`None` si no). Si la consulta falla
+    devuelve `fallo`: el badge se queda como estaba, sin un mensaje de error cada vez que se refresca."""
+    try:
+        cajas = CajaService.listar_cajas(session, id_usuario=id_usuario)
+    except PermisoDenegadoError:
+        cajas = []
+    except Exception:
+        logger.exception("Fallo al consultar el estado de la caja")
+        return {"fallo": True}
+    abiertas = cajas_de_esta_estacion([c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None])
+    return {"caja": abiertas[0] if abiertas else None}
+
+
 def _tarea_cargar_facturas(session, id_carga: int, **filtros) -> dict:
     """Corre en un hilo aparte (QueryWorker): el listado de facturas no congela la ventana mientras se escribe en
     la busqueda. `id_carga` vuelve en el resultado para descartar lo que llega fuera de turno."""
@@ -230,19 +245,37 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
         self._id_carga = 0
+        self._al_terminar_carga: Callable[[], None] | None = None
         self._workers_carga: set[QueryWorker] = set()
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_facturas)
         # Facturas emitidas/anuladas/cobradas en otras estaciones y estado de caja, sin
         # salir y volver a entrar al modulo (ver app/ui/auto_refresco.py).
-        self._auto_refresco = AutoRefresco(self, self._refresco_periodico, lambda: self.tabla, COL_ID_INTERNO)
+        self._auto_refresco = AutoRefresco(
+            self, self._refresco_periodico, lambda: self.tabla, COL_ID_INTERNO, asincrono=True
+        )
 
-    def _refresco_periodico(self) -> None:
-        # Sincrono: AutoRefresco vuelve a seleccionar la fila (por id) justo despues de recargar y necesita la
-        # tabla ya repoblada. Es el listado de siempre (decenas de ms), no una busqueda de texto.
-        self.cargar_facturas(sincrono=True)
-        self._verificar_caja_abierta(ofrecer_apertura=False)
+    def _refresco_periodico(self, al_terminar: Callable[[], None]) -> None:
+        # En un hilo aparte (listado y estado de la caja): la ventana no se detiene mientras la base responde.
+        # AutoRefresco vuelve a seleccionar la fila (por id) cuando la tabla ya esta repoblada (`al_terminar`).
+        self.cargar_facturas(silencioso=True, al_terminar=al_terminar)
+        self._refrescar_estado_caja()
+
+    def _refrescar_estado_caja(self) -> None:
+        """Actualiza el badge "Caja abierta"/"Sin caja abierta" sin detener la ventana (no ofrece abrir turno)."""
+        self.cargar_async(
+            "estado_caja",
+            _tarea_estado_caja,
+            self._mostrar_estado_caja,
+            texto_error="No se pudo consultar el estado de la caja.",
+            silencioso=True,
+            id_usuario=self.usuario.id_usuario,
+        )
+
+    def _mostrar_estado_caja(self, datos: dict) -> None:
+        if not datos.get("fallo"):
+            self._actualizar_estado_caja(datos["caja"])
 
     def showEvent(self, event: QShowEvent) -> None:
         # Mismo problema que DashboardPanel (ver su showEvent): MainWindow
@@ -259,7 +292,7 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
         # auditoria de facturacion). El gate real sigue intacto: nueva_factura() pide
         # la apertura explicitamente (ofrecer_apertura=True) recien cuando hace falta
         # de verdad, no solo por navegar al modulo.
-        self._verificar_caja_abierta(ofrecer_apertura=False)
+        self._refrescar_estado_caja()
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 
@@ -441,14 +474,20 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
             "id_usuario": self.usuario.id_usuario,
         }
 
-    def cargar_facturas(self, silencioso: bool = False, sincrono: bool = False) -> None:
+    def cargar_facturas(
+        self, silencioso: bool = False, sincrono: bool = False, al_terminar: Callable[[], None] | None = None
+    ) -> None:
         """Carga la pagina de facturas. Por defecto en un hilo aparte: si el usuario sigue escribiendo, la
         respuesta anterior se descarta al llegar (`_id_carga`) y solo se pinta la de lo ultimo que se pidio.
-        `sincrono=True` mantiene el flujo de siempre (lo usa el refresco periodico)."""
+        `al_terminar` se llama cuando la tabla ya esta repoblada (lo usa el refresco periodico para volver a
+        seleccionar la fila); `sincrono=True` carga en el hilo de la interfaz."""
         if sincrono:
             self._cargar_facturas_sincrono()
+            if al_terminar is not None:
+                al_terminar()
             return
         self._id_carga += 1
+        self._al_terminar_carga = al_terminar
         worker = QueryWorker(self.session_factory, _tarea_cargar_facturas, self._id_carga, **self._filtros_listado())
         worker.silencioso = silencioso
         worker.resultado.connect(self._on_facturas_cargadas)
@@ -464,6 +503,9 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
             return
         self._poblar_tabla(respuesta["resultado"])
+        al_terminar, self._al_terminar_carga = self._al_terminar_carga, None
+        if al_terminar is not None:
+            al_terminar()
 
     def _on_facturas_error(self, mensaje: str) -> None:
         # QueryWorker ya dejo el detalle en el log.

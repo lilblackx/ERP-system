@@ -6,6 +6,7 @@ tabla estilizada, paginación (D-01) y exportación a Excel (R-02/R-10).
 """
 
 import logging
+from collections.abc import Callable
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -211,7 +212,9 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
         QTimer.singleShot(100, self.cargar_productos)
         # Stock en tiempo real: ventas, recepciones y devoluciones de otras estaciones
         # (ver app/ui/auto_refresco.py).
-        self._auto_refresco = AutoRefresco(self, self._refresco_periodico, lambda: self.tabla, COL_ID_INTERNO)
+        self._auto_refresco = AutoRefresco(
+            self, self._refresco_periodico, lambda: self.tabla, COL_ID_INTERNO, asincrono=True
+        )
 
     def showEvent(self, event: QShowEvent) -> None:
         # Mismo problema que DashboardPanel/FacturacionPanel/ClientesPanel:
@@ -421,9 +424,10 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
         self.pagina_actual = 1
         self.cargar_productos(silencioso=True)  # busqueda mientras se escribe: no enciende la barra de carga
 
-    def _refresco_periodico(self) -> None:
-        # Sincrono: AutoRefresco vuelve a seleccionar la fila (por id) justo despues de recargar.
-        self.cargar_productos(sincrono=True)
+    def _refresco_periodico(self, al_terminar: Callable[[], None]) -> None:
+        # En un hilo aparte: la ventana no se detiene mientras la base responde. AutoRefresco vuelve a seleccionar la
+        # fila (por id) cuando la tabla ya esta repoblada (`al_terminar`).
+        self.cargar_productos(silencioso=True, al_terminar=al_terminar)
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
@@ -444,7 +448,9 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
         finally:
             session.close()
 
-    def cargar_productos(self, silencioso: bool = False, sincrono: bool = False) -> None:
+    def cargar_productos(
+        self, silencioso: bool = False, sincrono: bool = False, al_terminar: Callable[[], None] | None = None
+    ) -> None:
         self.cargar_async(
             "productos",
             _tarea_cargar_productos,
@@ -453,6 +459,7 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
             texto_sin_permiso="No tienes permiso para consultar inventario.",
             silencioso=silencioso,
             sincrono=sincrono,
+            al_terminar=al_terminar,
             texto=self.buscar_input.text().strip() or None,
             id_categoria=self.categoria_filtro_combo.currentData(),
             solo_con_stock=self.solo_stock_check.isChecked(),

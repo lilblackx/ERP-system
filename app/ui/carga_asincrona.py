@@ -12,8 +12,9 @@ ventana no repintaba ni atendia el teclado. Un panel que use CargaAsincronaMixin
 `_poblar_tabla(resultado)` corre ya en el hilo de la interfaz. Si el usuario sigue escribiendo, la respuesta de la
 consulta anterior se descarta al llegar (solo se pinta la de lo ultimo que se pidio).
 
-`sincrono=True` mantiene el flujo de siempre en el hilo de la interfaz: lo necesitan los refrescos automaticos
-(AutoRefresco vuelve a seleccionar la fila por id justo despues de recargar y espera la tabla ya repoblada).
+`sincrono=True` mantiene el flujo de siempre en el hilo de la interfaz. Los refrescos automaticos (AutoRefresco)
+cargan en el hilo aparte y pasan `al_terminar`: se llama cuando la tabla ya esta repoblada, para volver a seleccionar
+la fila por id y conservar el scroll. Un refresco asi es silencioso (no enciende la barra de carga cada 30 s).
 """
 
 import logging
@@ -65,8 +66,10 @@ class CargaAsincronaMixin:
         texto_sin_permiso: str = "No tienes permiso para consultar esta información.",
         silencioso: bool = False,
         sincrono: bool = False,
+        al_terminar: Callable[[], None] | None = None,
         **filtros: Any,
     ) -> None:
+        silencioso = silencioso or al_terminar is not None
         estado = self._estado_carga()
         estado["contador"] += 1
         id_carga = estado["contador"]
@@ -77,6 +80,7 @@ class CargaAsincronaMixin:
             "al_cargar": al_cargar,
             "texto_error": texto_error,
             "texto_sin_permiso": texto_sin_permiso,
+            "al_terminar": al_terminar,
         }
         if sincrono:
             session = self.session_factory()
@@ -114,6 +118,8 @@ class CargaAsincronaMixin:
             return
         try:
             carga["al_cargar"](respuesta["resultado"])
+            if carga["al_terminar"] is not None:
+                carga["al_terminar"]()
         except Exception as exc:
             logger.exception("Fallo al mostrar la carga '%s'", respuesta["clave"])
             MessageBox.critical(self, "Error", f"{carga['texto_error']}\n\nError: {exc}")

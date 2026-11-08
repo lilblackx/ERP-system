@@ -28,21 +28,26 @@ INTERVALO_AUTO_REFRESCO_MS = 30_000
 
 class AutoRefresco(QObject):
     """`obtener_tabla` devuelve la tabla que `recargar` repuebla en este momento (puede
-    cambiar, ej. la pestana activa de Compras); `columna_id` es la columna con el id."""
+    cambiar, ej. la pestana activa de Compras); `columna_id` es la columna con el id.
+
+    Con `asincrono=True`, `recargar(al_terminar)` carga en un hilo aparte (la ventana no se detiene mientras la base
+    responde) y llama a `al_terminar()` cuando la tabla ya esta repoblada; ahi se vuelve a seleccionar la fila."""
 
     def __init__(
         self,
         panel: QWidget,
-        recargar: Callable[[], None],
+        recargar: Callable[..., None],
         obtener_tabla: Callable[[], QTableWidget],
         columna_id: int = 0,
         intervalo_ms: int = INTERVALO_AUTO_REFRESCO_MS,
+        asincrono: bool = False,
     ):
         super().__init__(panel)
         self._panel = panel
         self._recargar = recargar
         self._obtener_tabla = obtener_tabla
         self._columna_id = columna_id
+        self._asincrono = asincrono
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refrescar)
         self.timer.start(intervalo_ms)
@@ -57,16 +62,21 @@ class AutoRefresco(QObject):
         id_seleccionado = self._id_seleccionado(tabla)
         scroll = tabla.verticalScrollBar().value()
 
-        self._recargar()
+        def restaurar() -> None:
+            tabla.clearSelection()
+            if id_seleccionado is not None:
+                for fila in range(tabla.rowCount()):
+                    item = tabla.item(fila, self._columna_id)
+                    if item is not None and item.text() == id_seleccionado:
+                        tabla.selectRow(fila)
+                        break
+            tabla.verticalScrollBar().setValue(scroll)
 
-        tabla.clearSelection()
-        if id_seleccionado is not None:
-            for fila in range(tabla.rowCount()):
-                item = tabla.item(fila, self._columna_id)
-                if item is not None and item.text() == id_seleccionado:
-                    tabla.selectRow(fila)
-                    break
-        tabla.verticalScrollBar().setValue(scroll)
+        if self._asincrono:
+            self._recargar(restaurar)
+        else:
+            self._recargar()
+            restaurar()
 
     def _id_seleccionado(self, tabla: QTableWidget) -> str | None:
         filas = tabla.selectionModel().selectedRows()

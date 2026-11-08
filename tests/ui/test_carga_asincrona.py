@@ -138,3 +138,25 @@ def test_el_debounce_lanza_una_sola_busqueda_tras_varias_teclas(panel, qtbot):
     qtbot.wait(80)
 
     assert llamadas == [1]
+
+
+def test_al_terminar_se_llama_despues_de_pintar_y_el_refresco_es_silencioso(panel):
+    orden = []
+    panel.cargar_async(
+        "lista", lambda s: "datos", orden.append, texto_error="x", al_terminar=lambda: orden.append("fin")
+    )
+
+    assert _WorkerFalso.creados[-1].silencioso is True  # un refresco automatico no enciende la barra de carga
+    panel._recibir_carga({"id_carga": 1, "clave": "lista", "resultado": "datos"})
+
+    assert orden == ["datos", "fin"]
+
+
+def test_al_terminar_no_se_llama_si_la_respuesta_llega_tarde(panel):
+    llamadas = []
+    panel.cargar_async("lista", lambda s: 1, lambda r: None, texto_error="x", al_terminar=lambda: llamadas.append(1))
+    _pedir(panel)  # el usuario pidio otra cosa antes de que llegara la respuesta del refresco
+
+    panel._recibir_carga({"id_carga": 1, "clave": "lista", "resultado": "viejo"})
+
+    assert llamadas == []

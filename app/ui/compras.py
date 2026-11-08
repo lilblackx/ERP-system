@@ -16,6 +16,7 @@ que todos los paneles existentes -- no hay una clase base propia en este proyect
 ClientesPanel/FacturacionPanel, todos QWidget directo)."""
 
 import logging
+from collections.abc import Callable
 from decimal import Decimal
 
 import qtawesome as qta
@@ -1619,6 +1620,7 @@ class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, 
             self,
             self._refresco_periodico,
             lambda: [self.tabla_oc, self.tabla_nr, self.tabla_compra][self.tabs.currentIndex()],
+            asincrono=True,
         )
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -1717,13 +1719,13 @@ class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, 
         item = tabla.item(filas[0].row(), 0)
         return int(item.text()) if item is not None else None
 
-    def _cargar_tab_actual(self, sincrono: bool = False) -> None:
+    def _cargar_tab_actual(self, sincrono: bool = False, al_terminar: Callable[[], None] | None = None) -> None:
         indice = self.tabs.currentIndex()
-        [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][indice](sincrono=sincrono)
+        [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][indice](sincrono=sincrono, al_terminar=al_terminar)
 
-    def _refresco_periodico(self) -> None:
-        # Sincrono: AutoRefresco vuelve a seleccionar la fila (por id) justo despues de recargar.
-        self._cargar_tab_actual(sincrono=True)
+    def _refresco_periodico(self, al_terminar: Callable[[], None]) -> None:
+        # En un hilo aparte: AutoRefresco vuelve a seleccionar la fila (por id) cuando la tabla ya esta repoblada.
+        self._cargar_tab_actual(al_terminar=al_terminar)
 
     # ── Pestana: Ordenes de Compra ───────────────────────────────────────
 
@@ -1797,7 +1799,7 @@ class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, 
         self.paginas["oc"] = 1
         self.cargar_ocs()
 
-    def cargar_ocs(self, sincrono: bool = False) -> None:
+    def cargar_ocs(self, sincrono: bool = False, al_terminar: Callable[[], None] | None = None) -> None:
         self.cargar_async(
             "oc",
             _tarea_listar_ocs,
@@ -1805,6 +1807,7 @@ class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, 
             texto_error="No se pudo cargar el listado de órdenes de compra.",
             texto_sin_permiso="No tienes permiso para consultar órdenes de compra.",
             sincrono=sincrono,
+            al_terminar=al_terminar,
             texto_busqueda=self.oc_buscar_input.text().strip() or None,
             estado=self.oc_estado_combo.currentData(),
             pagina=self.paginas["oc"],
@@ -1982,7 +1985,7 @@ class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, 
         self.paginas["nr"] = 1
         self.cargar_nrs()
 
-    def cargar_nrs(self, sincrono: bool = False) -> None:
+    def cargar_nrs(self, sincrono: bool = False, al_terminar: Callable[[], None] | None = None) -> None:
         # Estado y texto (numero de NR, OC o proveedor) se filtran en la consulta, antes de paginar -- ver
         # NotaRecepcionService.listar_notas_recepcion.
         self.cargar_async(
@@ -1992,6 +1995,7 @@ class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, 
             texto_error="No se pudo cargar el listado de recepciones.",
             texto_sin_permiso="No tienes permiso para consultar recepciones.",
             sincrono=sincrono,
+            al_terminar=al_terminar,
             pagina=self.paginas["nr"],
             por_pagina=POR_PAGINA,
             id_usuario=self.usuario.id_usuario,
@@ -2198,7 +2202,7 @@ class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, 
         self.paginas["compra"] = 1
         self.cargar_compras()
 
-    def cargar_compras(self, sincrono: bool = False) -> None:
+    def cargar_compras(self, sincrono: bool = False, al_terminar: Callable[[], None] | None = None) -> None:
         self.cargar_async(
             "compra",
             _tarea_listar_compras,
@@ -2206,6 +2210,7 @@ class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, 
             texto_error="No se pudo cargar el listado de facturas.",
             texto_sin_permiso="No tienes permiso para consultar compras.",
             sincrono=sincrono,
+            al_terminar=al_terminar,
             estado=self.compra_estado_combo.currentData(),
             solo_desde_oc=True,
             pagina=self.paginas["compra"],
