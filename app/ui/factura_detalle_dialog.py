@@ -23,7 +23,9 @@ from PySide6.QtWidgets import (
 
 from app.services.empresa import EmpresaService
 from app.services.permisos import PermisoDenegadoError
+from app.services.ventas import VentaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.carga_asincrona import sesion_para_dialogo
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_pdf import generar_pdf_factura, imprimir_factura
 from app.ui.message_box import MessageBox
@@ -113,6 +115,22 @@ _ETIQUETAS_METODO_VUELTO = {
     "pago_movil": "Pago Móvil",
     "transferencia": "Transferencia",
 }
+
+
+def tarea_cargar_factura(session, session_factory, id_factura: int, id_usuario: int | None) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): la factura con sus lineas y pagos, lista para abrir el detalle.
+
+    Devuelve {"session", "datos"}: la sesion con la que se consulto, que el dialogo sigue usando (anular, imprimir...)
+    y quien lo abre cierra al terminar. Un fallo vuelve como {"error": excepcion}: asi el panel siempre recibe
+    respuesta, muestra el mensaje de siempre (sin permiso / factura no encontrada / error) y suelta su guarda de
+    doble clic."""
+    sesion = sesion_para_dialogo(session_factory)
+    try:
+        datos = VentaService.obtener_factura(sesion, id_factura, id_usuario=id_usuario)
+        return {"session": sesion, "datos": datos}
+    except Exception as exc:
+        sesion.close()
+        return {"error": exc}
 
 
 class FacturaDetalleDialog(MixinPermisos, QDialog):

@@ -7,7 +7,7 @@ exportación -- no hay pedido de reporte para este catálogo, solo alta/edición
 import logging
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from app.db.models import Ruta, Usuario
 from app.services.permisos import PermisoDenegadoError
 from app.services.rutas import RutaService
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.message_box import MessageBox
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
@@ -63,7 +64,12 @@ ESTADOS_FILTRO = [
 ]
 
 
-class RutasPanel(MixinPermisos, MixinPaginacion, QWidget):
+def _tarea_listar_rutas(session, **filtros):
+    """Corre en un hilo aparte (ver carga_asincrona.py): solo consulta, sin tocar widgets."""
+    return RutaService.listar(session, **filtros)
+
+
+class RutasPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidget):
     """Listado de rutas con búsqueda, alta/edición y activar/desactivar -- sin DELETE
     fisico, ver RutaService.eliminar()."""
 
@@ -191,11 +197,11 @@ class RutasPanel(MixinPermisos, MixinPaginacion, QWidget):
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
 
     def _busqueda_dinamica(self) -> None:
-        if not hasattr(self, "_timer_busqueda"):
-            self._timer_busqueda = QTimer()
-            self._timer_busqueda.setSingleShot(True)
-            self._timer_busqueda.timeout.connect(self._buscar_desde_inicio)
-        self._timer_busqueda.start(300)
+        self.buscar_con_pausa(self._buscar_tecleando)
+
+    def _buscar_tecleando(self) -> None:
+        self.pagina_actual = 1
+        self.cargar_rutas(silencioso=True)  # no enciende la barra de carga
 
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
@@ -203,25 +209,21 @@ class RutasPanel(MixinPermisos, MixinPaginacion, QWidget):
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
-    def cargar_rutas(self) -> None:
-        session = self.session_factory()
-        try:
-            resultado = RutaService.listar(
-                session,
-                self.buscar_input.text().strip() or None,
-                id_usuario=self.usuario.id_usuario,
-                estado_ruta=self.estado_combo.currentData(),
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
-            )
-            self._poblar_tabla(resultado)
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar rutas.")
-        except Exception:
-            logger.exception("Fallo al cargar la lista de rutas")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de rutas.")
-        finally:
-            session.close()
+    def cargar_rutas(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        self.cargar_async(
+            "rutas",
+            _tarea_listar_rutas,
+            self._poblar_tabla,
+            texto_error="No se pudo cargar la lista de rutas.",
+            texto_sin_permiso="No tienes permiso para consultar rutas.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            texto_busqueda=self.buscar_input.text().strip() or None,
+            id_usuario=self.usuario.id_usuario,
+            estado_ruta=self.estado_combo.currentData(),
+            pagina=self.pagina_actual,
+            por_pagina=POR_PAGINA,
+        )
 
     def _poblar_tabla(self, resultado: dict) -> None:
         rutas: list[Ruta] = resultado["items"]

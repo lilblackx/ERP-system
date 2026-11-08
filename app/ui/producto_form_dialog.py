@@ -191,11 +191,15 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         id_usuario: int | None,
         producto: Inventario | None = None,
         parent=None,
+        precargado: dict | None = None,
     ):
         super().__init__(parent)
         self.session = session
         self.id_usuario = id_usuario
         self.producto = producto
+        # Catalogos ya cargados por el panel en un hilo aparte ({"categorias": [...] | None, "precio": ...}); sin ellos
+        # el dialogo los consulta el mismo. `categorias=None` significa "sin permiso 'categorias'/'ver'".
+        self._precargado = dict(precargado) if precargado is not None else None
         self.setWindowTitle("Editar Producto" if producto else "Nuevo Producto")
         ajustar_tamano(self, 860, 580)
         self.setStyleSheet(DIALOG_STYLE)
@@ -492,7 +496,13 @@ class ProductoFormDialog(MixinPermisos, QDialog):
     def _cargar_categorias(self, seleccionar_id: int | None = None) -> None:
         self.categoria_combo.clear()
         try:
-            categorias = CategoriaService.listar(self.session, id_usuario=self.id_usuario)
+            if self._precargado is not None and "categorias" in self._precargado:
+                # Solo la primera vez: despues (categoria nueva) se vuelve a consultar.
+                categorias = self._precargado.pop("categorias")
+                if categorias is None:
+                    raise PermisoDenegadoError("categorias", "ver")
+            else:
+                categorias = CategoriaService.listar(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             # 'inventario'/'crear' o 'editar' no implican 'categorias'/'ver' en el catalogo
             # de permisos -- son recursos independientes (auditoria de Productos
@@ -575,7 +585,10 @@ class ProductoFormDialog(MixinPermisos, QDialog):
             self.tiene_vencimiento_check.setChecked(True)
             self.vencimiento_input.setDate(QDate(producto.fecha_vencimiento))
 
-        precio = PrecioService.obtener_precio(self.session, producto.id_producto, id_usuario=self.id_usuario)
+        if self._precargado is not None and "precio" in self._precargado:
+            precio = self._precargado["precio"]
+        else:
+            precio = PrecioService.obtener_precio(self.session, producto.id_producto, id_usuario=self.id_usuario)
         if precio:
             self.precio_1_input.set_value(getattr(precio, "precio_1", None) or 0)
             self.precio_2_input.set_value(getattr(precio, "precio_2", None) or 0)

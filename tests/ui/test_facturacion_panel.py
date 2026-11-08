@@ -5,6 +5,8 @@ guard anti-reentrancia de ver_detalle_factura() agregado en el hallazgo 3.3 (aud
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 import app.ui.facturacion_panel as fp
 
 
@@ -44,8 +46,159 @@ def test_ver_detalle_factura_bloquea_reentrada_pero_no_queda_trabado(qtbot, monk
 
     panel.ver_detalle_factura()
 
-    assert len(llamadas_sesion) == 1
+    # una sesion para la consulta en el hilo y otra para el dialogo
+    assert len(llamadas_sesion) == 2
     assert panel._abriendo_dialogo is False
 
     panel.ver_detalle_factura()
-    assert len(llamadas_sesion) == 2
+    assert len(llamadas_sesion) == 4
+
+
+# -- El listado de facturas se consulta en un hilo aparte, sin congelar la ventana ------------------------
+
+
+class _WorkerFalso:
+    """Reemplaza a QueryWorker: registra con que se lo creo y no lanza ningun hilo."""
+
+    creados: list = []
+
+    def __init__(self, session_factory, tarea, *args, **kwargs):
+        self.tarea, self.args, self.kwargs = tarea, args, kwargs
+        self.silencioso = False
+        self.resultado, self.error, self.finished = MagicMock(), MagicMock(), MagicMock()
+        _WorkerFalso.creados.append(self)
+
+    def start(self):
+        self.iniciado = True
+
+    def wait(self, _ms):
+        return True
+
+
+def _panel_con_worker_falso(qtbot, monkeypatch):
+    _WorkerFalso.creados = []
+    monkeypatch.setattr(fp, "QueryWorker", _WorkerFalso)
+    monkeypatch.setattr(fp.QTimer, "singleShot", staticmethod(lambda *a, **k: None))
+    return _crear_panel(qtbot, monkeypatch)
+
+
+def test_cargar_facturas_consulta_en_un_hilo_con_los_filtros(qtbot, monkeypatch):
+    panel = _panel_con_worker_falso(qtbot, monkeypatch)
+    panel.buscar_input.setText("  FV-0005 ")
+
+    panel.cargar_facturas()
+
+    worker = _WorkerFalso.creados[-1]
+    assert worker.iniciado and worker.tarea is fp._tarea_cargar_facturas
+    assert worker.kwargs["texto_busqueda"] == "FV-0005"
+    assert worker.kwargs["pagina"] == 1 and worker.kwargs["por_pagina"] == fp.POR_PAGINA
+    assert worker.kwargs["id_usuario"] == 1
+    assert worker.silencioso is False
+
+
+def test_la_busqueda_mientras_se_escribe_no_enciende_la_barra_de_carga(qtbot, monkeypatch):
+    panel = _panel_con_worker_falso(qtbot, monkeypatch)
+
+    panel._buscar_desde_inicio()
+
+    assert _WorkerFalso.creados[-1].silencioso is True
+
+
+def test_una_respuesta_vieja_de_facturas_se_descarta(qtbot, monkeypatch):
+    panel = _panel_con_worker_falso(qtbot, monkeypatch)
+    pintados = []
+    panel._poblar_tabla = pintados.append
+    panel.cargar_facturas()
+    panel.cargar_facturas()
+
+    panel._on_facturas_cargadas({"id_carga": 1, "resultado": "viejo"})
+    panel._on_facturas_cargadas({"id_carga": 2, "resultado": "vigente"})
+
+    assert pintados == ["vigente"]
+
+
+def test_el_refresco_periodico_sigue_siendo_sincrono_para_conservar_la_seleccion(qtbot, monkeypatch):
+    panel = _panel_con_worker_falso(qtbot, monkeypatch)
+    monkeypatch.setattr(panel, "_verificar_caja_abierta", lambda **k: None)
+    pintados = []
+    panel._poblar_tabla = pintados.append
+    monkeypatch.setattr(fp.VentaService, "listar_facturas", staticmethod(lambda session, **kw: "listado"))
+
+    panel._refresco_periodico()
+
+    assert pintados == ["listado"]  # ya repoblada al volver: AutoRefresco reselecciona la fila justo despues
+    assert _WorkerFalso.creados == []
+
+
+def test_una_carga_sincrona_invalida_la_respuesta_asincrona_en_vuelo(qtbot, monkeypatch):
+    panel = _panel_con_worker_falso(qtbot, monkeypatch)
+    pintados = []
+    panel._poblar_tabla = pintados.append
+    monkeypatch.setattr(fp.VentaService, "listar_facturas", staticmethod(lambda session, **kw: "nuevo"))
+    panel.cargar_facturas()  # en vuelo
+    id_en_vuelo = panel._id_carga
+
+    panel.cargar_facturas(sincrono=True)
+    panel._on_facturas_cargadas({"id_carga": id_en_vuelo, "resultado": "viejo"})
+
+    assert pintados == ["nuevo"]
+
+
+def test_la_tarea_convierte_la_falta_de_permiso_en_un_resultado(monkeypatch):
+    def _sin_permiso(session, **filtros):
+        raise fp.PermisoDenegadoError("ventas", "ver")
+
+    monkeypatch.setattr(fp.VentaService, "listar_facturas", staticmethod(_sin_permiso))
+
+    assert fp._tarea_cargar_facturas(MagicMock(), 3) == {"id_carga": 3, "sin_permiso": True}
+
+
+# -- El detalle de la factura se consulta en un hilo aparte y su guarda de doble clic se suelta siempre ----
+
+
+def _panel_para_detalle(qtbot, monkeypatch, error):
+    panel = _crear_panel(qtbot, monkeypatch)
+    panel._fila_seleccionada_id = lambda: 1
+    panel.session_factory = MagicMock
+
+    def obtener(*a, **k):
+        if error is not None:
+            raise error
+        return {}
+
+    monkeypatch.setattr(fp.VentaService, "obtener_factura", staticmethod(obtener))
+    return panel
+
+
+def test_el_detalle_sin_permiso_avisa_y_suelta_la_guarda(qtbot, monkeypatch):
+    panel = _panel_para_detalle(qtbot, monkeypatch, fp.PermisoDenegadoError("sin permiso"))
+    avisos = []
+    monkeypatch.setattr(fp.MessageBox, "warning", lambda *a, **k: avisos.append(a[1]))
+    monkeypatch.setattr(fp, "FacturaDetalleDialog", lambda *a, **k: pytest.fail("no debe abrirse"))
+
+    panel.ver_detalle_factura()
+
+    assert avisos == ["Sin permiso"]
+    assert panel._abriendo_dialogo is False
+
+
+def test_el_detalle_de_una_factura_inexistente_avisa_y_suelta_la_guarda(qtbot, monkeypatch):
+    panel = _panel_para_detalle(qtbot, monkeypatch, ValueError("Factura no encontrada"))
+    avisos = []
+    monkeypatch.setattr(fp.MessageBox, "warning", lambda *a, **k: avisos.append((a[1], a[2])))
+
+    panel.ver_detalle_factura()
+
+    assert avisos == [("No se pudo abrir la factura", "Factura no encontrada")]
+    assert panel._abriendo_dialogo is False
+
+
+def test_un_fallo_inesperado_del_detalle_avisa_y_suelta_la_guarda(qtbot, monkeypatch):
+    panel = _panel_para_detalle(qtbot, monkeypatch, RuntimeError("se cayo la conexion"))
+    errores = []
+    monkeypatch.setattr(fp.MessageBox, "critical", lambda *a, **k: errores.append(a[1]))
+
+    panel.ver_detalle_factura()
+
+    assert errores == ["Error"]
+    assert panel._abriendo_dialogo is False

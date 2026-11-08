@@ -32,10 +32,14 @@ def _mock_session(precio_existente: Decimal | None = None) -> MagicMock:
 
     session.get.side_effect = get_side_effect
 
-    def query_side_effect(modelo):
+    def query_side_effect(modelo, *mas):
         nombre = getattr(modelo, "__name__", "")
         query_mock = MagicMock()
-        if nombre == "Categoria":
+        if mas:
+            # La verificacion de permisos (consultar_permiso) pide usuario + nombre del rol + si tiene el permiso
+            # en UNA consulta: aqui responde el admin.
+            query_mock.outerjoin.return_value.filter.return_value.first.return_value = (_USUARIO_ADMIN, "ADMIN", False)
+        elif nombre == "Categoria":
             query_mock.order_by.return_value.all.return_value = []
         elif nombre == "ProductoPrecio":
             precio_mock = None

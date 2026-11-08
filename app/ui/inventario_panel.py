@@ -39,6 +39,7 @@ from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.auto_refresco import AutoRefresco
+from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
 from app.ui.message_box import MessageBox
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
@@ -152,7 +153,42 @@ def _tarea_exportar_productos_pdf(
     return ruta, len(filas)
 
 
-class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
+def _tarea_cargar_productos(session, **filtros) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): la pagina de productos, sus precios y las alertas."""
+    id_usuario = filtros["id_usuario"]
+    resultado = ProductoService.buscar(session, **filtros)
+    return {
+        "resultado": resultado,
+        "precios": InventarioPanel._obtener_precios(session, [p.id_producto for p in resultado["items"]]),
+        "alertas": {
+            tipo: len(productos)
+            for tipo, productos in ProductoService.obtener_alertas_stock(session, id_usuario=id_usuario).items()
+        },
+    }
+
+
+def _tarea_form_producto(session, session_factory, id_usuario: int | None, id_producto: int | None = None) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): categorias (y, al editar, el producto y su precio) para el
+    formulario. Devuelve la sesion usada, que el panel usa para guardar y cierra al terminar."""
+    sesion = sesion_para_dialogo(session_factory)
+    try:
+        try:
+            categorias = CategoriaService.listar(sesion, id_usuario=id_usuario)
+        except PermisoDenegadoError:
+            categorias = None  # el formulario avisa que falta 'categorias'/'ver'
+        precargado = {"categorias": categorias}
+        producto = None
+        if id_producto is not None:
+            producto = sesion.get(Inventario, id_producto)
+            if producto is not None:
+                precargado["precio"] = PrecioService.obtener_precio(sesion, id_producto, id_usuario=id_usuario)
+        return {"session": sesion, "producto": producto, "precargado": precargado}
+    except BaseException:
+        sesion.close()
+        raise
+
+
+class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidget):
     """Panel principal del módulo Inventario: catálogo de productos con búsqueda,
     filtro por categoría, paginación, alta/edición (con precio de venta) y export."""
 
@@ -175,7 +211,7 @@ class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
         QTimer.singleShot(100, self.cargar_productos)
         # Stock en tiempo real: ventas, recepciones y devoluciones de otras estaciones
         # (ver app/ui/auto_refresco.py).
-        self._auto_refresco = AutoRefresco(self, self.cargar_productos, lambda: self.tabla, COL_ID_INTERNO)
+        self._auto_refresco = AutoRefresco(self, self._refresco_periodico, lambda: self.tabla, COL_ID_INTERNO)
 
     def showEvent(self, event: QShowEvent) -> None:
         # Mismo problema que DashboardPanel/FacturacionPanel/ClientesPanel:
@@ -296,7 +332,7 @@ class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
         self.btn_refresh.setStyleSheet(BUTTON_SECONDARY_QSS)
         self.btn_refresh.setFixedWidth(36)
         self.btn_refresh.setToolTip("Refrescar inventario")
-        self.btn_refresh.clicked.connect(self.cargar_productos)
+        self.btn_refresh.clicked.connect(lambda: self.cargar_productos())
 
         h.addWidget(self.buscar_input)
         h.addSpacerItem(QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
@@ -383,7 +419,11 @@ class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
 
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
-        self.cargar_productos()
+        self.cargar_productos(silencioso=True)  # busqueda mientras se escribe: no enciende la barra de carga
+
+    def _refresco_periodico(self) -> None:
+        # Sincrono: AutoRefresco vuelve a seleccionar la fila (por id) justo despues de recargar.
+        self.cargar_productos(sincrono=True)
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
@@ -404,32 +444,26 @@ class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
         finally:
             session.close()
 
-    def cargar_productos(self) -> None:
-        session = self.session_factory()
-        try:
-            resultado = ProductoService.buscar(
-                session,
-                texto=self.buscar_input.text().strip() or None,
-                id_categoria=self.categoria_filtro_combo.currentData(),
-                solo_con_stock=self.solo_stock_check.isChecked(),
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
-                id_usuario=self.usuario.id_usuario,
-            )
-            precios = self._obtener_precios(session, [p.id_producto for p in resultado["items"]])
-            self._poblar_tabla(resultado, precios)
-            self._actualizar_alertas(session)
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar inventario.")
-        except Exception as e:
-            logger.exception("Fallo al cargar el catálogo de inventario")
-            MessageBox.critical(
-                self,
-                "Error de conexión",
-                f"No se pudo cargar el catálogo de inventario.\n\nError: {str(e)}",
-            )
-        finally:
-            session.close()
+    def cargar_productos(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        self.cargar_async(
+            "productos",
+            _tarea_cargar_productos,
+            self._mostrar_productos,
+            texto_error="No se pudo cargar el catálogo de inventario.",
+            texto_sin_permiso="No tienes permiso para consultar inventario.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            texto=self.buscar_input.text().strip() or None,
+            id_categoria=self.categoria_filtro_combo.currentData(),
+            solo_con_stock=self.solo_stock_check.isChecked(),
+            pagina=self.pagina_actual,
+            por_pagina=POR_PAGINA,
+            id_usuario=self.usuario.id_usuario,
+        )
+
+    def _mostrar_productos(self, datos: dict) -> None:
+        self._poblar_tabla(datos["resultado"], datos["precios"])
+        self._actualizar_alertas(datos["alertas"])
 
     @staticmethod
     def _obtener_precios(session, ids_producto: list[int]) -> dict[int, dict[str, float]]:
@@ -448,10 +482,9 @@ class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
             for fila in filas
         }
 
-    def _actualizar_alertas(self, session) -> None:
-        alertas = ProductoService.obtener_alertas_stock(session, id_usuario=self.usuario.id_usuario)
-        n_bajo_stock = len(alertas["bajo_stock"])
-        n_proximos_vencer = len(alertas["proximos_vencer"])
+    def _actualizar_alertas(self, alertas: dict) -> None:
+        n_bajo_stock = alertas["bajo_stock"]
+        n_proximos_vencer = alertas["proximos_vencer"]
         # Antes se sumaban ambos conteos en un solo numero ("3 productos con alerta")
         # sin decir de que se trataba -- confuso para el usuario, que veia stock de sobra
         # y no entendia por que el producto estaba marcado (la alerta real era por
@@ -569,9 +602,22 @@ class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
     def nuevo_producto(self) -> None:
         if not self._exigir_permiso("crear", "No tienes permiso para crear productos."):
             return
-        session = self.session_factory()
+        self.cargar_async(
+            "form_producto",
+            _tarea_form_producto,
+            self._abrir_nuevo_producto,
+            texto_error="No se pudo abrir el formulario de producto.",
+            texto_sin_permiso="No tienes permiso para crear productos.",
+            session_factory=self.session_factory,
+            id_usuario=self.usuario.id_usuario,
+        )
+
+    def _abrir_nuevo_producto(self, datos_previos: dict) -> None:
+        session = datos_previos["session"]
         try:
-            dialogo = ProductoFormDialog(session, self.usuario.id_usuario, parent=self)
+            dialogo = ProductoFormDialog(
+                session, self.usuario.id_usuario, parent=self, precargado=datos_previos["precargado"]
+            )
             if dialogo.exec():
                 datos = dialogo.get_data()
                 datos["creado_por"] = self.usuario.id_usuario
@@ -619,11 +665,29 @@ class InventarioPanel(MixinPermisos, MixinPaginacion, QWidget):
         if id_producto is None:
             return
 
-        session = self.session_factory()
+        self.cargar_async(
+            "form_producto",
+            _tarea_form_producto,
+            self._abrir_editar_producto,
+            texto_error="No se pudo abrir el formulario de producto.",
+            texto_sin_permiso="No tienes permiso para editar productos.",
+            session_factory=self.session_factory,
+            id_usuario=self.usuario.id_usuario,
+            id_producto=id_producto,
+        )
+
+    def _abrir_editar_producto(self, datos_previos: dict) -> None:
+        session = datos_previos["session"]
+        producto = datos_previos["producto"]
         try:
-            producto = session.get(Inventario, id_producto)
+            if producto is None:
+                MessageBox.warning(self, "No encontrado", "El producto seleccionado ya no existe.")
+                return
+            id_producto = producto.id_producto
             cantidad_anterior = producto.cantidad_unidad
-            dialogo = ProductoFormDialog(session, self.usuario.id_usuario, producto, parent=self)
+            dialogo = ProductoFormDialog(
+                session, self.usuario.id_usuario, producto, parent=self, precargado=datos_previos["precargado"]
+            )
             if dialogo.exec():
                 datos = dialogo.get_data()
                 cantidad_nueva = datos.get("cantidad_unidad", cantidad_anterior)

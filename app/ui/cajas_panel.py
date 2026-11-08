@@ -31,13 +31,17 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy import case, func
 
 from app.db.models import Caja, CajaMovimiento, Usuario
+from app.services.paginacion import paginar
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
 from app.ui.caja_cierre_dialog import CajaCierreDialog
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.paginacion import ControlPaginacion
 from app.ui.pantalla import ajustar_tamano
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
@@ -192,7 +196,45 @@ class MovimientoManualDialog(QDialog):
         }
 
 
-class HistorialMovimientosDialog(QDialog):
+POR_PAGINA_HISTORIAL = 50
+
+
+def _tarea_historial_caja(session, id_caja: int, desde, hasta, pagina: int) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): una pagina de movimientos de la caja en el rango y los
+    totales de TODO el rango sumados en la base. Antes se traian todos los movimientos del rango y se sumaban (y se
+    ajustaba la altura de cada fila) en el hilo de la ventana."""
+    filtros = [CajaMovimiento.id_caja == id_caja]
+    if desde:
+        filtros.append(CajaMovimiento.fecha_registro >= datetime.combine(desde, datetime.min.time()))
+    if hasta:
+        filtros.append(CajaMovimiento.fecha_registro <= datetime.combine(hasta, datetime.max.time()))
+    resultado = paginar(
+        session.query(CajaMovimiento).filter(*filtros),
+        pagina,
+        POR_PAGINA_HISTORIAL,
+        CajaMovimiento.fecha_registro.desc(),
+        CajaMovimiento.id_movimiento.desc(),
+    )
+    entradas, salidas = (
+        session.query(
+            func.coalesce(
+                func.sum(case((CajaMovimiento.tipo_movimiento == "entrada", CajaMovimiento.monto_movimiento), else_=0)),
+                0,
+            ),
+            func.coalesce(
+                func.sum(case((CajaMovimiento.tipo_movimiento != "entrada", CajaMovimiento.monto_movimiento), else_=0)),
+                0,
+            ),
+        )
+        .filter(*filtros)
+        .one()
+    )
+    resultado["total_entradas"] = Decimal(str(entradas))
+    resultado["total_salidas"] = Decimal(str(salidas))
+    return resultado
+
+
+class HistorialMovimientosDialog(CargaAsincronaMixin, QDialog):
     """Dialogo para ver el historial de movimientos de una caja filtrado por fecha."""
 
     def __init__(
@@ -208,6 +250,8 @@ class HistorialMovimientosDialog(QDialog):
         self.id_caja = id_caja
         self.nombre_caja = nombre_caja
         self.usuario = usuario
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self._cargar_historial())
 
         self.setWindowTitle(f"Historial de Movimientos - {nombre_caja}")
         ajustar_tamano(self, 700, 500, 700)
@@ -241,7 +285,7 @@ class HistorialMovimientosDialog(QDialog):
 
         btn_filtrar = QPushButton("Filtrar")
         btn_filtrar.setStyleSheet(BUTTON_PRIMARY_QSS)
-        btn_filtrar.clicked.connect(self._cargar_historial)
+        btn_filtrar.clicked.connect(self._aplicar_filtro)
         header.addWidget(btn_filtrar)
 
         btn_hoy = QPushButton("Hoy")
@@ -299,6 +343,7 @@ class HistorialMovimientosDialog(QDialog):
         footer.addWidget(self.lbl_total_salidas)
         footer.addStretch()
         footer.addWidget(self.lbl_saldo)
+        footer.addWidget(self.paginacion)
 
         btn_cerrar = QPushButton("Cerrar")
         btn_cerrar.setStyleSheet(BUTTON_SECONDARY_QSS)
@@ -311,110 +356,99 @@ class HistorialMovimientosDialog(QDialog):
         hoy = date.today()
         self.fecha_desde.setText(hoy.strftime("%d/%m/%Y"))
         self.fecha_hasta.setText(hoy.strftime("%d/%m/%Y"))
+        self._aplicar_filtro()
+
+    def _cargar_historial(self, silencioso: bool = False) -> None:
+        # Parsear fechas
+        fecha_desde = None
+        fecha_hasta = None
+
+        if self.fecha_desde.text().strip():
+            try:
+                fecha_desde = datetime.strptime(self.fecha_desde.text().strip(), "%d/%m/%Y").date()
+            except ValueError:
+                MessageBox.warning(self, "Fecha inválida", "El formato de 'Desde' debe ser DD/MM/YYYY")
+                return
+
+        if self.fecha_hasta.text().strip():
+            try:
+                fecha_hasta = datetime.strptime(self.fecha_hasta.text().strip(), "%d/%m/%Y").date()
+            except ValueError:
+                MessageBox.warning(self, "Fecha inválida", "El formato de 'Hasta' debe ser DD/MM/YYYY")
+                return
+
+        # Si no hay fechas, mostrar movimientos de hoy
+        if not fecha_desde and not fecha_hasta:
+            hoy = date.today()
+            fecha_desde = hoy
+            fecha_hasta = hoy
+            self.fecha_desde.setText(hoy.strftime("%d/%m/%Y"))
+            self.fecha_hasta.setText(hoy.strftime("%d/%m/%Y"))
+
+        self.cargar_async(
+            "historial",
+            _tarea_historial_caja,
+            self._mostrar_historial,
+            texto_error="No se pudo cargar el historial.",
+            silencioso=silencioso,
+            id_caja=self.id_caja,
+            desde=fecha_desde,
+            hasta=fecha_hasta,
+            pagina=self.paginacion.pagina,
+        )
+
+    def _aplicar_filtro(self) -> None:
+        """Botones Filtrar/Hoy: un rango nuevo vuelve a la primera pagina."""
+        self.paginacion.reiniciar()
         self._cargar_historial()
 
-    def _cargar_historial(self) -> None:
-        try:
-            # Parsear fechas
-            fecha_desde = None
-            fecha_hasta = None
+    def _mostrar_historial(self, resultado: dict) -> None:
+        movimientos = resultado["items"]
+        self.paginacion.actualizar_desde(resultado, mostrar_total=True)
+        self.tabla.setRowCount(len(movimientos))
 
-            if self.fecha_desde.text().strip():
-                try:
-                    fecha_desde = datetime.strptime(self.fecha_desde.text().strip(), "%d/%m/%Y").date()
-                except ValueError:
-                    MessageBox.warning(
-                        self,
-                        "Fecha inválida",
-                        "El formato de 'Desde' debe ser DD/MM/YYYY",
-                    )
-                    return
+        for fila, mov in enumerate(movimientos):
+            fecha_str = mov.fecha_registro.strftime("%d/%m/%Y %H:%M")
+            self.tabla.setItem(fila, 0, QTableWidgetItem(fecha_str))
 
-            if self.fecha_hasta.text().strip():
-                try:
-                    fecha_hasta = datetime.strptime(self.fecha_hasta.text().strip(), "%d/%m/%Y").date()
-                except ValueError:
-                    MessageBox.warning(
-                        self,
-                        "Fecha inválida",
-                        "El formato de 'Hasta' debe ser DD/MM/YYYY",
-                    )
-                    return
+            es_entrada = mov.tipo_movimiento == "entrada"
+            tipo_item = QTableWidgetItem("Entrada" if es_entrada else "Salida")
+            tipo_item.setForeground(Qt.GlobalColor.darkGreen if es_entrada else Qt.GlobalColor.red)
+            self.tabla.setItem(fila, 1, tipo_item)
 
-            # Si no hay fechas, mostrar movimientos de hoy
-            if not fecha_desde and not fecha_hasta:
-                hoy = date.today()
-                fecha_desde = hoy
-                fecha_hasta = hoy
-                self.fecha_desde.setText(hoy.strftime("%d/%m/%Y"))
-                self.fecha_hasta.setText(hoy.strftime("%d/%m/%Y"))
+            self.tabla.setItem(fila, 2, QTableWidgetItem(mov.descripcion_movimiento or ""))
 
-            session = self.session_factory()
-            try:
-                query = session.query(CajaMovimiento).filter(CajaMovimiento.id_caja == self.id_caja)
+            monto = mov.monto_movimiento or Decimal("0.00")
+            item_monto = QTableWidgetItem(f"$ {monto:,.2f}")
+            item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 3, item_monto)
 
-                if fecha_desde:
-                    desde_dt = datetime.combine(fecha_desde, datetime.min.time())
-                    query = query.filter(CajaMovimiento.fecha_registro >= desde_dt)
+            # Determinar origen
+            origen = "Manual"
+            if mov.id_pago_cobro or mov.id_pago_cobro_bcv:
+                origen = "Cobro"
+            elif mov.id_pago_proveedor:
+                origen = "Pago Proveedor"
+            elif mov.id_pago_comision:
+                origen = "Pago Comisión"
+            self.tabla.setItem(fila, 4, QTableWidgetItem(origen))
 
-                if fecha_hasta:
-                    hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
-                    query = query.filter(CajaMovimiento.fecha_registro <= hasta_dt)
+            # Ajustar altura de la fila para mostrar toda la descripción
+            self.tabla.resizeRowToContents(fila)
 
-                movimientos = query.order_by(CajaMovimiento.fecha_registro.desc()).all()
-
-                self.tabla.setRowCount(len(movimientos))
-                total_entradas = Decimal("0.00")
-                total_salidas = Decimal("0.00")
-
-                for fila, mov in enumerate(movimientos):
-                    fecha_str = mov.fecha_registro.strftime("%d/%m/%Y %H:%M")
-                    self.tabla.setItem(fila, 0, QTableWidgetItem(fecha_str))
-
-                    es_entrada = mov.tipo_movimiento == "entrada"
-                    tipo_item = QTableWidgetItem("Entrada" if es_entrada else "Salida")
-                    tipo_item.setForeground(Qt.GlobalColor.darkGreen if es_entrada else Qt.GlobalColor.red)
-                    self.tabla.setItem(fila, 1, tipo_item)
-
-                    self.tabla.setItem(fila, 2, QTableWidgetItem(mov.descripcion_movimiento or ""))
-
-                    monto = mov.monto_movimiento or Decimal("0.00")
-                    item_monto = QTableWidgetItem(f"$ {monto:,.2f}")
-                    item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                    self.tabla.setItem(fila, 3, item_monto)
-
-                    # Determinar origen
-                    origen = "Manual"
-                    if mov.id_pago_cobro or mov.id_pago_cobro_bcv:
-                        origen = "Cobro"
-                    elif mov.id_pago_proveedor:
-                        origen = "Pago Proveedor"
-                    elif mov.id_pago_comision:
-                        origen = "Pago Comisión"
-                    self.tabla.setItem(fila, 4, QTableWidgetItem(origen))
-
-                    # Ajustar altura de la fila para mostrar toda la descripción
-                    self.tabla.resizeRowToContents(fila)
-
-                    if es_entrada:
-                        total_entradas += monto
-                    else:
-                        total_salidas += monto
-
-                self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
-                self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
-                saldo_neto = total_entradas - total_salidas
-                self.lbl_saldo.setText(f"Saldo Neto: ${saldo_neto:,.2f}")
-
-            finally:
-                session.close()
-
-        except Exception as e:
-            logger.exception("Fallo al cargar historial de movimientos")
-            MessageBox.critical(self, "Error", f"No se pudo cargar el historial: {str(e)}")
+        total_entradas = resultado["total_entradas"]
+        total_salidas = resultado["total_salidas"]
+        self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
+        self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
+        self.lbl_saldo.setText(f"Saldo Neto: ${total_entradas - total_salidas:,.2f}")
 
 
-class CajasPanel(MixinPermisos, QWidget):
+def _tarea_estado_cajas(session, id_usuario: int):
+    """Corre en un hilo aparte (ver carga_asincrona.py): el estado de cada caja, ya como diccionarios simples."""
+    return CajaService.obtener_estado_cajas(session, id_usuario=id_usuario)
+
+
+class CajasPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
     recurso_permisos = "cajas"
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
@@ -470,7 +504,7 @@ class CajasPanel(MixinPermisos, QWidget):
         btn_refrescar = QPushButton("Actualizar")
         btn_refrescar.setIcon(qta.icon("fa5s.sync-alt", color="white"))
         btn_refrescar.setStyleSheet(BUTTON_PRIMARY_QSS)
-        btn_refrescar.clicked.connect(self.cargar_cajas)
+        btn_refrescar.clicked.connect(lambda: self.cargar_cajas())
         h.addWidget(btn_refrescar)
         return w
 
@@ -565,18 +599,17 @@ class CajasPanel(MixinPermisos, QWidget):
         finally:
             session.close()
 
-    def cargar_cajas(self) -> None:
-        session = self.session_factory()
-        try:
-            estados = CajaService.obtener_estado_cajas(session, id_usuario=self.usuario.id_usuario)
-            self._poblar_tabla(estados)
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar cajas.")
-        except Exception:
-            logger.exception("Fallo al cargar el estado de las cajas")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el estado de las cajas.")
-        finally:
-            session.close()
+    def cargar_cajas(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        self.cargar_async(
+            "cajas",
+            _tarea_estado_cajas,
+            self._poblar_tabla,
+            texto_error="No se pudo cargar el estado de las cajas.",
+            texto_sin_permiso="No tienes permiso para consultar cajas.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            id_usuario=self.usuario.id_usuario,
+        )
 
     def _poblar_tabla(self, estados: list[dict]) -> None:
         self.tabla.setRowCount(len(estados))

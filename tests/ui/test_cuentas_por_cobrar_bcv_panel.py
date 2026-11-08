@@ -18,7 +18,6 @@ def panel(qtbot, monkeypatch):
     # Session mockeada en medio de otro test y pytest-qt lo reportaria como falla de ese test.
     monkeypatch.setattr(bcv.QTimer, "singleShot", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(bcv.CuentasPorCobrarBCVPanel, "cargar_cuentas", lambda self: None)
-    monkeypatch.setattr(bcv.CuentasPorCobrarBCVPanel, "_cargar_tasa_bcv", lambda self: None)
     panel = bcv.CuentasPorCobrarBCVPanel(MagicMock(), SimpleNamespace(id_usuario=1))
     qtbot.addWidget(panel)
     return panel

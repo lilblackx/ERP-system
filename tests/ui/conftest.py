@@ -2,8 +2,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QSettings, QTimer
 from PySide6.QtWidgets import QWidget
 
-from app.ui import animaciones, notificaciones_leidas, permisos_ui
-from app.utils import impresora_local, novedades_local
+from app.ui import animaciones, carga_asincrona, notificaciones_leidas, permisos_ui
+from app.utils import caja_local, impresora_local, novedades_local
 
 _single_shot_original = QTimer.singleShot
 
@@ -36,10 +36,71 @@ def _impresora_local_aislada(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _caja_local_aislada(tmp_path, monkeypatch):
+    """La caja de la estacion tambien vive en QSettings: va a un .ini temporal."""
+    ruta = str(tmp_path / "caja_estacion.ini")
+    monkeypatch.setattr(caja_local, "_settings", lambda: QSettings(ruta, QSettings.Format.IniFormat))
+
+
+@pytest.fixture(autouse=True)
 def _novedades_local_aislada(tmp_path, monkeypatch):
     """Lo "ya visto" de las novedades tambien va a un .ini temporal, para no leer ni pisar el registro de la PC real."""
     ruta = str(tmp_path / "novedades.ini")
     monkeypatch.setattr(novedades_local, "_settings", lambda: QSettings(ruta, QSettings.Format.IniFormat))
+
+
+class _SenalInmediata:
+    def __init__(self):
+        self._slots = []
+
+    def connect(self, slot):
+        self._slots.append(slot)
+
+    def emit(self, *args):
+        for slot in list(self._slots):
+            slot(*args)
+
+
+class WorkerInmediato:
+    """Reemplaza a QueryWorker en carga_asincrona: corre la tarea en el acto y entrega el resultado, sin hilo."""
+
+    def __init__(self, session_factory, tarea, *args, **kwargs):
+        self._session_factory, self._tarea, self._args, self._kwargs = session_factory, tarea, args, kwargs
+        self.silencioso = False
+        self.resultado, self.error, self.finished = _SenalInmediata(), _SenalInmediata(), _SenalInmediata()
+
+    def start(self):
+        session = self._session_factory()
+        try:
+            valor = self._tarea(session, *self._args, **self._kwargs)
+        finally:
+            session.close()
+        self.resultado.emit(valor)
+        self.finished.emit()
+
+    def isFinished(self):
+        return True
+
+    def wait(self, _ms):
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _cargas_asincronas_inmediatas(monkeypatch):
+    """Los paneles piden sus listados en un hilo aparte (app/ui/carga_asincrona.py). En los tests la tarea corre
+    en el acto, asi que `panel.cargar_x()` deja la tabla poblada al volver, como antes. Los tests del camino
+    asincrono en si cambian esta clase por un worker falso que no ejecuta nada."""
+    monkeypatch.setattr(carga_asincrona, "QueryWorker", WorkerInmediato)
+
+
+@pytest.fixture(autouse=True)
+def _sin_catalogos_de_reportes(monkeypatch):
+    """ReportesPanel pide los catalogos de sus combos en un hilo aparte al construirse. En los tests ese hilo
+    correria contra una Session de mentira en medio de otro test: se omite, y los tests del llenado llaman
+    a `_llenar_catalogos` con datos propios."""
+    from app.ui.reportes_panel import ReportesPanel
+
+    monkeypatch.setattr(ReportesPanel, "_cargar_catalogos", lambda self: None)
 
 
 @pytest.fixture(autouse=True)

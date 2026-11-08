@@ -37,6 +37,7 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.services.vendedores import VendedorService
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.mapa_rutas_panel import MapaRutasPanel
 from app.ui.message_box import MessageBox
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
@@ -138,7 +139,12 @@ ESTADOS_FILTRO = [
 ]
 
 
-class VendedoresPanel(MixinPermisos, MixinPaginacion, QWidget):
+def _tarea_listar_vendedores(session, **filtros):
+    """Corre en un hilo aparte (ver carga_asincrona.py): solo consulta, sin tocar widgets."""
+    return VendedorService.listar(session, **filtros)
+
+
+class VendedoresPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidget):
     """Panel principal del módulo Vendedores: listado con búsqueda, alta/edición
     y activar/desactivar -- lo minimo necesario para poder emitir facturas
     (FacturaFormDialog exige un vendedor activo)."""
@@ -353,11 +359,11 @@ class VendedoresPanel(MixinPermisos, MixinPaginacion, QWidget):
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
 
     def _busqueda_dinamica(self) -> None:
-        if not hasattr(self, "_timer_busqueda"):
-            self._timer_busqueda = QTimer()
-            self._timer_busqueda.setSingleShot(True)
-            self._timer_busqueda.timeout.connect(self._buscar_desde_inicio)
-        self._timer_busqueda.start(300)
+        self.buscar_con_pausa(self._buscar_tecleando)
+
+    def _buscar_tecleando(self) -> None:
+        self.pagina_actual = 1
+        self.cargar_vendedores(silencioso=True)  # no enciende la barra de carga
 
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
@@ -365,25 +371,21 @@ class VendedoresPanel(MixinPermisos, MixinPaginacion, QWidget):
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
-    def cargar_vendedores(self) -> None:
-        session = self.session_factory()
-        try:
-            resultado = VendedorService.listar(
-                session,
-                self.buscar_input.text().strip() or None,
-                id_usuario=self.usuario.id_usuario,
-                estado_vendedor=self.estado_combo.currentData(),
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
-            )
-            self._poblar_tabla(resultado)
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar vendedores.")
-        except Exception:
-            logger.exception("Fallo al cargar la lista de vendedores")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de vendedores.")
-        finally:
-            session.close()
+    def cargar_vendedores(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        self.cargar_async(
+            "vendedores",
+            _tarea_listar_vendedores,
+            self._poblar_tabla,
+            texto_error="No se pudo cargar la lista de vendedores.",
+            texto_sin_permiso="No tienes permiso para consultar vendedores.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            texto_busqueda=self.buscar_input.text().strip() or None,
+            id_usuario=self.usuario.id_usuario,
+            estado_vendedor=self.estado_combo.currentData(),
+            pagina=self.pagina_actual,
+            por_pagina=POR_PAGINA,
+        )
 
     def _poblar_tabla(self, resultado: dict) -> None:
         vendedores: list[Vendedor] = resultado["items"]

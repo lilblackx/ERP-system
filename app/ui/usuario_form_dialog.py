@@ -149,11 +149,15 @@ class UsuarioFormDialog(QDialog):
         id_usuario_actor: int | None,
         usuario: Usuario | None = None,
         parent=None,
+        precargado: dict | None = None,
     ):
         super().__init__(parent)
         self.session = session
         self.id_usuario_actor = id_usuario_actor
         self.usuario = usuario
+        # Roles y vendedores ya cargados por el panel en un hilo aparte ({"roles": [...], "vendedores": [...]}); sin
+        # ellos el dialogo los consulta el mismo.
+        self._precargado = precargado
         self.setWindowTitle("Editar Usuario" if usuario else "Nuevo Usuario")
         self.setStyleSheet(DIALOG_STYLE)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
@@ -361,25 +365,31 @@ class UsuarioFormDialog(QDialog):
         root.addLayout(footer_layout)
 
     def _cargar_combos(self) -> None:
-        try:
-            self._roles = RolService.listar_roles(self.session, id_usuario=self.id_usuario_actor)
-        except PermisoDenegadoError:
-            self._roles = []
+        if self._precargado is not None:
+            self._roles = list(self._precargado["roles"])
+        else:
+            try:
+                self._roles = RolService.listar_roles(self.session, id_usuario=self.id_usuario_actor)
+            except PermisoDenegadoError:
+                self._roles = []
         for rol in self._roles:
             self.rol_combo.addItem(rol.nombre, rol.id_rol)
 
-        try:
-            # por_pagina alto: este combo necesita TODOS los vendedores activos, no un
-            # recorte de pagina (VendedorService.listar() pagina desde 2026-08-27, ver
-            # auditoria Vendedores/Clientes).
-            self._vendedores = VendedorService.listar(
-                self.session,
-                id_usuario=self.id_usuario_actor,
-                estado_vendedor="ACTIVO",
-                por_pagina=1000,
-            )["items"]
-        except PermisoDenegadoError:
-            self._vendedores = []
+        if self._precargado is not None:
+            self._vendedores = list(self._precargado["vendedores"])
+        else:
+            try:
+                # por_pagina alto: este combo necesita TODOS los vendedores activos, no un
+                # recorte de pagina (VendedorService.listar() pagina desde 2026-08-27, ver
+                # auditoria Vendedores/Clientes).
+                self._vendedores = VendedorService.listar(
+                    self.session,
+                    id_usuario=self.id_usuario_actor,
+                    estado_vendedor="ACTIVO",
+                    por_pagina=1000,
+                )["items"]
+            except PermisoDenegadoError:
+                self._vendedores = []
         self.vendedor_combo.addItem("Sin vincular")
         for vendedor in self._vendedores:
             self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)

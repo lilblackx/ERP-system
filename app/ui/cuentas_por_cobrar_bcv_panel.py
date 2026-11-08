@@ -25,16 +25,25 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
-from app.db.models import CuentaPorCobrarBCV, Usuario
+from app.db.models import Cliente, CuentaPorCobrarBCV, FacturaVenta, Usuario
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.moneda_cuentas import (
+    filtrar_cuentas_por_metodo,
+    moneda_pago_por_tasa,
+    moneda_para_metodo,
+    nombre_moneda,
+)
 from app.services.pagos_bcv import PagoBCVService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
+from app.ui.conversion_bolivares import ConversionBolivaresMixin
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
@@ -165,7 +174,7 @@ QPushButton#BtnSecondary:hover {{
 """
 
 
-class PagoCobroBCVDialog(QDialog):
+class PagoCobroBCVDialog(ConversionBolivaresMixin, QDialog):
     """Un unico pago en USD contra el saldo_pendiente de una CuentaPorCobrarBCV."""
 
     def __init__(
@@ -263,21 +272,21 @@ class PagoCobroBCVDialog(QDialog):
         fila_bolivares.setSpacing(8)
 
         col_bolivares = QVBoxLayout()
-        lbl_bolivares = QLabel("Monto (Bs)")
-        lbl_bolivares.setProperty("class", "FormLabel")
+        self.lbl_bolivares = QLabel("Monto (Bs)")
+        self.lbl_bolivares.setProperty("class", "FormLabel")
         self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
-        col_bolivares.addWidget(lbl_bolivares)
+        col_bolivares.addWidget(self.lbl_bolivares)
         col_bolivares.addWidget(self.bolivares_input)
 
         col_tasa = QVBoxLayout()
-        lbl_tasa = QLabel("Tasa del día (Bs/USD)")
-        lbl_tasa.setProperty("class", "FormLabel")
+        self.lbl_tasa_campo = QLabel("Tasa del día (Bs/USD)")
+        self.lbl_tasa_campo.setProperty("class", "FormLabel")
         self.tasa_input = NumericLineEdit(NumericFieldType.RATE)
         self.tasa_input.setFixedHeight(32)
         self.tasa_input.valueChanged.connect(self._calcular_monto_usd)
-        col_tasa.addWidget(lbl_tasa)
+        col_tasa.addWidget(self.lbl_tasa_campo)
         col_tasa.addWidget(self.tasa_input)
 
         fila_bolivares.addLayout(col_bolivares, stretch=1)
@@ -424,12 +433,16 @@ class PagoCobroBCVDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas")
+            moneda_requerida = moneda_para_metodo(metodo, moneda_pago_por_tasa(self.tasa_combo.currentText()))
+            cuentas = filtrar_cuentas_por_metodo(
+                self._cuentas_activas, metodo, moneda_pago_por_tasa(self.tasa_combo.currentText())
+            )
+            if not cuentas:
+                self.origen_combo.addItem(f"Sin cuentas bancarias en {nombre_moneda(moneda_requerida)}")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas:
+                for cuenta in cuentas:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
@@ -452,17 +465,9 @@ class PagoCobroBCVDialog(QDialog):
         mostrar_bolivares = es_banco and not es_efectivo
         self.campos_bolivares_widget.setVisible(bool(mostrar_bolivares))
 
-        if mostrar_bolivares:
-            # Habilitar cálculo automático
-            self.monto_input.setReadOnly(True)
-            self.monto_input.setStyleSheet("background-color: #F1F5F9;")
-            # Si no hay tasa seleccionada, seleccionar automáticamente la primera disponible (BCV)
-            if self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
-                self.tasa_combo.setCurrentIndex(1)  # El índice 0 es "-- Seleccionar --"
-        else:
-            # Restaurar campo de monto manual
-            self.monto_input.setReadOnly(False)
-            self.monto_input.setStyleSheet("")
+        self._aplicar_modo_conversion(mostrar_bolivares)
+        if mostrar_bolivares and self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
+            self.tasa_combo.setCurrentIndex(1)  # el indice 0 es "-- Seleccionar --"; dispara _on_tasa_seleccionada
 
     def _on_tasa_seleccionada(self) -> None:
         """Carga la tasa seleccionada del combo al campo de tasa y calcula bolivares."""
@@ -470,6 +475,8 @@ class PagoCobroBCVDialog(QDialog):
         if tasa_data is not None:
             id_tasa, valor_tasa = tasa_data
             self._id_tasa_seleccionada = id_tasa
+            if self._cambio_la_moneda_de_la_tasa():
+                self._toggle_origen()
             self.tasa_input.set_value(valor_tasa)
             # Calcular automáticamente el monto en bolivares
             monto_usd = self.monto_input.get_value() or Decimal("0")
@@ -477,41 +484,6 @@ class PagoCobroBCVDialog(QDialog):
                 bolivares = monto_usd * Decimal(str(valor_tasa))
                 self.bolivares_input.set_value(bolivares)
             self._calcular_monto_usd()
-
-    def _calcular_monto_usd(self) -> None:
-        """Calcula el monto USD automáticamente: bolivares / tasa."""
-        metodo = self.metodo_combo.currentData()
-        origen = self.origen_combo.currentData()
-        # Solo calcular para métodos bancarios (no efectivo)
-        if metodo == "efectivo" or not origen or origen[0] != "banco":
-            return
-
-        bolivares = self.bolivares_input.get_value() or Decimal("0")
-        tasa = self.tasa_input.get_value() or Decimal("0")
-
-        if tasa > 0:
-            monto_usd = bolivares / tasa
-            self.monto_input.set_value(monto_usd)
-            # set_value() reformatea con el estilo base del widget -- reaplicar el
-            # resaltado de solo-lectura para que no desaparezca en cada recalculo
-            # mientras el metodo de pago siga siendo bancario.
-            if self.monto_input.isReadOnly():
-                self.monto_input.setStyleSheet("background-color: #F1F5F9;")
-
-    def _calcular_bolivares_desde_usd(self) -> None:
-        """Calcula el monto en bolivares automáticamente: USD * tasa."""
-        metodo = self.metodo_combo.currentData()
-        origen = self.origen_combo.currentData()
-        # Solo calcular para métodos bancarios (no efectivo)
-        if metodo == "efectivo" or not origen or origen[0] != "banco":
-            return
-
-        monto_usd = self.monto_input.get_value() or Decimal("0")
-        tasa = self.tasa_input.get_value() or Decimal("0")
-
-        if tasa > 0 and monto_usd > 0:
-            bolivares = monto_usd * tasa
-            self.bolivares_input.set_value(bolivares)
 
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
@@ -574,7 +546,9 @@ class PagoCobroBCVDialog(QDialog):
                         id_cuenta_por_cobrar=self.cuenta.id_cuenta_por_cobrar,
                         monto=monto,
                         metodo_pago=metodo_pago,
-                        moneda="VES" if monto_moneda_origen is not None else "USD",
+                        moneda=(moneda_pago_por_tasa(self.tasa_combo.currentText()) or "VES")
+                        if monto_moneda_origen is not None
+                        else "USD",
                         monto_moneda_origen=monto_moneda_origen,
                         monto_bolivares=monto_bolivares,
                         tasa_cambio=tasa_cambio,
@@ -710,7 +684,7 @@ class SeleccionarCuentaBCVDialog(QDialog):
         self.accept()
 
 
-class AbonoGeneralBCVDialog(QDialog):
+class AbonoGeneralBCVDialog(ConversionBolivaresMixin, QDialog):
     """Diálogo para aplicar un abono general a un cliente usando el método FIFO para cuentas BCV."""
 
     def __init__(
@@ -849,21 +823,21 @@ class AbonoGeneralBCVDialog(QDialog):
         fila_bolivares.setSpacing(8)
 
         col_bolivares = QVBoxLayout()
-        lbl_bolivares = QLabel("Monto (Bs)")
-        lbl_bolivares.setProperty("class", "FormLabel")
+        self.lbl_bolivares = QLabel("Monto (Bs)")
+        self.lbl_bolivares.setProperty("class", "FormLabel")
         self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
-        col_bolivares.addWidget(lbl_bolivares)
+        col_bolivares.addWidget(self.lbl_bolivares)
         col_bolivares.addWidget(self.bolivares_input)
 
         col_tasa = QVBoxLayout()
-        lbl_tasa = QLabel("Tasa del día (Bs/USD)")
-        lbl_tasa.setProperty("class", "FormLabel")
+        self.lbl_tasa_campo = QLabel("Tasa del día (Bs/USD)")
+        self.lbl_tasa_campo.setProperty("class", "FormLabel")
         self.tasa_input = NumericLineEdit(NumericFieldType.RATE)
         self.tasa_input.setFixedHeight(32)
         self.tasa_input.valueChanged.connect(self._calcular_monto_usd)
-        col_tasa.addWidget(lbl_tasa)
+        col_tasa.addWidget(self.lbl_tasa_campo)
         col_tasa.addWidget(self.tasa_input)
 
         fila_bolivares.addLayout(col_bolivares, stretch=1)
@@ -1005,12 +979,16 @@ class AbonoGeneralBCVDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas")
+            moneda_requerida = moneda_para_metodo(metodo, moneda_pago_por_tasa(self.tasa_combo.currentText()))
+            cuentas = filtrar_cuentas_por_metodo(
+                self._cuentas_activas, metodo, moneda_pago_por_tasa(self.tasa_combo.currentText())
+            )
+            if not cuentas:
+                self.origen_combo.addItem(f"Sin cuentas bancarias en {nombre_moneda(moneda_requerida)}")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas:
+                for cuenta in cuentas:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
@@ -1030,19 +1008,20 @@ class AbonoGeneralBCVDialog(QDialog):
         mostrar_bolivares = es_banco and not es_efectivo
         self.campos_bolivares_widget.setVisible(bool(mostrar_bolivares))
 
-        if mostrar_bolivares:
-            self.monto_input.setReadOnly(True)
-            self.monto_input.setStyleSheet("background-color: #F1F5F9;")
-            if self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
-                self.tasa_combo.setCurrentIndex(1)
-        else:
-            self.monto_input.setReadOnly(False)
-            self.monto_input.setStyleSheet("")
-
-        # Para efectivo, ocultar completamente el campo de tasa ya que no se usa
+        # Efectivo no usa tasa; cualquier otro metodo la vuelve a habilitar (antes quedaba bloqueada para
+        # siempre porque el dialogo abre en "Efectivo" y nada la re-habilitaba al cambiar de metodo).
+        self.tasa_input.setEnabled(not es_efectivo)
         if es_efectivo:
-            self.tasa_input.set_value(Decimal("0.00"))
-            self.tasa_input.setEnabled(False)
+            self.tasa_input.set_value(None)
+            # Sin tasa elegida: al volver a un metodo bancario se vuelve a cargar la del combo.
+            self.tasa_combo.blockSignals(True)
+            self.tasa_combo.setCurrentIndex(0)
+            self.tasa_combo.blockSignals(False)
+            self._id_tasa_seleccionada = None
+
+        self._aplicar_modo_conversion(mostrar_bolivares)
+        if mostrar_bolivares and self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
+            self.tasa_combo.setCurrentIndex(1)  # el indice 0 es "-- Seleccionar --"; dispara _on_tasa_seleccionada
 
     def _on_tasa_seleccionada(self) -> None:
         """Carga la tasa seleccionada del combo al campo de tasa y calcula bolivares."""
@@ -1050,42 +1029,14 @@ class AbonoGeneralBCVDialog(QDialog):
         if tasa_data is not None:
             id_tasa, valor_tasa = tasa_data
             self._id_tasa_seleccionada = id_tasa
+            if self._cambio_la_moneda_de_la_tasa():
+                self._toggle_origen()
             self.tasa_input.set_value(valor_tasa)
             monto_usd = self.monto_input.get_value() or Decimal("0")
             if valor_tasa > 0 and monto_usd > 0:
                 bolivares = monto_usd * Decimal(str(valor_tasa))
                 self.bolivares_input.set_value(bolivares)
             self._calcular_monto_usd()
-
-    def _calcular_monto_usd(self) -> None:
-        """Calcula el monto USD automáticamente: bolivares / tasa."""
-        metodo = self.metodo_combo.currentData()
-        origen = self.origen_combo.currentData()
-        if metodo == "efectivo" or not origen or origen[0] != "banco":
-            return
-
-        bolivares = self.bolivares_input.get_value() or Decimal("0")
-        tasa = self.tasa_input.get_value() or Decimal("0")
-
-        if tasa > 0:
-            monto_usd = bolivares / tasa
-            self.monto_input.set_value(monto_usd)
-            if self.monto_input.isReadOnly():
-                self.monto_input.setStyleSheet("background-color: #F1F5F9;")
-
-    def _calcular_bolivares_desde_usd(self) -> None:
-        """Calcula el monto en bolivares automáticamente: USD * tasa."""
-        metodo = self.metodo_combo.currentData()
-        origen = self.origen_combo.currentData()
-        if metodo == "efectivo" or not origen or origen[0] != "banco":
-            return
-
-        monto_usd = self.monto_input.get_value() or Decimal("0")
-        tasa = self.tasa_input.get_value() or Decimal("0")
-
-        if tasa > 0 and monto_usd > 0:
-            bolivares = monto_usd * tasa
-            self.bolivares_input.set_value(bolivares)
 
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
@@ -1152,6 +1103,9 @@ class AbonoGeneralBCVDialog(QDialog):
                         id_cuenta_bancaria=(id_origen if tipo_origen == "banco" else None),
                         id_caja=id_origen if tipo_origen == "caja" else None,
                         id_tasa=id_tasa,
+                        moneda_pago=moneda_pago_por_tasa(self.tasa_combo.currentText())
+                        if tipo_origen == "banco"
+                        else None,
                         referencia=self.referencia_input.text().strip() or None,
                         id_usuario=self.id_usuario,
                     )
@@ -1466,7 +1420,72 @@ class DetalleCuentasBCVDialog(MixinPermisos, QDialog):
             MessageBox.critical(self, "Error", "No se pudo aplicar el abono general BCV.")
 
 
-class CuentasPorCobrarBCVPanel(MixinPaginacion, QWidget):
+def _tarea_cargar_cuentas_bcv(session, id_usuario: int, **filtros) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): la pagina de clientes y el resumen general (total
+    pendiente, saldo a favor y clientes con saldo), en una sola consulta."""
+    resultado = reintentar_en_deadlock(
+        lambda: PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+            session=session, id_usuario=id_usuario, **filtros
+        )
+    )
+    subquery = (
+        session.query(
+            func.sum(CuentaPorCobrarBCV.saldo_pendiente).label("saldo_cliente"),
+            func.sum(CuentaPorCobrarBCV.saldo_favor).label("saldo_favor_cliente"),
+        )
+        .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+        .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
+        .filter(CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")))
+        .group_by(Cliente.id_cliente)
+        .having(func.sum(CuentaPorCobrarBCV.saldo_pendiente) > 0)
+        .subquery()
+    )
+    total_pendiente, total_favor, total_clientes = (
+        session.query(
+            func.coalesce(func.sum(subquery.c.saldo_cliente), 0),
+            func.coalesce(func.sum(subquery.c.saldo_favor_cliente), 0),
+            func.count(),
+        )
+        .select_from(subquery)
+        .one()
+    )
+    try:
+        tasa = TasaService.obtener_tasa_actual(session, id_usuario=id_usuario)
+    except Exception:  # informativa: sin permiso o sin tasa, el panel sigue sin el equivalente en Bs
+        tasa = None
+    return {
+        "resultado": resultado,
+        "tasa": tasa,
+        "total_pendiente": Decimal(str(total_pendiente or 0)),
+        "total_favor": Decimal(str(total_favor or 0)),
+        "total_clientes": int(total_clientes or 0),
+    }
+
+
+def _tarea_cuentas_cliente_bcv(session, session_factory, id_cliente: int) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): las cuentas BCV pendientes del cliente y el cliente.
+    Devuelve la sesion usada, que el dialogo de detalle cierra al salir."""
+    sesion = sesion_para_dialogo(session_factory)
+    try:
+        cuentas = (
+            sesion.query(CuentaPorCobrarBCV)
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .filter(
+                FacturaVenta.id_cliente_factura == id_cliente,
+                CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")),
+                CuentaPorCobrarBCV.saldo_pendiente > 0,
+            )
+            .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
+            .order_by(CuentaPorCobrarBCV.fecha_vencimiento.desc())
+            .all()
+        )
+        return {"session": sesion, "cuentas": cuentas, "cliente": sesion.get(Cliente, id_cliente)}
+    except BaseException:
+        sesion.close()
+        raise
+
+
+class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
     """Panel principal del modulo Cuentas por Cobrar BCV."""
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
@@ -1483,7 +1502,6 @@ class CuentasPorCobrarBCVPanel(MixinPaginacion, QWidget):
         self._total_registros = 0
         self.setObjectName("ContentArea")
         self._setup_ui()
-        self._cargar_tasa_bcv()
         QTimer.singleShot(100, self.cargar_cuentas)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -1657,106 +1675,39 @@ class CuentasPorCobrarBCVPanel(MixinPaginacion, QWidget):
 
         return w
 
-    def _cargar_tasa_bcv(self) -> None:
-        try:
-            session = self.session_factory()
-            try:
-                tasa = TasaService.obtener_tasa_actual(session, id_usuario=self.id_usuario)
-                if tasa:
-                    self._tasa_bcv = float(tasa.get("tasa_bcv")) if tasa.get("tasa_bcv") else None
-                    self.lbl_tasa.setText(f"Tasa BCV: {float(self._tasa_bcv):,.2f} Bs/USD")
-                    self.lbl_tasa.setVisible(True)
-            finally:
-                session.close()
-        except (PermisoDenegadoError, Exception):
+    def _mostrar_tasa(self, tasa: dict | None) -> None:
+        if tasa and tasa.get("tasa_bcv"):
+            self._tasa_bcv = float(tasa["tasa_bcv"])
+            self.lbl_tasa.setText(f"Tasa BCV: {self._tasa_bcv:,.2f} Bs/USD")
+            self.lbl_tasa.setVisible(True)
+        else:
             self._tasa_bcv = None
             self.lbl_tasa.setVisible(False)
 
-    def _cargar_resumen(self) -> None:
-        """Carga el resumen de cuentas por cobrar BCV (total pendiente, saldo a favor y cantidad de clientes)."""
-        try:
-            session = self.session_factory()
-            try:
-                from sqlalchemy import func
+    def cargar_cuentas(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        self.cargar_async(
+            "cuentas",
+            _tarea_cargar_cuentas_bcv,
+            self._mostrar_cuentas,
+            texto_error="No se pudieron cargar las cuentas por cobrar BCV.",
+            texto_sin_permiso="No tienes permiso para ver cuentas por cobrar BCV.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            id_usuario=self.id_usuario,
+            estado=self._estado_filtro,
+            pagina=self.pagina_actual,
+            por_pagina=POR_PAGINA,
+            busqueda=self.texto_busqueda or None,
+        )
 
-                from app.db.models import Cliente, CuentaPorCobrarBCV, FacturaVenta
-
-                # Calcular total pendiente y saldo a favor agrupado por cliente
-                subquery = (
-                    session.query(
-                        Cliente.id_cliente,
-                        func.sum(CuentaPorCobrarBCV.saldo_pendiente).label("saldo_cliente"),
-                        func.sum(CuentaPorCobrarBCV.saldo_favor).label("saldo_favor_cliente"),
-                    )
-                    .join(
-                        FacturaVenta,
-                        FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura,
-                    )
-                    .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
-                    .filter(CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")))
-                    .group_by(Cliente.id_cliente)
-                    .having(func.sum(CuentaPorCobrarBCV.saldo_pendiente) > 0)
-                    .subquery()
-                )
-
-                total_pendiente = session.query(func.coalesce(func.sum(subquery.c.saldo_cliente), 0)).scalar()
-
-                total_favor = session.query(func.coalesce(func.sum(subquery.c.saldo_favor_cliente), 0)).scalar()
-
-                total_clientes = session.query(func.count(subquery.c.id_cliente)).scalar()
-
-                self._total_pendiente = Decimal(str(total_pendiente)) if total_pendiente else Decimal("0.00")
-                self._total_favor = Decimal(str(total_favor)) if total_favor else Decimal("0.00")
-                self._total_registros = total_clientes if total_clientes else 0
-
-                # Actualizar UI
-                self.lbl_total.setText(f"{self._total_registros} clientes con saldo pendiente")
-                self.lbl_saldo_total.setText(f"${float(self._total_pendiente):,.2f}")
-
-                logger.info(
-                    f"BCV - Resumen cargado: Total pendiente={self._total_pendiente}, "
-                    f"Total favor={self._total_favor}, Clientes={self._total_registros}"
-                )
-            finally:
-                session.close()
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para ver el resumen de cuentas BCV.",
-            )
-        except Exception:
-            logger.exception("Error al cargar resumen de cuentas BCV")
-            self.lbl_total.setText("0 clientes con saldo pendiente")
-            self.lbl_saldo_total.setText("$0.00")
-
-    def cargar_cuentas(self) -> None:
-        try:
-            session = self.session_factory()
-            try:
-                resultado = reintentar_en_deadlock(
-                    lambda: PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
-                        session=session,
-                        estado=self._estado_filtro,
-                        pagina=self.pagina_actual,
-                        por_pagina=POR_PAGINA,
-                        id_usuario=self.id_usuario,
-                        busqueda=self.texto_busqueda if self.texto_busqueda else None,
-                    )
-                )
-                self._mostrar_datos(resultado)
-                self._cargar_resumen()
-            finally:
-                session.close()
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para ver cuentas por cobrar BCV.",
-            )
-        except Exception as e:
-            logger.exception("Error al cargar cuentas por cobrar BCV")
-            MessageBox.critical(self, "Error", f"No se pudieron cargar las cuentas: {str(e)}")
+    def _mostrar_cuentas(self, datos: dict) -> None:
+        self._mostrar_tasa(datos["tasa"])
+        self._mostrar_datos(datos["resultado"])
+        self._total_pendiente = datos["total_pendiente"]
+        self._total_favor = datos["total_favor"]
+        self._total_registros = datos["total_clientes"]
+        self.lbl_total.setText(f"{self._total_registros} clientes con saldo pendiente")
+        self.lbl_saldo_total.setText(f"${float(self._total_pendiente):,.2f}")
 
     def _mostrar_datos(self, resultado: dict) -> None:
         self.tabla.setRowCount(0)
@@ -1825,9 +1776,12 @@ class CuentasPorCobrarBCVPanel(MixinPaginacion, QWidget):
         self.cargar_cuentas()
 
     def _busqueda_dinamica(self) -> None:
+        self.buscar_con_pausa(self._buscar_tecleando)
+
+    def _buscar_tecleando(self) -> None:
         self.texto_busqueda = self.buscar_input.text().strip()
         self.pagina_actual = 1
-        self.cargar_cuentas()
+        self.cargar_cuentas(silencioso=True)  # no enciende la barra de carga
 
     def _buscar_desde_inicio(self) -> None:
         self._on_filtro_cambiado()
@@ -1844,54 +1798,44 @@ class CuentasPorCobrarBCVPanel(MixinPaginacion, QWidget):
             self._mostrar_cuentas_cliente(item)
 
     def _mostrar_cuentas_cliente(self, item) -> None:
-        """Muestra las cuentas individuales de un cliente en un diálogo."""
+        """Pide en un hilo aparte las cuentas individuales del cliente y abre el dialogo al llegar."""
+        self._cliente_del_detalle = item
+        self.cargar_async(
+            "detalle_cliente",
+            _tarea_cuentas_cliente_bcv,
+            self._abrir_cuentas_cliente,
+            texto_error="No se pudieron cargar las cuentas.",
+            texto_sin_permiso="No tienes permiso para ver cuentas por cobrar BCV.",
+            session_factory=self.session_factory,
+            id_cliente=item.id_cliente,
+        )
+
+    def _abrir_cuentas_cliente(self, datos: dict) -> None:
+        session = datos["session"]
+        item = self._cliente_del_detalle
         try:
-            session = self.session_factory()
-            try:
-                from app.db.models import FacturaVenta
+            cuentas = datos["cuentas"]
+            if not cuentas:
+                mensaje = f"El cliente {item.nombre_cliente} no tiene cuentas pendientes."
+                MessageBox.information(self, "Sin cuentas", mensaje)
+                return
 
-                # Obtener todas las cuentas del cliente
-                cuentas = (
-                    session.query(CuentaPorCobrarBCV)
-                    .join(
-                        FacturaVenta,
-                        FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura,
-                    )
-                    .filter(
-                        FacturaVenta.id_cliente_factura == item.id_cliente,
-                        CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")),
-                        CuentaPorCobrarBCV.saldo_pendiente > 0,
-                    )
-                    .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
-                    .order_by(CuentaPorCobrarBCV.fecha_vencimiento.desc())
-                    .all()
-                )
-
-                if not cuentas:
-                    mensaje = f"El cliente {item.nombre_cliente} no tiene cuentas pendientes."
-                    MessageBox.information(self, "Sin cuentas", mensaje)
-                    return
-
-                # Crear diálogo de detalle con abono general
-                from app.db.models import Cliente
-
-                cliente = session.get(Cliente, item.id_cliente)
-                tasa_bcv_float = float(self._tasa_bcv) if self._tasa_bcv else None
-                dialog = DetalleCuentasBCVDialog(
-                    self.session_factory,
-                    cliente,
-                    cuentas,
-                    tasa_bcv_float,
-                    self.id_usuario,
-                    self,
-                )
-                if dialog.exec() == QDialog.DialogCode.Accepted and dialog.se_realizo_cobro:
-                    self.cargar_cuentas()
-            finally:
-                session.close()
+            tasa_bcv_float = float(self._tasa_bcv) if self._tasa_bcv else None
+            dialog = DetalleCuentasBCVDialog(
+                self.session_factory,
+                datos["cliente"],
+                cuentas,
+                tasa_bcv_float,
+                self.id_usuario,
+                self,
+            )
+            if dialog.exec() == QDialog.DialogCode.Accepted and dialog.se_realizo_cobro:
+                self.cargar_cuentas()
         except Exception as e:
             logger.exception("Error al mostrar cuentas del cliente")
             MessageBox.critical(self, "Error", f"No se pudieron cargar las cuentas: {str(e)}")
+        finally:
+            session.close()
 
     def _cobrar(self, cuenta: CuentaPorCobrarBCV) -> None:
         tasa_bcv_float = float(self._tasa_bcv) if self._tasa_bcv else None

@@ -40,11 +40,11 @@ from app.services.historial_cliente import (
 )
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
-from app.services.ventas import VentaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.aplicar_nota_credito_dialog import AplicarNotaCreditoDialog
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
-from app.ui.factura_detalle_dialog import FacturaDetalleDialog
+from app.ui.factura_detalle_dialog import FacturaDetalleDialog, tarea_cargar_factura
 from app.ui.message_box import MessageBox
 from app.ui.pantalla import ajustar_tamano
 from app.ui.permisos_ui import MixinPermisos
@@ -218,7 +218,20 @@ def _tarea_exportar_historial_pdf(session, ruta: str, id_cliente: int, vista: st
     return ruta
 
 
-class HistorialClienteWindow(MixinPermisos, QDialog):
+def _tarea_historial_cliente(session, id_cliente: int, id_usuario: int | None) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): historial, saldos y notas de credito del cliente en una sola
+    pasada. Sin 'notas_credito'/'ver' simplemente no hay notas (no es un error)."""
+    historial = obtener_historial_cliente(session, id_cliente)
+    saldo_total = obtener_saldo_total_pendiente(session, id_cliente)
+    saldo_positivo = obtener_saldo_total_positivo(session, id_cliente)
+    try:
+        notas = NotaCreditoService.listar_notas_credito_cliente(session, id_cliente, id_usuario=id_usuario)
+    except PermisoDenegadoError:
+        notas = []
+    return {"historial": historial, "saldo_total": saldo_total, "saldo_positivo": saldo_positivo, "notas": notas}
+
+
+class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
     """Ventana que muestra el historial de facturas y pagos de un cliente."""
 
     recurso_permisos = "notas_credito"
@@ -484,43 +497,43 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         h.addWidget(btn_cerrar)
         return h
 
-    def cargar_historial(self) -> None:
-        session = self.session_factory()
-        try:
-            # Cargar historial
-            historial = obtener_historial_cliente(session, self.id_cliente)
-            self._historial = historial
-            self._aplicar_vista()
+    def cargar_historial(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        # Un fallo ya no deja la tabla vacia y "Cargando saldo..." congelado en silencio: carga_asincrona avisa
+        # con "Error de conexion" (un error de conexion no debe verse igual que "sin facturas").
+        self.cargar_async(
+            "historial",
+            _tarea_historial_cliente,
+            self._mostrar_historial,
+            texto_error="No se pudo cargar el historial del cliente.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            id_cliente=self.id_cliente,
+            id_usuario=self.id_usuario,
+        )
 
-            # Cargar saldo total pendiente
-            saldo_total = obtener_saldo_total_pendiente(session, self.id_cliente)
-            self.lbl_saldo_pendiente.setText(f"SALDO PENDIENTE : $ {float(saldo_total):,.2f}")
+    def _mostrar_historial(self, datos: dict) -> None:
+        historial = datos["historial"]
+        self._historial = historial
+        self._aplicar_vista()
 
-            # Color del saldo según si está vencido o no
-            if saldo_total > 0:
-                self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 16px; font-weight: bold;")
-            else:
-                self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 16px; font-weight: bold;")
+        saldo_total = datos["saldo_total"]
+        self.lbl_saldo_pendiente.setText(f"SALDO PENDIENTE : $ {float(saldo_total):,.2f}")
 
-            # Cargar saldo total positivo (notas de crédito disponibles)
-            saldo_positivo = obtener_saldo_total_positivo(session, self.id_cliente)
-            if saldo_positivo > 0:
-                self.lbl_saldo_positivo.setText(f"SALDO A FAVOR : $ {float(saldo_positivo):,.2f}")
-                self.lbl_saldo_positivo.show()
-            else:
-                self.lbl_saldo_positivo.hide()
+        # Color del saldo según si está vencido o no
+        if saldo_total > 0:
+            self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_DANGER}; font-size: 16px; font-weight: bold;")
+        else:
+            self.lbl_saldo_pendiente.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 16px; font-weight: bold;")
 
-            self._actualizar_notas_credito(session, historial)
+        # Saldo total positivo (notas de crédito disponibles)
+        saldo_positivo = datos["saldo_positivo"]
+        if saldo_positivo > 0:
+            self.lbl_saldo_positivo.setText(f"SALDO A FAVOR : $ {float(saldo_positivo):,.2f}")
+            self.lbl_saldo_positivo.show()
+        else:
+            self.lbl_saldo_positivo.hide()
 
-        except Exception:
-            logger.exception("Fallo al cargar el historial del cliente %s", self.id_cliente)
-            # Antes fallaba en silencio: la tabla quedaba vacia y "Cargando saldo..."
-            # congelado, indistinguible de un cliente sin historial real -- un error de
-            # conexion no debe verse igual que "sin facturas" (mismo criterio que
-            # facturacion_panel.py: QMessageBox.critical en cada carga que puede fallar).
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar el historial del cliente.")
-        finally:
-            session.close()
+        self._actualizar_notas_credito(datos["notas"], historial)
 
     def _on_vista_cambiada(self) -> None:
         self._vista = self.vista_combo.currentData() or VISTA_FACTURAS
@@ -536,19 +549,11 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         else:
             self.lbl_total_pagado.hide()
 
-    def _actualizar_notas_credito(self, session, historial: list) -> None:
+    def _actualizar_notas_credito(self, notas: list, historial: list) -> None:
         """Notas de credito disponibles del cliente + facturas del historial con saldo
         pendiente -- habilita los botones de aplicar/devolver y arma las listas que
-        consumen AplicarNotaCreditoDialog/DevolverNotaCreditoDialog. PermisoDenegadoError
-        se trata como "sin notas" (mismo criterio que PagoLineaDialog._cargar_origenes):
-        un usuario sin 'notas_credito'/'ver' simplemente no ve la funcionalidad, no un
-        error."""
-        try:
-            notas = NotaCreditoService.listar_notas_credito_cliente(
-                session, self.id_cliente, id_usuario=self.id_usuario
-            )
-        except PermisoDenegadoError:
-            notas = []
+        consumen AplicarNotaCreditoDialog/DevolverNotaCreditoDialog. `notas` ya viene vacia
+        si el usuario no tiene 'notas_credito'/'ver' (no ve la funcionalidad, no un error)."""
         self._notas_disponibles = [n for n in notas if n.estado == "disponible" and n.saldo_disponible > 0]
 
         self._facturas_pendientes = [
@@ -846,23 +851,34 @@ class HistorialClienteWindow(MixinPermisos, QDialog):
         if self._abriendo_dialogo:
             return
         self._abriendo_dialogo = True
+        # La factura se consulta en un hilo aparte (ver carga_asincrona.py); el dialogo se abre al llegar.
+        self.cargar_async(
+            "detalle_factura",
+            tarea_cargar_factura,
+            self._abrir_detalle_factura,
+            texto_error="No se pudo cargar el detalle de la factura.",
+            session_factory=self.session_factory,
+            id_factura=id_factura,
+            id_usuario=self.id_usuario,
+        )
 
-        session = self.session_factory()
+    def _abrir_detalle_factura(self, cargado: dict) -> None:
+        session = cargado.get("session")
+        error = cargado.get("error")
         try:
-            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.id_usuario)
-            dialogo = FacturaDetalleDialog(datos, session, self.id_usuario, parent=self)
-            dialogo.exec()
-        except ValueError as exc:
-            MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para ver el detalle de facturas.",
-            )
+            if isinstance(error, PermisoDenegadoError):
+                MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+            elif isinstance(error, ValueError):
+                MessageBox.warning(self, "No se pudo abrir la factura", str(error))
+            elif error is not None:
+                logger.error("Fallo al cargar el detalle de la factura", exc_info=error)
+                MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+            else:
+                FacturaDetalleDialog(cargado["datos"], session, self.id_usuario, parent=self).exec()
         except Exception:
-            logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
+            logger.exception("Fallo al abrir el detalle de la factura")
             MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
-            session.close()
+            if session is not None:
+                session.close()
             self._abriendo_dialogo = False

@@ -30,8 +30,10 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.services.bloqueo import esta_bloqueado
-from app.services.permisos import PermisoDenegadoError
+from app.services.permisos import PermisoDenegadoError, RolService
 from app.services.usuarios import UsuarioService
+from app.services.vendedores import VendedorService
+from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
 from app.ui.message_box import MessageBox
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.roles_permisos_panel import RolesPermisosPanel
@@ -61,7 +63,39 @@ COLS_VISIBLES = ["ID", "USUARIO", "NOMBRE", "ROL", "ESTADO"]
 COL_ID_INTERNO = 0  # oculto
 
 
-class UsuariosPanel(MixinPermisos, QWidget):
+def _tarea_listar_usuarios(session, **filtros):
+    """Corre en un hilo aparte (ver carga_asincrona.py): solo consulta, sin tocar widgets."""
+    return UsuarioService.listar_usuarios(session, **filtros)
+
+
+def _tarea_form_usuario(session, session_factory, id_actor: int | None, id_usuario: int | None = None) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): roles y vendedores activos (y, al editar, el usuario) para
+    el formulario. Devuelve la sesion usada, que el panel usa para guardar y cierra al terminar."""
+    sesion = sesion_para_dialogo(session_factory)
+    try:
+        try:
+            roles = RolService.listar_roles(sesion, id_usuario=id_actor)
+        except PermisoDenegadoError:
+            roles = []
+        try:
+            # por_pagina alto: el combo necesita TODOS los vendedores activos, no un recorte de pagina.
+            vendedores = VendedorService.listar(sesion, id_usuario=id_actor, estado_vendedor="ACTIVO", por_pagina=1000)[
+                "items"
+            ]
+        except PermisoDenegadoError:
+            vendedores = []
+        usuario = sesion.get(Usuario, id_usuario) if id_usuario is not None else None
+        return {
+            "session": sesion,
+            "usuario": usuario,
+            "precargado": {"roles": roles, "vendedores": vendedores},
+        }
+    except BaseException:
+        sesion.close()
+        raise
+
+
+class UsuariosPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
     """Panel principal del módulo Usuarios."""
 
     recurso_permisos = "usuarios"
@@ -238,30 +272,25 @@ class UsuariosPanel(MixinPermisos, QWidget):
     # ── Timer para búsqueda dinámica (300 ms debounce) ────────────────────
 
     def _busqueda_dinamica(self) -> None:
-        if not hasattr(self, "_timer_busqueda"):
-            self._timer_busqueda = QTimer()
-            self._timer_busqueda.setSingleShot(True)
-            self._timer_busqueda.timeout.connect(self.cargar_usuarios)
-        self._timer_busqueda.start(300)
+        self.buscar_con_pausa(self._buscar_tecleando)
+
+    def _buscar_tecleando(self) -> None:
+        self.cargar_usuarios(silencioso=True)  # no enciende la barra de carga
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
-    def cargar_usuarios(self) -> None:
-        session = self.session_factory()
-        try:
-            usuarios = UsuarioService.listar_usuarios(
-                session,
-                texto_busqueda=self.buscar_input.text().strip() or None,
-                id_usuario=self.usuario.id_usuario,
-            )
-            self._poblar_tabla(usuarios)
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar usuarios.")
-        except Exception:
-            logger.exception("Fallo al cargar la lista de usuarios")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de usuarios.")
-        finally:
-            session.close()
+    def cargar_usuarios(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        self.cargar_async(
+            "usuarios",
+            _tarea_listar_usuarios,
+            self._poblar_tabla,
+            texto_error="No se pudo cargar la lista de usuarios.",
+            texto_sin_permiso="No tienes permiso para consultar usuarios.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            texto_busqueda=self.buscar_input.text().strip() or None,
+            id_usuario=self.usuario.id_usuario,
+        )
 
     def _poblar_tabla(self, usuarios: list[dict]) -> None:
         self.tabla.setRowCount(len(usuarios))
@@ -290,9 +319,22 @@ class UsuariosPanel(MixinPermisos, QWidget):
     def nuevo_usuario(self) -> None:
         if not self._exigir_permiso("crear", "No tienes permiso para crear usuarios."):
             return
-        session = self.session_factory()
+        self.cargar_async(
+            "form_usuario",
+            _tarea_form_usuario,
+            self._abrir_nuevo_usuario,
+            texto_error="No se pudo abrir el formulario de usuario.",
+            texto_sin_permiso="No tienes permiso para crear usuarios.",
+            session_factory=self.session_factory,
+            id_actor=self.usuario.id_usuario,
+        )
+
+    def _abrir_nuevo_usuario(self, datos_previos: dict) -> None:
+        session = datos_previos["session"]
         try:
-            dialogo = UsuarioFormDialog(session, self.usuario.id_usuario, parent=self)
+            dialogo = UsuarioFormDialog(
+                session, self.usuario.id_usuario, parent=self, precargado=datos_previos["precargado"]
+            )
             if dialogo.exec():
                 datos = dialogo.get_data()
                 UsuarioService.crear_usuario(
@@ -322,13 +364,28 @@ class UsuariosPanel(MixinPermisos, QWidget):
         if id_usuario is None:
             return
 
-        session = self.session_factory()
+        self.cargar_async(
+            "form_usuario",
+            _tarea_form_usuario,
+            self._abrir_editar_usuario,
+            texto_error="No se pudo abrir el formulario de usuario.",
+            texto_sin_permiso="No tienes permiso para editar usuarios.",
+            session_factory=self.session_factory,
+            id_actor=self.usuario.id_usuario,
+            id_usuario=id_usuario,
+        )
+
+    def _abrir_editar_usuario(self, datos_previos: dict) -> None:
+        session = datos_previos["session"]
+        usuario = datos_previos["usuario"]
         try:
-            usuario = session.get(Usuario, id_usuario)
             if usuario is None:
                 MessageBox.warning(self, "No encontrado", "El usuario seleccionado ya no existe.")
                 return
-            dialogo = UsuarioFormDialog(session, self.usuario.id_usuario, usuario, parent=self)
+            id_usuario = usuario.id_usuario
+            dialogo = UsuarioFormDialog(
+                session, self.usuario.id_usuario, usuario, parent=self, precargado=datos_previos["precargado"]
+            )
             if dialogo.exec():
                 UsuarioService.editar_usuario(
                     session,

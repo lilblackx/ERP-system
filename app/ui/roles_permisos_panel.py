@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from app.db.models import Usuario
 from app.services.permisos import PermisoDenegadoError, PermisoService, RolService
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.message_box import MessageBox
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
@@ -49,7 +50,17 @@ from app.ui.styles import (
 logger = logging.getLogger(__name__)
 
 
-class RolesPermisosPanel(MixinPermisos, QWidget):
+def _tarea_listar_roles(session, id_usuario: int) -> list[tuple[int, str]]:
+    """Corre en un hilo aparte (ver carga_asincrona.py): (id, nombre) de cada rol."""
+    return [(rol.id_rol, rol.nombre) for rol in RolService.listar_roles(session, id_usuario=id_usuario)]
+
+
+def _tarea_matriz_rol(session, id_rol: int, id_usuario: int) -> list[dict]:
+    """Corre en un hilo aparte (ver carga_asincrona.py): la matriz de permisos del rol."""
+    return PermisoService.obtener_matriz_rol(session, id_rol, id_usuario=id_usuario)
+
+
+class RolesPermisosPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
     """Lista de roles a la izquierda + checkbox-grid de permisos del rol seleccionado a
     la derecha, agrupado por recurso (una fila de checkboxes por recurso, una casilla por
     acción disponible de ese recurso)."""
@@ -189,35 +200,32 @@ class RolesPermisosPanel(MixinPermisos, QWidget):
     # ── Roles ──────────────────────────────────────────────────────────────
 
     def _cargar_roles(self) -> None:
-        session = self.session_factory()
-        try:
-            roles = RolService.listar_roles(session, id_usuario=self.usuario.id_usuario)
-            id_previo = self._rol_seleccionado_id
-            self.lista_roles.blockSignals(True)
-            self.lista_roles.clear()
-            for rol in roles:
-                item = QListWidgetItem(rol.nombre)
-                item.setData(Qt.ItemDataRole.UserRole, rol.id_rol)
-                self.lista_roles.addItem(item)
-                if rol.id_rol == id_previo:
-                    self.lista_roles.setCurrentItem(item)
-            self.lista_roles.blockSignals(False)
-            if self.lista_roles.currentItem() is None and self.lista_roles.count() > 0:
-                self.lista_roles.setCurrentRow(0)
-            elif self.lista_roles.count() == 0:
-                self._rol_seleccionado_id = None
-                self._render_matriz([], None)
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para consultar roles y permisos.",
-            )
-        except Exception:
-            logger.exception("Fallo al cargar la lista de roles")
-            MessageBox.critical(self, "Error", "No se pudo cargar la lista de roles.")
-        finally:
-            session.close()
+        # La consulta corre en un hilo aparte (ver carga_asincrona.py); aqui solo se pinta el resultado.
+        self.cargar_async(
+            "roles",
+            _tarea_listar_roles,
+            self._mostrar_roles,
+            texto_error="No se pudo cargar la lista de roles.",
+            texto_sin_permiso="No tienes permiso para consultar roles y permisos.",
+            id_usuario=self.usuario.id_usuario,
+        )
+
+    def _mostrar_roles(self, roles: list[tuple[int, str]]) -> None:
+        id_previo = self._rol_seleccionado_id
+        self.lista_roles.blockSignals(True)
+        self.lista_roles.clear()
+        for id_rol, nombre in roles:
+            item = QListWidgetItem(nombre)
+            item.setData(Qt.ItemDataRole.UserRole, id_rol)
+            self.lista_roles.addItem(item)
+            if id_rol == id_previo:
+                self.lista_roles.setCurrentItem(item)
+        self.lista_roles.blockSignals(False)
+        if self.lista_roles.currentItem() is None and self.lista_roles.count() > 0:
+            self.lista_roles.setCurrentRow(0)
+        elif self.lista_roles.count() == 0:
+            self._rol_seleccionado_id = None
+            self._render_matriz([], None)
 
     def _on_rol_seleccionado(self, actual: QListWidgetItem | None, _anterior) -> None:
         if actual is None:
@@ -325,21 +333,16 @@ class RolesPermisosPanel(MixinPermisos, QWidget):
     # ── Matriz de permisos ────────────────────────────────────────────────
 
     def _cargar_matriz(self, id_rol: int, nombre_rol: str) -> None:
-        session = self.session_factory()
-        try:
-            matriz = PermisoService.obtener_matriz_rol(session, id_rol, id_usuario=self.usuario.id_usuario)
-            self._render_matriz(matriz, nombre_rol)
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para consultar la matriz de permisos.",
-            )
-        except Exception:
-            logger.exception("Fallo al cargar la matriz de permisos del rol %s", id_rol)
-            MessageBox.critical(self, "Error", "No se pudo cargar la matriz de permisos.")
-        finally:
-            session.close()
+        # En un hilo aparte; si el usuario cambia de rol antes de que llegue, la respuesta vieja se descarta.
+        self.cargar_async(
+            "matriz",
+            _tarea_matriz_rol,
+            lambda matriz: self._render_matriz(matriz, nombre_rol),
+            texto_error="No se pudo cargar la matriz de permisos.",
+            texto_sin_permiso="No tienes permiso para consultar la matriz de permisos.",
+            id_rol=id_rol,
+            id_usuario=self.usuario.id_usuario,
+        )
 
     def _limpiar_matriz(self) -> None:
         self._checkboxes.clear()

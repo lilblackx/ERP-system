@@ -40,8 +40,9 @@ from app.services.ventas import VentaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.auto_refresco import AutoRefresco
 from app.ui.caja_apertura_dialog import CajaAperturaDialog
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
-from app.ui.factura_detalle_dialog import FacturaDetalleDialog
+from app.ui.factura_detalle_dialog import FacturaDetalleDialog, tarea_cargar_factura
 from app.ui.factura_form_dialog import FacturaFormDialog
 from app.ui.factura_pdf import imprimir_factura
 from app.ui.message_box import MessageBox
@@ -67,6 +68,7 @@ from app.ui.styles import (
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
 from app.ui.workers import QueryWorker
+from app.utils.caja_local import cajas_de_esta_estacion
 from app.utils.impresora_local import obtener_impresora_local
 
 logger = logging.getLogger(__name__)
@@ -203,7 +205,16 @@ CONDICIONES_FILTRO = [
 ]
 
 
-class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
+def _tarea_cargar_facturas(session, id_carga: int, **filtros) -> dict:
+    """Corre en un hilo aparte (QueryWorker): el listado de facturas no congela la ventana mientras se escribe en
+    la busqueda. `id_carga` vuelve en el resultado para descartar lo que llega fuera de turno."""
+    try:
+        return {"id_carga": id_carga, "resultado": VentaService.listar_facturas(session, **filtros)}
+    except PermisoDenegadoError:
+        return {"id_carga": id_carga, "sin_permiso": True}
+
+
+class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidget):
     """Panel principal del módulo Facturación: listado de facturas con búsqueda por
     número, filtro por estado/condición de pago, paginación, emisión de nuevas
     facturas (carrito), ver detalle y anulación."""
@@ -218,6 +229,8 @@ class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
         # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
+        self._id_carga = 0
+        self._workers_carga: set[QueryWorker] = set()
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self.cargar_facturas)
@@ -226,7 +239,9 @@ class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
         self._auto_refresco = AutoRefresco(self, self._refresco_periodico, lambda: self.tabla, COL_ID_INTERNO)
 
     def _refresco_periodico(self) -> None:
-        self.cargar_facturas()
+        # Sincrono: AutoRefresco vuelve a seleccionar la fila (por id) justo despues de recargar y necesita la
+        # tabla ya repoblada. Es el listado de siempre (decenas de ms), no una busqueda de texto.
+        self.cargar_facturas(sincrono=True)
         self._verificar_caja_abierta(ofrecer_apertura=False)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -412,23 +427,54 @@ class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
 
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
-        self.cargar_facturas()
+        self.cargar_facturas(silencioso=True)  # busqueda mientras se escribe: no enciende la barra de carga
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
-    def cargar_facturas(self) -> None:
+    def _filtros_listado(self) -> dict:
+        return {
+            "texto_busqueda": self.buscar_input.text().strip() or None,
+            "estado": self.estado_combo.currentData(),
+            "condicion_pago": self.condicion_combo.currentData(),
+            "pagina": self.pagina_actual,
+            "por_pagina": POR_PAGINA,
+            "id_usuario": self.usuario.id_usuario,
+        }
+
+    def cargar_facturas(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        """Carga la pagina de facturas. Por defecto en un hilo aparte: si el usuario sigue escribiendo, la
+        respuesta anterior se descarta al llegar (`_id_carga`) y solo se pinta la de lo ultimo que se pidio.
+        `sincrono=True` mantiene el flujo de siempre (lo usa el refresco periodico)."""
+        if sincrono:
+            self._cargar_facturas_sincrono()
+            return
+        self._id_carga += 1
+        worker = QueryWorker(self.session_factory, _tarea_cargar_facturas, self._id_carga, **self._filtros_listado())
+        worker.silencioso = silencioso
+        worker.resultado.connect(self._on_facturas_cargadas)
+        worker.error.connect(self._on_facturas_error)
+        worker.finished.connect(lambda w=worker: self._workers_carga.discard(w))
+        self._workers_carga.add(worker)  # referencia viva mientras corre (ver workers.py)
+        worker.start()
+
+    def _on_facturas_cargadas(self, respuesta: dict) -> None:
+        if respuesta["id_carga"] != self._id_carga:
+            return  # llego tarde: ya se pidio otro listado
+        if respuesta.get("sin_permiso"):
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
+            return
+        self._poblar_tabla(respuesta["resultado"])
+
+    def _on_facturas_error(self, mensaje: str) -> None:
+        # QueryWorker ya dejo el detalle en el log.
+        MessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de facturas.")
+
+    def _cargar_facturas_sincrono(self) -> None:
+        # Invalida lo que haya en vuelo: si no, una respuesta anterior llegaria despues y pisaria esta.
+        self._id_carga += 1
         session = self.session_factory()
         try:
-            resultado = VentaService.listar_facturas(
-                session,
-                texto_busqueda=self.buscar_input.text().strip() or None,
-                estado=self.estado_combo.currentData(),
-                condicion_pago=self.condicion_combo.currentData(),
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
-                id_usuario=self.usuario.id_usuario,
-            )
-            self._poblar_tabla(resultado)
+            self._poblar_tabla(VentaService.listar_facturas(session, **self._filtros_listado()))
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar facturas.")
         except Exception:
@@ -436,6 +482,11 @@ class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
             MessageBox.critical(self, "Error de conexión", "No se pudo cargar el listado de facturas.")
         finally:
             session.close()
+
+    def closeEvent(self, event) -> None:
+        for worker in list(self._workers_carga):
+            worker.wait(2000)  # un hilo vivo al destruirse el panel haria caer el proceso
+        super().closeEvent(event)
 
     def _poblar_tabla(self, resultado: dict) -> None:
         facturas: list[FacturaVenta] = resultado["items"]
@@ -499,6 +550,8 @@ class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
     # ── Gate de caja (sin turno abierto no se puede facturar) ─────────────
 
     def _cajas_con_turno_abierto(self) -> list[Caja]:
+        """La caja de ESTA estacion si tiene turno abierto (vacio si no). Las cajas que abrieron otras
+        estaciones no cuentan: cada estacion factura de forma independiente."""
         session = self.session_factory()
         try:
             cajas = CajaService.listar_cajas(session, id_usuario=self.usuario.id_usuario)
@@ -506,7 +559,7 @@ class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
             cajas = []
         finally:
             session.close()
-        return [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        return cajas_de_esta_estacion([c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None])
 
     def _actualizar_estado_caja(self, caja: Caja | None) -> None:
         if caja is not None:
@@ -566,7 +619,9 @@ class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
             # con el error mostrado y el carrito/formas de pago intactos, en vez de
             # cerrarse y perder todo lo cargado (hallazgo #3 de la auditoria de
             # facturacion). Aca solo queda reaccionar a un exec() exitoso.
-            dialogo = FacturaFormDialog(session, self.usuario.id_usuario, parent=self)
+            dialogo = FacturaFormDialog(
+                session, self.usuario.id_usuario, parent=self, session_factory=self.session_factory
+            )
             if dialogo.exec() and dialogo.factura_emitida is not None:
                 factura_emitida = dialogo.factura_emitida
                 # Solo id/numero: `factura_emitida` esta desligada de su sesion (ver
@@ -628,25 +683,36 @@ class FacturacionPanel(MixinPermisos, MixinPaginacion, QWidget):
         if self._abriendo_dialogo:
             return
         self._abriendo_dialogo = True
+        # La factura se consulta en un hilo aparte (ver carga_asincrona.py); el dialogo se abre al llegar.
+        self.cargar_async(
+            "detalle_factura",
+            tarea_cargar_factura,
+            self._abrir_detalle_factura,
+            texto_error="No se pudo cargar el detalle de la factura.",
+            session_factory=self.session_factory,
+            id_factura=id_factura,
+            id_usuario=self.usuario.id_usuario,
+        )
 
-        session = self.session_factory()
+    def _abrir_detalle_factura(self, cargado: dict) -> None:
+        session = cargado.get("session")
+        error = cargado.get("error")
         try:
-            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.usuario.id_usuario)
-            dialogo = FacturaDetalleDialog(datos, session, self.usuario.id_usuario, parent=self)
-            dialogo.exec()
-        except ValueError as exc:
-            MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para ver el detalle de facturas.",
-            )
+            if isinstance(error, PermisoDenegadoError):
+                MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+            elif isinstance(error, ValueError):
+                MessageBox.warning(self, "No se pudo abrir la factura", str(error))
+            elif error is not None:
+                logger.error("Fallo al cargar el detalle de la factura", exc_info=error)
+                MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+            else:
+                FacturaDetalleDialog(cargado["datos"], session, self.usuario.id_usuario, parent=self).exec()
         except Exception:
-            logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
+            logger.exception("Fallo al abrir el detalle de la factura")
             MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
-            session.close()
+            if session is not None:
+                session.close()
             self._abriendo_dialogo = False
 
     def anular_factura_seleccionada(self) -> None:

@@ -20,12 +20,14 @@ from PySide6.QtWidgets import (  # type: ignore
 )
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import Usuario
+from app.db.models import Banco, BancoMovimiento, CuentaBancaria, Usuario
 from app.services.cuentas_bancarias import CuentaBancariaService
 from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.moneda_cuentas import MONEDAS_CUENTA, etiqueta_moneda, nombre_moneda
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, _enmascarar_numero_cuenta
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
 from app.ui.conciliacion_bancos_dialog import ConciliacionBancosDialog
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
 from app.ui.message_box import MessageBox
@@ -59,10 +61,12 @@ COLS_VISIBLES = [
     "BANCO",
     "NÚMERO DE CUENTA",
     "TIPO",
+    "MONEDA",
     "TITULAR",
     "IDENTIFICACIÓN",
     "SALDO",
     "MONTO EN BS",
+    "SALDO COP",
     "ESTADO",
 ]
 
@@ -78,13 +82,32 @@ COLORES_ESTADO_CUENTA = {
 }
 
 
-def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario) -> list[list]:
+# Columnas de saldo que no aplican a la moneda filtrada: una cuenta en bolivares no tiene saldo en USD que mostrar y
+# una en dolares no tiene monto en Bs. Con "Todas las monedas" (o COP) se ven las dos.
+_COLUMNAS_OCULTAS_POR_MONEDA = {
+    "VES": {"SALDO", "SALDO COP"},
+    "USD": {"MONTO EN BS", "SALDO COP"},
+    "COP": {"SALDO", "MONTO EN BS"},
+}
+COL_SALDO_USD = "SALDO"
+COL_MONTO_BS = "MONTO EN BS"
+
+
+def _indices_columnas_visibles(moneda: str | None) -> list[int]:
+    ocultas = _COLUMNAS_OCULTAS_POR_MONEDA.get(moneda or "", set())
+    return [i for i, nombre in enumerate(COLS_VISIBLES) if nombre not in ocultas]
+
+
+def _filas_cuentas_bancarias_query(
+    session, texto_busqueda, estado_cuenta, id_banco, id_usuario, moneda=None
+) -> list[list]:
     resultado = CuentaBancariaService.listar(
         session,
         texto_busqueda=texto_busqueda,
         estado_cuenta=estado_cuenta,
         id_banco=id_banco,
         id_usuario=id_usuario,
+        moneda=moneda,
         pagina=1,
         por_pagina=1_000_000,
     )
@@ -96,10 +119,12 @@ def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_ba
             cuenta.banco.nombre_banco if cuenta.banco else None,
             _enmascarar_numero_cuenta(cuenta.numero_cuenta),
             cuenta.tipo_cuenta_banco,
+            cuenta.moneda or "VES",
             cuenta.nombre_titular,
             cuenta.identificacion_titular,
             float(cuenta.saldo_total_banco or 0),
             float(cuenta.saldo_total_banco_bs or 0),
+            float(cuenta.saldo_total_banco_cop or 0),
             cuenta.estado_cuenta,
         ]
         for cuenta in cuentas
@@ -107,13 +132,14 @@ def _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_ba
 
 
 def _tarea_exportar_cuentas_bancarias_excel(
-    session, ruta: str, texto_busqueda, estado_cuenta, id_banco, id_usuario
+    session, ruta: str, texto_busqueda, estado_cuenta, id_banco, id_usuario, moneda=None
 ) -> tuple[str, int]:
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar la lista completa
     de cuentas bancarias a un archivo (openpyxl) es lo bastante lento como para
     congelar la ventana si se hace en el hilo de GUI."""
-    filas = _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario)
-    exportar_excel(ruta, COLS_VISIBLES, filas)
+    filas = _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario, moneda)
+    indices = _indices_columnas_visibles(moneda)
+    exportar_excel(ruta, [COLS_VISIBLES[i] for i in indices], [[fila[i] for i in indices] for fila in filas])
     return ruta, len(filas)
 
 
@@ -126,20 +152,48 @@ def _tarea_exportar_cuentas_bancarias_pdf(
     id_usuario,
     filtros,
     col_widths,
+    moneda=None,
 ) -> tuple[str, int]:
-    filas = _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario)
+    filas = _filas_cuentas_bancarias_query(session, texto_busqueda, estado_cuenta, id_banco, id_usuario, moneda)
+    indices = _indices_columnas_visibles(moneda)
     exportar_pdf(
         ruta,
         "Reporte de Cuentas Bancarias",
-        COLS_VISIBLES,
-        filas,
+        [COLS_VISIBLES[i] for i in indices],
+        [[fila[i] for i in indices] for fila in filas],
         filtros=filtros,
-        col_widths=col_widths,
+        col_widths=[col_widths[i] for i in indices],
     )
     return ruta, len(filas)
 
 
-class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
+def _tarea_listar_cuentas_bancarias(session, **filtros):
+    """Corre en un hilo aparte (ver carga_asincrona.py): solo consulta, sin tocar widgets."""
+    return CuentaBancariaService.listar(session, **filtros)
+
+
+def _tarea_form_cuenta(session, session_factory, id_cuenta: int | None = None) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): bancos activos (y, al editar, la cuenta y si tiene
+    movimientos) para el formulario. Devuelve la sesion usada, que el panel usa para guardar y cierra al terminar."""
+    sesion = sesion_para_dialogo(session_factory)
+    try:
+        bancos = sesion.query(Banco).filter(Banco.estado_banco == "ACTIVO").order_by(Banco.nombre_banco).all()
+        precargado = {"bancos": bancos}
+        cuenta = None
+        if id_cuenta is not None:
+            cuenta = sesion.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == id_cuenta).first()
+            if cuenta is not None:
+                precargado["tiene_movimientos"] = (
+                    sesion.query(BancoMovimiento.id_movimiento).filter(BancoMovimiento.id_cuenta == id_cuenta).first()
+                    is not None
+                )
+        return {"session": sesion, "cuenta": cuenta, "precargado": precargado}
+    except BaseException:
+        sesion.close()
+        raise
+
+
+class CuentasBancariasPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidget):
     """Panel de gestión de cuentas bancarias."""
 
     recurso_permisos = "bancos"
@@ -153,6 +207,7 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
         self._total_registros = 0
         self._filtro_estado = None
         self._filtro_banco = None
+        self._filtro_moneda = None
         self._texto_busqueda = ""
 
         self._setup_ui()
@@ -161,7 +216,7 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
 
         # Timer para auto-refresh de saldos (cada 30 segundos)
         self._refresh_timer = QTimer(self)
-        self._refresh_timer.timeout.connect(self._cargar_datos)
+        self._refresh_timer.timeout.connect(self._refrescar_saldos)
         self._refresh_timer.start(30000)
 
     def _setup_ui(self):
@@ -231,7 +286,15 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._on_estado_cambiado)
 
-        self.btn_filtrar = BotonFiltros([("Banco", self.banco_combo), ("Estado", self.estado_combo)])
+        self.moneda_combo = QComboBox()
+        self.moneda_combo.addItem("Todas las monedas", None)
+        for moneda in MONEDAS_CUENTA:
+            self.moneda_combo.addItem(etiqueta_moneda(moneda), moneda)
+        self.moneda_combo.currentIndexChanged.connect(self._on_moneda_cambiada)
+
+        self.btn_filtrar = BotonFiltros(
+            [("Banco", self.banco_combo), ("Moneda", self.moneda_combo), ("Estado", self.estado_combo)]
+        )
         toolbar_layout.addWidget(self.btn_filtrar)
 
         self.btn_exportar = BotonExportar(on_excel=self._exportar_excel, on_pdf=self._exportar_pdf)
@@ -248,11 +311,13 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
                 1: Qt.AlignmentFlag.AlignLeft,
                 2: Qt.AlignmentFlag.AlignLeft,
                 3: Qt.AlignmentFlag.AlignLeft,
-                4: Qt.AlignmentFlag.AlignLeft,
+                4: Qt.AlignmentFlag.AlignCenter,
                 5: Qt.AlignmentFlag.AlignLeft,
-                6: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignLeft,
                 7: Qt.AlignmentFlag.AlignRight,
-                8: Qt.AlignmentFlag.AlignCenter,
+                8: Qt.AlignmentFlag.AlignRight,
+                9: Qt.AlignmentFlag.AlignRight,
+                10: Qt.AlignmentFlag.AlignCenter,
             },
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -339,47 +404,36 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
         finally:
             session.close()
 
-    def _cargar_datos(self):
-        """Carga las cuentas bancarias según los filtros actuales."""
-        session = self.session_factory()
-        try:
-            resultado = CuentaBancariaService.listar(
-                session,
-                texto_busqueda=self._texto_busqueda or None,
-                estado_cuenta=self._filtro_estado,
-                id_banco=self._filtro_banco,
-                id_usuario=self.usuario.id_usuario,
-                pagina=self.pagina_actual,
-                por_pagina=self._por_pagina,
-            )
-            self._cuentas = resultado["items"]
-            self._total_registros = resultado["total"]
-            self.paginacion.actualizar_desde(resultado)
-            self._actualizar_tabla()
-            self._actualizar_paginacion()
-        except PermisoDenegadoError:
-            self._cuentas = []
-            self._total_registros = 0
-            self._actualizar_tabla()
-            self._actualizar_paginacion()
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para consultar cuentas bancarias.",
-            )
-        except Exception:
-            logger.exception("Fallo al cargar la lista de cuentas bancarias")
-            self._cuentas = []
-            self._total_registros = 0
-            self._actualizar_tabla()
-            self._actualizar_paginacion()
-            MessageBox.critical(
-                self,
-                "Error de conexión",
-                "No se pudo cargar la lista de cuentas bancarias.",
-            )
-        finally:
-            session.close()
+    def _cargar_datos(self, silencioso: bool = False, sincrono: bool = False):
+        """Pide las cuentas segun los filtros actuales en un hilo aparte (ver carga_asincrona.py)."""
+        self.cargar_async(
+            "cuentas",
+            _tarea_listar_cuentas_bancarias,
+            self._mostrar_cuentas,
+            texto_error="No se pudo cargar la lista de cuentas bancarias.",
+            texto_sin_permiso="No tienes permiso para consultar cuentas bancarias.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            texto_busqueda=self._texto_busqueda or None,
+            estado_cuenta=self._filtro_estado,
+            id_banco=self._filtro_banco,
+            moneda=self._filtro_moneda,
+            id_usuario=self.usuario.id_usuario,
+            pagina=self.pagina_actual,
+            por_pagina=self._por_pagina,
+        )
+
+    def _mostrar_cuentas(self, resultado: dict) -> None:
+        self._cuentas = resultado["items"]
+        self._total_registros = resultado["total"]
+        self.paginacion.actualizar_desde(resultado)
+        self._actualizar_tabla()
+        self._actualizar_paginacion()
+
+    def _refrescar_saldos(self) -> None:
+        # Cada 30 s, en segundo plano y solo si el panel se esta viendo: oculto no hay nada que actualizar.
+        if self.isVisible():
+            self._cargar_datos(silencioso=True)
 
     def _actualizar_tabla(self):
         """Actualiza la tabla con las cuentas cargadas."""
@@ -399,22 +453,30 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
                 QTableWidgetItem(_enmascarar_numero_cuenta(cuenta.numero_cuenta) or "N/A"),
             )
             self.table.setItem(row, 3, QTableWidgetItem(cuenta.tipo_cuenta_banco or "N/A"))
-            self.table.setItem(row, 4, QTableWidgetItem(cuenta.nombre_titular or "N/A"))
-            self.table.setItem(row, 5, QTableWidgetItem(cuenta.identificacion_titular or "N/A"))
+            item_moneda = QTableWidgetItem(cuenta.moneda or "VES")
+            item_moneda.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 4, item_moneda)
+            self.table.setItem(row, 5, QTableWidgetItem(cuenta.nombre_titular or "N/A"))
+            self.table.setItem(row, 6, QTableWidgetItem(cuenta.identificacion_titular or "N/A"))
             item_saldo = QTableWidgetItem(f"${float(cuenta.saldo_total_banco):,.2f}")
             item_saldo.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(row, 6, item_saldo)
+            self.table.setItem(row, 7, item_saldo)
 
             # Usar el saldo en BS directamente de la base de datos, no multiplicar por tasa
             saldo_bs = float(cuenta.saldo_total_banco_bs or 0)
             item_saldo_bs = QTableWidgetItem(f"{saldo_bs:,.2f}" if saldo_bs > 0 else "0.00")
             item_saldo_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(row, 7, item_saldo_bs)
+            self.table.setItem(row, 8, item_saldo_bs)
+
+            saldo_cop = float(cuenta.saldo_total_banco_cop or 0)
+            item_saldo_cop = QTableWidgetItem(f"{saldo_cop:,.2f}")
+            item_saldo_cop.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 9, item_saldo_cop)
 
             estado = cuenta.estado_cuenta or "N/A"
             color_estado = COLORES_ESTADO_CUENTA.get(estado, COLOR_TEXT_MUTED)
             estado_widget = EstadoBadge(estado, color_estado)
-            self.table.setCellWidget(row, 8, estado_widget)
+            self.table.setCellWidget(row, 10, estado_widget)
 
     def _actualizar_paginacion(self):
         """Actualiza los controles de paginación."""
@@ -428,14 +490,29 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
     def _on_busqueda_cambiada(self, texto: str):
         """Maneja el cambio en el texto de búsqueda."""
         self._texto_busqueda = texto.strip()
+        self.buscar_con_pausa(self._buscar_tecleando)
+
+    def _buscar_tecleando(self):
         self.pagina_actual = 1
-        self._cargar_datos()
+        self._cargar_datos(silencioso=True)  # no enciende la barra de carga
 
     def _on_banco_cambiado(self, index: int):
         """Maneja el cambio en el filtro de banco."""
         self._filtro_banco = self.banco_combo.currentData()
         self.pagina_actual = 1
         self._cargar_datos()
+
+    def _on_moneda_cambiada(self, index: int):
+        """Filtra por moneda y deja visibles solo las columnas de saldo que aplican a esa moneda."""
+        self._filtro_moneda = self.moneda_combo.currentData()
+        self._aplicar_columnas_por_moneda()
+        self.pagina_actual = 1
+        self._cargar_datos()
+
+    def _aplicar_columnas_por_moneda(self) -> None:
+        ocultas = _COLUMNAS_OCULTAS_POR_MONEDA.get(self._filtro_moneda or "", set())
+        for indice, nombre in enumerate(COLS_VISIBLES):
+            self.table.setColumnHidden(indice, nombre in ocultas)
 
     def _on_estado_cambiado(self, index: int):
         """Maneja el cambio en el filtro de estado."""
@@ -447,9 +524,19 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
         """Abre el diálogo para crear una nueva cuenta bancaria."""
         if not self._exigir_permiso("crear", "No tienes permiso para crear cuentas bancarias."):
             return
-        session = self.session_factory()
+        self.cargar_async(
+            "form_cuenta",
+            _tarea_form_cuenta,
+            self._abrir_nueva_cuenta,
+            texto_error="No se pudo abrir el formulario de cuenta bancaria.",
+            texto_sin_permiso="No tienes permiso para crear cuentas bancarias.",
+            session_factory=self.session_factory,
+        )
+
+    def _abrir_nueva_cuenta(self, datos_previos: dict):
+        session = datos_previos["session"]
         try:
-            dialog = CuentaBancariaFormDialog(session, parent=self)
+            dialog = CuentaBancariaFormDialog(session, parent=self, precargado=datos_previos["precargado"])
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 datos = dialog.get_data()
                 datos["creado_por"] = self.usuario.id_usuario
@@ -488,23 +575,39 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
         if item is None:
             return
 
-        cuenta_id = int(item.text())
-        session = self.session_factory()
-        try:
-            from app.db.models import CuentaBancaria
+        self.cargar_async(
+            "form_cuenta",
+            _tarea_form_cuenta,
+            self._abrir_editar_cuenta,
+            texto_error="No se pudo abrir el formulario de cuenta bancaria.",
+            texto_sin_permiso="No tienes permiso para editar cuentas bancarias.",
+            session_factory=self.session_factory,
+            id_cuenta=int(item.text()),
+        )
 
-            cuenta = session.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == cuenta_id).first()
+    def _abrir_editar_cuenta(self, datos_previos: dict):
+        session = datos_previos["session"]
+        cuenta = datos_previos["cuenta"]
+        try:
             if cuenta is None:
                 MessageBox.warning(self, "No encontrado", "La cuenta bancaria no existe.")
                 return
 
-            dialog = CuentaBancariaFormDialog(session, cuenta, parent=self)
+            dialog = CuentaBancariaFormDialog(session, cuenta, parent=self, precargado=datos_previos["precargado"])
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 datos = dialog.get_data()
+                confirmar_cambio_moneda = False
+                if datos.get("moneda") != (cuenta.moneda or "VES"):
+                    resumen = CuentaBancariaService.resumen_uso(session, cuenta.id_cuenta, self.usuario.id_usuario)
+                    if resumen["movimientos"] > 0:
+                        if not self._confirmar_cambio_de_moneda(cuenta, datos["moneda"], resumen):
+                            return
+                        confirmar_cambio_moneda = True
                 CuentaBancariaService.actualizar(
                     session,
                     cuenta.id_cuenta,
                     id_usuario=self.usuario.id_usuario,
+                    confirmar_cambio_moneda=confirmar_cambio_moneda,
                     **datos,
                 )
                 self._cargar_datos()
@@ -518,15 +621,39 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
         except ValueError as exc:
             session.rollback()
             MessageBox.warning(self, "Dato inválido", str(exc))
-        except PermisoDenegadoError:
+        except PermisoDenegadoError as exc:
             session.rollback()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para editar cuentas bancarias.")
+            MessageBox.warning(self, "Sin permiso", str(exc) or "No tienes permiso para editar cuentas bancarias.")
         except Exception:
             session.rollback()
             logger.exception("Fallo al editar cuenta bancaria")
             MessageBox.critical(self, "Error", "No se pudo guardar los cambios de la cuenta bancaria.")
         finally:
             session.close()
+
+    def _confirmar_cambio_de_moneda(self, cuenta, moneda_nueva: str, resumen: dict) -> bool:
+        """Cambiar la moneda de una cuenta con historial no toca los movimientos, pero cambia que pagos futuros
+        puede recibir: se muestra el uso que ha tenido para que quien lo hace lo decida con los datos a la vista."""
+        etiquetas = {
+            "zelle": "Zelle",
+            "binance": "Binance",
+            "transferencia": "transferencia",
+            "punto_de_venta": "punto de venta",
+            "pago_movil": "pago móvil",
+            "efectivo": "efectivo",
+        }
+        por_metodo = ", ".join(
+            f"{cantidad} por {etiquetas.get(metodo, metodo)}" for metodo, cantidad in resumen["por_metodo"].items()
+        )
+        detalle = f"\nPagos registrados: {por_metodo}." if por_metodo else ""
+        texto = (
+            f"La cuenta ...{(cuenta.numero_cuenta or '')[-4:]} tiene {resumen['movimientos']} movimiento(s) "
+            f"y hoy es en {nombre_moneda(cuenta.moneda)}.{detalle}\n\n"
+            f"Pasarla a {nombre_moneda(moneda_nueva)} no modifica el historial, pero desde ahora solo recibirá "
+            "pagos en esa moneda (por ejemplo, Zelle y Binance solo a cuentas en dólares).\n\n"
+            "El cambio queda registrado en la auditoría. ¿Confirmar?"
+        )
+        return MessageBox.question(self, "Cambiar la moneda de la cuenta", texto) == QMessageBox.StandardButton.Yes
 
     def _on_cambiar_estado(self):
         """Cambia el estado de la cuenta seleccionada."""
@@ -637,6 +764,7 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
             "texto_busqueda": self._texto_busqueda or None,
             "estado_cuenta": self._filtro_estado,
             "id_banco": self._filtro_banco,
+            "moneda": self._filtro_moneda,
             "id_usuario": self.usuario.id_usuario,
         }
 
@@ -676,9 +804,10 @@ class CuentasBancariasPanel(MixinPermisos, MixinPaginacion, QWidget):
         filtros = {
             "Búsqueda": texto_busqueda if texto_busqueda else "Todos",
             "Banco": self.banco_combo.currentText(),
+            "Moneda": self.moneda_combo.currentText(),
             "Estado": self.estado_combo.currentText(),
         }
-        col_widths = [0.5, 1.5, 1.5, 1.0, 1.5, 1.3, 1.0, 1.0, 1.0]
+        col_widths = [0.5, 1.5, 1.5, 1.0, 0.8, 1.5, 1.3, 1.0, 1.0, 1.0, 1.0]
 
         ocupar_boton(self.btn_exportar)
         self._worker_export = QueryWorker(

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import app.ui.comisiones_panel as comp
+from app.services.ventas import VentaService
 
 
 def _crear_panel(qtbot, monkeypatch, gestion=False):
@@ -26,7 +27,7 @@ def _crear_panel(qtbot, monkeypatch, gestion=False):
 def test_ver_detalle_factura_bloquea_reentrada_pero_no_queda_trabado(qtbot, monkeypatch):
     panel = _crear_panel(qtbot, monkeypatch)
     panel._fila_seleccionada_id_factura = lambda: 1
-    monkeypatch.setattr(comp.VentaService, "obtener_factura", staticmethod(lambda *a, **k: {}))
+    monkeypatch.setattr(VentaService, "obtener_factura", staticmethod(lambda *a, **k: {}))
 
     llamadas_sesion = []
 
@@ -49,11 +50,12 @@ def test_ver_detalle_factura_bloquea_reentrada_pero_no_queda_trabado(qtbot, monk
 
     panel.ver_detalle_factura()
 
-    assert len(llamadas_sesion) == 1
+    # una sesion para la consulta en el hilo y otra para el dialogo
+    assert len(llamadas_sesion) == 2
     assert panel._abriendo_dialogo is False
 
     panel.ver_detalle_factura()
-    assert len(llamadas_sesion) == 2
+    assert len(llamadas_sesion) == 4
 
 
 # ── Pago con el filtro "Solo con porcentaje BCV" ────────────────────────────

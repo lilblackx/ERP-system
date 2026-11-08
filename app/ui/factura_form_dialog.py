@@ -6,6 +6,7 @@ porque la tabla del carrito se beneficia de espacio vertical extra."""
 
 import logging
 from decimal import ROUND_HALF_UP, Decimal
+from functools import partial
 
 import qtawesome as qta
 from PySide6.QtCore import QDate, QSize, Qt, QTimer
@@ -39,6 +40,7 @@ from app.services.clientes import create_cliente, list_clientes
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.inventario import PrecioService, ProductoService
+from app.services.moneda_cuentas import filtrar_cuentas_por_metodo, moneda_para_metodo, nombre_moneda
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
@@ -46,6 +48,7 @@ from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
 from app.ui.animaciones import destello, destello_fila, liberar_boton, ocupar_boton
 from app.ui.autorizacion_dialog import AutorizacionDialog
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, formatear_monto
@@ -81,6 +84,7 @@ from app.ui.styles import (
     aplicar_sombra,
 )
 from app.ui.workers import QueryWorker
+from app.utils.caja_local import cajas_de_esta_estacion
 from app.utils.rif import formatear_identificacion
 
 logger = logging.getLogger(__name__)
@@ -280,7 +284,25 @@ LIMITE_CATALOGO = 50  # tope de resultados por busqueda (D-01): evita cargar el 
 DEBOUNCE_BUSQUEDA_MS = 300
 
 
-class FacturaFormDialog(QDialog):
+def _tarea_buscar_clientes(session, texto: str | None, id_usuario: int | None) -> list:
+    """Corre en un hilo aparte (ver carga_asincrona.py): clientes activos que coinciden con el texto."""
+    resultado = list_clientes(session, texto, id_usuario=id_usuario, por_pagina=LIMITE_CATALOGO)
+    return [c for c in resultado["items"] if (c.estado_cliente or "ACTIVO") == "ACTIVO"]
+
+
+def _tarea_buscar_productos(session, texto: str | None, id_usuario: int | None) -> list:
+    """Corre en un hilo aparte: productos activos con stock que coinciden con el texto."""
+    return ProductoService.buscar(
+        session,
+        texto=texto,
+        solo_con_stock=True,
+        solo_activos=True,
+        por_pagina=LIMITE_CATALOGO,
+        id_usuario=id_usuario,
+    )["items"]
+
+
+class FacturaFormDialog(CargaAsincronaMixin, QDialog):
     """Dialogo de nueva factura: cabecera + carrito de productos.
 
     Cliente y producto se buscan contra la base con cada tecla (debounce de
@@ -289,9 +311,13 @@ class FacturaFormDialog(QDialog):
     mas abajo).
     """
 
-    def __init__(self, session: Session, id_usuario: int | None, parent=None):
+    def __init__(self, session: Session, id_usuario: int | None, parent=None, session_factory=None):
         super().__init__(parent)
         self.session = session
+        # Con `session_factory` la busqueda mientras se escribe corre en un hilo aparte (con su propia sesion: la
+        # del dialogo no se puede compartir con otro hilo); sin ella (otros usos, tests) todo sigue en el hilo de
+        # la ventana.
+        self.session_factory = session_factory
         self.id_usuario = id_usuario
         self.items: list[dict] = []
         self.pagos: list[dict] = []
@@ -491,7 +517,9 @@ class FacturaFormDialog(QDialog):
             cajas = CajaService.listar_cajas(self.session, id_usuario=self.id_usuario)
         except PermisoDenegadoError:
             cajas = []
-        self._cajas_abiertas_vuelto = [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        self._cajas_abiertas_vuelto = cajas_de_esta_estacion(
+            [c for c in cajas if c.fecha_apertura is not None and c.fecha_cierre is None]
+        )
 
         try:
             cuentas = BancoService.listar_cuentas(self.session, id_usuario=self.id_usuario)
@@ -801,12 +829,16 @@ class FacturaFormDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas_vuelto:
-                self.origen_vuelto_combo.addItem("Sin cuentas bancarias activas")
+            # El vuelto por pago movil/transferencia sale de una cuenta en bolivares.
+            cuentas_vuelto = filtrar_cuentas_por_metodo(self._cuentas_activas_vuelto, metodo)
+            if not cuentas_vuelto:
+                self.origen_vuelto_combo.addItem(
+                    f"Sin cuentas bancarias en {nombre_moneda(moneda_para_metodo(metodo))}"
+                )
                 self.origen_vuelto_combo.setEnabled(False)
             else:
                 self.origen_vuelto_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas_vuelto:
+                for cuenta in cuentas_vuelto:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     etiqueta = f"{nombre_banco} - {_enmascarar(cuenta.numero_cuenta)}"
                     self.origen_vuelto_combo.addItem(etiqueta, ("banco", cuenta.id_cuenta))
@@ -816,7 +848,9 @@ class FacturaFormDialog(QDialog):
     def _agregar_pago(self) -> None:
         total_pagado = sum(self._convertir_pago_a_usd(pago) for pago in self.pagos)
         saldo_pendiente = max(self._total_factura_actual() - total_pagado, 0.0)
-        dialogo = PagoLineaDialog(self.session, self.id_usuario, monto_sugerido=saldo_pendiente, parent=self)
+        dialogo = PagoLineaDialog(
+            self.session, self.id_usuario, monto_sugerido=saldo_pendiente, parent=self, solo_caja_estacion=True
+        )
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.pagos.append(dialogo.get_data())
             self._refrescar_tabla_pagos()
@@ -1101,6 +1135,7 @@ class FacturaFormDialog(QDialog):
         self._buscar_clientes(None)
 
     def _buscar_clientes(self, texto: str | None, *, abrir_dropdown: bool = False) -> None:
+        self._cancelar_busqueda_pendiente("clientes")
         resultado = list_clientes(self.session, texto, id_usuario=self.id_usuario, por_pagina=LIMITE_CATALOGO)
         self._clientes = [c for c in resultado["items"] if (c.estado_cliente or "ACTIVO") == "ACTIVO"]
         self._poblar_combo_clientes(self._clientes, abrir_dropdown=abrir_dropdown)
@@ -1195,7 +1230,28 @@ class FacturaFormDialog(QDialog):
         # abrir_dropdown solo mientras hay texto tipeado -- abrirlo tambien al borrar el
         # campo de vuelta a vacio (volviendo a la lista completa) seria una sorpresa poco
         # pedida, no una sugerencia util.
-        self._buscar_clientes(texto, abrir_dropdown=bool(texto))
+        if self.session_factory is None:
+            self._buscar_clientes(texto, abrir_dropdown=bool(texto))
+            return
+        self.cargar_async(
+            "clientes",
+            _tarea_buscar_clientes,
+            partial(self._aplicar_clientes, abrir_dropdown=bool(texto)),
+            texto_error="No se pudo buscar clientes.",
+            texto_sin_permiso="No tienes permiso para consultar clientes.",
+            silencioso=True,  # busqueda mientras se escribe: no enciende la barra de carga
+            texto=texto,
+            id_usuario=self.id_usuario,
+        )
+
+    def _aplicar_clientes(self, clientes: list, abrir_dropdown: bool = False) -> None:
+        self._clientes = clientes
+        self._poblar_combo_clientes(clientes, abrir_dropdown=abrir_dropdown)
+
+    def _cancelar_busqueda_pendiente(self, clave: str) -> None:
+        """Una busqueda sincrona (Enter, cliente nuevo) manda sobre la que iba en vuelo: si esta llegara despues,
+        repoblaria el combo y desharia lo que se acaba de elegir."""
+        self._estado_carga()["cargas"].pop(clave, None)
 
     def _on_cliente_buscar_return_pressed(self) -> None:
         if hasattr(self, "_timer_busqueda_cliente"):
@@ -1472,14 +1528,16 @@ class FacturaFormDialog(QDialog):
         self._buscar_productos(None)
 
     def _buscar_productos(self, texto: str | None) -> None:
+        self._cancelar_busqueda_pendiente("productos")
         resultado = ProductoService.buscar(
             self.session,
             texto=texto,
             solo_con_stock=True,
+            solo_activos=True,
             por_pagina=LIMITE_CATALOGO,
             id_usuario=self.id_usuario,
         )
-        self._productos = [p for p in resultado["items"] if (p.estado_producto or "ACTIVO") == "ACTIVO"]
+        self._productos = resultado["items"]
         self._poblar_combo_productos(self._productos)
 
     def _poblar_combo_productos(self, productos: list) -> None:
@@ -1512,10 +1570,28 @@ class FacturaFormDialog(QDialog):
         if not hasattr(self, "_timer_busqueda_producto"):
             self._timer_busqueda_producto = QTimer(self)
             self._timer_busqueda_producto.setSingleShot(True)
-            self._timer_busqueda_producto.timeout.connect(
-                lambda: self._buscar_productos(self.producto_buscar_input.text().strip() or None)
-            )
+            self._timer_busqueda_producto.timeout.connect(self._buscar_productos_tras_debounce)
         self._timer_busqueda_producto.start(DEBOUNCE_BUSQUEDA_MS)
+
+    def _buscar_productos_tras_debounce(self) -> None:
+        texto = self.producto_buscar_input.text().strip() or None
+        if self.session_factory is None:
+            self._buscar_productos(texto)
+            return
+        self.cargar_async(
+            "productos",
+            _tarea_buscar_productos,
+            self._aplicar_productos,
+            texto_error="No se pudo buscar productos.",
+            texto_sin_permiso="No tienes permiso para consultar productos.",
+            silencioso=True,
+            texto=texto,
+            id_usuario=self.id_usuario,
+        )
+
+    def _aplicar_productos(self, productos: list) -> None:
+        self._productos = productos
+        self._poblar_combo_productos(productos)
 
     def _on_producto_buscar_return_pressed(self) -> None:
         if hasattr(self, "_timer_busqueda_producto"):

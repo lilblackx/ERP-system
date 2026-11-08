@@ -7,7 +7,7 @@ Diseño moderno integrado en el MainWindow (no como ventana flotante).
 import logging
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -32,6 +32,7 @@ from app.services.paginacion import paginar_lista
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService
 from app.ui.banco_form_dialog import BancoFormDialog
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.message_box import MessageBox
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
@@ -80,7 +81,12 @@ COLORES_ESTADO_BANCO = {
 }
 
 
-class BancosPanel(MixinPermisos, MixinPaginacion, QWidget):
+def _tarea_listar_bancos(session, **filtros):
+    """Corre en un hilo aparte (ver carga_asincrona.py): solo consulta, sin tocar widgets."""
+    return BancoService.listar_bancos(session, **filtros)
+
+
+class BancosPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidget):
     """
     Panel principal del módulo Bancos.
     Encapsula la barra de herramientas y la tabla de datos en un solo widget
@@ -252,45 +258,39 @@ class BancosPanel(MixinPermisos, MixinPaginacion, QWidget):
 
     # ── Carga de datos ─────────────────────────────────────────────────────
 
-    def cargar_bancos(self):
-        """Carga la lista de bancos via BancoService (antes hacia session.query(Banco)
-        directo, sin pasar por require_permiso -- cualquier usuario autenticado podia
-        ver/crear/editar/"eliminar" bancos sin importar su rol; hallazgo de auditoria,
-        2026-09-02). Bancos es un catalogo chico (a diferencia de clientes/vendedores),
-        asi que se sigue filtrando/paginando del lado de Python sobre la lista completa
-        en vez de sumarle paginacion al servicio."""
-        session = self.session_factory()
-        try:
-            bancos = BancoService.listar_bancos(session, id_usuario=self.usuario.id_usuario)
+    def cargar_bancos(self, silencioso: bool = False, sincrono: bool = False):
+        """Pide la lista de bancos via BancoService en un hilo aparte (ver carga_asincrona.py). Bancos es un
+        catalogo chico (a diferencia de clientes/vendedores), asi que se sigue filtrando/paginando del lado de
+        Python sobre la lista completa en vez de sumarle paginacion al servicio."""
+        self.cargar_async(
+            "bancos",
+            _tarea_listar_bancos,
+            self._mostrar_bancos,
+            texto_error="No se pudo cargar la lista de bancos.",
+            texto_sin_permiso="No tienes permiso para consultar bancos.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            id_usuario=self.usuario.id_usuario,
+        )
 
-            estado_filtro = self.estado_combo.currentData()
-            if estado_filtro:
-                bancos = [b for b in bancos if b.estado_banco == estado_filtro]
+    def _mostrar_bancos(self, bancos: list) -> None:
+        estado_filtro = self.estado_combo.currentData()
+        if estado_filtro:
+            bancos = [b for b in bancos if b.estado_banco == estado_filtro]
 
-            busqueda = self.buscar_input.text().strip().lower()
-            if busqueda:
-                bancos = [
-                    b
-                    for b in bancos
-                    if busqueda in (b.codigo_banco or "").lower()
-                    or busqueda in (b.nombre_banco or "").lower()
-                    or busqueda in (b.identificacion_banco or "").lower()
-                    or busqueda in (b.numero_telefono_banco or "").lower()
-                ]
+        busqueda = self.buscar_input.text().strip().lower()
+        if busqueda:
+            bancos = [
+                b
+                for b in bancos
+                if busqueda in (b.codigo_banco or "").lower()
+                or busqueda in (b.nombre_banco or "").lower()
+                or busqueda in (b.identificacion_banco or "").lower()
+                or busqueda in (b.numero_telefono_banco or "").lower()
+            ]
 
-            self.bancos = bancos
-            self._actualizar_tabla()
-        except PermisoDenegadoError:
-            self.bancos = []
-            self._actualizar_tabla()
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar bancos.")
-        except Exception:
-            logger.exception("Fallo al cargar la lista de bancos")
-            self.bancos = []
-            self._actualizar_tabla()
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de bancos.")
-        finally:
-            session.close()
+        self.bancos = bancos
+        self._actualizar_tabla()
 
     def _actualizar_tabla(self):
         """Actualiza la tabla con los bancos cargados (respetando paginación)."""
@@ -342,10 +342,12 @@ class BancosPanel(MixinPermisos, MixinPaginacion, QWidget):
         self.cargar_bancos()
 
     def _busqueda_dinamica(self):
-        """Búsqueda en tiempo real con debounce."""
-        if hasattr(self, "_search_timer") and self._search_timer is not None:
-            self._search_timer.stop()
-        self._search_timer = QTimer.singleShot(300, self._buscar_desde_inicio)
+        """Búsqueda en tiempo real con pausa al teclear."""
+        self.buscar_con_pausa(self._buscar_tecleando)
+
+    def _buscar_tecleando(self):
+        self.pagina_actual = 1
+        self.cargar_bancos(silencioso=True)  # no enciende la barra de carga
 
     # ── CRUD ─────────────────────────────────────────────────────────────
 

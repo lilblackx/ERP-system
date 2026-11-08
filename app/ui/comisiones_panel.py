@@ -36,13 +36,14 @@ from app.db.models import ComisionFactura, Usuario
 from app.services.comisiones import ComisionService, PagoComisionService
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
+from app.services.moneda_cuentas import filtrar_cuentas_por_metodo, moneda_para_metodo, nombre_moneda
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, CajaService
 from app.services.usuarios import UsuarioService
 from app.services.vendedores import VendedorService
-from app.services.ventas import VentaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
-from app.ui.factura_detalle_dialog import FacturaDetalleDialog
+from app.ui.carga_asincrona import CargaAsincronaMixin
+from app.ui.factura_detalle_dialog import FacturaDetalleDialog, tarea_cargar_factura
 from app.ui.message_box import MessageBox
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
@@ -328,12 +329,14 @@ class PagarComisionesDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas")
+            moneda_requerida = moneda_para_metodo(metodo, None)
+            cuentas = filtrar_cuentas_por_metodo(self._cuentas_activas, metodo, None)
+            if not cuentas:
+                self.origen_combo.addItem(f"Sin cuentas bancarias en {nombre_moneda(moneda_requerida)}")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas:
+                for cuenta in cuentas:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
@@ -534,7 +537,33 @@ class DetalleComisionFacturaDialog(QDialog):
         root.addLayout(fila_botones)
 
 
-class ComisionesPanel(MixinPermisos, QWidget):
+def _tarea_vendedores_activos(session, id_usuario: int) -> list:
+    """Corre en un hilo aparte (ver carga_asincrona.py): los vendedores activos para el selector del modo gestion."""
+    return VendedorService.listar(session, id_usuario=id_usuario, estado_vendedor="ACTIVO", por_pagina=LIMITE_CATALOGO)[
+        "items"
+    ]
+
+
+def _tarea_cargar_comisiones(
+    session, modo_gestion: bool, id_vendedor: int | None, id_usuario: int, solo_bcv: bool, sin_bcv: bool
+) -> list:
+    """Corre en un hilo aparte: las comisiones del vendedor elegido (modo gestion) o las propias."""
+    if modo_gestion:
+        if id_vendedor is None:
+            return []
+        return ComisionService.listar_comisiones_vendedor(
+            session,
+            id_vendedor,
+            id_usuario=id_usuario,
+            solo_con_porcentaje_bcv=solo_bcv,
+            solo_sin_porcentaje_bcv=sin_bcv,
+        )
+    return ComisionService.listar_mis_comisiones(
+        session, id_usuario, solo_con_porcentaje_bcv=solo_bcv, solo_sin_porcentaje_bcv=sin_bcv
+    )
+
+
+class ComisionesPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
     """Panel del modulo Comisiones: dos modos segun el permiso del usuario.
     - Modo gestion (comisiones:ver): selector de vendedor + tabla + pagar.
     - Modo "Mis Comisiones" (reportes_comisiones:ver): solo lectura de propias."""
@@ -724,31 +753,22 @@ class ComisionesPanel(MixinPermisos, QWidget):
             h.addWidget(self.btn_pagar)
         return w
 
-    def cargar_datos(self) -> None:
-        session = self.session_factory()
-        try:
-            if self.modo_gestion:
-                self._cargar_vendedores(session)
-            else:
-                self._cargar_comisiones_propias(session)
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar comisiones.")
-        except ValueError as exc:
-            MessageBox.warning(self, "Error", str(exc))
-        except Exception:
-            logger.exception("Fallo al cargar comisiones")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar las comisiones.")
-        finally:
-            session.close()
+    def cargar_datos(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        if self.modo_gestion:
+            self.cargar_async(
+                "vendedores",
+                _tarea_vendedores_activos,
+                self._llenar_vendedores,
+                texto_error="No se pudo cargar las comisiones.",
+                texto_sin_permiso="No tienes permiso para consultar comisiones.",
+                silencioso=silencioso,
+                sincrono=sincrono,
+                id_usuario=self.usuario.id_usuario,
+            )
+        else:
+            self._recargar_comisiones(silencioso=silencioso, sincrono=sincrono)
 
-    def _cargar_vendedores(self, session: Session) -> None:
-        resultado = VendedorService.listar(
-            session,
-            id_usuario=self.usuario.id_usuario,
-            estado_vendedor="ACTIVO",
-            por_pagina=LIMITE_CATALOGO,
-        )
-        vendedores = resultado["items"]
+    def _llenar_vendedores(self, vendedores: list) -> None:
         self.vendedor_combo.blockSignals(True)
         self.vendedor_combo.clear()
         if not vendedores:
@@ -763,44 +783,34 @@ class ComisionesPanel(MixinPermisos, QWidget):
             self.vendedor_combo.setCurrentIndex(0)
             self._on_vendedor_cambiado()
 
-    def _cargar_comisiones_propias(self, session: Session) -> None:
-        try:
-            self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
-            self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
-            comisiones = ComisionService.listar_mis_comisiones(
-                session,
-                self.usuario.id_usuario,
-                solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
-                solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
-            )
-            self.comisiones_cargadas = comisiones
-            self._aplicar_filtro_estado()
-        except ValueError:
-            self.tabla.setRowCount(0)
-            self.lbl_total.setText("Sin datos")
-            raise
+    def _recargar_comisiones(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        """Pide las comisiones con los filtros de porcentaje BCV actuales (en un hilo aparte) y, al llegar, aplica
+        el filtro de estado y pinta la tabla."""
+        self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
+        self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
+        self.cargar_async(
+            "comisiones",
+            _tarea_cargar_comisiones,
+            self._al_cargar_comisiones,
+            texto_error="No se pudo cargar las comisiones.",
+            texto_sin_permiso="No tienes permiso para consultar comisiones.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            modo_gestion=self.modo_gestion,
+            id_vendedor=self.id_vendedor_actual,
+            id_usuario=self.usuario.id_usuario,
+            solo_bcv=self.solo_porcentaje_bcv,
+            sin_bcv=self.solo_sin_porcentaje_bcv,
+        )
+
+    def _al_cargar_comisiones(self, comisiones: list) -> None:
+        self.comisiones_cargadas = comisiones
+        self._filtrar_y_poblar()
 
     def _on_vendedor_cambiado(self) -> None:
         self.id_vendedor_actual = self.vendedor_combo.currentData()
         if self.id_vendedor_actual is not None:
-            session = self.session_factory()
-            try:
-                self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
-                self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
-                comisiones = ComisionService.listar_comisiones_vendedor(
-                    session,
-                    self.id_vendedor_actual,
-                    id_usuario=self.usuario.id_usuario,
-                    solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
-                    solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
-                )
-                self.comisiones_cargadas = comisiones
-                self._aplicar_filtro_estado()
-            except Exception:
-                logger.exception("Fallo al cargar comisiones del vendedor")
-                self.tabla.setRowCount(0)
-            finally:
-                session.close()
+            self._recargar_comisiones()
 
     def _aplicar_filtro_estado(self) -> None:
         # Los checkboxes son mutuamente excluyentes
@@ -815,37 +825,17 @@ class ComisionesPanel(MixinPermisos, QWidget):
                 self.chk_porcentaje_bcv.setChecked(False)
                 self.chk_porcentaje_bcv.blockSignals(False)
 
-        # Si algún checkbox de porcentaje BCV cambió, recargar desde BD
+        # Si algún checkbox de porcentaje BCV cambió, recargar desde BD (en un hilo aparte; al llegar se repinta)
         if (
             self.chk_porcentaje_bcv.isChecked() != self.solo_porcentaje_bcv
             or self.chk_sin_porcentaje_bcv.isChecked() != self.solo_sin_porcentaje_bcv
         ):
-            self.solo_porcentaje_bcv = self.chk_porcentaje_bcv.isChecked()
-            self.solo_sin_porcentaje_bcv = self.chk_sin_porcentaje_bcv.isChecked()
-            session = self.session_factory()
-            try:
-                if self.modo_gestion and self.id_vendedor_actual is not None:
-                    comisiones = ComisionService.listar_comisiones_vendedor(
-                        session,
-                        self.id_vendedor_actual,
-                        id_usuario=self.usuario.id_usuario,
-                        solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
-                        solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
-                    )
-                else:
-                    # Modo "Mis Comisiones" - recargar con filtro de porcentaje BCV
-                    comisiones = ComisionService.listar_mis_comisiones(
-                        session,
-                        self.usuario.id_usuario,
-                        solo_con_porcentaje_bcv=self.solo_porcentaje_bcv,
-                        solo_sin_porcentaje_bcv=self.solo_sin_porcentaje_bcv,
-                    )
-                self.comisiones_cargadas = comisiones
-            except Exception:
-                logger.exception("Fallo al recargar comisiones con filtro porcentaje BCV")
-            finally:
-                session.close()
+            self._recargar_comisiones()
+            return
 
+        self._filtrar_y_poblar()
+
+    def _filtrar_y_poblar(self) -> None:
         estado_filtro = self.estado_combo.currentData()
         if estado_filtro:
             filtradas = [c for c in self.comisiones_cargadas if c.estado_pago == estado_filtro]
@@ -1091,23 +1081,34 @@ class ComisionesPanel(MixinPermisos, QWidget):
         if self._abriendo_dialogo:
             return
         self._abriendo_dialogo = True
+        # La factura se consulta en un hilo aparte (ver carga_asincrona.py); el dialogo se abre al llegar.
+        self.cargar_async(
+            "detalle_factura",
+            tarea_cargar_factura,
+            self._abrir_detalle_factura,
+            texto_error="No se pudo cargar el detalle de la factura.",
+            session_factory=self.session_factory,
+            id_factura=id_factura,
+            id_usuario=self.usuario.id_usuario,
+        )
 
-        session = self.session_factory()
+    def _abrir_detalle_factura(self, cargado: dict) -> None:
+        session = cargado.get("session")
+        error = cargado.get("error")
         try:
-            datos = VentaService.obtener_factura(session, id_factura, id_usuario=self.usuario.id_usuario)
-            dialogo = FacturaDetalleDialog(datos, session, self.usuario.id_usuario, parent=self)
-            dialogo.exec()
-        except ValueError as exc:
-            MessageBox.warning(self, "No se pudo abrir la factura", str(exc))
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para ver el detalle de facturas.",
-            )
+            if isinstance(error, PermisoDenegadoError):
+                MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+            elif isinstance(error, ValueError):
+                MessageBox.warning(self, "No se pudo abrir la factura", str(error))
+            elif error is not None:
+                logger.error("Fallo al cargar el detalle de la factura", exc_info=error)
+                MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+            else:
+                FacturaDetalleDialog(cargado["datos"], session, self.usuario.id_usuario, parent=self).exec()
         except Exception:
-            logger.exception("Fallo al cargar el detalle de la factura %s", id_factura)
+            logger.exception("Fallo al abrir el detalle de la factura")
             MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
         finally:
-            session.close()
+            if session is not None:
+                session.close()
             self._abriendo_dialogo = False
