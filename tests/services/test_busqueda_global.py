@@ -274,3 +274,89 @@ def test_una_accion_exige_el_permiso_de_crear(db_session):
     asignar_permiso(db_session, rol, crear_permiso(db_session, recurso="ventas", accion="crear"))
     resultados = BusquedaGlobalService.buscar(db_session, usuario.id_usuario, "nueva fact")
     assert [r.accion for r in resultados if r.tipo == TIPO_ACCION] == ["nueva_factura"]
+
+
+# ── Permisos de la busqueda en una sola tanda ───────────────────────────────
+
+
+def test_permisos_del_usuario_coinciden_con_verificar_permiso(db_session):
+    from app.services.usuarios import UsuarioService
+
+    rol = crear_rol(db_session)
+    asignar_permiso(db_session, rol, crear_permiso(db_session, recurso="clientes", accion="ver"))
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+    admin = crear_usuario_admin(db_session)
+    sin_rol = crear_usuario(db_session)
+
+    puede = UsuarioService.permisos_del_usuario(db_session, usuario.id_usuario)
+    assert puede("clientes", "ver") and not puede("clientes", "crear") and not puede("ventas", "ver")
+    assert all(
+        puede(r, a) == UsuarioService.verificar_permiso(db_session, usuario.id_usuario, r, a)
+        for r, a in (("clientes", "ver"), ("clientes", "crear"), ("ventas", "ver"))
+    )
+    assert UsuarioService.permisos_del_usuario(db_session, admin.id_usuario)("ventas", "anular")  # ADMIN: todo
+    assert not UsuarioService.permisos_del_usuario(db_session, sin_rol.id_usuario)("clientes", "ver")
+    assert not UsuarioService.permisos_del_usuario(db_session, 999999)("clientes", "ver")
+
+
+def test_un_usuario_inactivo_no_tiene_ningun_permiso_en_la_busqueda(db_session):
+    from app.services.usuarios import UsuarioService
+
+    rol = crear_rol(db_session)
+    asignar_permiso(db_session, rol, crear_permiso(db_session, recurso="clientes", accion="ver"))
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol, estado="INACTIVO")
+    crear_cliente(db_session, nombre_razon_social="Comercial Sur")
+
+    assert not UsuarioService.permisos_del_usuario(db_session, usuario.id_usuario)("clientes", "ver")
+    assert BusquedaGlobalService.buscar(db_session, usuario.id_usuario, "comercial") == []
+
+
+def test_la_busqueda_resuelve_todos_los_permisos_en_una_tanda(db_session):
+    from sqlalchemy import event
+
+    rol = crear_rol(db_session)
+    for recurso in ("clientes", "inventario", "proveedores", "ventas"):
+        asignar_permiso(db_session, rol, crear_permiso(db_session, recurso=recurso, accion="ver"))
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+    db_session.commit()
+    sentencias = []
+    motor = db_session.get_bind()
+
+    def registrar(conn, cursor, statement, *args):
+        sentencias.append(statement)
+
+    event.listen(motor, "before_cursor_execute", registrar)
+    try:
+        BusquedaGlobalService.buscar(db_session, usuario.id_usuario, "zzzzz")
+    finally:
+        event.remove(motor, "before_cursor_execute", registrar)
+
+    sobre_permisos = [s for s in sentencias if "rol_permisos" in s or " roles" in s.lower() or "FROM usuarios" in s]
+    # usuario con su rol, permisos del rol y el refresco del usuario expirado por el commit: tres, no tres por tipo
+    assert len(sobre_permisos) <= 3, sobre_permisos
+
+
+def test_las_facturas_encontradas_salen_de_la_mas_reciente_a_la_mas_antigua(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
+    numeros = []
+    for _ in range(3):
+        factura = VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "10.00"}],
+        )
+        numeros.append(factura.numero_factura)
+
+    resultados = [
+        r for r in BusquedaGlobalService.buscar(db_session, admin.id_usuario, "FV-") if r.tipo == TIPO_FACTURA
+    ]
+
+    assert [r.titulo for r in resultados] == sorted(numeros, reverse=True)[: len(resultados)]
+    assert len(resultados) >= 1

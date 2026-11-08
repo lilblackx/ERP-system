@@ -1,8 +1,9 @@
 import re
+from collections.abc import Callable
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import Rol, Usuario, Vendedor
+from app.db.models import Permiso, Rol, RolPermiso, Usuario, Vendedor
 from app.services.auditoria import AuditoriaService
 from app.services.auth import hash_password, validar_password_policy
 from app.services.bloqueo import esta_bloqueado
@@ -385,6 +386,32 @@ class UsuarioService:
     # de reusada para evitar un import circular (permisos.py no puede importar
     # UsuarioService si usuarios.py importa require_permiso). Hallazgo de auditoria
     # 2026-08-22, resuelto el mismo dia.
+    @staticmethod
+    def permisos_del_usuario(session: Session, id_usuario: int) -> Callable[[str, str], bool]:
+        """Funcion `puede(recurso, accion)` con los mismos criterios que `verificar_permiso`, pero resuelta con a lo
+        sumo DOS consultas para toda la tanda: quien necesita preguntar por muchos permisos seguidos (la busqueda
+        global revisa uno por tipo de resultado) no repite tres idas a la base por cada pregunta."""
+        fila = (
+            session.query(Usuario, Rol.nombre)
+            .outerjoin(Rol, Rol.id_rol == Usuario.id_rol)
+            .filter(Usuario.id_usuario == id_usuario)
+            .first()
+        )
+        if fila is None:
+            return lambda recurso, accion: False
+        usuario, nombre_rol = fila
+        if usuario.id_rol is None or usuario.estado != "ACTIVO" or esta_bloqueado(usuario):
+            return lambda recurso, accion: False
+        if nombre_rol == "ADMIN":  # el seed no le asigna filas en rol_permisos (ver verificar_permiso)
+            return lambda recurso, accion: True
+        concedidos = {
+            (recurso, accion)
+            for recurso, accion in session.query(Permiso.recurso, Permiso.accion)
+            .join(RolPermiso, RolPermiso.id_permiso == Permiso.id_permiso)
+            .filter(RolPermiso.id_rol == usuario.id_rol)
+        }
+        return lambda recurso, accion: (recurso, accion) in concedidos
+
     @staticmethod
     def verificar_permiso(session: Session, id_usuario: int, recurso: str, accion: str) -> bool:
         # Una sola consulta (usuario + rol + permiso) en vez de tres idas a la base: ver consultar_permiso().
