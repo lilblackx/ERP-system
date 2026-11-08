@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Inventario, ProductoPrecio
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.busqueda_sql import escapar_like as _escapar_like
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 from app.utils.decimal_utils import to_decimal
@@ -16,13 +18,6 @@ ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 # con este unico valor fijo en vez de borrar la columna (append-only, no se edita el
 # schema ya creado).
 TIPO_PRECIO_UNICO = "UNICO"
-
-
-def _escapar_like(texto: str) -> str:
-    """Escapa caracteres especiales en búsquedas LIKE: % y _ son wildcards,
-    necesitan escape para búsquedas literales. Sin esto, una búsqueda de '%' devuelve
-    todos los registros, '%_' devuelve cualquier registro con N caracteres, etc."""
-    return texto.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
 
 class ProductoService:
@@ -344,6 +339,7 @@ class ProductoService:
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
+        solo_activos: bool = False,
     ) -> dict:
         """D-01: paginado igual que VentaService.listar_facturas() -- el catalogo puede
         crecer sin cota. `texto` busca por codigo O nombre a la vez (una sola caja de
@@ -358,16 +354,20 @@ class ProductoService:
         if texto:
             like = f"%{_escapar_like(texto)}%"
             query = query.filter(
-                Inventario.cod_producto.ilike(like, escape="\\") | Inventario.nombre_producto.ilike(like, escape="\\")
+                contiene(session, Inventario.cod_producto, like) | contiene(session, Inventario.nombre_producto, like)
             )
         if codigo:
-            query = query.filter(Inventario.cod_producto.ilike(f"%{_escapar_like(codigo)}%", escape="\\"))
+            query = query.filter(contiene(session, Inventario.cod_producto, patron_contiene(codigo)))
         if nombre:
-            query = query.filter(Inventario.nombre_producto.ilike(f"%{_escapar_like(nombre)}%", escape="\\"))
+            query = query.filter(contiene(session, Inventario.nombre_producto, patron_contiene(nombre)))
         if id_categoria:
             query = query.filter(Inventario.id_categoria == id_categoria)
         if solo_con_stock:
             query = query.filter(Inventario.cantidad_unidad > 0)
+        if solo_activos:
+            # En la base y no en Python tras paginar: filtrar despues dejaba paginas con menos productos de los
+            # pedidos (los inactivos ocupaban lugar) y el total/paginas contaba productos que nunca se muestran.
+            query = query.filter(Inventario.estado_producto == "ACTIVO")
 
         return paginar(query, pagina, por_pagina, Inventario.nombre_producto, Inventario.id_producto)
 

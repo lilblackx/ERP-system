@@ -138,3 +138,87 @@ def test_la_celda_de_detalle_trae_el_texto_completo_en_el_tooltip(qtbot):
     celda = panel.tabla.item(0, 4)
 
     assert len(celda.text()) < 100 and largo in celda.toolTip()  # la celda se resume; el tooltip la trae entera
+
+
+# -- La bitacora se consulta en un hilo aparte, sin congelar la ventana ----------------------------------
+
+
+class _WorkerFalso:
+    """Reemplaza a QueryWorker: registra con que se lo creo y no lanza ningun hilo."""
+
+    creados: list = []
+
+    def __init__(self, session_factory, tarea, *args, **kwargs):
+        self.tarea, self.args, self.kwargs = tarea, args, kwargs
+        self.silencioso = False
+        self.resultado, self.error, self.finished = MagicMock(), MagicMock(), MagicMock()
+        _WorkerFalso.creados.append(self)
+
+    def start(self):
+        self.iniciado = True
+
+    def wait(self, _ms):
+        return True
+
+
+def _panel(qtbot, monkeypatch):
+    _WorkerFalso.creados = []
+    monkeypatch.setattr(ap, "QueryWorker", _WorkerFalso)
+    monkeypatch.setattr(ap.QTimer, "singleShot", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(ap.MessageBox, "warning", lambda *a, **k: None)
+    monkeypatch.setattr(ap.MessageBox, "critical", lambda *a, **k: None)
+    panel = ap.AuditoriaPanel(MagicMock(), SimpleNamespace(id_usuario=1))
+    qtbot.addWidget(panel)
+    return panel
+
+
+def test_cargar_eventos_consulta_en_un_hilo_con_los_filtros_y_la_pagina(qtbot, monkeypatch):
+    panel = _panel(qtbot, monkeypatch)
+    panel.buscar_input.setText(" CREAR_CLIENTE ")
+
+    panel.cargar_eventos()
+
+    worker = _WorkerFalso.creados[-1]
+    assert worker.iniciado and worker.tarea is ap._tarea_cargar_eventos
+    assert worker.kwargs["texto_busqueda"] == "CREAR_CLIENTE"
+    assert worker.kwargs["pagina"] == 1 and worker.kwargs["por_pagina"] == ap.POR_PAGINA
+    assert worker.kwargs["id_usuario_actor"] == 1
+    assert worker.silencioso is False
+
+
+def test_la_busqueda_mientras_se_escribe_no_enciende_la_barra_de_carga(qtbot, monkeypatch):
+    panel = _panel(qtbot, monkeypatch)
+
+    panel._buscar_desde_inicio()
+
+    assert _WorkerFalso.creados[-1].silencioso is True
+
+
+def test_una_respuesta_vieja_de_la_bitacora_se_descarta(qtbot, monkeypatch):
+    panel = _panel(qtbot, monkeypatch)
+    pintados = []
+    panel._poblar_tabla = pintados.append
+    panel.cargar_eventos()
+    panel.cargar_eventos()
+
+    panel._on_eventos_cargados({"id_carga": 1, "resultado": "viejo"})
+    panel._on_eventos_cargados({"id_carga": 2, "resultado": "vigente"})
+
+    assert pintados == ["vigente"]
+
+
+def test_sin_permiso_la_tarea_lo_informa_y_el_panel_no_pinta(qtbot, monkeypatch):
+    panel = _panel(qtbot, monkeypatch)
+    pintados = []
+    panel._poblar_tabla = pintados.append
+    panel.cargar_eventos()
+
+    def _sin_permiso(session, **filtros):
+        raise ap.PermisoDenegadoError("auditoria", "ver")
+
+    monkeypatch.setattr(ap.AuditoriaService, "consultar_auditoria", _sin_permiso)
+    respuesta = ap._tarea_cargar_eventos(MagicMock(), panel._id_carga)
+    panel._on_eventos_cargados(respuesta)
+
+    assert respuesta == {"id_carga": panel._id_carga, "sin_permiso": True}
+    assert pintados == []

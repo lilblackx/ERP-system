@@ -207,3 +207,116 @@ def test_consultar_auditoria_paginacion(db_session):
     ids_pagina1 = {e.id_auditoria for e in pagina1["items"]}
     ids_pagina2 = {e.id_auditoria for e in pagina2["items"]}
     assert ids_pagina1.isdisjoint(ids_pagina2)
+
+
+# -- Auditoria de productos: paginada, con conteos de todo el filtro --------------------------------------
+
+
+def _evento_inventario(db_session, accion, id_producto, **extra):
+    detalle = {"id_producto": id_producto, "nombre_producto": extra.pop("nombre", "Aceite"), **extra}
+    return AuditoriaService.registrar_evento(db_session, None, accion, "INVENTARIO", detalle)
+
+
+def test_auditoria_de_producto_no_mezcla_el_12_con_el_123(db_session):
+    _evento_inventario(db_session, "CAMBIO_PRECIO", 12)
+    _evento_inventario(db_session, "CAMBIO_PRECIO", 123)
+    _evento_inventario(db_session, "CAMBIO_PRECIO", 1234)
+
+    resultado = AuditoriaService.consultar_auditoria_producto(db_session, producto_id=12)
+
+    assert resultado["total"] == 1
+    assert '"id_producto": 12,' in resultado["items"][0].detalle
+
+
+def test_auditoria_de_producto_encuentra_las_recepciones_por_su_id_en_texto(db_session):
+    AuditoriaService.registrar_evento(
+        db_session, None, "RECEPCION_MERCANCIA", "INVENTARIO", "Recibido Aceite (ID: 12) cantidad 5"
+    )
+    AuditoriaService.registrar_evento(
+        db_session, None, "RECEPCION_MERCANCIA", "INVENTARIO", "Recibido Harina (ID: 123) cantidad 5"
+    )
+
+    resultado = AuditoriaService.consultar_auditoria_producto(db_session, producto_id=12)
+
+    assert resultado["total"] == 1
+
+
+def test_auditoria_de_producto_pagina_y_cuenta_todo_el_filtro(db_session):
+    for _ in range(7):
+        _evento_inventario(db_session, "CAMBIO_PRECIO", 5)
+    for _ in range(3):
+        _evento_inventario(db_session, "MOVIMIENTO_STOCK", 5)
+
+    p1 = AuditoriaService.consultar_auditoria_producto(db_session, producto_id=5, pagina=1, por_pagina=4)
+    p3 = AuditoriaService.consultar_auditoria_producto(db_session, producto_id=5, pagina=3, por_pagina=4)
+
+    assert (p1["total"], p1["total_paginas"], len(p1["items"])) == (10, 3, 4)
+    assert len(p3["items"]) == 2
+    assert p1["por_accion"] == {"CAMBIO_PRECIO": 7, "MOVIMIENTO_STOCK": 3}  # de todo el filtro, no de la pagina
+    ids = [e.id_auditoria for e in p1["items"]] + [e.id_auditoria for e in p3["items"]]
+    assert len(set(ids)) == len(ids)
+
+
+def test_auditoria_de_producto_filtra_por_accion_y_texto_en_la_base(db_session):
+    _evento_inventario(db_session, "CAMBIO_PRECIO", 5, nombre="Aceite Girasol")
+    _evento_inventario(db_session, "CAMBIO_PRECIO", 6, nombre="Harina")
+    _evento_inventario(db_session, "MOVIMIENTO_STOCK", 5, nombre="Aceite Girasol")
+
+    por_texto = AuditoriaService.consultar_auditoria_producto(db_session, texto="girasol")
+    por_accion = AuditoriaService.consultar_auditoria_producto(db_session, accion="CAMBIO_PRECIO")
+
+    assert por_texto["total"] == 2  # sin distinguir mayusculas
+    assert por_accion["total"] == 2
+
+
+def test_auditoria_de_producto_solo_trae_eventos_de_inventario(db_session):
+    _evento_inventario(db_session, "CAMBIO_PRECIO", 5)
+    AuditoriaService.registrar_evento(db_session, None, "CREAR_CLIENTE", "CLIENTES", {"id_producto": 5})
+
+    assert AuditoriaService.consultar_auditoria_producto(db_session, producto_id=5)["total"] == 1
+
+
+def test_auditoria_de_producto_respeta_el_rango_de_fechas(db_session):
+    evento = _evento_inventario(db_session, "CAMBIO_PRECIO", 5)
+    evento.fecha_evento = datetime.now() - timedelta(days=40)
+    db_session.commit()
+    _evento_inventario(db_session, "CAMBIO_PRECIO", 5)
+
+    reciente = AuditoriaService.consultar_auditoria_producto(
+        db_session, producto_id=5, fecha_desde=datetime.now() - timedelta(days=7)
+    )
+    todo = AuditoriaService.consultar_auditoria_producto(db_session, producto_id=5)
+
+    assert (reciente["total"], todo["total"]) == (1, 2)
+
+
+# -- Bitacora: la busqueda ya no usa comodines del usuario ni un EXISTS por fila ---------------------------
+
+
+def test_la_busqueda_de_la_bitacora_trata_el_guion_bajo_como_texto(db_session):
+    admin = crear_usuario_admin(db_session)
+    AuditoriaService.registrar_evento(db_session, None, "CREAR_CLIENTE", "CLIENTES")
+    AuditoriaService.registrar_evento(db_session, None, "CREARXCLIENTE", "CLIENTES")
+
+    resultado = AuditoriaService.consultar_auditoria(
+        db_session, texto_busqueda="CREAR_CLIENTE", id_usuario_actor=admin.id_usuario
+    )
+
+    assert [e.accion for e in resultado["items"]] == ["CREAR_CLIENTE"]
+
+
+def test_la_busqueda_de_la_bitacora_encuentra_por_nombre_de_usuario_y_no_pierde_eventos_de_sistema(db_session):
+    admin = crear_usuario_admin(db_session)
+    otro = crear_usuario(db_session, nombre_usuario="zeta_unico")
+    AuditoriaService.registrar_evento(db_session, otro.id_usuario, "LOGIN", "AUTH")
+    AuditoriaService.registrar_evento(db_session, None, "ARRANQUE", "SISTEMA")
+
+    por_usuario = AuditoriaService.consultar_auditoria(
+        db_session, texto_busqueda="zeta_unico", id_usuario_actor=admin.id_usuario
+    )
+    por_accion = AuditoriaService.consultar_auditoria(
+        db_session, texto_busqueda="ARRANQUE", id_usuario_actor=admin.id_usuario
+    )
+
+    assert [e.accion for e in por_usuario["items"]] == ["LOGIN"]
+    assert [e.accion for e in por_accion["items"]] == ["ARRANQUE"]

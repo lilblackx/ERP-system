@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     Caja,
@@ -19,6 +19,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
@@ -515,15 +516,21 @@ class CompraService:
         texto_busqueda: str | None = None,
     ) -> dict:
         require_permiso(session, id_usuario, "compras", "ver")
-        query = session.query(Compra)
+        # joinedload: la pestana Facturas muestra proveedor y OC de cada compra; sin esto cada fila disparaba
+        # sus propias consultas al pintarse.
+        query = session.query(Compra).options(joinedload(Compra.proveedor), joinedload(Compra.oc))
         # Numero de compra, numero de OC o proveedor -- filtrado antes de paginar (la UI
         # lo hacia en Python sobre la pagina ya cortada).
         if texto_busqueda:
-            like = f"%{texto_busqueda}%"
-            subq_proveedor = session.query(Proveedor.id_proveedor).filter(Proveedor.nombre_razon_social.ilike(like))
-            subq_oc = session.query(CompraOC.id_oc).filter(CompraOC.numero_oc.ilike(like))
+            like = patron_contiene(texto_busqueda)
+            subq_proveedor = session.query(Proveedor.id_proveedor).filter(
+                contiene(session, Proveedor.nombre_razon_social, like)
+            )
+            subq_oc = session.query(CompraOC.id_oc).filter(contiene(session, CompraOC.numero_oc, like))
             query = query.filter(
-                Compra.numero_compra.ilike(like) | Compra.id_proveedor.in_(subq_proveedor) | Compra.id_oc.in_(subq_oc)
+                contiene(session, Compra.numero_compra, like)
+                | Compra.id_proveedor.in_(subq_proveedor)
+                | Compra.id_oc.in_(subq_oc)
             )
         if id_proveedor:
             query = query.filter(Compra.id_proveedor == id_proveedor)

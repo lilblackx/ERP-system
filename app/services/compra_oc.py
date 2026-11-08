@@ -8,7 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     CompraOC,
@@ -18,6 +18,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
@@ -320,10 +321,16 @@ class CompraOCService:
         las 200 OC mas recientes y filtraban en Python, y una OC pendiente mas vieja no
         aparecia."""
         require_permiso(session, id_usuario, "compras", "ver")
-        query = session.query(CompraOC).join(Proveedor, Proveedor.id_proveedor == CompraOC.id_proveedor)
+        query = (
+            session.query(CompraOC)
+            .join(Proveedor, Proveedor.id_proveedor == CompraOC.id_proveedor)
+            .options(joinedload(CompraOC.proveedor))
+        )
         if texto_busqueda:
-            like = f"%{texto_busqueda}%"
-            query = query.filter(CompraOC.numero_oc.ilike(like) | Proveedor.nombre_razon_social.ilike(like))
+            like = patron_contiene(texto_busqueda)
+            query = query.filter(
+                contiene(session, CompraOC.numero_oc, like) | contiene(session, Proveedor.nombre_razon_social, like)
+            )
         if estado:
             query = query.filter(CompraOC.estado == estado)
         if estados:

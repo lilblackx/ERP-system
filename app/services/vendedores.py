@@ -1,10 +1,11 @@
 from datetime import date
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Cliente, FacturaVenta, Ruta, Vendedor
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
@@ -59,13 +60,13 @@ class VendedorService:
         memoria a medida que crece -- hallazgo de auditoria Vendedores/Clientes,
         2026-08-27."""
         require_permiso(session, id_usuario, "vendedores", "ver")
-        query = session.query(Vendedor)
+        query = session.query(Vendedor).options(joinedload(Vendedor.ruta))
         if texto_busqueda:
-            like = f"%{texto_busqueda}%"
+            like = patron_contiene(texto_busqueda)
             query = query.filter(
-                Vendedor.nombre_vendedor.ilike(like)
-                | Vendedor.identificacion_vendedor.ilike(like)
-                | Vendedor.codigo_vendedor.ilike(like)
+                contiene(session, Vendedor.nombre_vendedor, like)
+                | contiene(session, Vendedor.identificacion_vendedor, like)
+                | contiene(session, Vendedor.codigo_vendedor, like)
             )
         if estado_vendedor:
             query = query.filter(Vendedor.estado_vendedor == estado_vendedor)

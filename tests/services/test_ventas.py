@@ -2836,3 +2836,65 @@ def test_listar_y_obtener_factura_exponen_total_a_cobrar_con_iva(db_session):
 
     assert listado["items"][0].total_a_cobrar == Decimal("116.00")
     assert detalle["factura"].total_a_cobrar == Decimal("116.00")
+
+
+def _emitir_contado(db_session, admin, cliente, vendedor, producto):
+    return VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+
+@pytest.mark.parametrize("tope", [1000, 1])
+def test_la_busqueda_de_facturas_da_lo_mismo_con_ids_resueltos_o_con_subconsulta(db_session, monkeypatch, tope):
+    """Hasta _TOPE_IDS_BUSQUEDA coincidencias se pide la pagina por ids; con mas se deja la subconsulta (un IN
+    grande no cabe en los parametros de SQL Server). El resultado debe ser el mismo por los dos caminos."""
+    import app.services.ventas as ventas
+
+    monkeypatch.setattr(ventas, "_TOPE_IDS_BUSQUEDA", tope)
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "20.00")
+    cliente = crear_cliente(db_session, nombre_razon_social="Comercial Repetida SA")
+    otro = crear_cliente(db_session, nombre_razon_social="Otro Nombre SA")
+    f1 = _emitir_contado(db_session, admin, cliente, vendedor, producto)
+    f2 = _emitir_contado(db_session, admin, cliente, vendedor, producto)
+    _emitir_contado(db_session, admin, otro, vendedor, producto)
+
+    resultado = VentaService.listar_facturas(db_session, texto_busqueda="Repetida", id_usuario=admin.id_usuario)
+
+    assert resultado["total"] == 2
+    assert {f.id_factura for f in resultado["items"]} == {f1.id_factura, f2.id_factura}
+    # mas reciente primero, igual que el listado sin busqueda
+    assert [f.id_factura for f in resultado["items"]] == [f2.id_factura, f1.id_factura]
+
+
+def test_la_busqueda_de_facturas_sin_coincidencias_devuelve_vacio_y_pagina_1(db_session):
+    admin = crear_usuario_admin(db_session)
+
+    resultado = VentaService.listar_facturas(db_session, texto_busqueda="NoExiste987", id_usuario=admin.id_usuario)
+
+    assert (resultado["items"], resultado["total"], resultado["pagina"], resultado["total_paginas"]) == ([], 0, 1, 1)
+
+
+def test_la_busqueda_de_facturas_trata_el_guion_bajo_y_el_porcentaje_como_texto(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "20.00")
+    cliente = crear_cliente(db_session, nombre_razon_social="Ferre_Tornillo SA")
+    otro = crear_cliente(db_session, nombre_razon_social="FerreXTornillo SA")
+    f1 = _emitir_contado(db_session, admin, cliente, vendedor, producto)
+    _emitir_contado(db_session, admin, otro, vendedor, producto)
+
+    con_guion = VentaService.listar_facturas(db_session, texto_busqueda="Ferre_Tornillo", id_usuario=admin.id_usuario)
+    con_porcentaje = VentaService.listar_facturas(db_session, texto_busqueda="%", id_usuario=admin.id_usuario)
+
+    assert [f.id_factura for f in con_guion["items"]] == [f1.id_factura]
+    assert con_porcentaje["total"] == 0

@@ -64,6 +64,7 @@ from app.ui.styles import (
     estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonFiltros
+from app.ui.workers import QueryWorker
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +392,15 @@ def datos_de_detalle(evento) -> dict:
     }
 
 
+def _tarea_cargar_eventos(session, id_carga: int, **filtros) -> dict:
+    """Corre en un hilo aparte (QueryWorker): la bitacora es la tabla que mas crece y una busqueda de texto en ella
+    no debe congelar la ventana. `id_carga` vuelve en el resultado para descartar lo que llega fuera de turno."""
+    try:
+        return {"id_carga": id_carga, "resultado": AuditoriaService.consultar_auditoria(session, **filtros)}
+    except PermisoDenegadoError:
+        return {"id_carga": id_carga, "sin_permiso": True}
+
+
 class AuditoriaPanel(MixinPaginacion, QWidget):
     """Panel principal del modulo Auditoria: listado filtrable y paginado de
     AuditoriaService.consultar_auditoria(), gateado con el permiso 'auditoria'/'ver'."""
@@ -400,6 +410,8 @@ class AuditoriaPanel(MixinPaginacion, QWidget):
         self.session_factory = session_factory
         self.usuario = usuario
         self._eventos_pagina: list[Auditoria] = []
+        self._id_carga = 0
+        self._workers_carga: set[QueryWorker] = set()
         self.setObjectName("ContentArea")
         self._setup_ui()
         QTimer.singleShot(100, self._cargar_usuarios_filtro)
@@ -587,7 +599,7 @@ class AuditoriaPanel(MixinPaginacion, QWidget):
 
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
-        self.cargar_eventos()
+        self.cargar_eventos(silencioso=True)  # busqueda mientras se escribe: no enciende la barra de carga
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
@@ -608,30 +620,46 @@ class AuditoriaPanel(MixinPaginacion, QWidget):
         finally:
             session.close()
 
-    def cargar_eventos(self) -> None:
-        session = self.session_factory()
-        try:
-            fecha_desde = datetime.combine(self.fecha_desde_input.date().toPython(), time.min)
-            fecha_hasta = datetime.combine(self.fecha_hasta_input.date().toPython(), time.max)
-            resultado = AuditoriaService.consultar_auditoria(
-                session,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_usuario=self.usuario_combo.currentData(),
-                modulo=self.modulo_combo.currentData(),
-                texto_busqueda=self.buscar_input.text().strip() or None,
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
-                id_usuario_actor=self.usuario.id_usuario,
-            )
-            self._poblar_tabla(resultado)
-        except PermisoDenegadoError:
+    def cargar_eventos(self, silencioso: bool = False) -> None:
+        """Pide la pagina de eventos en un hilo aparte. Si el usuario sigue cambiando filtros o escribiendo, la
+        respuesta anterior se descarta al llegar (`_id_carga`): solo se pinta la de lo ultimo que se pidio."""
+        self._id_carga += 1
+        worker = QueryWorker(
+            self.session_factory,
+            _tarea_cargar_eventos,
+            self._id_carga,
+            fecha_desde=datetime.combine(self.fecha_desde_input.date().toPython(), time.min),
+            fecha_hasta=datetime.combine(self.fecha_hasta_input.date().toPython(), time.max),
+            id_usuario=self.usuario_combo.currentData(),
+            modulo=self.modulo_combo.currentData(),
+            texto_busqueda=self.buscar_input.text().strip() or None,
+            pagina=self.pagina_actual,
+            por_pagina=POR_PAGINA,
+            id_usuario_actor=self.usuario.id_usuario,
+        )
+        worker.silencioso = silencioso
+        worker.resultado.connect(self._on_eventos_cargados)
+        worker.error.connect(self._on_eventos_error)
+        worker.finished.connect(lambda w=worker: self._workers_carga.discard(w))
+        self._workers_carga.add(worker)  # referencia viva mientras corre (ver workers.py)
+        worker.start()
+
+    def _on_eventos_cargados(self, respuesta: dict) -> None:
+        if respuesta["id_carga"] != self._id_carga:
+            return  # llego tarde: ya se pidio otra pagina
+        if respuesta.get("sin_permiso"):
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar la auditoría.")
-        except Exception:
-            logger.exception("Fallo al cargar la bitácora de auditoría")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la bitácora de auditoría.")
-        finally:
-            session.close()
+            return
+        self._poblar_tabla(respuesta["resultado"])
+
+    def _on_eventos_error(self, mensaje: str) -> None:
+        # QueryWorker ya dejo el detalle en el log.
+        MessageBox.critical(self, "Error de conexión", "No se pudo cargar la bitácora de auditoría.")
+
+    def closeEvent(self, event) -> None:
+        for worker in list(self._workers_carga):
+            worker.wait(2000)  # un hilo vivo al destruirse el panel haria caer el proceso
+        super().closeEvent(event)
 
     def _poblar_tabla(self, resultado: dict) -> None:
         eventos: list[Auditoria] = resultado["items"]

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Banco
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
@@ -39,9 +40,11 @@ class BancoService:
         require_permiso(session, id_usuario, "bancos", "ver")
         query = session.query(Banco)
         if texto_busqueda:
-            like = f"%{texto_busqueda}%"
+            like = patron_contiene(texto_busqueda)
             query = query.filter(
-                Banco.nombre_banco.ilike(like) | Banco.identificacion_banco.ilike(like) | Banco.codigo_banco.ilike(like)
+                contiene(session, Banco.nombre_banco, like)
+                | contiene(session, Banco.identificacion_banco, like)
+                | contiene(session, Banco.codigo_banco, like)
             )
         if estado_banco:
             query = query.filter(Banco.estado_banco == estado_banco)

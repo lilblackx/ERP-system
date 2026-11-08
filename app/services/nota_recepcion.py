@@ -12,7 +12,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     CompraOC,
@@ -25,6 +25,7 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
@@ -296,19 +297,24 @@ class NotaRecepcionService:
         filtraba en Python sobre la pagina ya cortada, y una NR de la pagina 2 nunca
         aparecia al buscarla."""
         require_permiso(session, id_usuario, "compras", "ver")
-        query = session.query(NotaRecepcion)
+        query = session.query(NotaRecepcion).options(
+            joinedload(NotaRecepcion.oc).joinedload(CompraOC.proveedor),
+            joinedload(NotaRecepcion.usuario_recepcion),
+        )
         if id_oc:
             query = query.filter(NotaRecepcion.id_oc == id_oc)
         if estado:
             query = query.filter(NotaRecepcion.estado == estado)
         if texto_busqueda:
-            like = f"%{texto_busqueda}%"
+            like = patron_contiene(texto_busqueda)
             subq_oc = (
                 session.query(CompraOC.id_oc)
                 .join(Proveedor, Proveedor.id_proveedor == CompraOC.id_proveedor)
-                .filter(CompraOC.numero_oc.ilike(like) | Proveedor.nombre_razon_social.ilike(like))
+                .filter(
+                    contiene(session, CompraOC.numero_oc, like) | contiene(session, Proveedor.nombre_razon_social, like)
+                )
             )
-            query = query.filter(NotaRecepcion.numero_nr.ilike(like) | NotaRecepcion.id_oc.in_(subq_oc))
+            query = query.filter(contiene(session, NotaRecepcion.numero_nr, like) | NotaRecepcion.id_oc.in_(subq_oc))
 
         return paginar(query, pagina, por_pagina, NotaRecepcion.fecha_recepcion.desc(), NotaRecepcion.id_nr.desc())
 

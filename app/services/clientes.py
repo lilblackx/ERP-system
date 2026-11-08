@@ -1,19 +1,15 @@
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Cliente, Vendedor
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene
+from app.services.busqueda_sql import escapar_like as _escapar_like
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
-
-
-def _escapar_like(texto: str) -> str:
-    """Escapa caracteres especiales en búsquedas LIKE: % y _ son wildcards,
-    necesitan escape para búsquedas literales. Sin esto, una búsqueda de '%' devuelve
-    todos los registros, '%_' devuelve cualquier registro con N caracteres, etc."""
-    return texto.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
 
 def _validar_requeridos(datos: dict) -> None:
@@ -86,16 +82,23 @@ def list_clientes(
         # selectores que si necesiten un filtro AND preciso solo por ese campo.
         like = f"%{_escapar_like(texto_busqueda)}%"
         query = query.filter(
-            Cliente.nombre_razon_social.ilike(like, escape="\\")
-            | Cliente.id_legal.ilike(like, escape="\\")
-            | Cliente.codigo_cliente.ilike(like, escape="\\")
-            | Cliente.identificacion_cliente.ilike(like, escape="\\")
-            | Cliente.email.ilike(like, escape="\\")
-            | Cliente.telefono.ilike(like, escape="\\")
+            or_(
+                *(
+                    contiene(session, columna, like)
+                    for columna in (
+                        Cliente.nombre_razon_social,
+                        Cliente.id_legal,
+                        Cliente.codigo_cliente,
+                        Cliente.identificacion_cliente,
+                        Cliente.email,
+                        Cliente.telefono,
+                    )
+                )
+            )
         )
     if identificacion:
         like = f"%{_escapar_like(identificacion)}%"
-        query = query.filter(Cliente.identificacion_cliente.ilike(like, escape="\\"))
+        query = query.filter(contiene(session, Cliente.identificacion_cliente, like))
     if estado_cliente:
         query = query.filter(Cliente.estado_cliente == estado_cliente)
     if id_vendedor:

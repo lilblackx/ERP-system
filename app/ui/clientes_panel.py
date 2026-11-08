@@ -89,6 +89,15 @@ ESTADOS_FILTRO = [
 ]
 
 
+def _tarea_cargar_clientes(session, id_carga: int, **filtros) -> dict:
+    """Corre en un hilo aparte (QueryWorker): el listado de clientes no congela la ventana mientras se escribe en
+    la busqueda. `id_carga` vuelve en el resultado para que el panel descarte lo que llega fuera de turno."""
+    try:
+        return {"id_carga": id_carga, "resultado": list_clientes(session, **filtros)}
+    except PermisoDenegadoError:
+        return {"id_carga": id_carga, "sin_permiso": True}
+
+
 def _filas_clientes_query(session, texto_busqueda, id_usuario, estado_cliente, id_vendedor, id_categoria) -> list[list]:
     resultado = list_clientes(
         session,
@@ -174,6 +183,8 @@ class ClientesPanel(MixinPermisos, MixinPaginacion, QWidget):
         # Guard anti-reentrancia para ver_historial_cliente() -- ver bancos_panel.py para
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
+        self._id_carga = 0
+        self._workers_carga: set[QueryWorker] = set()
         self.setObjectName("ContentArea")
         self._setup_ui()
         # Carga inicial diferida para no bloquear el arranque
@@ -388,31 +399,49 @@ class ClientesPanel(MixinPermisos, MixinPaginacion, QWidget):
 
     def _buscar_desde_inicio(self) -> None:
         self.pagina_actual = 1
-        self.cargar_clientes()
+        self.cargar_clientes(silencioso=True)  # busqueda mientras se escribe: no enciende la barra de carga
 
     # ── Lógica de datos ───────────────────────────────────────────────────
 
-    def cargar_clientes(self) -> None:
-        session = self.session_factory()
-        try:
-            resultado = list_clientes(
-                session,
-                self.buscar_input.text().strip() or None,
-                id_usuario=self.usuario.id_usuario,
-                estado_cliente=self.estado_combo.currentData(),
-                id_vendedor=self.vendedor_combo.currentData(),
-                id_categoria=self.categoria_combo.currentData(),
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
-            )
-            self._poblar_tabla(resultado)
-        except PermisoDenegadoError:
+    def cargar_clientes(self, silencioso: bool = False) -> None:
+        """Pide el listado en un hilo aparte. Si el usuario sigue escribiendo, la consulta anterior se descarta
+        al llegar (`_id_carga`): solo se pinta la respuesta a lo ultimo que se pidio."""
+        self._id_carga = getattr(self, "_id_carga", 0) + 1
+        worker = QueryWorker(
+            self.session_factory,
+            _tarea_cargar_clientes,
+            self._id_carga,
+            texto_busqueda=self.buscar_input.text().strip() or None,
+            id_usuario=self.usuario.id_usuario,
+            estado_cliente=self.estado_combo.currentData(),
+            id_vendedor=self.vendedor_combo.currentData(),
+            id_categoria=self.categoria_combo.currentData(),
+            pagina=self.pagina_actual,
+            por_pagina=POR_PAGINA,
+        )
+        worker.silencioso = silencioso
+        worker.resultado.connect(self._on_clientes_cargados)
+        worker.error.connect(self._on_clientes_error)
+        worker.finished.connect(lambda w=worker: self._workers_carga.discard(w))
+        self._workers_carga.add(worker)  # referencia viva mientras corre (ver workers.py)
+        worker.start()
+
+    def _on_clientes_cargados(self, respuesta: dict) -> None:
+        if respuesta["id_carga"] != self._id_carga:
+            return  # llego tarde: ya se pidio otro listado
+        if respuesta.get("sin_permiso"):
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar clientes.")
-        except Exception:
-            logger.exception("Fallo al cargar la lista de clientes")
-            MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de clientes.")
-        finally:
-            session.close()
+            return
+        self._poblar_tabla(respuesta["resultado"])
+
+    def _on_clientes_error(self, mensaje: str) -> None:
+        # QueryWorker ya dejo el detalle en el log.
+        MessageBox.critical(self, "Error de conexión", "No se pudo cargar la lista de clientes.")
+
+    def closeEvent(self, event) -> None:
+        for worker in list(self._workers_carga):
+            worker.wait(2000)  # un hilo vivo al destruirse el panel haria caer el proceso
+        super().closeEvent(event)
 
     def _poblar_tabla(self, resultado: dict) -> None:
         clientes: list[Cliente] = resultado["items"]

@@ -31,6 +31,8 @@ from app.db.models import (
     Usuario,
     Vendedor,
 )
+from app.services.busqueda_sql import contiene
+from app.services.busqueda_sql import escapar_like as _escapar_like
 from app.services.tesoreria import _enmascarar_numero_cuenta
 from app.services.usuarios import UsuarioService
 from app.utils.rif import formatear_identificacion
@@ -171,12 +173,6 @@ def normalizar(texto: str) -> str:
     return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn").lower()
 
 
-def _escapar_like(texto: str) -> str:
-    """% y _ son comodines de LIKE: sin escape, buscar '%' devolveria todo (mismo criterio
-    que clientes._escapar_like)."""
-    return texto.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-
-
 def _identificacion(id_legal: str | None, numero: str | None) -> str:
     return formatear_identificacion(id_legal, numero)
 
@@ -251,9 +247,9 @@ class BusquedaGlobalService:
         filas = (
             session.query(Cliente)
             .filter(
-                Cliente.nombre_razon_social.ilike(like, escape="\\")
-                | Cliente.identificacion_cliente.ilike(like, escape="\\")
-                | Cliente.codigo_cliente.ilike(like, escape="\\")
+                contiene(session, Cliente.nombre_razon_social, like)
+                | contiene(session, Cliente.identificacion_cliente, like)
+                | contiene(session, Cliente.codigo_cliente, like)
             )
             .order_by(Cliente.nombre_razon_social)
             .limit(limite)
@@ -275,7 +271,7 @@ class BusquedaGlobalService:
         filas = (
             session.query(Inventario)
             .filter(
-                Inventario.nombre_producto.ilike(like, escape="\\") | Inventario.cod_producto.ilike(like, escape="\\")
+                contiene(session, Inventario.nombre_producto, like) | contiene(session, Inventario.cod_producto, like)
             )
             .order_by(Inventario.nombre_producto)
             .limit(limite)
@@ -291,9 +287,9 @@ class BusquedaGlobalService:
         filas = (
             session.query(Proveedor)
             .filter(
-                Proveedor.nombre_razon_social.ilike(like, escape="\\")
-                | Proveedor.identificacion_proveedor.ilike(like, escape="\\")
-                | Proveedor.codigo_proveedor.ilike(like, escape="\\")
+                contiene(session, Proveedor.nombre_razon_social, like)
+                | contiene(session, Proveedor.identificacion_proveedor, like)
+                | contiene(session, Proveedor.codigo_proveedor, like)
             )
             .order_by(Proveedor.nombre_razon_social)
             .limit(limite)
@@ -315,7 +311,7 @@ class BusquedaGlobalService:
         filas = (
             session.query(FacturaVenta)
             .options(joinedload(FacturaVenta.cliente))
-            .filter(FacturaVenta.numero_factura.ilike(like, escape="\\"))
+            .filter(contiene(session, FacturaVenta.numero_factura, like))
             .order_by(FacturaVenta.fecha_emision.desc())
             .limit(limite)
             .all()
@@ -336,9 +332,9 @@ class BusquedaGlobalService:
         filas = (
             session.query(Vendedor)
             .filter(
-                Vendedor.nombre_vendedor.ilike(like, escape="\\")
-                | Vendedor.identificacion_vendedor.ilike(like, escape="\\")
-                | Vendedor.codigo_vendedor.ilike(like, escape="\\")
+                contiene(session, Vendedor.nombre_vendedor, like)
+                | contiene(session, Vendedor.identificacion_vendedor, like)
+                | contiene(session, Vendedor.codigo_vendedor, like)
             )
             .order_by(Vendedor.nombre_vendedor)
             .limit(limite)
@@ -362,7 +358,7 @@ class BusquedaGlobalService:
             .options(joinedload(Compra.proveedor))
             .join(Proveedor, Compra.id_proveedor == Proveedor.id_proveedor)
             .filter(
-                Compra.numero_compra.ilike(like, escape="\\") | Proveedor.nombre_razon_social.ilike(like, escape="\\")
+                contiene(session, Compra.numero_compra, like) | contiene(session, Proveedor.nombre_razon_social, like)
             )
             .order_by(Compra.fecha_emision.desc())
             .limit(limite)
@@ -389,8 +385,8 @@ class BusquedaGlobalService:
             .join(Cliente, FacturaVenta.id_cliente_factura == Cliente.id_cliente)
             .filter(
                 CuentaPorCobrar.estado.in_(CUENTA_ABIERTA),
-                FacturaVenta.numero_factura.ilike(like, escape="\\")
-                | Cliente.nombre_razon_social.ilike(like, escape="\\"),
+                contiene(session, FacturaVenta.numero_factura, like)
+                | contiene(session, Cliente.nombre_razon_social, like),
             )
             .order_by(CuentaPorCobrar.fecha_vencimiento)
             .limit(limite)
@@ -420,7 +416,7 @@ class BusquedaGlobalService:
             .join(Proveedor, Compra.id_proveedor == Proveedor.id_proveedor)
             .filter(
                 CuentaPorPagar.estado.in_(CUENTA_ABIERTA),
-                Compra.numero_compra.ilike(like, escape="\\") | Proveedor.nombre_razon_social.ilike(like, escape="\\"),
+                contiene(session, Compra.numero_compra, like) | contiene(session, Proveedor.nombre_razon_social, like),
             )
             .order_by(CuentaPorPagar.fecha_vencimiento)
             .limit(limite)
@@ -445,7 +441,7 @@ class BusquedaGlobalService:
     def _bancos(session: Session, like: str, limite: int) -> list[ResultadoBusqueda]:
         filas = (
             session.query(Banco)
-            .filter(Banco.nombre_banco.ilike(like, escape="\\") | Banco.codigo_banco.ilike(like, escape="\\"))
+            .filter(contiene(session, Banco.nombre_banco, like) | contiene(session, Banco.codigo_banco, like))
             .order_by(Banco.nombre_banco)
             .limit(limite)
             .all()
@@ -463,7 +459,7 @@ class BusquedaGlobalService:
             .options(joinedload(CuentaBancaria.banco))
             .join(Banco, CuentaBancaria.id_banco == Banco.id_banco)
             .filter(
-                CuentaBancaria.nombre_titular.ilike(like, escape="\\") | Banco.nombre_banco.ilike(like, escape="\\")
+                contiene(session, CuentaBancaria.nombre_titular, like) | contiene(session, Banco.nombre_banco, like)
             )
             .order_by(Banco.nombre_banco)
             .limit(limite)
@@ -484,7 +480,7 @@ class BusquedaGlobalService:
     def _cajas(session: Session, like: str, limite: int) -> list[ResultadoBusqueda]:
         filas = (
             session.query(Caja)
-            .filter(Caja.nombre_caja.ilike(like, escape="\\"))
+            .filter(contiene(session, Caja.nombre_caja, like))
             .order_by(Caja.nombre_caja)
             .limit(limite)
             .all()
@@ -499,9 +495,9 @@ class BusquedaGlobalService:
         filas = (
             session.query(Usuario)
             .filter(
-                Usuario.nombre_usuario.ilike(like, escape="\\")
-                | Usuario.nombre.ilike(like, escape="\\")
-                | Usuario.apellido.ilike(like, escape="\\")
+                contiene(session, Usuario.nombre_usuario, like)
+                | contiene(session, Usuario.nombre, like)
+                | contiene(session, Usuario.apellido, like)
             )
             .order_by(Usuario.nombre_usuario)
             .limit(limite)

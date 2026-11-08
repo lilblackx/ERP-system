@@ -2,10 +2,10 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, time
 
 import qtawesome as qta
-from PySide6.QtCore import QDate, QSize, Qt
+from PySide6.QtCore import QDate, QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -21,13 +21,14 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.db.models import Auditoria, Usuario
+from app.db.models import Usuario
+from app.services.auditoria import AuditoriaService
 from app.ui.auditoria_detalle_dialog import DetalleAuditoriaDialog
 from app.ui.auditoria_detalle_dialog import filas_de_cambios as _filas_de_cambios
 from app.ui.message_box import MessageBox
+from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.pantalla import ajustar_tamano
 from app.ui.styles import (
     COLOR_BLUE_LIGHTER,
@@ -75,7 +76,11 @@ def filas_de_cambios(detalle: str | None) -> list[tuple[str, str, str]]:
     return _filas_de_cambios(detalle, _etiqueta_campo)
 
 
-class ProductoAuditoriaDialog(QDialog):
+POR_PAGINA = 50
+PAUSA_FILTRO_MS = 300  # espera tras la ultima tecla antes de consultar
+
+
+class ProductoAuditoriaDialog(MixinPaginacion, QDialog):
     """Diálogo para ver el historial de auditoría de un producto."""
 
     def __init__(
@@ -196,7 +201,7 @@ class ProductoAuditoriaDialog(QDialog):
         self.nombre_input.setStyleSheet(SEARCH_QSS)
         self.nombre_input.setFixedHeight(34)
         self.nombre_input.setMinimumWidth(180)
-        self.nombre_input.textChanged.connect(self._aplicar_filtros)
+        self.nombre_input.textChanged.connect(self._filtrar_con_pausa)
 
         self.fecha_inicio = QDateEdit()
         estilizar_campo_fecha(self.fecha_inicio)
@@ -324,6 +329,10 @@ class ProductoAuditoriaDialog(QDialog):
         btn_detalle.clicked.connect(self._ver_detalle)
         h.addWidget(btn_detalle)
         h.addStretch()
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self._cargar_datos())
+        h.addWidget(self.paginacion)
+        h.addStretch()
         btn_cerrar = QPushButton("Cerrar")
         btn_cerrar.setIcon(qta.icon("fa5s.times", color=COLOR_PRIMARY))
         btn_cerrar.setObjectName("BtnSecondary")
@@ -334,63 +343,22 @@ class ProductoAuditoriaDialog(QDialog):
         return h
 
     def _cargar_datos(self):
-        """Carga los datos de auditoría desde la base de datos."""
+        """Carga UNA pagina de la auditoria con los filtros actuales (la paginacion y el filtro por nombre se
+        resuelven en la base: antes se traia toda la historia del rango y se filtraba en Python)."""
         try:
-            query = self.session.query(Auditoria).filter(Auditoria.modulo == "INVENTARIO")
-
-            # Filtrar por producto específico si se proporcionó
-            if self.producto_id:
-                # Buscar tanto en formato JSON como en texto plano (RECEPCION_MERCANCIA).
-                # No se filtra por "id_detalle: N": ese formato (trigger de 0080, ya
-                # eliminado en 0084) guardaba el id de la linea de NR, no el del producto.
-                query = query.filter(
-                    or_(
-                        Auditoria.detalle.like(f'%"id_producto": {self.producto_id}%'),
-                        Auditoria.detalle.like(f"%(ID: {self.producto_id})%"),
-                    )
-                )
-
-            # Aplicar filtros actuales
-            accion = self.accion_combo.currentData()
-            if accion:
-                query = query.filter(Auditoria.accion == accion)
-
-            # Convertir QDate a datetime.date usando métodos directos
-            from datetime import date
-
-            fecha_inicio = date(
-                self.fecha_inicio.date().year(),
-                self.fecha_inicio.date().month(),
-                self.fecha_inicio.date().day(),
+            resultado = AuditoriaService.consultar_auditoria_producto(
+                self.session,
+                producto_id=self.producto_id,
+                accion=self.accion_combo.currentData(),
+                texto=self.nombre_input.text().strip() or None,
+                fecha_desde=datetime.combine(self.fecha_inicio.date().toPython(), time.min),
+                fecha_hasta=datetime.combine(self.fecha_fin.date().toPython(), time.max),
+                pagina=self.pagina_actual,
+                por_pagina=POR_PAGINA,
             )
-            fecha_fin = date(
-                self.fecha_fin.date().year(),
-                self.fecha_fin.date().month(),
-                self.fecha_fin.date().day(),
-            )
-            query = query.filter(
-                Auditoria.fecha_evento >= datetime.combine(fecha_inicio, datetime.min.time()),
-                Auditoria.fecha_evento <= datetime.combine(fecha_fin, datetime.max.time()),
-            )
-
-            # Ordenar por fecha descendente
-            query = query.order_by(Auditoria.fecha_evento.desc())
-
-            resultados = query.all()
-
-            # Aplicar filtro por nombre de producto (client-side filtering)
-            nombre_filtro = self.nombre_input.text().strip()
-            if nombre_filtro:
-                resultados_filtrados = []
-                for aud in resultados:
-                    nombre_producto = self._extraer_nombre_producto(aud.detalle)
-                    if nombre_producto and nombre_filtro.lower() in nombre_producto.lower():
-                        resultados_filtrados.append(aud)
-                resultados = resultados_filtrados
-
-            self._poblar_tabla(resultados)
-            self._actualizar_resumen(resultados)
-
+            self._poblar_tabla(resultado["items"])
+            self._actualizar_resumen(resultado["por_accion"], resultado["total"])
+            self.paginacion.actualizar_desde(resultado)
         except Exception as e:
             logger.exception("Error al cargar datos de auditoría")
             MessageBox.critical(self, "Error", f"No se pudieron cargar los datos de auditoría: {str(e)}")
@@ -759,26 +727,19 @@ class ProductoAuditoriaDialog(QDialog):
 
         return None
 
-    def _actualizar_resumen(self, resultados):
-        """Actualiza el resumen de estadísticas."""
-        total = len(resultados)
-        cambios_precio = sum(1 for r in resultados if r.accion == "CAMBIO_PRECIO")
-        movimientos_stock = sum(1 for r in resultados if r.accion == "MOVIMIENTO_STOCK")
-        recepciones_mercancia = sum(1 for r in resultados if r.accion == "RECEPCION_MERCANCIA")
-        cambios_descripcion = sum(1 for r in resultados if r.accion == "CAMBIO_DESCRIPCION")
-        cambios_nombre = sum(1 for r in resultados if r.accion == "CAMBIO_NOMBRE")
-        cambios_estado = sum(1 for r in resultados if r.accion == "CAMBIAR_ESTADO_PRODUCTO")
-        ediciones = sum(1 for r in resultados if r.accion == "ACTUALIZAR_PRODUCTO")
-        creaciones = sum(1 for r in resultados if r.accion == "CREAR_PRODUCTO")
-
+    def _actualizar_resumen(self, por_accion: dict, total: int):
+        """Estadisticas de TODO lo que cumple los filtros (no solo de la pagina visible)."""
         self.lbl_total_registros.setText(f"Total registros: {total}")
-        self.lbl_cambios_precio.setText(f"Cambios de precio: {cambios_precio}")
-        self.lbl_movimientos_stock.setText(f"Movimientos de stock: {movimientos_stock}")
-        resumen_texto = (
-            f"Recepciones: {recepciones_mercancia} | Descripción: {cambios_descripcion} | Nombre: {cambios_nombre} | "
-            f"Estado: {cambios_estado} | Ediciones: {ediciones} | Creaciones: {creaciones}"
+        self.lbl_cambios_precio.setText(f"Cambios de precio: {por_accion.get('CAMBIO_PRECIO', 0)}")
+        self.lbl_movimientos_stock.setText(f"Movimientos de stock: {por_accion.get('MOVIMIENTO_STOCK', 0)}")
+        self.lbl_ediciones.setText(
+            f"Recepciones: {por_accion.get('RECEPCION_MERCANCIA', 0)} | "
+            f"Descripción: {por_accion.get('CAMBIO_DESCRIPCION', 0)} | "
+            f"Nombre: {por_accion.get('CAMBIO_NOMBRE', 0)} | "
+            f"Estado: {por_accion.get('CAMBIAR_ESTADO_PRODUCTO', 0)} | "
+            f"Ediciones: {por_accion.get('ACTUALIZAR_PRODUCTO', 0)} | "
+            f"Creaciones: {por_accion.get('CREAR_PRODUCTO', 0)}"
         )
-        self.lbl_ediciones.setText(resumen_texto)
 
     def _datos_de_detalle(self, aud) -> dict:
         """Todo lo que muestra la ventana de detalle de un registro de auditoria."""
@@ -807,8 +768,17 @@ class ProductoAuditoriaDialog(QDialog):
         DetalleAuditoriaDialog(self._datos_de_detalle(self._resultados[fila]), parent=self).exec()
 
     def _aplicar_filtros(self):
-        """Aplica los filtros seleccionados y recarga los datos."""
+        """Aplica los filtros seleccionados y recarga los datos desde la pagina 1."""
+        self.pagina_actual = 1
         self._cargar_datos()
+
+    def _filtrar_con_pausa(self):
+        """Filtro por nombre mientras se escribe: una consulta por pausa, no una por tecla."""
+        if not hasattr(self, "_timer_filtro"):
+            self._timer_filtro = QTimer(self)
+            self._timer_filtro.setSingleShot(True)
+            self._timer_filtro.timeout.connect(self._aplicar_filtros)
+        self._timer_filtro.start(PAUSA_FILTRO_MS)
 
     @staticmethod
     def _fecha_desde_defecto() -> QDate:
@@ -819,8 +789,13 @@ class ProductoAuditoriaDialog(QDialog):
 
     def _limpiar_filtros(self):
         """Limpia todos los filtros y recarga los datos."""
+        # Sin señales: cada cambio dispararia su propia consulta y aqui se necesita una sola.
+        bloqueos = [
+            QSignalBlocker(w) for w in (self.accion_combo, self.nombre_input, self.fecha_inicio, self.fecha_fin)
+        ]
         self.accion_combo.setCurrentIndex(0)
         self.nombre_input.clear()
         self.fecha_inicio.setDate(self._fecha_desde_defecto())
         self.fecha_fin.setDate(QDate.currentDate())
-        self._cargar_datos()
+        del bloqueos
+        self._aplicar_filtros()

@@ -67,10 +67,21 @@ def paginar(query, pagina: Any, por_pagina: Any, *orden) -> dict:
         raise ValueError("paginar() exige un orden con desempate (termina en la clave primaria)")
     pagina, por_pagina = normalizar_paginacion(pagina, por_pagina)
 
-    total = query.order_by(None).count()
-    pagina = min(pagina, total_paginas(total, por_pagina))
+    def _pagina(numero: int) -> list:
+        return query.order_by(*orden).offset((numero - 1) * por_pagina).limit(por_pagina).all()
 
-    items = query.order_by(*orden).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+    items = _pagina(pagina)
+    desplazamiento = (pagina - 1) * por_pagina
+    # Una pagina a medias (o la primera, vacia) ya dice cuantas filas hay: el COUNT(*) seria otro recorrido
+    # completo de la consulta -- en una busqueda con pocos resultados es casi la mitad del tiempo.
+    if 0 < len(items) < por_pagina or (not items and pagina == 1):
+        return _resultado(items, desplazamiento + len(items), pagina, por_pagina)
+
+    total = query.order_by(None).count()
+    ultima = total_paginas(total, por_pagina)
+    if pagina > ultima:  # pagina vacia pasada la ultima: se lleva a la ultima
+        pagina = ultima
+        items = _pagina(pagina)
     return _resultado(items, total, pagina, por_pagina)
 
 

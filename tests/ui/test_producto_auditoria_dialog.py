@@ -12,20 +12,6 @@ from PySide6.QtWidgets import QLabel, QTableWidget, QWidget
 from app.ui.producto_auditoria_dialog import ProductoAuditoriaDialog
 
 
-class _Consulta:
-    def __init__(self, datos):
-        self._datos = datos
-
-    def filter(self, *a, **k):
-        return self
-
-    def order_by(self, *a, **k):
-        return self
-
-    def all(self):
-        return self._datos
-
-
 def _aud(accion, minuto):
     return SimpleNamespace(
         fecha_evento=datetime(2026, 9, 8, 11, minuto),
@@ -36,11 +22,24 @@ def _aud(accion, minuto):
     )
 
 
+def _respuesta(items):
+    return {
+        "items": items,
+        "total": len(items),
+        "pagina": 1,
+        "por_pagina": 50,
+        "total_paginas": 1,
+        "por_accion": {"CAMBIO_PRECIO": 1, "CREAR_PRODUCTO": 1},
+    }
+
+
 @pytest.fixture
-def dialogo(qtbot):
-    session = MagicMock()
-    session.query.return_value = _Consulta([_aud("CAMBIO_PRECIO", 59), _aud("CREAR_PRODUCTO", 40)])
-    d = ProductoAuditoriaDialog(session, MagicMock(), None)
+def dialogo(qtbot, monkeypatch):
+    monkeypatch.setattr(
+        "app.ui.producto_auditoria_dialog.AuditoriaService.consultar_auditoria_producto",
+        lambda session, **kw: _respuesta([_aud("CAMBIO_PRECIO", 59), _aud("CREAR_PRODUCTO", 40)]),
+    )
+    d = ProductoAuditoriaDialog(MagicMock(), MagicMock(), None)
     qtbot.addWidget(d)
     return d
 
@@ -195,3 +194,86 @@ def test_en_la_tabla_de_cambios_los_encabezados_se_alinean_como_sus_celdas(qtbot
         encabezado = d.tabla_cambios.horizontalHeaderItem(col).textAlignment()
         celda = d.tabla_cambios.item(0, col).textAlignment()
         assert encabezado & Qt.AlignmentFlag.AlignLeft and celda & Qt.AlignmentFlag.AlignLeft
+
+
+# -- Paginacion y filtros en la base -------------------------------------------------------------------
+
+
+def test_el_resumen_cuenta_todo_lo_filtrado_no_solo_la_pagina(dialogo, monkeypatch):
+    monkeypatch.setattr(
+        "app.ui.producto_auditoria_dialog.AuditoriaService.consultar_auditoria_producto",
+        lambda session, **kw: {
+            **_respuesta([_aud("CAMBIO_PRECIO", 1)]),
+            "total": 120,
+            "total_paginas": 3,
+            "por_accion": {"CAMBIO_PRECIO": 80, "MOVIMIENTO_STOCK": 40},
+        },
+    )
+
+    dialogo._cargar_datos()
+
+    assert dialogo.table.rowCount() == 1  # solo la pagina
+    assert dialogo.lbl_total_registros.text() == "Total registros: 120"
+    assert dialogo.lbl_cambios_precio.text() == "Cambios de precio: 80"
+    assert dialogo.lbl_movimientos_stock.text() == "Movimientos de stock: 40"
+    assert dialogo.paginacion.total_paginas == 3
+
+
+def test_la_consulta_pide_la_pagina_actual_con_el_tamano_de_pagina(dialogo, monkeypatch):
+    pedidos = []
+
+    def _consulta(session, **kw):
+        pedidos.append(kw)
+        return {**_respuesta([]), "total_paginas": 5}
+
+    monkeypatch.setattr("app.ui.producto_auditoria_dialog.AuditoriaService.consultar_auditoria_producto", _consulta)
+    dialogo.nombre_input.setText("aceite")
+    dialogo._aplicar_filtros()
+    dialogo.paginacion.fijar_pagina(2)
+
+    dialogo._cargar_datos()
+
+    assert pedidos[-1]["pagina"] == 2 and pedidos[-1]["por_pagina"] == 50
+    assert pedidos[-1]["texto"] == "aceite"
+
+
+def test_cambiar_un_filtro_vuelve_a_la_pagina_1(dialogo, monkeypatch):
+    monkeypatch.setattr(
+        "app.ui.producto_auditoria_dialog.AuditoriaService.consultar_auditoria_producto",
+        lambda session, **kw: {**_respuesta([]), "total_paginas": 5, "pagina": kw["pagina"]},
+    )
+    dialogo.paginacion.fijar_pagina(4)
+
+    dialogo._aplicar_filtros()
+
+    assert dialogo.pagina_actual == 1
+
+
+def test_escribir_en_el_filtro_de_nombre_consulta_una_vez_por_pausa(qtbot, dialogo, monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(
+        "app.ui.producto_auditoria_dialog.AuditoriaService.consultar_auditoria_producto",
+        lambda session, **kw: llamadas.append(kw) or _respuesta([]),
+    )
+
+    for letra in "aceite":
+        dialogo.nombre_input.setText(dialogo.nombre_input.text() + letra)
+
+    assert llamadas == []  # ninguna consulta mientras se escribe
+    qtbot.waitUntil(lambda: len(llamadas) == 1, timeout=2000)
+    assert llamadas[0]["texto"] == "aceite"
+
+
+def test_limpiar_filtros_consulta_una_sola_vez(dialogo, monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(
+        "app.ui.producto_auditoria_dialog.AuditoriaService.consultar_auditoria_producto",
+        lambda session, **kw: llamadas.append(kw) or _respuesta([]),
+    )
+    dialogo.nombre_input.blockSignals(True)
+    dialogo.nombre_input.setText("x")
+    dialogo.nombre_input.blockSignals(False)
+
+    dialogo._limpiar_filtros()
+
+    assert len(llamadas) == 1 and llamadas[0]["texto"] is None

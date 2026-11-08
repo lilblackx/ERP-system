@@ -1,9 +1,11 @@
 import json
 from datetime import date, datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Auditoria, Usuario
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.paginacion import paginar
 
 # Modulos que efectivamente llaman a registrar_evento() hoy (grep de `modulo="..."` en
@@ -96,15 +98,70 @@ class AuditoriaService:
             # usuario que no conoce el modelo de datos -- hallazgo del usuario, 2026-08-28).
             # `accion`/`modulo` siguen disponibles arriba para filtros exactos (los combos
             # del panel), esto es un OR parcial case-insensitive sobre accion/modulo/detalle
-            # y el nombre de usuario. `Auditoria.usuario.has(...)` genera un EXISTS
-            # correlacionado -- funciona bien con id_usuario NULL (eventos de sistema) sin
-            # necesitar un JOIN explicito que duplicaria filas.
-            patron = f"%{texto_busqueda}%"
+            # y el nombre de usuario. Los usuarios que coinciden se resuelven UNA vez (tabla chica) y se
+            # compara por id_usuario: un EXISTS correlacionado (`Auditoria.usuario.has(...)`) se evaluaba por
+            # cada fila de la bitacora, que es la tabla que mas crece. id_usuario NULL (eventos de sistema)
+            # simplemente no coincide por esa rama.
+            patron = patron_contiene(texto_busqueda)
+            usuarios_que_coinciden = session.query(Usuario.id_usuario).filter(
+                contiene(session, Usuario.nombre_usuario, patron)
+            )
             query = query.filter(
-                Auditoria.accion.ilike(patron)
-                | Auditoria.modulo.ilike(patron)
-                | Auditoria.detalle.ilike(patron)
-                | Auditoria.usuario.has(Usuario.nombre_usuario.ilike(patron))
+                contiene(session, Auditoria.accion, patron)
+                | contiene(session, Auditoria.modulo, patron)
+                | contiene(session, Auditoria.detalle, patron)
+                | Auditoria.id_usuario.in_(usuarios_que_coinciden)
             )
 
         return paginar(query, pagina, por_pagina, Auditoria.fecha_evento.desc(), Auditoria.id_auditoria.desc())
+
+    @staticmethod
+    def consultar_auditoria_producto(
+        session: Session,
+        producto_id: int | None = None,
+        accion: str | None = None,
+        texto: str | None = None,
+        fecha_desde: date | datetime | None = None,
+        fecha_hasta: date | datetime | None = None,
+        pagina: int = 1,
+        por_pagina: int = 50,
+    ) -> dict:
+        """Eventos de auditoria del modulo INVENTARIO (los que muestra ProductoAuditoriaDialog), paginados, mas
+        `por_accion` con el conteo de TODO lo que cumple los filtros (no solo la pagina) para el resumen. El filtro
+        por producto compara el `"id_producto": N` del detalle con su terminador (`,` o `}`): sin el, buscar el
+        producto 12 traia tambien los eventos del 123. `texto` filtra por coincidencia en el detalle (donde viene el
+        nombre del producto) en la base: antes se traia todo y se filtraba en Python."""
+        query = session.query(Auditoria).filter(Auditoria.modulo == "INVENTARIO")
+        if producto_id:
+            id_producto = int(producto_id)
+            query = query.filter(
+                or_(
+                    Auditoria.detalle.like(f'%"id_producto": {id_producto},%'),
+                    Auditoria.detalle.like(f'%"id_producto": {id_producto}}}%'),
+                    Auditoria.detalle.like(f"%(ID: {id_producto})%"),
+                )
+            )
+        if accion:
+            query = query.filter(Auditoria.accion == accion)
+        if texto:
+            query = query.filter(contiene(session, Auditoria.detalle, patron_contiene(texto)))
+        if fecha_desde:
+            query = query.filter(Auditoria.fecha_evento >= fecha_desde)
+        if fecha_hasta:
+            query = query.filter(Auditoria.fecha_evento <= fecha_hasta)
+
+        conteos = (
+            query.with_entities(Auditoria.accion, func.count(Auditoria.id_auditoria))
+            .group_by(Auditoria.accion)
+            .order_by(None)
+            .all()
+        )
+        resultado = paginar(
+            query.options(joinedload(Auditoria.usuario)),
+            pagina,
+            por_pagina,
+            Auditoria.fecha_evento.desc(),
+            Auditoria.id_auditoria.desc(),
+        )
+        resultado["por_accion"] = {nombre: cantidad for nombre, cantidad in conteos}
+        return resultado

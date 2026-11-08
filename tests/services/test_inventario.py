@@ -560,3 +560,20 @@ def test_crear_y_actualizar_articulo_bcv(db_session):
     ProductoService.actualizar(db_session, producto.id_producto, id_usuario=admin.id_usuario, articulo_bcv=False)
     db_session.refresh(producto)
     assert producto.articulo_bcv is False
+
+
+def test_buscar_solo_activos_filtra_en_la_base_y_no_deja_paginas_incompletas(db_session):
+    admin = crear_usuario_admin(db_session)
+    for i in range(3):
+        crear_producto(db_session, cantidad_unidad=10, nombre_producto=f"Aceite A{i}", estado_producto="INACTIVO")
+    activos = [crear_producto(db_session, cantidad_unidad=10, nombre_producto=f"Aceite B{i}") for i in range(2)]
+
+    todos = ProductoService.buscar(db_session, texto="Aceite", por_pagina=2, id_usuario=admin.id_usuario)
+    solo_activos = ProductoService.buscar(
+        db_session, texto="Aceite", solo_activos=True, por_pagina=2, id_usuario=admin.id_usuario
+    )
+
+    assert todos["total"] == 5
+    # sin el filtro la primera pagina se llena con inactivos; con el, trae justo los activos pedidos
+    assert solo_activos["total"] == 2 and solo_activos["total_paginas"] == 1
+    assert {p.id_producto for p in solo_activos["items"]} == {p.id_producto for p in activos}

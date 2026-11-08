@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, union
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
@@ -25,6 +25,8 @@ from app.db.models import (
     Vendedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.busqueda_sql import escapar_like as _escapar_like
 from app.services.comisiones import ComisionService
 from app.services.db_utils import (
     _es_deadlock,
@@ -41,16 +43,6 @@ from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
-
-
-def _escapar_like(texto: str) -> str:
-    """Escapa caracteres especiales en búsquedas LIKE: % y _ son wildcards,
-    necesitan escape para búsquedas literales. Sin esto, una búsqueda de '%' devuelve
-    todos los registros, '%_' devuelve cualquier registro con N caracteres, etc. Mismo
-    helper (duplicado a proposito, ver clientes.py/inventario.py) usado en
-    listar_facturas() (hallazgo nuevo, auditoria 2026-09-05 -- mismo patron que 1.5 pero
-    en este archivo, no cubierto por el plan original)."""
-    return texto.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
 
 def _numero_factura_temporal() -> str:
@@ -172,6 +164,10 @@ def _convertir_a_usd(monto_moneda_origen: Decimal, moneda: str, tasa: ControlDeT
         tasa_cop = to_decimal(tasa.tasa_cop)
         return (monto_moneda_origen / tasa_cop).quantize(Decimal("0.01"))
     raise ValueError(f"moneda de pago invalida: {moneda}")
+
+
+# Tope de ids que se pasan a un IN (SQL Server rechaza consultas con mas de ~2100 parametros).
+_TOPE_IDS_BUSQUEDA = 1000
 
 
 class VentaService:
@@ -589,6 +585,7 @@ class VentaService:
                     raise ValueError("Cuenta bancaria de vuelto no encontrada")
                 if cuenta_vuelto.estado_cuenta != "ACTIVO":
                     raise ValueError(f"La cuenta bancaria '{cuenta_vuelto.numero_cuenta}' esta inactiva")
+                BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria_vuelto, metodo_vuelto)
                 referencia_vuelto = (referencia_vuelto or "").strip()
                 if len(referencia_vuelto) < 4:
                     raise ValueError(
@@ -1180,11 +1177,11 @@ class VentaService:
         if condicion_pago:
             query = query.filter(FacturaVenta.condicion_pago == condicion_pago)
         if numero_factura:
-            query = query.filter(FacturaVenta.numero_factura.ilike(f"%{_escapar_like(numero_factura)}%", escape="\\"))
+            query = query.filter(contiene(session, FacturaVenta.numero_factura, patron_contiene(numero_factura)))
         if nombre_cliente:
             # Usar subquery para filtrar por nombre de cliente sin afectar los joinedloads
             subq_cliente = session.query(Cliente.id_cliente).filter(
-                Cliente.nombre_razon_social.ilike(f"%{_escapar_like(nombre_cliente)}%", escape="\\")
+                contiene(session, Cliente.nombre_razon_social, patron_contiene(nombre_cliente))
             )
             query = query.filter(FacturaVenta.id_cliente_factura.in_(subq_cliente))
         if texto_busqueda:
@@ -1195,16 +1192,32 @@ class VentaService:
             # aparte para uso programatico/tests que quieran un filtro AND preciso.
             like = f"%{_escapar_like(texto_busqueda)}%"
             subq_cliente_texto = session.query(Cliente.id_cliente).filter(
-                Cliente.nombre_razon_social.ilike(like, escape="\\")
+                contiene(session, Cliente.nombre_razon_social, like)
             )
             subq_vendedor_texto = session.query(Vendedor.id_vendedor).filter(
-                Vendedor.nombre_vendedor.ilike(like, escape="\\")
+                contiene(session, Vendedor.nombre_vendedor, like)
             )
-            query = query.filter(
-                FacturaVenta.numero_factura.ilike(like, escape="\\")
-                | FacturaVenta.id_cliente_factura.in_(subq_cliente_texto)
-                | FacturaVenta.id_vendedor.in_(subq_vendedor_texto)
-            )
+            # Tres consultas simples unidas en vez de un OR entre el numero y dos IN: con el OR SQL Server no puede
+            # usar ningun indice y recorre toda la tabla de facturas (la que mas crece) -- ~0.4 s con 100 mil
+            # facturas. Unidas, cada rama usa el suyo (numero_factura, id_cliente_factura, id_vendedor).
+            coincidencias = union(
+                select(FacturaVenta.id_factura).where(contiene(session, FacturaVenta.numero_factura, like)),
+                select(FacturaVenta.id_factura).where(FacturaVenta.id_cliente_factura.in_(subq_cliente_texto)),
+                select(FacturaVenta.id_factura).where(FacturaVenta.id_vendedor.in_(subq_vendedor_texto)),
+            ).subquery()
+            # Primero se resuelven los ids que coinciden (consulta rapida, ~40 ms con 100 mil facturas) y luego se
+            # pide la pagina con `id_factura IN (...)`. Pasar la union como subconsulta a la consulta ordenada por
+            # fecha hace que SQL Server recorra el indice de fechas evaluando el filtro fila por fila: 0.4 s con
+            # pocas coincidencias y 0.9 s sin ninguna. Con mas coincidencias que el tope (un IN grande no cabe en
+            # los parametros de SQL Server) se usa la subconsulta: ahi la pagina se llena rapido igual.
+            ids_coincidentes = [
+                fila[0]
+                for fila in session.execute(select(coincidencias.c.id_factura).limit(_TOPE_IDS_BUSQUEDA + 1)).all()
+            ]
+            if len(ids_coincidentes) <= _TOPE_IDS_BUSQUEDA:
+                query = query.filter(FacturaVenta.id_factura.in_(ids_coincidentes))
+            else:
+                query = query.filter(FacturaVenta.id_factura.in_(select(coincidencias.c.id_factura)))
 
         hoy = date.today()
         if estado:

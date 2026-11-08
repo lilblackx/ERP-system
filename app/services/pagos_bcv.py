@@ -16,6 +16,7 @@ from app.db.models import (
     PagoCobroBCV,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
@@ -82,6 +83,7 @@ class PagoBCVService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+            BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria, metodo_pago, moneda)
 
         if id_caja is not None:
             caja = session.get(Caja, id_caja)
@@ -168,6 +170,7 @@ class PagoBCVService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' esta inactiva")
+            BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria, metodo_pago, moneda)
         else:
             caja = session.get(Caja, id_caja)
             if caja is None:
@@ -177,6 +180,9 @@ class PagoBCVService:
 
         monto = to_decimal(monto)
         fecha_pago = fecha_pago or datetime.now()
+        if monto_bolivares is None and moneda == "COP" and monto_moneda_origen is not None:
+            # El monto "local" del movimiento (el que lleva el saldo de la cuenta) en un pago en pesos son los pesos.
+            monto_bolivares = monto_moneda_origen
         pago = PagoCobroBCV(
             id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
             id_cuenta_bancaria=id_cuenta_bancaria,
@@ -322,7 +328,7 @@ class PagoBCVService:
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if busqueda:
-            query = query.filter(Cliente.nombre_razon_social.ilike(f"%{busqueda}%"))
+            query = query.filter(contiene(session, Cliente.nombre_razon_social, patron_contiene(busqueda)))
         if estado == "vencida":
             query = query.filter(
                 CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")),
@@ -410,7 +416,7 @@ class PagoBCVService:
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if busqueda:
-            query = query.filter(Cliente.nombre_razon_social.ilike(f"%{busqueda}%"))
+            query = query.filter(contiene(session, Cliente.nombre_razon_social, patron_contiene(busqueda)))
 
         # Filtro por estado
         if estado == "vencida":
@@ -492,6 +498,7 @@ class PagoBCVService:
         id_tasa: int | None = None,
         referencia: str | None = None,
         id_usuario: int | None = None,
+        moneda_pago: str | None = None,
     ) -> dict:
         """Aplica un abono general a un cliente usando el método FIFO (First In, First Out) para cuentas BCV.
 
@@ -542,6 +549,7 @@ class PagoBCVService:
                 raise ValueError("Cuenta bancaria no encontrada")
             if cuenta_bancaria.estado_cuenta != "ACTIVO":
                 raise ValueError(f"La cuenta bancaria '{cuenta_bancaria.numero_cuenta}' está inactiva")
+            BancoService.validar_cuenta_para_pago(session, id_cuenta_bancaria, metodo_pago, moneda_pago)
 
         if id_caja is not None:
             caja = session.get(Caja, id_caja)
@@ -767,5 +775,7 @@ class PagoBCVService:
 
         except Exception as e:
             session.rollback()
+            if _es_deadlock(e):
+                raise  # la UI lo reintenta (reintentar_en_deadlock); envuelto en ValueError nunca lo veia
             logger.error(f"BCV - Error al aplicar abono general: {e}")
             raise ValueError(f"Error al aplicar abono general BCV: {str(e)}") from e

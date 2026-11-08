@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Ruta
 from app.services.auditoria import AuditoriaService
+from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
@@ -76,8 +77,10 @@ class RutaService:
         require_permiso(session, id_usuario, "rutas", "ver")
         query = session.query(Ruta)
         if texto_busqueda:
-            like = f"%{texto_busqueda}%"
-            query = query.filter(Ruta.nombre_ruta.ilike(like) | Ruta.descripcion_ruta.ilike(like))
+            like = patron_contiene(texto_busqueda)
+            query = query.filter(
+                contiene(session, Ruta.nombre_ruta, like) | contiene(session, Ruta.descripcion_ruta, like)
+            )
         if estado_ruta:
             query = query.filter(Ruta.estado_ruta == estado_ruta)
         return paginar(query, pagina, por_pagina, Ruta.nombre_ruta, Ruta.id_ruta)
