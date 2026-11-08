@@ -32,7 +32,7 @@ def panel(qtbot, monkeypatch):
     monkeypatch.setattr(cb.CuentasBancariasPanel, "_cargar_datos", lambda self, *a, **k: None)
     panel = cb.CuentasBancariasPanel(MagicMock(), SimpleNamespace(id_usuario=1))
     qtbot.addWidget(panel)
-    panel._refresh_timer.stop()
+    panel._auto_refresco.timer.stop()
     return panel
 
 
@@ -343,3 +343,50 @@ def test_el_dialogo_de_movimientos_rotula_el_monto_local_segun_la_moneda_de_la_c
     assert dialogo.table.horizontalHeaderItem(3).text() == f"Monto {unidad}"
     assert dialogo.lbl_total_entradas_bs.text() == f"Total Entradas {unidad}: 1,500.00"
     assert dialogo.lbl_total_salidas_bs.text() == f"Total Salidas {unidad}: 250.00"
+
+
+# -- Refresco de saldos cada 30 s: en un hilo y sin perder la cuenta seleccionada ---------------------------------
+
+
+def test_el_refresco_de_saldos_usa_el_auto_refresco_asincrono(panel):
+    assert panel._auto_refresco._asincrono is True
+    assert panel._auto_refresco.timer.interval() == 30_000
+
+
+def test_el_refresco_pide_las_cuentas_en_silencio_y_avisa_al_terminar(qtbot, monkeypatch):
+    pedidos = []
+    monkeypatch.setattr(cb.CuentasBancariasPanel, "_cargar_bancos", lambda self: None)
+    monkeypatch.setattr(cb.CuentasBancariasPanel, "_cargar_datos", lambda self, *a, **k: pedidos.append(k))
+    panel = cb.CuentasBancariasPanel(MagicMock(), SimpleNamespace(id_usuario=1))
+    qtbot.addWidget(panel)
+    panel._auto_refresco.timer.stop()
+    aviso = MagicMock()
+
+    panel._refresco_periodico(aviso)
+
+    assert pedidos[-1] == {"silencioso": True, "al_terminar": aviso}
+
+
+def test_tras_refrescar_los_saldos_sigue_seleccionada_la_misma_cuenta(panel):
+    panel.show()
+    panel._mostrar_cuentas(
+        {"items": [_cuenta(1, "VES"), _cuenta(2, "USD", saldo="10.00")], "total": 2, "pagina": 1, "total_paginas": 1}
+    )
+    panel.table.selectRow(1)  # cuenta 2
+
+    pendientes = []
+    panel._cargar_datos = lambda silencioso=False, sincrono=False, al_terminar=None: pendientes.append(al_terminar)
+    panel._auto_refresco.refrescar()  # lanza la carga y vuelve: la ventana sigue libre
+    # llega la respuesta: entra una cuenta nueva arriba y cambia el saldo de la 2
+    panel._mostrar_cuentas(
+        {
+            "items": [_cuenta(5, "VES"), _cuenta(1, "VES"), _cuenta(2, "USD", saldo="99.00")],
+            "total": 3,
+            "pagina": 1,
+            "total_paginas": 1,
+        }
+    )
+    pendientes[0]()
+
+    fila = panel.table.selectionModel().selectedRows()[0].row()
+    assert panel.table.item(fila, 0).text() == "2" and panel.table.item(fila, 7).text() == "$99.00"

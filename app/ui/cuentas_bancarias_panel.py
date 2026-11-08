@@ -1,7 +1,8 @@
 import logging
+from collections.abc import Callable
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (  # type: ignore
     QAbstractItemView,
     QComboBox,
@@ -27,6 +28,7 @@ from app.services.moneda_cuentas import MONEDAS_CUENTA, etiqueta_moneda, nombre_
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import BancoService, _enmascarar_numero_cuenta
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.auto_refresco import AutoRefresco
 from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
 from app.ui.conciliacion_bancos_dialog import ConciliacionBancosDialog
 from app.ui.cuenta_bancaria_form_dialog import CuentaBancariaFormDialog
@@ -214,10 +216,9 @@ class CuentasBancariasPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion,
         self._cargar_bancos()
         self._cargar_datos()
 
-        # Timer para auto-refresh de saldos (cada 30 segundos)
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.timeout.connect(self._refrescar_saldos)
-        self._refresh_timer.start(30000)
+        # Saldos al dia cada 30 s, en un hilo aparte y sin perder la cuenta seleccionada ni el scroll (ver
+        # app/ui/auto_refresco.py: solo corre si el panel se ve y no hay un dialogo abierto).
+        self._auto_refresco = AutoRefresco(self, self._refresco_periodico, lambda: self.table, 0, asincrono=True)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -404,7 +405,9 @@ class CuentasBancariasPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion,
         finally:
             session.close()
 
-    def _cargar_datos(self, silencioso: bool = False, sincrono: bool = False):
+    def _cargar_datos(
+        self, silencioso: bool = False, sincrono: bool = False, al_terminar: Callable[[], None] | None = None
+    ):
         """Pide las cuentas segun los filtros actuales en un hilo aparte (ver carga_asincrona.py)."""
         self.cargar_async(
             "cuentas",
@@ -414,6 +417,7 @@ class CuentasBancariasPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion,
             texto_sin_permiso="No tienes permiso para consultar cuentas bancarias.",
             silencioso=silencioso,
             sincrono=sincrono,
+            al_terminar=al_terminar,
             texto_busqueda=self._texto_busqueda or None,
             estado_cuenta=self._filtro_estado,
             id_banco=self._filtro_banco,
@@ -430,10 +434,9 @@ class CuentasBancariasPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion,
         self._actualizar_tabla()
         self._actualizar_paginacion()
 
-    def _refrescar_saldos(self) -> None:
-        # Cada 30 s, en segundo plano y solo si el panel se esta viendo: oculto no hay nada que actualizar.
-        if self.isVisible():
-            self._cargar_datos(silencioso=True)
+    def _refresco_periodico(self, al_terminar: Callable[[], None]) -> None:
+        # `al_terminar` vuelve a seleccionar la fila (por id) cuando la tabla ya se repueblo.
+        self._cargar_datos(silencioso=True, al_terminar=al_terminar)
 
     def _actualizar_tabla(self):
         """Actualiza la tabla con las cuentas cargadas."""
@@ -838,5 +841,5 @@ class CuentasBancariasPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion,
 
     def closeEvent(self, event):
         """Detiene el timer de auto-refresh cuando se cierra el panel."""
-        self._refresh_timer.stop()
+        self._auto_refresco.timer.stop()
         super().closeEvent(event)
