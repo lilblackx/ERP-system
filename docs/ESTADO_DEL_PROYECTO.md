@@ -1290,6 +1290,203 @@ de servicio.
   configurable (`dias_horizonte`, default 30) y categoria opcional, devuelve dias
   restantes por fila. UI en `reportes_panel.py` (nuevo tipo de reporte, filtros de dias
   horizonte + categoria, export incluido).
+- **Auditoria del modulo de reportes y su exportacion** (2026-11-07, `reportes.py`, `reportes_panel.py`,
+  `exportacion.py`). Decisiones que no se deducen del codigo:
+  - **Aging / morosos con corte pasado** (`_cuentas_al_corte`): el saldo de una cuenta es el de hoy, asi
+    que para un corte anterior se reconstruye sumando los pagos (`pagos_cobros`, `pagos_cobros_bcv`,
+    `pagos_proveedores`) y las notas de credito aplicadas posteriores al corte, y solo entran facturas
+    emitidas hasta esa fecha. Las aplicaciones de nota de credito no tienen tabla propia: se leen de
+    `Auditoria` (`APLICACION_NOTA_CREDITO_CLIENTE`). Cuentas con saldo 0 no se listan (la cuenta normal de
+    una factura BCV queda en 0 por diseno).
+  - **BCV** entra en estado de cuenta del cliente, cobros del periodo (columna `cartera`) y clientes
+    morosos. El cargo de una factura BCV va por su cuenta BCV, no por la normal.
+  - **Kardex**: `saldo_apertura` = stock actual - suma de todos los movimientos reconstruidos (carga inicial
+    y ajustes manuales, que no dejan movimiento). Hace que el saldo final cuadre con el inventario.
+  - **Facturas anuladas** se filtra por fecha de ANULACION (evento de auditoria), no de emision.
+  - **Libro de Ventas**: lista las anuladas (montos en 0, fuera de totales), separa exento de base
+    imponible, y agrega tasa BCV de la factura y total en Bs. Las notas de credito NO restan del IVA: las
+    unicas que existen nacen de anular una factura (que ya cuenta en 0) o de un sobreabono (no es una venta).
+  - **Exportacion**: Excel lleva periodo/filtros/totales (`filtros=`) y anchos ajustados; ambos aceptan
+    `secciones=` (tablas extra, p.ej. NC del Libro de Ventas); el PDF acepta `apaisado=` y siempre iguala
+    columnas/encabezados/anchos para que una tabla no se desborde de la hoja. Los filtros impresos son los
+    de los combos al momento de generar (`_combos_snapshot`), no los actuales.
+  - **Bultos y unidades en los reportes de venta** (2026-11-08). `costo_producto` es el costo de UNA unidad
+    (decision del usuario). Valorizacion ya multiplicaba por `cantidad_unidad` (correcta); el Margen de
+    utilidad ahora pasa las lineas `tipo_venta='bulto'` a unidades con `cantidad_caja` antes de multiplicar el
+    costo. "Productos mas vendidos", "Margen de utilidad" y "Ventas a clientes por producto" ya no suman bultos
+    con unidades: llevan columnas `bultos` y `unidades` separadas (pantalla, Excel/CSV y PDF); las lineas viejas
+    sin `tipo_venta` cuentan como unidades. Compras y Kardex no se tocan: las compras entran siempre en unidades.
+- **Exportar un listado paginado lleva TODAS las filas** (2026-11-08). Cuentas por Cobrar, Cuentas por Pagar y las
+  tres pestanas de Compras (ODC, recepciones, facturas) exportaban lo que decia la tabla: solo la pagina visible
+  (20 filas). Ahora `app/ui/exportacion_completa.py` (`ExportacionCompletaMixin`) lanza un `QueryWorker` que vuelve
+  a pedir el listado con los mismos filtros y `por_pagina=POR_PAGINA_EXPORTACION` y escribe el archivo; cada panel
+  aporta una tarea y una funcion de filas (`filas_exportacion_*`) cuyas celdas son las de la tabla (hay tests que
+  lo comparan). Regla: un export NUNCA lee `QTableWidget`; si agregas un listado paginado, exporta con una tarea.
+  Los demas exports (clientes, inventario, facturas, proveedores, vendedores, cuentas bancarias, BCV, historial,
+  tasas) ya pedian todo; los reportes no paginan.
+- **Revision de consultas** (2026-11-08):
+  - `consultar_permiso()` (`services/permisos.py`): usuario + rol + permiso en UNA consulta (antes 3). Lo usan
+    `require_permiso`, `UsuarioService.verificar_permiso` y `es_admin_en_sesion`: corre en cada accion de la app,
+    asi que con la base en otra red eran 2 esperas de red de menos cada vez. El orden y el texto de los errores
+    no cambian.
+  - Migracion `0099`: indices compuestos `(id_cuenta, fecha_movimiento DESC)` en `banco_movimientos`,
+    `(id_caja, fecha_registro DESC)` en `caja_movimientos` y `(id_cliente_factura, fecha_emision DESC)` en
+    `factura_venta` (reemplazan a los de una sola columna, que quedaban cubiertos) mas los de las claves foraneas
+    que alguna consulta usa (`*_detalle.id_producto` del kardex, `id_factura_origen`/`id_compra_origen` de las
+    notas de credito, `clientes.id_categoria_cliente`, `cuentas_bancarias.id_banco`, `vendedores.id_ruta`). NO se
+    indexaron `creado_por`/`modificado_por` ni las claves de las tablas de pagos: ninguna consulta filtra por
+    ellas y cada indice encarece las escrituras. Para revisar de nuevo: claves foraneas sin indice =
+    `sys.foreign_keys` sin `sys.index_columns` (key_ordinal = 1), y `sys.dm_db_missing_index_details` en una base
+    con carga real.
+  - `listar_cuentas_por_cobrar_por_cliente`: sin filtro de estado ya no trae las cuentas pagadas sin saldo a favor
+    (la mayor parte del historial) y trae factura y cliente en la misma consulta (`contains_eager`): antes era
+    una consulta extra por cuenta.
+  - **Estandar de reportes: lo que AGRUPA se suma en SQL (`GROUP BY`), no en Python.** Ya lo hacen: ventas por
+    periodo / cliente / vendedor / ruta, contado vs credito, productos mas vendidos, margen de utilidad, ventas a
+    clientes por producto, compras por periodo / proveedor / producto, cumplimiento de proveedores, flujo de caja
+    consolidado, conciliacion bancaria y las dos de comisiones. Los reportes que son un LISTADO (libro de ventas,
+    anuladas, estados de cuenta, kardex, cobros/pagos del periodo, aging, morosos) arman una fila por documento
+    porque esa es su salida; ahi solo se vigila que no haya consultas por fila (`joinedload`/una consulta previa).
+    `_periodo_sql()` agrupa por dia o mes; `_TOTAL_FACTURA_SQL` es subtotal - descuento + IVA.
+  - `obtener_historial_cliente`: la cuenta por cobrar de cada factura se trae en UNA consulta (antes una por
+    factura: un cliente con 3 000 facturas tardaba 4,6 s; ahora ~0,2 s). Hay un test que cuenta consultas.
+  - Lecturas pasadas a un hilo aparte: lista de roles y matriz de permisos, y la apertura del detalle de factura
+    (Facturacion, Historial del cliente, Comisiones; `tarea_cargar_factura` en `factura_detalle_dialog.py`; la
+    guarda `_abriendo_dialogo` se suelta siempre porque la tarea devuelve el error como dato).
+  - PDF de reportes: pasado `LIMITE_FILAS_PDF` (20 000) el panel avisa y pide Excel o un rango menor (un PDF
+    tarda ~1,5 ms por fila). El Libro de Ventas de 2 anios (120 000 filas) no es un uso normal: el servicio
+    tarda 9 s y el Excel 23 s; por mes (~5 000 facturas) son 0,4 s y 0,9 s, y el PDF 7,6 s.
+  - Barras de busqueda (30 000 clientes, 15 000 productos, 120 000 facturas; la consulta de cada busqueda, que
+    corre en un hilo aparte tras 300 ms de pausa): Clientes 27-45 ms, Inventario 11-23 ms, Facturacion 36-48 ms,
+    Cuentas por cobrar con texto 40 ms (antes 319: el nombre se filtraba en Python DESPUES de agrupar; ahora en
+    SQL antes de agrupar), busqueda global 100-260 ms (recorre varias tablas).
+  - Consumo de la app (MainWindow real con ventanas, 19 modulos abiertos, base de 120 000 facturas): 65 MB Python +
+    Qt, 164 MB tras importar todo, ~400-440 MB con todos los modulos abiertos; CPU en reposo ~1 % de un nucleo;
+    sin fuga (5 recorridos completos: 438-445 MB estables, hilos y handles constantes); 3 conexiones a la base.
+    Combos de Reportes: `_ModeloLista` (lista (id, texto) sin un objeto por elemento) en vez de
+    `QStandardItemModel`: +74 MB en vez de +109 MB al abrir el modulo. Limites conocidos: abrir Reportes por
+    primera vez congela la ventana ~1,3-2,7 s porque crea los filtros de los 45 reportes de golpe (284 addWidget
+    y 349 setStyleSheet; arreglo futuro = construir cada pagina de filtros al elegir su reporte); los refrescos
+    periodicos de Facturacion/Inventario/Compras son sincronos a proposito (reseleccionan la fila) y dejan huecos
+    de hasta ~0,5 s cada 30 s; un listado de 100 000+ filas en pantalla tarda ~4 s en llenar la tabla.
+  - Medido con 120 000 facturas / 300 000 lineas / 36 000 cuentas por cobrar (antes -> ahora): Cuentas por Cobrar
+    62,5 s -> 0,3 s; productos mas vendidos (2 anios) 8,7 s -> 0,08 s; margen 9,0 s -> 0,07 s; ventas a clientes por
+    producto 26,9 s -> 3,5 s. Los indices de 0099 no cambiaron los tiempos de banco/caja (70 y 16 ms): quedan por
+    ser baratos, pero no fueron la ganancia.
+- **Auditoria de busquedas y rendimiento** (2026-11-07). Medido contra la base de pruebas con 30k-200k filas:
+  - `app/services/busqueda_sql.py` es el unico lugar que arma un LIKE (`patron_contiene` + `contiene`). `ilike`
+    de SQLAlchemy genera `lower(col) LIKE lower(patron)`; con colacion `*_CI_*` (la de por defecto) `contiene`
+    usa `LIKE` directo (~30 % menos tiempo, mas en columnas largas). Antes varios servicios no escapaban `%`/`_`.
+  - `paginar()` pide primero la pagina y solo cuenta (`COUNT(*)`) si la pagina esta llena o vacia mas alla de la
+    primera: una busqueda con pocos resultados ya no recorre la consulta dos veces.
+  - `listar_facturas` con `texto_busqueda`: tres ramas unidas (numero / cliente / vendedor) y los ids se
+    resuelven ANTES de pedir la pagina. Con `ORDER BY fecha_emision DESC` + el filtro dentro, SQL Server recorre
+    el indice de fechas evaluando el filtro fila por fila (0.4-0.9 s con 100k facturas; ahora ~30-40 ms).
+    Se intento lo mismo en la bitacora de auditoria y NO convino (empeora con mas de 1000 coincidencias): su
+    costo es el escaneo del texto de `detalle`, acotado por el rango de fechas del panel (30 dias).
+  - Los paneles de Clientes, Facturacion y Auditoria consultan en un `QueryWorker` con descarte de respuestas
+    viejas (`_id_carga`); la busqueda mientras se escribe es `silencioso`. El refresco periodico de Facturacion
+    sigue sincrono: `AutoRefresco` reselecciona la fila por id justo despues de recargar.
+  - Auditoria de productos: paginada (50) en `AuditoriaService.consultar_auditoria_producto`, con conteos por
+    accion de todo el filtro; el filtro por producto ya no mezcla el 12 con el 123.
+  - Migracion 0095: indices de `factura_venta.id_vendedor`, lineas por producto, `fecha_pago` de pagos y
+    `caja_movimientos.fecha_registro`, y los de `pagos_cobros_bcv` (no tenia ninguno).
+  - Limite que queda: buscar texto dentro del `detalle` de la bitacora de auditoria con ~200k eventos tarda
+    ~0.5-0.7 s (hay que leer ese campo largo). El rango de fechas del panel (30 dias por defecto) lo acota; el
+    panel y el dialogo de auditoria de producto ya van paginados y en hilo aparte.
+  - Descartado tras medir: indice cubriente sobre `clientes` (solo mejora el listado sin filtro y empeora
+    algunas busquedas); el ORM ya envia VARCHAR para columnas `String`, el problema de NVARCHAR solo afecta
+    SQL crudo con `text()` y parametros.
+- **Carga asincrona de listados y caja por estacion** (2026-11-07):
+  - `app/ui/carga_asincrona.py` (`CargaAsincronaMixin`: `cargar_async`, `buscar_con_pausa`) es el mecanismo comun:
+    la consulta corre en un `QueryWorker`, la respuesta vieja se descarta por id de carga y la busqueda mientras
+    se escribe es `silencioso`. `sincrono=True` queda para los refrescos de `AutoRefresco` (inventario, compras,
+    facturacion). Lo usan inventario, proveedores, vendedores, rutas, usuarios, bancos, cuentas bancarias, CxC,
+    CxC BCV, CxP y las tres pestanas de compras. En `tests/ui/conftest.py` el worker se sustituye por uno
+    inmediato (`WorkerInmediato`) para que `panel.cargar_x()` deje la tabla poblada; los tests del camino
+    asincrono (`test_carga_asincrona.py`) usan un worker falso.
+  - Antes CxC, CxC BCV y bancos "debounceaban" mal (`QTimer.singleShot` no se puede cancelar, o ni habia
+    debounce): una consulta por tecla. CxP filtraba la busqueda en Python DESPUES de paginar (total y paginas
+    inconsistentes); ahora `listar_cuentas_por_pagar(texto_busqueda=...)` filtra antes de paginar.
+  - N+1 eliminados con `joinedload`: cuentas por pagar (compra/proveedor/OC), compras, OC, notas de recepcion,
+    vendedores (ruta) y cuentas bancarias (banco). Se pintaban en el hilo de la ventana con una consulta por fila.
+  - Reportes: los catalogos de los combos (8 listas completas, algunas repetidas en 7 combos) se piden en un
+    worker como tuplas `(id, texto)` y los combos del mismo catalogo comparten un `QStandardItemModel`.
+  - Movimientos de una cuenta bancaria: `BancoMovimientoService.listar_paginado` (50 por pagina) con los totales
+    de TODA la cuenta sumados en SQL; antes traia todos los movimientos y consultaba el usuario de cada fila.
+  - Cuentas bancarias: el refresco de saldos cada 30 s corre en segundo plano y solo si el panel esta visible.
+  - **Caja por estacion** (`app/utils/caja_local.py`, QSettings local): `CajaAperturaDialog` guarda la caja que
+    abre la estacion; el gate de Facturacion, el cobro en efectivo (`PagoLineaDialog(solo_caja_estacion=True)`)
+    y el vuelto usan solo esa. Antes, con cualquier caja abierta en otra estacion, el gate no ofrecia abrir la
+    propia. Compras, CxC/CxP y Comisiones siguen listando todas las cajas abiertas.
+    **Al actualizar:** una estacion con el turno de caja abierto desde antes no tiene guardada su caja (el vinculo
+    estacion -> caja nace al abrir turno con `CajaAperturaDialog`): al facturar le pedira abrir caja y no podra
+    elegir la que ya tiene abierta. Hay que cerrar ese turno desde el panel Cajas (ADMIN) y volver a abrirlo desde
+    Facturacion. No se adivina la caja por usuario porque con el mismo usuario en varias estaciones una tomaria la
+    caja de otra.
+  - **Cobros a clientes: una sola fuente del monto** (`app/ui/conversion_bolivares.py`, `ConversionBolivaresMixin`,
+    usado por `PagoCobroDialog`, `AbonoGeneralDialog` y sus equivalentes BCV). Zelle y Binance son metodos en
+    dolares: el monto en $ se escribe (precargado con la deuda) y los Bs son referencia de solo lectura; cambiar
+    la tasa recalcula los Bs, nunca el $. Transferencia y punto de venta: se escribe en Bs y el $ sale de la tasa
+    (solo lectura). Antes todo metodo bancario usaba el segundo modo: al elegir Zelle el $ pasaba a derivarse
+    de unos Bs en 0 y de la tasa. Sin Bs el $ queda vacio (no en 0,01) y se rechaza al aplicar.
+  - **Moneda de la cuenta bancaria** (migraciones 0096 y 0097; `app/services/moneda_cuentas.py`):
+    - `cuentas_bancarias.moneda` es `VES`, `USD` o `COP` (CHECK en la base). Una cuenta solo recibe pagos en su
+      moneda: Zelle/Binance a `USD`, un pago en pesos (`moneda='COP'`, o la tasa COP en los dialogos de cobro) a
+      `COP`, el resto de los metodos bancarios a `VES`. `BancoService.validar_cuenta_para_pago` lo exige en el
+      servidor (cobros, abono general, pago a proveedor, comisiones, devolucion de nota de credito y vuelto); las
+      pantallas solo ofrecen las cuentas de la moneda del pago. El reembolso de nota de credito de proveedor NO
+      valida (su pantalla no tiene metodo de pago).
+    - 0096 deja todas las cuentas en `VES`. **0097 deduce la moneda por el historial** (`pagos_cobros`,
+      `pagos_cobros_bcv`, `pagos_proveedores`, `pagos_comisiones`): si todos los pagos de la cuenta son de la misma
+      moneda, la cuenta queda en ella (aviso `MONEDA_CUENTA_DEDUCIDA` en la auditoria); si hay pagos mezclados NO
+      se adivina, queda en `VES` y deja `MONEDA_CUENTA_REVISAR` para que un ADMIN decida; sin pagos no cambia.
+    - Cambiar la moneda de una cuenta CON movimientos: solo ADMIN y con confirmacion explicita
+      (`confirmar_cambio_moneda=True`, que la pantalla manda tras mostrar `CuentaBancariaService.resumen_uso`:
+      movimientos y pagos por metodo). No toca el historial, solo lo que la cuenta acepta a futuro; queda en la
+      auditoria como `CAMBIAR_MONEDA_CUENTA_BANCARIA`. Sin movimientos se cambia libremente.
+    - **Saldo en pesos** (migracion 0098): `cuentas_bancarias.saldo_total_banco_cop` (DECIMAL(20,2)). El monto
+      "local" de cada movimiento (`banco_movimientos.monto_bolivares`, que con la tasa COP ya llevaba los pesos) va
+      a `saldo_total_banco_cop` si la cuenta es COP y a `saldo_total_banco_bs` si no; `saldo_total_banco` (USD)
+      sigue sumando el equivalente en dolares de cualquier cuenta. `trg_banco_movimientos_saldo` se recreo con ese
+      enrutado por `cuentas_bancarias.moneda`. Un cobro en pesos (`moneda='COP'`) sin `monto_bolivares` usa
+      `monto_moneda_origen` como monto local (`_aplicar_pago_cobro` y su equivalente BCV). La 0098 pasa a su saldo
+      propio los pesos que las cuentas COP ya habian acumulado en `saldo_total_banco_bs`. Nota de nombres: la
+      columna sigue llamandose `monto_bolivares` aunque para una cuenta COP guarde pesos (no se renombro para no
+      tocar los triggers de pagos).
+    - Cambiar una cuenta de VES a COP (o al reves) mueve su saldo local de una columna a la otra
+      (`CuentaBancariaService._reclasificar_saldo_local`); de/hacia USD no mueve nada.
+    - Formulario de cuenta: se muestra solo el saldo inicial de la moneda (VES: Bs, USD: $, COP: pesos). El
+      listado tiene filtro por moneda y la columna "SALDO COP"; cada moneda muestra solo su columna de saldo (VES:
+      MONTO EN BS; USD: SALDO; COP: SALDO COP; Todas: las tres) y la exportacion respeta lo mismo. El dialogo de
+      movimientos de una cuenta COP rotula el monto local como COP.
+  - **Migrado despues** (misma fecha): Cajas (estado de cajas en hilo aparte; el historial de movimientos de una
+    caja pagina de a 50 con los totales del rango sumados en SQL), Comisiones (una sola ruta `_recargar_comisiones`
+    en hilo aparte; el filtro de estado ya no vuelve a consultar), historial de cliente (historial, saldos y notas
+    de credito en una pasada; si falla avisa en vez de dejar la tabla vacia), detalle de CxC y CxC BCV (la consulta
+    corre en un hilo y el dialogo se abre al llegar) y la busqueda de cliente/producto del formulario de factura
+    MIENTRAS SE ESCRIBE (con `session_factory`; ver abajo).
+  - Detalle de CxC/BCV: `sesion_para_dialogo()` crea una sesion que sobrevive a la tarea y viaja en el resultado
+    (`{"session": ...}`); el dialogo la usa para cobrar/refrescar y la cierra al salir. Si la respuesta llega tarde
+    (otro doble clic ya pidio otro detalle) `_recibir_carga` la cierra; si la tarea falla despues de crearla, la
+    cierra la propia tarea. `CargaAsincronaMixin.done()` espera los hilos de un QDialog (accept/reject no pasan por
+    `closeEvent`).
+  - Formulario de factura: solo la busqueda al teclear es asincrona. Enter (cliente/producto), el cliente nuevo y la
+    carga inicial siguen sincronos a proposito: el cajero (o el lector de codigos) espera el resultado en ese
+    instante, y una busqueda sincrona anula la que iba en vuelo (`_cancelar_busqueda_pendiente`) para que no
+    repueble el combo despues. Sin `session_factory` (otros usos, tests) todo sigue en el hilo de la ventana.
+  - **Los dos que quedaban, tambien migrados** (para que toda la app siga el mismo esquema, aunque hoy no haga falta
+    por volumen): el detalle de pagos de Cuentas por pagar y los formularios de producto, usuario y cuenta
+    bancaria. Mismo patron "carga previa": el panel pide en un hilo (`_tarea_form_producto`, `_tarea_form_usuario`,
+    `_tarea_form_cuenta`, `_tarea_detalle_pagos_proveedor`) los catalogos y el registro a editar con una sesion de
+    `sesion_para_dialogo()`, abre el formulario al llegar y cierra la sesion al terminar. Los formularios reciben
+    `precargado={...}` (categorias/precio, roles/vendedores, bancos/tiene_movimientos) y, sin ese argumento,
+    consultan ellos mismos como antes. `categorias=None` en el producto significa "sin permiso
+    'categorias'/'ver'" (el formulario avisa); tras crear una categoria nueva el combo SI se vuelve a consultar.
+    `listar_pagos_proveedor` trae caja y cuenta (con banco) en la misma consulta.
+  - Con esto no queda ningun listado ni formulario que consulte la base en el hilo de la ventana al abrirse, salvo
+    lo que se dejo a proposito sincrono: Enter y carga inicial del formulario de factura, los refrescos de
+    `AutoRefresco`, y las acciones puntuales (guardar, anular, cobrar) que el usuario espera en el acto.
 - **Columna "Cliente" en Comisiones** (2026-09-07/08, `app/services/comisiones.py`,
   `app/ui/comisiones_panel.py`): `listar_comisiones_vendedor()`/`listar_mis_comisiones()`
   ahora hacen eager load `ComisionFactura.detalle -> FacturaDetalle.factura ->
