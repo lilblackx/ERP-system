@@ -457,3 +457,44 @@ def test_anular_factura_bcv_sin_cobros_no_deja_deuda(db_session):
     db_session.refresh(cuenta)
     assert cuenta.estado == "anulada"
     assert cuenta.saldo_pendiente == Decimal("0.00")
+
+
+def test_abono_general_bcv_por_zelle_sin_tasa_aplica_en_dolares_sin_equivalente_en_bolivares(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    _emitir_credito_bcv(db_session, admin, cliente=cliente, precio="100.00")
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"), moneda="USD")
+
+    resultado = PagoBCVService.aplicar_abono_general_cliente_bcv(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("20.00"),
+        tasa_cambio=None,
+        metodo_pago="zelle",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    assert resultado["monto_total_aplicado"] == Decimal("20.00")
+    pago = db_session.query(PagoCobroBCV).one()
+    assert pago.monto_bolivares is None and pago.tasa_cambio is None
+    db_session.refresh(cuenta)
+    assert cuenta.saldo_total_banco == Decimal("20.00") and cuenta.saldo_total_banco_bs == Decimal("0.00")
+
+
+def test_abono_general_bcv_sin_tasa_sigue_siendo_obligatorio_con_transferencia(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    _emitir_credito_bcv(db_session, admin, cliente=cliente, precio="100.00")
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"))
+
+    with pytest.raises(ValueError, match="tasa de cambio debe ser mayor a cero"):
+        PagoBCVService.aplicar_abono_general_cliente_bcv(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_abono=Decimal("20.00"),
+            tasa_cambio=None,
+            metodo_pago="transferencia",
+            id_cuenta_bancaria=cuenta.id_cuenta,
+            id_usuario=admin.id_usuario,
+        )

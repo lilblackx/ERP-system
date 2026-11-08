@@ -10,6 +10,10 @@ moneda:
 El efectivo no usa cuenta bancaria.
 """
 
+from decimal import Decimal
+
+from app.utils.decimal_utils import to_decimal
+
 MONEDA_BS = "VES"
 MONEDA_USD = "USD"
 MONEDA_COP = "COP"
@@ -45,6 +49,20 @@ def nombre_moneda(moneda: str | None) -> str:
 def etiqueta_moneda(moneda: str | None) -> str:
     """Para listas y combos: "Dólares (USD)"."""
     return _ETIQUETAS.get(moneda or MONEDA_BS, str(moneda))
+
+
+def tasa_del_abono(metodo_pago: str | None, tasa_cambio) -> Decimal | None:
+    """Tasa de un abono general ya validada. Zelle y Binance se pagan en dolares, igual que la deuda: la tasa solo da el
+    equivalente en bolivares, asi que es opcional (`None` = sin equivalente en Bs). Con cualquier otro metodo es
+    obligatoria y mayor a cero; una tasa dada (aun con Zelle) tampoco puede ser cero ni negativa."""
+    if tasa_cambio is None:
+        if metodo_pago in METODOS_EN_DOLARES:
+            return None
+        raise ValueError("La tasa de cambio debe ser mayor a cero")
+    tasa = to_decimal(tasa_cambio)
+    if tasa <= 0:
+        raise ValueError("La tasa de cambio debe ser mayor a cero")
+    return tasa
 
 
 def filtrar_cuentas_por_metodo(cuentas, metodo_pago: str | None, moneda_pago: str | None = None) -> list:

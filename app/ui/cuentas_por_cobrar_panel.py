@@ -43,6 +43,7 @@ from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf, valor_para_exportar
 from app.services.moneda_cuentas import (
+    METODOS_EN_DOLARES,
     filtrar_cuentas_por_metodo,
     moneda_pago_por_tasa,
     moneda_para_metodo,
@@ -945,12 +946,17 @@ class AbonoGeneralDialog(ConversionBolivaresMixin, QDialog):
                 id_tasa = self._id_tasa_seleccionada
 
                 if not tasa_cambio or tasa_cambio <= 0:
-                    MessageBox.warning(
-                        self,
-                        "Tasa requerida",
-                        "Para pagos bancarios debe indicar una tasa de cambio válida.",
-                    )
-                    return
+                    if metodo not in METODOS_EN_DOLARES:
+                        MessageBox.warning(
+                            self,
+                            "Tasa requerida",
+                            "Para pagos bancarios debe indicar una tasa de cambio válida.",
+                        )
+                        return
+                    # Zelle y Binance se pagan en dolares, como la deuda: la tasa solo da el equivalente en Bs y es
+                    # opcional. Sin ella el pago se registra igual, sin equivalente en bolivares.
+                    tasa_cambio = None
+                    id_tasa = None
             else:
                 # Para efectivo, usar tasa BCV solo para cálculos internos (no se muestra al usuario)
                 if self.tasa_bcv and self.tasa_bcv > 0:

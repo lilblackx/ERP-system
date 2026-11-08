@@ -1327,3 +1327,121 @@ def test_listar_cuentas_por_cobrar_por_cliente_no_trae_las_ya_pagadas_y_usa_poca
     assert sorted(f["saldo_total"] for f in resultado["items"]) == [Decimal("100.00"), Decimal("120.00")]
     # permiso (1) + listado (1): sin una consulta extra por cuenta
     assert len(consultas) <= 3, consultas
+
+
+# --- Zelle / Binance: la tasa del abono general es opcional -------------------
+
+
+def test_abono_general_por_zelle_sin_tasa_aplica_en_dolares_sin_equivalente_en_bolivares(db_session):
+    from app.db.models import BancoMovimiento, PagoCobro
+
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+    _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"), moneda="USD")
+
+    resultado = PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("60.00"),
+        tasa_cambio=None,
+        metodo_pago="zelle",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    assert resultado["monto_total_aplicado"] == Decimal("60.00")
+    assert resultado["tasa_cambio_utilizada"] is None
+    assert resultado["facturas_actualizadas"][0]["monto_aplicado_bs"] is None
+    assert "Bs" not in resultado["facturas_actualizadas"][0]["descripcion_auditoria"]
+    pago = db_session.query(PagoCobro).one()
+    assert pago.monto == Decimal("60.00") and pago.monto_bolivares is None and pago.tasa_cambio is None
+    movimiento = db_session.query(BancoMovimiento).filter_by(id_cuenta=cuenta.id_cuenta).one()
+    assert movimiento.monto_movimiento == Decimal("60.00") and movimiento.monto_bolivares is None
+    db_session.refresh(cuenta)
+    assert cuenta.saldo_total_banco == Decimal("60.00")
+    assert cuenta.saldo_total_banco_bs == Decimal("0.00")
+
+
+def test_abono_general_por_zelle_con_tasa_sigue_guardando_el_equivalente_en_bolivares(db_session):
+    from app.db.models import PagoCobro
+
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+    _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"), moneda="USD")
+
+    PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("50.00"),
+        tasa_cambio=Decimal("40.00"),
+        metodo_pago="zelle",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    pago = db_session.query(PagoCobro).one()
+    assert pago.monto_bolivares == Decimal("2000.00") and pago.tasa_cambio == Decimal("40.00")
+
+
+def test_abono_general_con_sobreabono_por_binance_sin_tasa_ingresa_el_excedente(db_session):
+    from app.db.models import BancoMovimiento
+
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+    _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"), moneda="USD")
+
+    resultado = PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("130.00"),
+        tasa_cambio=None,
+        metodo_pago="binance",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    assert resultado["es_sobreabono"] is True and resultado["saldo_restante"] == Decimal("30.00")
+    db_session.refresh(cuenta)
+    assert cuenta.saldo_total_banco == Decimal("130.00")  # el dinero entro completo, aunque sobre
+    assert all(m.monto_bolivares is None for m in db_session.query(BancoMovimiento).all())
+
+
+@pytest.mark.parametrize("metodo", ["transferencia", "punto_de_venta", "efectivo"])
+def test_abono_general_sin_tasa_sigue_siendo_obligatorio_fuera_de_zelle_y_binance(db_session, metodo):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+    _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"))
+
+    with pytest.raises(ValueError, match="tasa de cambio debe ser mayor a cero"):
+        PagoService.aplicar_abono_general_cliente(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_abono=Decimal("10.00"),
+            tasa_cambio=None,
+            metodo_pago=metodo,
+            id_cuenta_bancaria=cuenta.id_cuenta,
+            id_usuario=admin.id_usuario,
+        )
+
+
+def test_abono_general_por_zelle_con_tasa_cero_o_negativa_se_rechaza(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("500.00"))
+    _crear_facturas_cliente_cxc(db_session, cliente, admin, [Decimal("100.00")])
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"), moneda="USD")
+
+    for tasa in (Decimal("0"), Decimal("-5")):
+        with pytest.raises(ValueError, match="tasa de cambio debe ser mayor a cero"):
+            PagoService.aplicar_abono_general_cliente(
+                db_session,
+                id_cliente=cliente.id_cliente,
+                monto_abono=Decimal("10.00"),
+                tasa_cambio=tasa,
+                metodo_pago="zelle",
+                id_cuenta_bancaria=cuenta.id_cuenta,
+                id_usuario=admin.id_usuario,
+            )

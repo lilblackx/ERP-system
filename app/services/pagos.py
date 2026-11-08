@@ -25,6 +25,7 @@ from app.services.db_utils import (
     aplicar_lock_timeout,
     traducir_error_trigger,
 )
+from app.services.moneda_cuentas import tasa_del_abono
 from app.services.notas_credito import NotaCreditoService
 from app.services.paginacion import paginar, paginar_lista
 from app.services.permisos import require_permiso
@@ -475,7 +476,7 @@ class PagoService:
         session: Session,
         id_cliente: int,
         monto_abono: Decimal,
-        tasa_cambio: Decimal,
+        tasa_cambio: Decimal | None,
         metodo_pago: str,
         id_cuenta_bancaria: int | None = None,
         id_caja: int | None = None,
@@ -494,7 +495,8 @@ class PagoService:
             session: Sesión de base de datos
             id_cliente: ID del cliente
             monto_abono: Monto total del abono en USD
-            tasa_cambio: Tasa de cambio USD a Bs
+            tasa_cambio: Tasa de cambio USD a Bs. Opcional solo con Zelle/Binance (pagos en dolares): sin ella el
+                pago no guarda equivalente en bolivares
             metodo_pago: Método de pago (efectivo, transferencia, etc.)
             id_cuenta_bancaria: ID de cuenta bancaria (opcional)
             id_caja: ID de caja (opcional)
@@ -521,9 +523,7 @@ class PagoService:
         if monto_abono <= 0:
             raise ValueError("El monto del abono debe ser mayor a cero")
 
-        tasa_cambio = to_decimal(tasa_cambio)
-        if tasa_cambio <= 0:
-            raise ValueError("La tasa de cambio debe ser mayor a cero")
+        tasa_cambio = tasa_del_abono(metodo_pago, tasa_cambio)
 
         if (id_cuenta_bancaria is None) == (id_caja is None):
             raise ValueError("Indique exactamente un origen del pago: cuenta bancaria o caja")
@@ -600,17 +600,23 @@ class PagoService:
                 monto_aplicar = min(monto_restante, saldo_pendiente)
 
                 # Calcular equivalentes en Bs
-                monto_aplicado_bs = (monto_aplicar * tasa_cambio).quantize(Decimal("0.01"))
                 restante_despues = (monto_restante - monto_aplicar).quantize(Decimal("0.01"))
-                restante_bs = (restante_despues * tasa_cambio).quantize(Decimal("0.01"))
+                monto_aplicado_bs = (monto_aplicar * tasa_cambio).quantize(Decimal("0.01")) if tasa_cambio else None
+                restante_bs = (restante_despues * tasa_cambio).quantize(Decimal("0.01")) if tasa_cambio else None
 
                 # Generar descripción de auditoría con formato exacto esperado por tests
-                descripcion_auditoria = (
-                    f"Abono general aplicado: ${monto_aplicar:.2f} / "
-                    f"{monto_aplicado_bs:.2f} Bs. "
-                    f"Tasa: {tasa_cambio:.2f} | "
-                    f"$ Restante por asignar a otras facturas: ${restante_despues:.2f} / {restante_bs:.2f} Bs"
-                )
+                if tasa_cambio:
+                    descripcion_auditoria = (
+                        f"Abono general aplicado: ${monto_aplicar:.2f} / "
+                        f"{monto_aplicado_bs:.2f} Bs. "
+                        f"Tasa: {tasa_cambio:.2f} | "
+                        f"$ Restante por asignar a otras facturas: ${restante_despues:.2f} / {restante_bs:.2f} Bs"
+                    )
+                else:  # pago en dolares sin tasa: no hay equivalente en bolivares
+                    descripcion_auditoria = (
+                        f"Abono general aplicado: ${monto_aplicar:.2f} | "
+                        f"$ Restante por asignar a otras facturas: ${restante_despues:.2f}"
+                    )
 
                 # Crear registro de pago
                 pago = PagoCobro(
@@ -622,7 +628,7 @@ class PagoService:
                     moneda="USD",
                     monto=monto_aplicar,
                     monto_bolivares=monto_aplicado_bs,
-                    tasa_cambio=tasa_cambio.quantize(Decimal("0.01")),
+                    tasa_cambio=tasa_cambio.quantize(Decimal("0.01")) if tasa_cambio else None,
                     referencia=referencia,
                     fecha_pago=datetime.now(),
                     creado_por=id_usuario,
@@ -697,8 +703,10 @@ class PagoService:
                         descripcion=descripcion_sobreabono,
                         id_usuario=id_usuario,
                         fecha=datetime.now(),
-                        monto_bolivares=(saldo_restante * tasa_cambio).quantize(Decimal("0.01")),
-                        tasa_cambio=tasa_cambio.quantize(Decimal("0.01")),
+                        monto_bolivares=(saldo_restante * tasa_cambio).quantize(Decimal("0.01"))
+                        if tasa_cambio
+                        else None,
+                        tasa_cambio=tasa_cambio.quantize(Decimal("0.01")) if tasa_cambio else None,
                         referencia=referencia,
                     )
                 else:
@@ -730,7 +738,7 @@ class PagoService:
                 detalle={
                     "id_cliente": id_cliente,
                     "monto_abono": str(monto_abono),
-                    "tasa_cambio": str(tasa_cambio),
+                    "tasa_cambio": str(tasa_cambio) if tasa_cambio is not None else None,
                     "monto_total_aplicado": str(monto_a_aplicar),
                     "saldo_restante": str(saldo_restante),
                     "es_sobreabono": es_sobreabono,

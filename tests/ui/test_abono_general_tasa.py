@@ -282,3 +282,68 @@ def test_pago_unico_en_transferencia_el_monto_usd_es_derivado_y_solo_hay_cuentas
     assert pago_unico.monto_input.isReadOnly()
     assert not pago_unico.bolivares_input.isReadOnly()
     assert _origenes(pago_unico) == [1]
+
+
+# -- La tasa es opcional con Zelle/Binance ------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def servicio(monkeypatch):
+    """Sustituye al servicio de abono (CxC y BCV) y recoge con que argumentos lo llama el dialogo."""
+    llamadas, avisos = [], []
+
+    def falso(*args, **kwargs):
+        llamadas.append(kwargs)
+        return {
+            "facturas_actualizadas": [],
+            "monto_total_aplicado": Decimal("10.00"),
+            "saldo_restante": Decimal("0.00"),
+            "es_sobreabono": False,
+        }
+
+    monkeypatch.setattr(cxc.PagoService, "aplicar_abono_general_cliente", staticmethod(falso))
+    monkeypatch.setattr(bcv.PagoBCVService, "aplicar_abono_general_cliente_bcv", staticmethod(falso))
+    monkeypatch.setattr(cxc.MessageBox, "warning", lambda *a, **k: avisos.append(a[1]))
+    monkeypatch.setattr(cxc.MessageBox, "information", lambda *a, **k: None)
+    return SimpleNamespace(llamadas=llamadas, avisos=avisos)
+
+
+def _sin_tasa(dlg):
+    dlg.tasa_input.set_value(None)
+    dlg.tasa_combo.setCurrentIndex(0)
+    dlg._id_tasa_seleccionada = None
+
+
+@pytest.mark.parametrize("metodo", ["zelle", "binance"])
+def test_zelle_y_binance_se_pueden_abonar_sin_tasa(dialogo, servicio, metodo):
+    _elegir_metodo(dialogo, metodo)
+    _sin_tasa(dialogo)
+    _con_deuda(dialogo, "10.00")
+
+    dialogo._validar_y_aceptar()
+
+    assert servicio.avisos == []
+    assert len(servicio.llamadas) == 1
+    assert servicio.llamadas[0]["tasa_cambio"] is None and servicio.llamadas[0]["id_tasa"] is None
+    assert servicio.llamadas[0]["metodo_pago"] == metodo
+
+
+def test_zelle_con_tasa_la_manda_al_servicio(dialogo, servicio):
+    _elegir_metodo(dialogo, "zelle")
+    _con_deuda(dialogo, "10.00")
+
+    dialogo._validar_y_aceptar()
+
+    assert servicio.llamadas[0]["tasa_cambio"] == Decimal(str(TASA)) and servicio.llamadas[0]["id_tasa"] == 7
+
+
+@pytest.mark.parametrize("metodo", ["transferencia", "punto_de_venta"])
+def test_los_metodos_en_bolivares_siguen_exigiendo_la_tasa(dialogo, servicio, metodo):
+    _elegir_metodo(dialogo, metodo)
+    _sin_tasa(dialogo)
+    _con_deuda(dialogo, "10.00")
+
+    dialogo._validar_y_aceptar()
+
+    assert servicio.llamadas == []
+    assert servicio.avisos == ["Tasa requerida"]
