@@ -1364,11 +1364,10 @@ de servicio.
     Qt, 164 MB tras importar todo, ~400-440 MB con todos los modulos abiertos; CPU en reposo ~1 % de un nucleo;
     sin fuga (5 recorridos completos: 438-445 MB estables, hilos y handles constantes); 3 conexiones a la base.
     Combos de Reportes: `_ModeloLista` (lista (id, texto) sin un objeto por elemento) en vez de
-    `QStandardItemModel`: +74 MB en vez de +109 MB al abrir el modulo. Limites conocidos: abrir Reportes por
-    primera vez congela la ventana ~1,3-2,7 s porque crea los filtros de los 45 reportes de golpe (284 addWidget
-    y 349 setStyleSheet; arreglo futuro = construir cada pagina de filtros al elegir su reporte); los refrescos
-    periodicos de Facturacion/Inventario/Compras son sincronos a proposito (reseleccionan la fila) y dejan huecos
-    de hasta ~0,5 s cada 30 s; un listado de 100 000+ filas en pantalla tarda ~4 s en llenar la tabla.
+    `QStandardItemModel`: +74 MB en vez de +109 MB al abrir el modulo. Los tres limites que
+    quedaban (abrir Reportes congelaba ~1,3-2,7 s; los refrescos periodicos de Facturacion/Inventario/Compras eran
+    sincronos y dejaban huecos de hasta ~0,5 s cada 30 s; un listado de 100 000+ filas tardaba ~4-8 s en llenar la
+    tabla) se resolvieron el 2026-11-08, ver "Limites de rendimiento resueltos" mas abajo.
   - Medido con 120 000 facturas / 300 000 lineas / 36 000 cuentas por cobrar (antes -> ahora): Cuentas por Cobrar
     62,5 s -> 0,3 s; productos mas vendidos (2 anios) 8,7 s -> 0,08 s; margen 9,0 s -> 0,07 s; ventas a clientes por
     producto 26,9 s -> 3,5 s. Los indices de 0099 no cambiaron los tiempos de banco/caja (70 y 16 ms): quedan por
@@ -1386,7 +1385,7 @@ de servicio.
     costo es el escaneo del texto de `detalle`, acotado por el rango de fechas del panel (30 dias).
   - Los paneles de Clientes, Facturacion y Auditoria consultan en un `QueryWorker` con descarte de respuestas
     viejas (`_id_carga`); la busqueda mientras se escribe es `silencioso`. El refresco periodico de Facturacion
-    sigue sincrono: `AutoRefresco` reselecciona la fila por id justo despues de recargar.
+    ya no es sincrono (ver "Limites de rendimiento resueltos").
   - Auditoria de productos: paginada (50) en `AuditoriaService.consultar_auditoria_producto`, con conteos por
     accion de todo el filtro; el filtro por producto ya no mezcla el 12 con el 123.
   - Migracion 0095: indices de `factura_venta.id_vendedor`, lineas por producto, `fecha_pago` de pagos y
@@ -1400,8 +1399,7 @@ de servicio.
 - **Carga asincrona de listados y caja por estacion** (2026-11-07):
   - `app/ui/carga_asincrona.py` (`CargaAsincronaMixin`: `cargar_async`, `buscar_con_pausa`) es el mecanismo comun:
     la consulta corre en un `QueryWorker`, la respuesta vieja se descarta por id de carga y la busqueda mientras
-    se escribe es `silencioso`. `sincrono=True` queda para los refrescos de `AutoRefresco` (inventario, compras,
-    facturacion). Lo usan inventario, proveedores, vendedores, rutas, usuarios, bancos, cuentas bancarias, CxC,
+    se escribe es `silencioso`. `sincrono=True` sigue existiendo pero ya no lo usa ningun refresco automatico. Lo usan inventario, proveedores, vendedores, rutas, usuarios, bancos, cuentas bancarias, CxC,
     CxC BCV, CxP y las tres pestanas de compras. En `tests/ui/conftest.py` el worker se sustituye por uno
     inmediato (`WorkerInmediato`) para que `panel.cargar_x()` deje la tabla poblada; los tests del camino
     asincrono (`test_carga_asincrona.py`) usan un worker falso.
@@ -1485,8 +1483,96 @@ de servicio.
     'categorias'/'ver'" (el formulario avisa); tras crear una categoria nueva el combo SI se vuelve a consultar.
     `listar_pagos_proveedor` trae caja y cuenta (con banco) en la misma consulta.
   - Con esto no queda ningun listado ni formulario que consulte la base en el hilo de la ventana al abrirse, salvo
-    lo que se dejo a proposito sincrono: Enter y carga inicial del formulario de factura, los refrescos de
-    `AutoRefresco`, y las acciones puntuales (guardar, anular, cobrar) que el usuario espera en el acto.
+    lo que se dejo a proposito sincrono: Enter y carga inicial del formulario de factura y las acciones
+    puntuales (guardar, anular, cobrar) que el usuario espera en el acto.
+- **Tasa opcional en el abono general por Zelle/Binance** (2026-11-08): los dos dialogos de abono general (CxC y CxC
+  BCV) pedian siempre una tasa para cualquier pago bancario, y con Zelle/Binance el campo ni se muestra (solo se
+  precarga la BCV del dia): sin ninguna tasa registrada el cajero quedaba bloqueado por un campo que no veia. Zelle y
+  Binance se pagan en dolares, igual que la deuda: la tasa solo da el equivalente en bolivares. Ahora
+  `moneda_cuentas.tasa_del_abono(metodo, tasa)` valida: con Zelle/Binance la tasa puede ser `None` (el pago y el
+  movimiento bancario se guardan con `monto_bolivares`/`tasa_cambio` NULL, el saldo en Bs de la cuenta no se mueve y
+  el texto de auditoria no lleva Bs); con cualquier otro metodo sigue siendo obligatoria y mayor a cero, y una tasa
+  dada (aun con Zelle) no puede ser cero ni negativa. `PagoService.aplicar_abono_general_cliente` y
+  `PagoBCVService.aplicar_abono_general_cliente_bcv` lo usan; el dialogo manda `tasa_cambio=None` e `id_tasa=None`
+  cuando no hay tasa. Con tasa el comportamiento no cambia. El cobro de una sola factura ya aceptaba pagos sin tasa.
+- **Conciliacion de bancos por moneda de la cuenta** (2026-11-08, `app/ui/conciliacion_bancos_dialog.py`): antes
+  mostraba siempre los dos lados (saldos en $ y en Bs, tasa, columnas Monto/Tasa/Monto BS) y obligaba a escribir una
+  tasa. Ahora `_aplicar_modo_moneda()` lee `cuentas_bancarias.moneda` de la cuenta elegida: una cuenta USD solo muestra
+  dolares (saldo final en $, columna Monto) y una VES/COP solo su moneda local (saldo final en BS o COP, columna
+  "Monto BS"/"Monto COP"); la tasa ya no esta en la pantalla principal. Un solo juego de etiquetas (saldo inicial,
+  entradas, salidas, diferencia) en la moneda de la cuenta. Los totales se suman en SQL (`_suma_por_tipo`) en vez de
+  recorrer todos los movimientos anteriores en Python. Se corrigio de paso `_marcar_conciliado`, que comparaba el saldo
+  calculado en Bs contra el saldo final en dolares. Movimiento manual: cuenta USD pide solo el monto en $ y guarda
+  `monto_bolivares`/`tasa_cambio` NULL; cuenta VES/COP pide el monto local y la tasa (precargada con la del dia) y el
+  equivalente en $ se calcula sin mostrarse. Al cambiar de cuenta se descartan los manuales sin guardar (eran de otra
+  moneda). `tests/ui/test_conciliacion_por_moneda.py`.
+- **Reportes de listado paginados** (2026-11-08, `reportes_panel.py`): control de pagina global
+  (`ControlPaginacion`) en el pie, 100 filas por pagina (`POR_PAGINA_REPORTE`), oculto cuando solo hay una pagina; el
+  boton Generar vuelve a la pagina 1 y el cambio de pagina repite la consulta. Exportar un reporte paginado vuelve a
+  pedirlo COMPLETO en un hilo (`_con_resultado_completo`, con los filtros con que se genero lo que se ve, no con los
+  que el usuario toco despues) y la pantalla conserva su pagina; el limite de PDF se evalua con el total de la
+  paginacion. Dos tipos de paginacion:
+  - **En la base** (`REPORTES_PAGINADOS_EN_SQL`): el servicio recibe `pagina`/`por_pagina` (`paginar()` central) y
+    devuelve `paginacion`; con `pagina=None` devuelve todas las filas y `paginacion=None` (lo que usa la
+    exportacion). Los totales se calculan en la base sobre TODO el filtro y no cambian al pasar de pagina. Son:
+    Libro de Ventas (el total en Bs se agrupa por (total, tasa) y se multiplica por la cantidad de facturas iguales:
+    da exactamente la suma del redondeo factura a factura), movimientos de caja, movimientos por cuenta bancaria (saldo
+    corrido con `SUM() OVER (ORDER BY fecha, id)` y saldo inicial con una suma previa: ya no se trae todo el historial
+    de la cuenta a Python), notas de credito de cliente, notas de credito de proveedor, devoluciones a proveedor,
+    pagos a proveedores y cobros del periodo (la pagina de las dos carteras, normal y BCV, se elige con un UNION ALL de
+    (cartera, id, fecha) y despues se cargan solo esos pagos; orden fecha, cartera, id).
+  - **En la tarea del hilo** (`_tarea_paginada`, `paginar_lista`): aging CxC / CxC BCV / CxP, facturas anuladas,
+    kardex, estados de cuenta de cliente y proveedor, clientes morosos, activacion de clientes, ordenes de compra
+    abiertas (el servicio devuelve `total_vencidas` para su chip), valorizacion de inventario, stock bajo minimo,
+    productos sin movimiento, historico de precios, cierre diario por cajero y productos proximos a vencer. Estos
+    reconstruyen el resultado en Python (saldos corridos, JSON de auditoria, eventos de varias tablas, corte a una
+    fecha), asi que el servicio sigue armando el resultado completo y la tarea lo corta despues: la pantalla dibuja
+    una pagina y la exportacion pide el resultado completo, pero la consulta de base de datos sigue siendo la completa.
+    Medidos son rapidos (aging CxC 5 382 cuentas 377 ms, morosos 425 ms, kardex 63 ms). Sus etiquetas y totales salen
+    del resultado completo, no de las filas de la pagina. Cobros/pagos/notas de credito/devoluciones, caja, banco y
+    libro de ventas, y ademas CxC otras, CxP otras y proximos vencimientos, estan en `REPORTES_PAGINADOS_EN_SQL`.
+  - No se paginan: los que agrupan (ventas por periodo/cliente/vendedor/ruta, margen, productos mas vendidos, compras
+    por..., cumplimiento de proveedores, flujo de caja, comisiones, conciliacion, saldo consolidado), porque devuelven
+    pocas filas, y el arqueo de caja (los movimientos de un solo turno). Siguen con el tope de
+    `LIMITE_FILAS_PANTALLA`.
+  - **Exportacion unificada**: Reportes usa `ExportacionCompletaMixin` como los demas paneles. `_exportar` pide el
+    destino, resuelve `_info_pdf()` (lee los combos) en el hilo de la ventana y lanza UNA tarea
+    (`_tarea_exportar_reporte`) en un hilo: si el reporte es paginado vuelve a pedirlo completo con los filtros con
+    que se genero (`_consulta_completa`), arma las filas (`_filas_para_exportar`/`_secciones_para_exportar` solo leen el
+    modo y el resultado) y escribe el archivo. Antes eran dos hilos y armar las filas de un reporte grande congelaba la
+    ventana. El aviso final es el comun de la app ("Exportacion exitosa").
+  - `estado_cuenta_cliente` y `estado_cuenta_proveedor` recorrian todos los pagos por cada cuenta (cuadratico): ahora
+    suman por cuenta en una pasada (cliente con 3 559 movimientos: 1,4 s -> 0,38 s). `estado_cuenta_cliente` sigue
+    leyendo TODAS las aplicaciones de notas de credito de la auditoria (no hay forma de filtrarlas por cliente en SQL).
+  - Medido con 120 000 facturas, 100 000 cobros, 60 000 notas de credito y 150 000 movimientos de banco y de caja
+    (2 anios): Libro de Ventas pagina 1 300 ms (completo 8,5 s); movimientos de caja 86 ms (completo 4,8 s);
+    movimientos de banco 264 ms (completo 5,2 s); cobros del periodo pagina 1 124 ms y pagina 1000 104 ms (completo
+    8,9 s); notas de credito de cliente pagina 1 108 ms (completo 3,4 s); un mes de Libro de Ventas 106 ms.
+- **Busqueda global mas rapida** (2026-11-08): de ~300 ms a ~70 ms con 120 000 facturas. (1) Los permisos se
+  resuelven una vez por busqueda (`UsuarioService.permisos_del_usuario`: a lo sumo dos consultas) en vez de tres
+  consultas por cada tipo de resultado y por cada accion. (2) La busqueda de facturas pide primero los ids por el
+  indice (angosto) del numero de factura, ordenados por id, y despues carga solo esas facturas: con pocas coincidencias
+  buscar directo ordenando por fecha recorria las 120 000 facturas con una consulta de clave por fila (170 ms; ahora
+  ~25 ms). Las facturas se numeran en orden, asi que las mas recientes son las de id mayor.
+- **Refresco de saldos de Cuentas Bancarias** (2026-11-08): usaba su propio temporizador y repoblaba la tabla cada 30 s
+  perdiendo la cuenta seleccionada y el scroll. Ahora usa `AutoRefresco(asincrono=True)` como Facturacion, Inventario y
+  Compras: carga en un hilo, solo si el panel se ve y no hay un dialogo abierto, y vuelve a seleccionar la cuenta por
+  id con la tabla ya repoblada.
+- **Limites de rendimiento resueltos** (2026-11-08):
+  - Reportes abre en ~60-100 ms (antes 1,3-2,7 s). Las paginas de filtros ya no se crean las 45 al construir el
+    panel: `_filtros_fabricas` (modo -> metodo `_make_filtros_*`) y `_asegurar_pagina(modo)` crea la pagina la primera
+    vez que se elige el reporte (o se genera). Los catalogos de los combos (`_GRUPOS_CATALOGO`) se asignan en
+    `_aplicar_catalogos()`, que se vuelve a llamar al crear cada pagina y no repite lo ya asignado. Lo que lea un
+    combo de otra pagina debe llamar antes a `_asegurar_pagina` (las pruebas usan `_construir_todas_las_paginas`).
+  - Refrescos de 30 s de Facturacion, Inventario y Compras: `AutoRefresco(asincrono=True)` llama a
+    `recargar(al_terminar)`; el panel carga en un hilo (silencioso, no enciende la barra de carga) y `al_terminar`
+    reselecciona la fila por id y conserva el scroll cuando la tabla ya se repueblo. `cargar_async(al_terminar=)`
+    lo llama despues de `al_cargar` solo si la respuesta es la vigente (una respuesta vieja no reselecciona). En
+    Facturacion el estado de la caja tambien va en hilo (`_tarea_estado_caja`; si falla, el badge se queda como
+    estaba). `cargar_facturas(al_terminar=)` hace lo mismo con su worker propio.
+  - Tablas de Reportes: `LIMITE_FILAS_PANTALLA` (5 000) filas dibujadas; la etiqueta de total conserva el conteo
+    real y agrega "en pantalla las primeras N (la exportacion incluye todas)". La exportacion nunca lee la tabla,
+    asi que lleva todas las filas. Libro de ventas con 120 000 filas: 8,5 s -> 0,34 s en pantalla.
 - **Columna "Cliente" en Comisiones** (2026-09-07/08, `app/services/comisiones.py`,
   `app/ui/comisiones_panel.py`): `listar_comisiones_vendedor()`/`listar_mis_comisiones()`
   ahora hacen eager load `ComisionFactura.detalle -> FacturaDetalle.factura ->
