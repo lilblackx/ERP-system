@@ -30,7 +30,7 @@ import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from sqlalchemy import Date, case, cast, exists, func, literal_column, or_
+from sqlalchemy import Date, case, cast, exists, func, literal, literal_column, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
@@ -44,6 +44,7 @@ from app.db.models import (
     Compra,
     CompraDetalle,
     CompraOC,
+    ControlDeTasa,
     CuentaBancaria,
     CuentaPorCobrar,
     CuentaPorCobrarBCV,
@@ -66,11 +67,25 @@ from app.db.models import (
     Vendedor,
 )
 from app.services.otros_movimientos import ESTADOS_CXC_OTRO
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 from app.services.tesoreria import TIPOS_MOVIMIENTO_CAJA
 from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
+
+
+def _pagina_o_todo(query, pagina, por_pagina, *orden):
+    """(filas de la consulta, `paginacion`): con `pagina=None` todas las filas (la exportacion) y `paginacion=None`; con
+    `pagina`, solo esa pagina y su diccionario de paginacion (ver `paginar`). `orden` termina en la clave primaria."""
+    if pagina is None:
+        return query.order_by(*orden).all(), None
+    resultado = paginar(query, pagina, por_pagina, *orden)
+    return resultado["items"], {k: v for k, v in resultado.items() if k != "items"}
+
+
+# Filas por pagina de un reporte de listado en pantalla (la exportacion pide todas, con `pagina=None`).
+POR_PAGINA_REPORTE = 100
 
 # Tamano maximo de un IN (...): SQL Server rechaza consultas con mas de ~2100 parametros.
 _TAMANO_LOTE_IN = 1000
@@ -414,6 +429,8 @@ class ReporteService:
         fecha_desde: date,
         fecha_hasta: date,
         id_cliente: int | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
         """Libro de Ventas para el IVA (base del formato exigido por el SENIAT): detalle
         de facturas emitidas en el rango, con base imponible, monto exento y monto de IVA
@@ -421,30 +438,36 @@ class ReporteService:
         facturas ANULADA se listan (el SENIAT exige conservar el correlativo) con montos en
         cero y no entran en los totales. Las notas de credito emitidas en el mismo rango se
         listan aparte: no se restan del IVA porque las unicas que existen nacen de anular una
-        factura (que ya cuenta en cero) o de un sobreabono (que no es una venta)."""
+        factura (que ya cuenta en cero) o de un sobreabono (que no es una venta).
+
+        Con `pagina=None` devuelve TODAS las filas (es lo que usa la exportacion). Con `pagina` devuelve solo esa
+        pagina de `por_pagina` filas (es lo que muestra la pantalla; ver `paginacion` en el resultado). Los totales
+        son siempre los de todo el filtro: se suman en la base y no dependen de la pagina."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
+        filtros = [FacturaVenta.fecha_emision >= desde_dt, FacturaVenta.fecha_emision <= hasta_dt]
+        if id_cliente:
+            filtros.append(FacturaVenta.id_cliente_factura == id_cliente)
         query = (
             session.query(FacturaVenta)
             .options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.tasa))
-            .filter(FacturaVenta.fecha_emision >= desde_dt)
-            .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .filter(*filtros)
         )
-        if id_cliente:
-            query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
-        facturas = query.order_by(FacturaVenta.fecha_emision, FacturaVenta.numero_control).all()
+        orden = (FacturaVenta.fecha_emision, FacturaVenta.numero_control, FacturaVenta.id_factura)
+        paginacion = None
+        if pagina is None:
+            facturas = query.order_by(*orden).all()
+        else:
+            resultado_pagina = paginar(query, pagina, por_pagina, *orden)
+            facturas = resultado_pagina["items"]
+            paginacion = {k: v for k, v in resultado_pagina.items() if k != "items"}
 
         centavo = Decimal("0.01")
         filas = []
-        total_base = Decimal("0.00")
-        total_exento = Decimal("0.00")
-        total_iva = Decimal("0.00")
-        total_bs = Decimal("0.00")
-        cantidad_vigentes = 0
         for factura in facturas:
             anulada = factura.estado_factura == "ANULADA"
             if anulada:
@@ -457,13 +480,6 @@ class ReporteService:
             total = base_total + monto_iva
             tasa = factura.tasa.tasa_dolar_bcv if factura.tasa else None
             total_en_bs = (total * to_decimal(tasa)).quantize(centavo) if tasa else None
-
-            if not anulada:
-                cantidad_vigentes += 1
-                total_base += base_imponible
-                total_exento += monto_exento
-                total_iva += monto_iva
-                total_bs += total_en_bs or Decimal("0.00")
             filas.append(
                 {
                     "fecha_emision": factura.fecha_emision,
@@ -481,6 +497,8 @@ class ReporteService:
                     "total_bs": total_en_bs,
                 }
             )
+
+        totales = ReporteService._totales_libro_ventas(session, filtros)
 
         nc_query = (
             session.query(NotaCreditoCliente)
@@ -508,15 +526,62 @@ class ReporteService:
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
-            "cantidad_facturas": cantidad_vigentes,
-            "cantidad_anuladas": len(filas) - cantidad_vigentes,
-            "total_base_imponible": total_base,
-            "total_exento": total_exento,
-            "total_iva": total_iva,
-            "total_general": total_base + total_exento + total_iva,
-            "total_bs": total_bs,
+            "paginacion": paginacion,
+            "cantidad_facturas": totales["vigentes"],
+            "cantidad_anuladas": totales["anuladas"],
+            "total_base_imponible": totales["base_imponible"],
+            "total_exento": totales["exento"],
+            "total_iva": totales["iva"],
+            "total_general": totales["base_imponible"] + totales["exento"] + totales["iva"],
+            "total_bs": totales["total_bs"],
             "notas_credito": filas_nc,
             "total_notas_credito": sum((nc["monto"] for nc in filas_nc), Decimal("0.00")),
+        }
+
+    @staticmethod
+    def _totales_libro_ventas(session: Session, filtros: list) -> dict:
+        """Cantidades y totales del Libro de Ventas de TODO el filtro, sumados en la base (las ANULADA no suman).
+        El total en Bs es la suma del total de cada factura por su tasa, redondeado factura a factura: se agrupa por
+        (total, tasa) y se multiplica por la cantidad de facturas iguales, que da exactamente lo mismo sin traer
+        una fila por factura."""
+        vigente = FacturaVenta.estado_factura != "ANULADA"
+        base_total = FacturaVenta.total_venta - FacturaVenta.monto_descuento
+
+        def suma(condicion, columna):
+            return func.coalesce(func.sum(case((condicion, columna), else_=0)), 0)
+
+        vigentes, anuladas, base_imponible, exento, iva = (
+            session.query(
+                suma(vigente, 1),
+                suma(~vigente, 1),
+                suma(vigente & (FacturaVenta.iva_aplicado == 1), base_total),
+                suma(vigente & (FacturaVenta.iva_aplicado == 0), base_total),
+                suma(vigente, FacturaVenta.monto_iva),
+            )
+            .filter(*filtros)
+            .one()
+        )
+
+        total_factura = base_total + FacturaVenta.monto_iva
+        por_total_y_tasa = (
+            session.query(total_factura, ControlDeTasa.tasa_dolar_bcv, func.count(FacturaVenta.id_factura))
+            .outerjoin(ControlDeTasa, FacturaVenta.id_tasa_factura == ControlDeTasa.id_tasa)
+            .filter(*filtros, vigente)
+            .group_by(total_factura, ControlDeTasa.tasa_dolar_bcv)
+            .all()
+        )
+        centavo = Decimal("0.01")
+        total_bs = Decimal("0.00")
+        for total, tasa, cantidad in por_total_y_tasa:
+            if tasa:
+                total_bs += (to_decimal(total) * to_decimal(tasa)).quantize(centavo) * cantidad
+        return {
+            "vigentes": int(vigentes),
+            "anuladas": int(anuladas),
+            "base_imponible": to_decimal(base_imponible),
+            "exento": to_decimal(exento),
+            "iva": to_decimal(iva),
+            "total_bs": total_bs,
         }
 
     @staticmethod
@@ -1053,28 +1118,36 @@ class ReporteService:
         fecha_desde: date,
         fecha_hasta: date,
         id_cliente: int | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
         """Listado detallado de notas de credito de cliente emitidas en el rango (motivo,
         factura de origen, estado disponible/aplicada/devuelta) -- version standalone del
-        resumen que libro_ventas() ya muestra como un solo chip agregado."""
+        resumen que libro_ventas() ya muestra como un solo chip agregado. Con `pagina=None` devuelve todas las filas
+        (la exportacion); con `pagina`, solo esa (ver `paginacion`). El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
+        filtros = [NotaCreditoCliente.fecha_creacion >= desde_dt, NotaCreditoCliente.fecha_creacion <= hasta_dt]
+        if id_cliente:
+            filtros.append(NotaCreditoCliente.id_cliente == id_cliente)
         query = (
             session.query(NotaCreditoCliente)
             .options(
                 joinedload(NotaCreditoCliente.cliente),
                 joinedload(NotaCreditoCliente.factura_origen),
             )
-            .filter(NotaCreditoCliente.fecha_creacion >= desde_dt)
-            .filter(NotaCreditoCliente.fecha_creacion <= hasta_dt)
+            .filter(*filtros)
         )
-        if id_cliente:
-            query = query.filter(NotaCreditoCliente.id_cliente == id_cliente)
-        notas = query.order_by(NotaCreditoCliente.fecha_creacion).all()
+        notas, paginacion = _pagina_o_todo(
+            query, pagina, por_pagina, NotaCreditoCliente.fecha_creacion, NotaCreditoCliente.id_nota_credito
+        )
+        total_general = to_decimal(
+            session.query(func.coalesce(func.sum(NotaCreditoCliente.monto), 0)).filter(*filtros).scalar()
+        )
 
         filas = [
             {
@@ -1093,7 +1166,8 @@ class ReporteService:
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
-            "total_general": sum((f["monto"] for f in filas), Decimal("0.00")),
+            "paginacion": paginacion,
+            "total_general": total_general,
         }
 
     @staticmethod
@@ -1378,6 +1452,7 @@ class ReporteService:
         return {
             "fecha_corte": hoy,
             "filas": filas,
+            "total_vencidas": sum(1 for f in filas if f["vencida"]),
             "total_ordenes": len(filas),
             "total_general": sum((f["total_oc"] for f in filas), Decimal("0.00")),
         }
@@ -1455,28 +1530,40 @@ class ReporteService:
         fecha_desde: date,
         fecha_hasta: date,
         id_proveedor: int | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
         """Listado de devoluciones a proveedor (nota_devolucion) emitidas en el rango, con
-        motivo, cantidad y el proveedor/OC de origen (via nota_recepcion)."""
+        motivo, cantidad y el proveedor/OC de origen (via nota_recepcion). Con `pagina=None` devuelve todas las filas
+        (la exportacion); con `pagina`, solo esa. Los totales son siempre los de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        query = (
-            session.query(NotaDevolucion)
-            .join(NotaRecepcion, NotaRecepcion.id_nr == NotaDevolucion.id_nr)
-            .join(CompraOC, CompraOC.id_oc == NotaRecepcion.id_oc)
-            .options(
-                joinedload(NotaDevolucion.nota_recepcion).joinedload(NotaRecepcion.oc).joinedload(CompraOC.proveedor)
-            )
-            .filter(NotaDevolucion.fecha_devolucion >= desde_dt)
-            .filter(NotaDevolucion.fecha_devolucion <= hasta_dt)
-        )
+        filtros = [NotaDevolucion.fecha_devolucion >= desde_dt, NotaDevolucion.fecha_devolucion <= hasta_dt]
         if id_proveedor:
-            query = query.filter(CompraOC.id_proveedor == id_proveedor)
-        devoluciones = query.order_by(NotaDevolucion.fecha_devolucion).all()
+            filtros.append(CompraOC.id_proveedor == id_proveedor)
+
+        def con_origen(consulta):
+            return (
+                consulta.join(NotaRecepcion, NotaRecepcion.id_nr == NotaDevolucion.id_nr)
+                .join(CompraOC, CompraOC.id_oc == NotaRecepcion.id_oc)
+                .filter(*filtros)
+            )
+
+        query = con_origen(session.query(NotaDevolucion)).options(
+            joinedload(NotaDevolucion.nota_recepcion).joinedload(NotaRecepcion.oc).joinedload(CompraOC.proveedor)
+        )
+        devoluciones, paginacion = _pagina_o_todo(
+            query, pagina, por_pagina, NotaDevolucion.fecha_devolucion, NotaDevolucion.id_devolucion
+        )
+        cantidad, total_cantidad = con_origen(
+            session.query(
+                func.count(NotaDevolucion.id_devolucion), func.coalesce(func.sum(NotaDevolucion.cantidad_total), 0)
+            )
+        ).one()
 
         filas = [
             {
@@ -1496,8 +1583,9 @@ class ReporteService:
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
-            "total_devoluciones": len(filas),
-            "total_cantidad": sum((f["cantidad_total"] for f in filas), Decimal("0.00")),
+            "paginacion": paginacion,
+            "total_devoluciones": int(cantidad),
+            "total_cantidad": to_decimal(total_cantidad),
         }
 
     @staticmethod
@@ -1507,29 +1595,37 @@ class ReporteService:
         fecha_desde: date,
         fecha_hasta: date,
         id_proveedor: int | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
         """Listado de notas de credito de proveedor (saldo a favor de la empresa,
         generado al anular una compra con pagos ya aplicados) creadas en el rango. A
         diferencia de NotaCreditoCliente esta no es un documento fiscal correlativo -- ver
-        el docstring de NotaCreditoProveedor en models.py."""
+        el docstring de NotaCreditoProveedor en models.py. Con `pagina=None` devuelve todas las filas (la exportacion);
+        con `pagina`, solo esa. El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
+        filtros = [NotaCreditoProveedor.fecha_creacion >= desde_dt, NotaCreditoProveedor.fecha_creacion <= hasta_dt]
+        if id_proveedor:
+            filtros.append(NotaCreditoProveedor.id_proveedor == id_proveedor)
         query = (
             session.query(NotaCreditoProveedor)
             .options(
                 joinedload(NotaCreditoProveedor.proveedor),
                 joinedload(NotaCreditoProveedor.compra_origen),
             )
-            .filter(NotaCreditoProveedor.fecha_creacion >= desde_dt)
-            .filter(NotaCreditoProveedor.fecha_creacion <= hasta_dt)
+            .filter(*filtros)
         )
-        if id_proveedor:
-            query = query.filter(NotaCreditoProveedor.id_proveedor == id_proveedor)
-        notas = query.order_by(NotaCreditoProveedor.fecha_creacion).all()
+        notas, paginacion = _pagina_o_todo(
+            query, pagina, por_pagina, NotaCreditoProveedor.fecha_creacion, NotaCreditoProveedor.id_nota_credito
+        )
+        total_general = to_decimal(
+            session.query(func.coalesce(func.sum(NotaCreditoProveedor.monto), 0)).filter(*filtros).scalar()
+        )
 
         filas = [
             {
@@ -1548,7 +1644,8 @@ class ReporteService:
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
-            "total_general": sum((f["monto"] for f in filas), Decimal("0.00")),
+            "paginacion": paginacion,
+            "total_general": total_general,
         }
 
     @staticmethod
@@ -2019,15 +2116,26 @@ class ReporteService:
         aplicaciones_nc = [a for a in _aplicaciones_nc_cliente(session) if a["id_factura"] in ids_facturas_cliente]
         ids_facturas_bcv = {c.id_factura for c in cuentas_bcv}
 
+        # Sumas por cuenta/factura de una sola pasada: recorrer todos los pagos por cada cuenta era cuadratico (un
+        # cliente con 3 500 movimientos tardaba 1,4 s).
+        pagos_por_cuenta: dict[int, Decimal] = {}
+        for p in pagos:
+            pagos_por_cuenta[p.id_cuenta_por_cobrar] = (
+                pagos_por_cuenta.get(p.id_cuenta_por_cobrar, Decimal("0.00")) + p.monto
+            )
+        pagos_bcv_por_cuenta: dict[int, Decimal] = {}
+        for p in pagos_bcv:
+            pagos_bcv_por_cuenta[p.id_cuenta_por_cobrar] = (
+                pagos_bcv_por_cuenta.get(p.id_cuenta_por_cobrar, Decimal("0.00")) + p.monto
+            )
+        nc_por_factura: dict[int, Decimal] = {}
+        for a in aplicaciones_nc:
+            nc_por_factura[a["id_factura"]] = nc_por_factura.get(a["id_factura"], Decimal("0.00")) + a["monto"]
+
         eventos = []
         for cuenta in cuentas:
-            pagos_de_cuenta = sum(
-                (p.monto for p in pagos if p.id_cuenta_por_cobrar == cuenta.id_cuenta_por_cobrar),
-                Decimal("0.00"),
-            )
-            nc_de_cuenta = sum(
-                (a["monto"] for a in aplicaciones_nc if a["id_factura"] == cuenta.id_factura), Decimal("0.00")
-            )
+            pagos_de_cuenta = pagos_por_cuenta.get(cuenta.id_cuenta_por_cobrar, Decimal("0.00"))
+            nc_de_cuenta = nc_por_factura.get(cuenta.id_factura, Decimal("0.00"))
             cargo = cuenta.saldo_pendiente + pagos_de_cuenta + nc_de_cuenta
             if cargo == 0 and cuenta.id_factura in ids_facturas_bcv:
                 continue  # factura BCV: su cargo va por la cuenta BCV, esta cuenta normal solo esta en cero
@@ -2041,10 +2149,7 @@ class ReporteService:
                 }
             )
         for cuenta in cuentas_bcv:
-            pagos_de_cuenta = sum(
-                (p.monto for p in pagos_bcv if p.id_cuenta_por_cobrar == cuenta.id_cuenta_por_cobrar),
-                Decimal("0.00"),
-            )
+            pagos_de_cuenta = pagos_bcv_por_cuenta.get(cuenta.id_cuenta_por_cobrar, Decimal("0.00"))
             eventos.append(
                 {
                     "fecha": cuenta.factura.fecha_emision,
@@ -2121,56 +2226,97 @@ class ReporteService:
         fecha_desde: date,
         fecha_hasta: date,
         id_cliente: int | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
         """Cobros (pagos aplicados a cuentas por cobrar) del rango, de la cartera normal y de la BCV
-        (cada fila dice de cual viene en `cartera`), en orden cronologico."""
+        (cada fila dice de cual viene en `cartera`), en orden cronologico. Con `pagina=None` devuelve todas las filas
+        (la exportacion); con `pagina`, solo esa (ver `paginacion`): la pagina se elige con un UNION ALL de las dos
+        carteras (solo id y fecha) y despues se cargan unicamente esos pagos. Los totales son siempre los de todo el
+        filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        query = (
-            session.query(PagoCobro)
-            .join(
-                CuentaPorCobrar,
-                CuentaPorCobrar.id_cuenta_por_cobrar == PagoCobro.id_cuenta_por_cobrar,
+        def con_factura(consulta, pago, cuenta):
+            consulta = consulta.join(cuenta, cuenta.id_cuenta_por_cobrar == pago.id_cuenta_por_cobrar).join(
+                FacturaVenta, FacturaVenta.id_factura == cuenta.id_factura
             )
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
-            .options(
-                joinedload(PagoCobro.cuenta_por_cobrar)
-                .joinedload(CuentaPorCobrar.factura)
-                .joinedload(FacturaVenta.cliente)
-            )
-            .filter(PagoCobro.fecha_pago >= desde_dt, PagoCobro.fecha_pago <= hasta_dt)
+            consulta = consulta.filter(pago.fecha_pago >= desde_dt, pago.fecha_pago <= hasta_dt)
+            if id_cliente is not None:
+                consulta = consulta.filter(FacturaVenta.id_cliente_factura == id_cliente)
+            return consulta
+
+        carteras = (
+            ("Normal", 0, PagoCobro, CuentaPorCobrar, PagoCobro.id_pago_cobro),
+            ("BCV", 1, PagoCobroBCV, CuentaPorCobrarBCV, PagoCobroBCV.id_pago_cobro_bcv),
         )
-        query_bcv = (
-            session.query(PagoCobroBCV)
-            .join(
-                CuentaPorCobrarBCV,
-                CuentaPorCobrarBCV.id_cuenta_por_cobrar == PagoCobroBCV.id_cuenta_por_cobrar,
+
+        # Totales de todo el filtro, sumados en la base.
+        totales_por_metodo: dict[str, Decimal] = {}
+        for _nombre, _rango, pago, cuenta, _id in carteras:
+            for metodo, total in con_factura(
+                session.query(pago.metodo_pago, func.sum(pago.monto)), pago, cuenta
+            ).group_by(pago.metodo_pago):
+                totales_por_metodo[metodo] = totales_por_metodo.get(metodo, Decimal("0.00")) + to_decimal(total)
+
+        if pagina is None:
+            pagos = []
+            for nombre, rango, pago, cuenta, id_pago in carteras:
+                consulta = con_factura(session.query(pago), pago, cuenta).options(
+                    joinedload(pago.cuenta_por_cobrar).joinedload(cuenta.factura).joinedload(FacturaVenta.cliente)
+                )
+                pagos.extend((p.fecha_pago, rango, getattr(p, id_pago.key), nombre, p) for p in consulta)
+            pagos.sort(key=lambda t: t[:3])
+            paginacion = None
+        else:
+            ids = []
+            for _nombre, rango, pago, cuenta, id_pago in carteras:
+                ids.append(
+                    con_factura(
+                        session.query(
+                            literal(rango).label("rango"),
+                            id_pago.label("id"),
+                            pago.fecha_pago.label("fecha"),
+                        ),
+                        pago,
+                        cuenta,
+                    )
+                )
+            union = ids[0].union_all(ids[1]).subquery()
+            elegidos = paginar(
+                session.query(union.c.rango, union.c.id, union.c.fecha),
+                pagina,
+                por_pagina,
+                union.c.fecha,
+                union.c.rango,
+                union.c.id,
             )
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
-            .options(
-                joinedload(PagoCobroBCV.cuenta_por_cobrar)
-                .joinedload(CuentaPorCobrarBCV.factura)
-                .joinedload(FacturaVenta.cliente)
-            )
-            .filter(PagoCobroBCV.fecha_pago >= desde_dt, PagoCobroBCV.fecha_pago <= hasta_dt)
-        )
-        if id_cliente is not None:
-            query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
-            query_bcv = query_bcv.filter(FacturaVenta.id_cliente_factura == id_cliente)
-        pagos = [("Normal", p) for p in query.all()] + [("BCV", p) for p in query_bcv.all()]
-        pagos.sort(key=lambda par: par[1].fecha_pago)
+            paginacion = {k: v for k, v in elegidos.items() if k != "items"}
+            por_cartera = {}
+            for nombre, rango, pago, cuenta, id_pago in carteras:
+                pedidos = [fila.id for fila in elegidos["items"] if fila.rango == rango]
+                if pedidos:
+                    cargados = (
+                        session.query(pago)
+                        .options(
+                            joinedload(pago.cuenta_por_cobrar)
+                            .joinedload(cuenta.factura)
+                            .joinedload(FacturaVenta.cliente)
+                        )
+                        .filter(id_pago.in_(pedidos))
+                        .all()
+                    )
+                    por_cartera.update({(rango, getattr(p, id_pago.key)): (nombre, p) for p in cargados})
+            pagos = [
+                (fila.fecha, fila.rango, fila.id, *por_cartera[(fila.rango, fila.id)]) for fila in elegidos["items"]
+            ]
 
         filas = []
-        totales_por_metodo: dict[str, Decimal] = {}
-        for cartera, pago in pagos:
+        for _fecha, _rango, _id, cartera, pago in pagos:
             factura = pago.cuenta_por_cobrar.factura
-            totales_por_metodo[pago.metodo_pago] = (
-                totales_por_metodo.get(pago.metodo_pago, Decimal("0.00")) + pago.monto
-            )
             filas.append(
                 {
                     "fecha_pago": pago.fecha_pago,
@@ -2186,8 +2332,9 @@ class ReporteService:
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
+            "paginacion": paginacion,
             "totales_por_metodo": totales_por_metodo,
-            "total_general": sum((f["monto"] for f in filas), Decimal("0.00")),
+            "total_general": sum(totales_por_metodo.values(), Decimal("0.00")),
         }
 
     @staticmethod
@@ -2262,23 +2409,33 @@ class ReporteService:
         estado: str | None = None,
         fecha_desde: date | None = None,
         fecha_hasta: date | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
+        """Cuentas por cobrar "otras". Con `pagina=None` devuelve todas las filas (la exportacion); con `pagina`, solo
+        esa (ver `paginacion`). El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if estado is not None and estado not in ESTADOS_CXC_OTRO:
             raise ValueError(f"estado invalido: {estado!r}, debe ser uno de {ESTADOS_CXC_OTRO}")
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
-        query = session.query(CuentaPorCobrarOtro).options(joinedload(CuentaPorCobrarOtro.cliente))
+        filtros = []
         if id_cliente is not None:
-            query = query.filter(CuentaPorCobrarOtro.id_cliente == id_cliente)
+            filtros.append(CuentaPorCobrarOtro.id_cliente == id_cliente)
         if estado is not None:
-            query = query.filter(CuentaPorCobrarOtro.estado == estado)
+            filtros.append(CuentaPorCobrarOtro.estado == estado)
         if fecha_desde is not None:
-            query = query.filter(CuentaPorCobrarOtro.fecha_emision >= datetime.combine(fecha_desde, time.min))
+            filtros.append(CuentaPorCobrarOtro.fecha_emision >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
-            query = query.filter(CuentaPorCobrarOtro.fecha_emision <= datetime.combine(fecha_hasta, time.max))
-        cuentas = query.order_by(CuentaPorCobrarOtro.fecha_emision).all()
+            filtros.append(CuentaPorCobrarOtro.fecha_emision <= datetime.combine(fecha_hasta, time.max))
+        query = session.query(CuentaPorCobrarOtro).options(joinedload(CuentaPorCobrarOtro.cliente)).filter(*filtros)
+        cuentas, paginacion = _pagina_o_todo(
+            query, pagina, por_pagina, CuentaPorCobrarOtro.fecha_emision, CuentaPorCobrarOtro.id_cuenta
+        )
+        total_general = to_decimal(
+            session.query(func.coalesce(func.sum(CuentaPorCobrarOtro.saldo_pendiente), 0)).filter(*filtros).scalar()
+        )
 
         filas = [
             {
@@ -2295,7 +2452,8 @@ class ReporteService:
         ]
         return {
             "filas": filas,
-            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
+            "paginacion": paginacion,
+            "total_general": total_general,
         }
 
     # ── Tesoreria ─────────────────────────────────────────────────────────
@@ -2308,7 +2466,11 @@ class ReporteService:
         fecha_hasta: date,
         id_caja: int | None = None,
         tipo_movimiento: str | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
+        """Movimientos de caja del rango. Con `pagina=None` devuelve todas las filas (lo que usa la exportacion); con
+        `pagina`, solo esa pagina (ver `paginacion`). Los totales son siempre los de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
@@ -2317,19 +2479,20 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        query = (
-            session.query(CajaMovimiento)
-            .options(joinedload(CajaMovimiento.caja))
-            .filter(
-                CajaMovimiento.fecha_registro >= desde_dt,
-                CajaMovimiento.fecha_registro <= hasta_dt,
-            )
-        )
+        filtros = [CajaMovimiento.fecha_registro >= desde_dt, CajaMovimiento.fecha_registro <= hasta_dt]
         if id_caja is not None:
-            query = query.filter(CajaMovimiento.id_caja == id_caja)
+            filtros.append(CajaMovimiento.id_caja == id_caja)
         if tipo_movimiento is not None:
-            query = query.filter(CajaMovimiento.tipo_movimiento == tipo_movimiento)
-        movimientos = query.order_by(CajaMovimiento.fecha_registro).all()
+            filtros.append(CajaMovimiento.tipo_movimiento == tipo_movimiento)
+        query = session.query(CajaMovimiento).options(joinedload(CajaMovimiento.caja)).filter(*filtros)
+        orden = (CajaMovimiento.fecha_registro, CajaMovimiento.id_movimiento)
+        paginacion = None
+        if pagina is None:
+            movimientos = query.order_by(*orden).all()
+        else:
+            resultado_pagina = paginar(query, pagina, por_pagina, *orden)
+            movimientos = resultado_pagina["items"]
+            paginacion = {k: v for k, v in resultado_pagina.items() if k != "items"}
 
         def _origen(m: CajaMovimiento) -> str:
             if m.id_pago_cobro is not None or m.id_pago_cobro_bcv is not None:
@@ -2351,18 +2514,32 @@ class ReporteService:
             }
             for m in movimientos
         ]
-        total_entradas = sum(
-            (f["monto_movimiento"] for f in filas if f["tipo_movimiento"] == "entrada"),
-            Decimal("0.00"),
+        # Los totales se suman en la base sobre todo el filtro (no sobre la pagina que se muestra).
+        entradas_sql, salidas_sql = (
+            session.query(
+                func.coalesce(
+                    func.sum(
+                        case((CajaMovimiento.tipo_movimiento == "entrada", CajaMovimiento.monto_movimiento), else_=0)
+                    ),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(
+                        case((CajaMovimiento.tipo_movimiento == "salida", CajaMovimiento.monto_movimiento), else_=0)
+                    ),
+                    0,
+                ),
+            )
+            .filter(*filtros)
+            .one()
         )
-        total_salidas = sum(
-            (f["monto_movimiento"] for f in filas if f["tipo_movimiento"] == "salida"),
-            Decimal("0.00"),
-        )
+        total_entradas = to_decimal(entradas_sql)
+        total_salidas = to_decimal(salidas_sql)
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
+            "paginacion": paginacion,
             "total_entradas": total_entradas,
             "total_salidas": total_salidas,
             "neto": total_entradas - total_salidas,
@@ -2562,12 +2739,15 @@ class ReporteService:
             .all()
         )
 
+        pagos_por_cuenta: dict[int, Decimal] = {}  # una sola pasada: recorrer los pagos por cada cuenta era cuadratico
+        for p in pagos:
+            pagos_por_cuenta[p.id_cuenta_por_pagar] = (
+                pagos_por_cuenta.get(p.id_cuenta_por_pagar, Decimal("0.00")) + p.monto
+            )
+
         eventos = []
         for cuenta in cuentas:
-            pagos_de_cuenta = sum(
-                (p.monto for p in pagos if p.id_cuenta_por_pagar == cuenta.id_cuenta),
-                Decimal("0.00"),
-            )
+            pagos_de_cuenta = pagos_por_cuenta.get(cuenta.id_cuenta, Decimal("0.00"))
             eventos.append(
                 {
                     "fecha": cuenta.compra.fecha_emision,
@@ -2624,41 +2804,44 @@ class ReporteService:
         fecha_desde: date,
         fecha_hasta: date,
         id_proveedor: int | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
+        """Pagos a proveedores del rango. Con `pagina=None` devuelve todas las filas (la exportacion); con `pagina`,
+        solo esa (ver `paginacion`). Los totales son siempre los de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        query = (
-            session.query(PagoProveedor)
-            .join(
-                CuentaPorPagar,
-                CuentaPorPagar.id_cuenta == PagoProveedor.id_cuenta_por_pagar,
-            )
-            .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
-            .options(
-                joinedload(PagoProveedor.cuenta_por_pagar)
-                .joinedload(CuentaPorPagar.compra)
-                .joinedload(Compra.proveedor)
-            )
-            .filter(
-                PagoProveedor.fecha_pago >= desde_dt,
-                PagoProveedor.fecha_pago <= hasta_dt,
-            )
-        )
+        filtros = [PagoProveedor.fecha_pago >= desde_dt, PagoProveedor.fecha_pago <= hasta_dt]
         if id_proveedor is not None:
-            query = query.filter(Compra.id_proveedor == id_proveedor)
-        pagos = query.order_by(PagoProveedor.fecha_pago).all()
+            filtros.append(Compra.id_proveedor == id_proveedor)
+
+        def con_compra(consulta):
+            return (
+                consulta.join(CuentaPorPagar, CuentaPorPagar.id_cuenta == PagoProveedor.id_cuenta_por_pagar)
+                .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
+                .filter(*filtros)
+            )
+
+        query = con_compra(session.query(PagoProveedor)).options(
+            joinedload(PagoProveedor.cuenta_por_pagar).joinedload(CuentaPorPagar.compra).joinedload(Compra.proveedor)
+        )
+        pagos, paginacion = _pagina_o_todo(
+            query, pagina, por_pagina, PagoProveedor.fecha_pago, PagoProveedor.id_pago_proveedor
+        )
+        totales_por_metodo = {
+            metodo: to_decimal(total)
+            for metodo, total in con_compra(
+                session.query(PagoProveedor.metodo_pago, func.sum(PagoProveedor.monto))
+            ).group_by(PagoProveedor.metodo_pago)
+        }
 
         filas = []
-        totales_por_metodo: dict[str, Decimal] = {}
         for pago in pagos:
             compra = pago.cuenta_por_pagar.compra
-            totales_por_metodo[pago.metodo_pago] = (
-                totales_por_metodo.get(pago.metodo_pago, Decimal("0.00")) + pago.monto
-            )
             filas.append(
                 {
                     "fecha_pago": pago.fecha_pago,
@@ -2672,8 +2855,9 @@ class ReporteService:
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
+            "paginacion": paginacion,
             "totales_por_metodo": totales_por_metodo,
-            "total_general": sum((f["monto"] for f in filas), Decimal("0.00")),
+            "total_general": sum(totales_por_metodo.values(), Decimal("0.00")),
         }
 
     @staticmethod
@@ -2682,27 +2866,40 @@ class ReporteService:
         id_usuario: int | None,
         dias_horizonte: int = 30,
         id_proveedor: int | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
+        """Cuentas por pagar que vencen en el horizonte. Con `pagina=None` devuelve todas las filas (la exportacion);
+        con `pagina`, solo esa (ver `paginacion`). El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if dias_horizonte < 0:
             raise ValueError("dias_horizonte no puede ser negativo")
         hoy = date.today()
         limite = hoy + timedelta(days=dias_horizonte)
 
+        filtros = [
+            CuentaPorPagar.estado.in_(ESTADOS_CXP_ABIERTOS),
+            CuentaPorPagar.fecha_vencimiento.isnot(None),
+            CuentaPorPagar.fecha_vencimiento >= hoy,
+            CuentaPorPagar.fecha_vencimiento <= limite,
+        ]
+        if id_proveedor is not None:
+            filtros.append(Compra.id_proveedor == id_proveedor)
         query = (
             session.query(CuentaPorPagar)
             .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
             .options(joinedload(CuentaPorPagar.compra).joinedload(Compra.proveedor))
-            .filter(CuentaPorPagar.estado.in_(ESTADOS_CXP_ABIERTOS))
-            .filter(CuentaPorPagar.fecha_vencimiento.isnot(None))
-            .filter(
-                CuentaPorPagar.fecha_vencimiento >= hoy,
-                CuentaPorPagar.fecha_vencimiento <= limite,
-            )
+            .filter(*filtros)
         )
-        if id_proveedor is not None:
-            query = query.filter(Compra.id_proveedor == id_proveedor)
-        cuentas = query.order_by(CuentaPorPagar.fecha_vencimiento).all()
+        cuentas, paginacion = _pagina_o_todo(
+            query, pagina, por_pagina, CuentaPorPagar.fecha_vencimiento, CuentaPorPagar.id_cuenta
+        )
+        total_general = to_decimal(
+            session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0))
+            .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
+            .filter(*filtros)
+            .scalar()
+        )
 
         filas = [
             {
@@ -2718,7 +2915,8 @@ class ReporteService:
             "fecha_corte": hoy,
             "dias_horizonte": dias_horizonte,
             "filas": filas,
-            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
+            "paginacion": paginacion,
+            "total_general": total_general,
         }
 
     @staticmethod
@@ -2729,32 +2927,45 @@ class ReporteService:
         estado: str | None = None,
         fecha_desde: date | None = None,
         fecha_hasta: date | None = None,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
         """cuentas_por_pagar_otros pese al nombre no son pasivos comerciales: son
         transferencias recibidas en una cuenta bancaria propia que aun no se han podido
         identificar/conciliar contra un cliente (ver docstring de CuentaPorPagarOtro en
         models.py). Comparte tabla con Bancos -> conciliacion_bancaria, pero con
         agregacion distinta: aca se lista el detalle filtrable por cuenta/estado/fecha,
-        alla se resume por cuenta con totales pendiente vs conciliado."""
+        alla se resume por cuenta con totales pendiente vs conciliado. Con `pagina=None` devuelve todas las filas (la
+        exportacion); con `pagina`, solo esa (ver `paginacion`). El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if estado is not None and estado not in ESTADOS_CXP_OTRO:
             raise ValueError(f"estado invalido: {estado!r}, debe ser uno de {ESTADOS_CXP_OTRO}")
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
-        query = session.query(CuentaPorPagarOtro).options(
-            joinedload(CuentaPorPagarOtro.cuenta_bancaria),
-            joinedload(CuentaPorPagarOtro.cliente_identificado),
-        )
+        filtros = []
         if id_cuenta_bancaria is not None:
-            query = query.filter(CuentaPorPagarOtro.id_cuenta_bancaria == id_cuenta_bancaria)
+            filtros.append(CuentaPorPagarOtro.id_cuenta_bancaria == id_cuenta_bancaria)
         if estado is not None:
-            query = query.filter(CuentaPorPagarOtro.estado == estado)
+            filtros.append(CuentaPorPagarOtro.estado == estado)
         if fecha_desde is not None:
-            query = query.filter(CuentaPorPagarOtro.fecha_recepcion >= datetime.combine(fecha_desde, time.min))
+            filtros.append(CuentaPorPagarOtro.fecha_recepcion >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
-            query = query.filter(CuentaPorPagarOtro.fecha_recepcion <= datetime.combine(fecha_hasta, time.max))
-        cuentas = query.order_by(CuentaPorPagarOtro.fecha_recepcion).all()
+            filtros.append(CuentaPorPagarOtro.fecha_recepcion <= datetime.combine(fecha_hasta, time.max))
+        query = (
+            session.query(CuentaPorPagarOtro)
+            .options(
+                joinedload(CuentaPorPagarOtro.cuenta_bancaria),
+                joinedload(CuentaPorPagarOtro.cliente_identificado),
+            )
+            .filter(*filtros)
+        )
+        cuentas, paginacion = _pagina_o_todo(
+            query, pagina, por_pagina, CuentaPorPagarOtro.fecha_recepcion, CuentaPorPagarOtro.id_cuenta
+        )
+        total_general = to_decimal(
+            session.query(func.coalesce(func.sum(CuentaPorPagarOtro.saldo_pendiente), 0)).filter(*filtros).scalar()
+        )
 
         filas = [
             {
@@ -2774,7 +2985,8 @@ class ReporteService:
         ]
         return {
             "filas": filas,
-            "total_general": sum((f["saldo_pendiente"] for f in filas), Decimal("0.00")),
+            "paginacion": paginacion,
+            "total_general": total_general,
         }
 
     # ── Bancos ────────────────────────────────────────────────────────────
@@ -2786,7 +2998,14 @@ class ReporteService:
         id_cuenta_bancaria: int,
         fecha_desde: date,
         fecha_hasta: date,
+        pagina: int | None = None,
+        por_pagina: int = POR_PAGINA_REPORTE,
     ) -> dict:
+        """Movimientos de una cuenta en el rango, con el saldo corrido de cada uno. Con `pagina=None` devuelve todas
+        las filas (lo que usa la exportacion); con `pagina`, solo esa pagina (ver `paginacion`).
+
+        El saldo inicial y el saldo corrido se calculan en la base (suma anterior al rango y suma acumulada con una
+        funcion de ventana): ya no se trae a Python todo el historial de la cuenta."""
         require_permiso(session, id_usuario, "reportes", "ver")
         cuenta = session.get(CuentaBancaria, id_cuenta_bancaria)
         if cuenta is None:
@@ -2799,36 +3018,54 @@ class ReporteService:
         # Direccion: entrada si tipo_movimiento in ('abono','deposito'), salida en
         # cualquier otro caso -- mismo CASE que trg_banco_movimientos_saldo
         # (schema_sqlserver.sql:1273), ver flujo_caja_consolidado.
-        todos = (
-            session.query(BancoMovimiento)
-            .filter(BancoMovimiento.id_cuenta == id_cuenta_bancaria)
-            .order_by(BancoMovimiento.fecha_movimiento)
-            .all()
+        monto = func.coalesce(BancoMovimiento.monto_movimiento, 0)
+        con_signo = case((BancoMovimiento.tipo_movimiento.in_(("abono", "deposito")), monto), else_=-monto)
+
+        saldo_inicial = to_decimal(
+            session.query(func.coalesce(func.sum(con_signo), 0))
+            .filter(BancoMovimiento.id_cuenta == id_cuenta_bancaria, BancoMovimiento.fecha_movimiento < desde_dt)
+            .scalar()
         )
+        en_el_rango = [
+            BancoMovimiento.id_cuenta == id_cuenta_bancaria,
+            BancoMovimiento.fecha_movimiento >= desde_dt,
+            BancoMovimiento.fecha_movimiento <= hasta_dt,
+        ]
+        neto_del_rango = to_decimal(session.query(func.coalesce(func.sum(con_signo), 0)).filter(*en_el_rango).scalar())
 
-        saldo_inicial = Decimal("0.00")
-        for m in todos:
-            if m.fecha_movimiento < desde_dt:
-                monto = m.monto_movimiento or Decimal("0.00")
-                saldo_inicial += monto if m.tipo_movimiento in ("abono", "deposito") else -monto
+        orden = (BancoMovimiento.fecha_movimiento, BancoMovimiento.id_movimiento)
+        acumulado = (
+            session.query(
+                BancoMovimiento.id_movimiento.label("id_movimiento"),
+                func.sum(con_signo).over(order_by=orden).label("acumulado"),
+            )
+            .filter(*en_el_rango)
+            .subquery()
+        )
+        query = (
+            session.query(BancoMovimiento, acumulado.c.acumulado)
+            .join(acumulado, acumulado.c.id_movimiento == BancoMovimiento.id_movimiento)
+            .filter(*en_el_rango)
+        )
+        paginacion = None
+        if pagina is None:
+            registros = query.order_by(*orden).all()
+        else:
+            resultado_pagina = paginar(query, pagina, por_pagina, *orden)
+            registros = resultado_pagina["items"]
+            paginacion = {k: v for k, v in resultado_pagina.items() if k != "items"}
 
-        saldo = saldo_inicial
-        filas = []
-        for m in todos:
-            if desde_dt <= m.fecha_movimiento <= hasta_dt:
-                monto = m.monto_movimiento or Decimal("0.00")
-                saldo += monto if m.tipo_movimiento in ("abono", "deposito") else -monto
-                filas.append(
-                    {
-                        "fecha_movimiento": m.fecha_movimiento,
-                        "tipo_movimiento": m.tipo_movimiento,
-                        "referencia_movimiento": m.referencia_movimiento,
-                        "descripcion_movimiento": m.descripcion_movimiento,
-                        "monto_movimiento": monto,
-                        "saldo": saldo,
-                    }
-                )
-
+        filas = [
+            {
+                "fecha_movimiento": m.fecha_movimiento,
+                "tipo_movimiento": m.tipo_movimiento,
+                "referencia_movimiento": m.referencia_movimiento,
+                "descripcion_movimiento": m.descripcion_movimiento,
+                "monto_movimiento": m.monto_movimiento or Decimal("0.00"),
+                "saldo": saldo_inicial + to_decimal(corrido),
+            }
+            for m, corrido in registros
+        ]
         return {
             "id_cuenta": cuenta.id_cuenta,
             "numero_cuenta": cuenta.numero_cuenta,
@@ -2836,7 +3073,8 @@ class ReporteService:
             "fecha_hasta": fecha_hasta,
             "saldo_inicial": saldo_inicial,
             "filas": filas,
-            "saldo_final": saldo,
+            "paginacion": paginacion,
+            "saldo_final": saldo_inicial + neto_del_rango,
         }
 
     @staticmethod

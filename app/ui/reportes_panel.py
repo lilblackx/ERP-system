@@ -8,13 +8,13 @@ docs/ESTADO_DEL_PROYECTO.md seccion 10 (R-02b/R-04) para el resto del
 catalogo (kardex, conciliacion bancaria, comisiones, etc.) que se agrega en
 pasos siguientes sobre esta misma pantalla.
 
-Todos son acotados por naturaleza (cuentas abiertas, un rango de fechas, los
-movimientos de un turno) asi que se cargan enteros via QueryWorker sin
-paginacion -- ver R-04 en el checklist para cuando eso deje de ser cierto.
+Los reportes de listado se pagan por paginas (ver REPORTES_PAGINADOS) y la exportacion siempre pide el reporte
+completo en un hilo (ExportacionCompletaMixin); los que agrupan devuelven pocas filas y se cargan enteros.
 """
 
 import logging
 from decimal import Decimal
+from types import SimpleNamespace
 
 import qtawesome as qta
 from PySide6.QtCore import QAbstractListModel, QDate, QModelIndex, Qt, QTimer
@@ -46,10 +46,12 @@ from app.db.models import (
 )
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
-from app.services.reportes import ReporteService
-from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.services.paginacion import paginar_lista
+from app.services.reportes import POR_PAGINA_REPORTE, ReporteService
+from app.ui.exportacion_completa import ExportacionCompletaMixin
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
+from app.ui.paginacion import ControlPaginacion
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
     CALENDARIO_QSS,
@@ -187,6 +189,49 @@ COLS_VENTAS_PRODUCTOS_CLIENTES_EXPORT = [
 # Reportes anchos: el PDF sale en hoja horizontal.
 # Filas maximas que se exportan a PDF (a Excel no hay limite): ver _exportar_pdf.
 LIMITE_FILAS_PDF = 20_000
+# Filas que se dibujan en la tabla de pantalla. Un reporte de 100 mil filas tardaba ~4 s en llenar la tabla (una
+# celda por dato) y nadie lo lee en pantalla; la exportacion siempre lleva todas las filas del resultado.
+LIMITE_FILAS_PANTALLA = 5_000
+# Reportes de listado paginados en la base (`pagina`/`por_pagina` en el servicio): la pantalla pide una pagina y la
+# exportacion vuelve a pedir TODAS las filas. Los demas llevan el resultado completo y solo se acota lo que se dibuja.
+REPORTES_PAGINADOS_EN_SQL = frozenset(
+    {
+        REPORTE_LIBRO_VENTAS,
+        REPORTE_MOV_CAJA_PERIODO,
+        REPORTE_MOV_CUENTA_BANCARIA,
+        REPORTE_NC_EMITIDAS,
+        REPORTE_DEVOLUCIONES_PROVEEDOR,
+        REPORTE_NC_PROVEEDOR,
+        REPORTE_COBROS_PERIODO,
+        REPORTE_PAGOS_PERIODO,
+        REPORTE_CXC_OTRAS,
+        REPORTE_CXP_OTRAS,
+        REPORTE_PROXIMOS_VENCIMIENTOS,
+    }
+)
+# El resto de los listados arma su resultado completo en el servicio (uniones de tablas, saldos corridos, JSON de
+# auditoria) y la tarea del hilo lo corta en paginas (`_tarea_paginada`): la pantalla y la exportacion no cargan
+# todas las filas en la interfaz, pero la consulta de base de datos sigue siendo la completa.
+REPORTES_PAGINADOS = REPORTES_PAGINADOS_EN_SQL | frozenset(
+    {
+        REPORTE_ACTIVACION_CLIENTES,
+        REPORTE_OC_ABIERTAS,
+        REPORTE_VALORIZACION,
+        REPORTE_BAJO_MINIMO,
+        REPORTE_SIN_MOVIMIENTO,
+        REPORTE_HISTORICO_PRECIOS,
+        REPORTE_CIERRE_CAJERO,
+        REPORTE_PRODUCTOS_PROXIMOS_VENCER,
+        REPORTE_AGING_CXC,
+        REPORTE_AGING_CXC_BCV,
+        REPORTE_AGING_CXP,
+        REPORTE_FACTURAS_ANULADAS,
+        REPORTE_KARDEX,
+        REPORTE_ESTADO_CTA_CLIENTE,
+        REPORTE_CLIENTES_MOROSOS,
+        REPORTE_ESTADO_CTA_PROVEEDOR,
+    }
+)
 
 REPORTES_APAISADOS = frozenset({REPORTE_LIBRO_VENTAS, REPORTE_OC_ABIERTAS, REPORTE_CIERRE_CAJERO})
 COLS_ACTIVACION_CLIENTES = ["Cliente", "Vendedor", "Facturas", "Meta", "Efectividad %"]
@@ -510,31 +555,37 @@ def _estilizar_fecha(date_edit: QDateEdit) -> None:
         calendario.setWeekdayTextFormat(dia, formato)
 
 
-def _tarea_exportar_reporte_excel(
-    session, ruta, encabezados, filas, titulo, config_empresa, filtros=None, secciones=None
+def _tarea_exportar_reporte(
+    session, ruta, formato, modo, resultado, consulta, titulo, filtros, col_widths, apaisado
 ) -> tuple[str, int]:
-    """Corre en un QThread aparte (QueryWorker) -- reportes con muchas filas pueden
-    tardar varios segundos en volcarse a Excel/PDF, sin esto congelaban la ventana."""
-    exportar_excel(
-        ruta, encabezados, filas, titulo=titulo, config_empresa=config_empresa, filtros=filtros, secciones=secciones
-    )
-    return ruta, len(filas)
-
-
-def _tarea_exportar_reporte_pdf(
-    session, ruta, encabezados, filas, titulo, filtros, col_widths, config_empresa, secciones=None, apaisado=False
-) -> tuple[str, int]:
-    exportar_pdf(
-        ruta,
-        titulo,
-        encabezados,
-        filas,
-        filtros=filtros,
-        col_widths=col_widths,
-        config_empresa=config_empresa,
-        secciones=secciones,
-        apaisado=apaisado,
-    )
+    """Corre en un hilo aparte (ver exportacion_completa.py). En un reporte paginado `consulta` es `(tarea, filtros)`:
+    se vuelve a pedir el reporte COMPLETO con los filtros con que se genero lo que se ve (la pantalla solo tiene una
+    pagina); en los demas `resultado` ya es el completo. Despues arma las filas y escribe el archivo, todo fuera del
+    hilo de la ventana (armar 100 000 filas tambien tarda)."""
+    if consulta is not None:
+        tarea, filtros_consulta = consulta
+        resultado = tarea(session, **filtros_consulta)
+    # `_filas_para_exportar` y `_secciones_para_exportar` solo leen el modo y el resultado.
+    contexto = SimpleNamespace(_ultimo_modo=modo, _ultimo_resultado=resultado)
+    _nombre, encabezados, filas = ReportesPanel._filas_para_exportar(contexto)
+    secciones = ReportesPanel._secciones_para_exportar(contexto)
+    config_empresa = EmpresaService.obtener_datos_documento(session)
+    if formato == "excel":
+        exportar_excel(
+            ruta, encabezados, filas, titulo=titulo, config_empresa=config_empresa, filtros=filtros, secciones=secciones
+        )
+    else:
+        exportar_pdf(
+            ruta,
+            titulo,
+            encabezados,
+            filas,
+            filtros=filtros,
+            col_widths=col_widths,
+            config_empresa=config_empresa,
+            secciones=secciones,
+            apaisado=apaisado,
+        )
     return ruta, len(filas)
 
 
@@ -570,13 +621,27 @@ def _tarea_aging_cxp(session, id_usuario, fecha_corte, id_proveedor, orden):
     )
 
 
-def _tarea_libro_ventas(session, id_usuario, fecha_desde, fecha_hasta, id_cliente):
+def _tarea_paginada(session, tarea, pagina, por_pagina, **filtros):
+    """Corre `tarea` (el reporte completo) y devuelve solo la pagina pedida de sus filas, con `paginacion`. Los totales
+    del resultado ya son los de todas las filas. Corre en el hilo de la consulta, no en la interfaz."""
+    resultado = tarea(session, **filtros)
+    pagina_filas = paginar_lista(resultado["filas"], pagina, por_pagina)
+    return {
+        **resultado,
+        "filas": pagina_filas["items"],
+        "paginacion": {k: v for k, v in pagina_filas.items() if k != "items"},
+    }
+
+
+def _tarea_libro_ventas(session, id_usuario, fecha_desde, fecha_hasta, id_cliente, pagina=None, por_pagina=None):
     return ReporteService.libro_ventas(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         id_cliente=id_cliente,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
@@ -645,13 +710,15 @@ def _tarea_facturas_anuladas(session, id_usuario, fecha_desde, fecha_hasta):
     )
 
 
-def _tarea_nc_emitidas(session, id_usuario, fecha_desde, fecha_hasta, id_cliente):
+def _tarea_nc_emitidas(session, id_usuario, fecha_desde, fecha_hasta, id_cliente, pagina=None, por_pagina=None):
     return ReporteService.notas_credito_emitidas(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         id_cliente=id_cliente,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
@@ -703,23 +770,29 @@ def _tarea_cumplimiento_proveedores(session, id_usuario, fecha_desde, fecha_hast
     )
 
 
-def _tarea_devoluciones_proveedor(session, id_usuario, fecha_desde, fecha_hasta, id_proveedor):
+def _tarea_devoluciones_proveedor(
+    session, id_usuario, fecha_desde, fecha_hasta, id_proveedor, pagina=None, por_pagina=None
+):
     return ReporteService.devoluciones_proveedor(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         id_proveedor=id_proveedor,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
-def _tarea_nc_proveedor(session, id_usuario, fecha_desde, fecha_hasta, id_proveedor):
+def _tarea_nc_proveedor(session, id_usuario, fecha_desde, fecha_hasta, id_proveedor, pagina=None, por_pagina=None):
     return ReporteService.notas_credito_proveedor(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         id_proveedor=id_proveedor,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
@@ -769,13 +842,15 @@ def _tarea_estado_cuenta_cliente(session, id_usuario, id_cliente, fecha_desde, f
     )
 
 
-def _tarea_cobros_periodo(session, id_usuario, fecha_desde, fecha_hasta, id_cliente):
+def _tarea_cobros_periodo(session, id_usuario, fecha_desde, fecha_hasta, id_cliente, pagina=None, por_pagina=None):
     return ReporteService.cobros_del_periodo(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         id_cliente=id_cliente,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
@@ -783,8 +858,15 @@ def _tarea_clientes_morosos(session, id_usuario, fecha_corte):
     return ReporteService.clientes_morosos(session, id_usuario=id_usuario, fecha_corte=fecha_corte)
 
 
-def _tarea_cxc_otras(session, id_usuario, id_cliente, estado):
-    return ReporteService.cxc_otras(session, id_usuario=id_usuario, id_cliente=id_cliente, estado=estado)
+def _tarea_cxc_otras(session, id_usuario, id_cliente, estado, pagina=None, por_pagina=None):
+    return ReporteService.cxc_otras(
+        session,
+        id_usuario=id_usuario,
+        id_cliente=id_cliente,
+        estado=estado,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
+    )
 
 
 def _tarea_estado_cuenta_proveedor(session, id_usuario, id_proveedor, fecha_desde, fecha_hasta):
@@ -797,35 +879,43 @@ def _tarea_estado_cuenta_proveedor(session, id_usuario, id_proveedor, fecha_desd
     )
 
 
-def _tarea_pagos_periodo(session, id_usuario, fecha_desde, fecha_hasta, id_proveedor):
+def _tarea_pagos_periodo(session, id_usuario, fecha_desde, fecha_hasta, id_proveedor, pagina=None, por_pagina=None):
     return ReporteService.pagos_del_periodo(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         id_proveedor=id_proveedor,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
-def _tarea_proximos_vencimientos(session, id_usuario, dias_horizonte, id_proveedor):
+def _tarea_proximos_vencimientos(session, id_usuario, dias_horizonte, id_proveedor, pagina=None, por_pagina=None):
     return ReporteService.proximos_vencimientos(
         session,
         id_usuario=id_usuario,
         dias_horizonte=dias_horizonte,
         id_proveedor=id_proveedor,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
-def _tarea_cxp_otras(session, id_usuario, id_cuenta_bancaria, estado):
+def _tarea_cxp_otras(session, id_usuario, id_cuenta_bancaria, estado, pagina=None, por_pagina=None):
     return ReporteService.cxp_otras(
         session,
         id_usuario=id_usuario,
         id_cuenta_bancaria=id_cuenta_bancaria,
         estado=estado,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
-def _tarea_mov_caja_periodo(session, id_usuario, fecha_desde, fecha_hasta, id_caja, tipo_movimiento):
+def _tarea_mov_caja_periodo(
+    session, id_usuario, fecha_desde, fecha_hasta, id_caja, tipo_movimiento, pagina=None, por_pagina=None
+):
     return ReporteService.movimientos_caja_periodo(
         session,
         id_usuario=id_usuario,
@@ -833,6 +923,8 @@ def _tarea_mov_caja_periodo(session, id_usuario, fecha_desde, fecha_hasta, id_ca
         fecha_hasta=fecha_hasta,
         id_caja=id_caja,
         tipo_movimiento=tipo_movimiento,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
@@ -856,13 +948,17 @@ def _tarea_flujo_caja(session, id_usuario, fecha_desde, fecha_hasta, agrupacion)
     )
 
 
-def _tarea_mov_cuenta_bancaria(session, id_usuario, id_cuenta_bancaria, fecha_desde, fecha_hasta):
+def _tarea_mov_cuenta_bancaria(
+    session, id_usuario, id_cuenta_bancaria, fecha_desde, fecha_hasta, pagina=None, por_pagina=None
+):
     return ReporteService.movimientos_cuenta_bancaria(
         session,
         id_usuario=id_usuario,
         id_cuenta_bancaria=id_cuenta_bancaria,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
+        pagina=pagina,
+        por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
@@ -981,7 +1077,71 @@ def _modelo_combo(filas: list[tuple], primero: str | None = None) -> _ModeloList
     return _ModeloLista(filas, primero)
 
 
-class ReportesPanel(QWidget):
+# (clave en `_tarea_catalogos_filtros`, primera opcion "todos", combos que la usan). Un combo por pagina de
+# filtros: un QWidget no puede pertenecer a dos layouts a la vez. caja_combo (arqueo) siempre requiere una caja
+# puntual; caja_combo_mcp (movimientos por periodo) es opcional y lleva su propia opcion "Todas". Kardex e historico de
+# precios requieren un producto puntual; ventas por producto y cliente admite todos. Movimientos por cuenta requiere
+# una cuenta puntual (sin "Todas").
+_GRUPOS_CATALOGO: tuple[tuple[str, str | None, tuple[str, ...]], ...] = (
+    (
+        "clientes",
+        "Todos los clientes",
+        (
+            "cliente_combo",
+            "cliente_combo_bcv",
+            "cliente_combo_lv",
+            "cliente_combo_nc",
+            "cliente_combo_ecc",
+            "cliente_combo_cbp",
+            "cliente_combo_cxco",
+        ),
+    ),
+    (
+        "proveedores",
+        "Todos los proveedores",
+        (
+            "proveedor_combo",
+            "proveedor_combo_oc",
+            "proveedor_combo_dp",
+            "proveedor_combo_ncp",
+            "proveedor_combo_ecp",
+            "proveedor_combo_pp",
+            "proveedor_combo_pv",
+        ),
+    ),
+    ("cajas", None, ("caja_combo",)),
+    ("cajas", "Todas las cajas", ("caja_combo_mcp",)),
+    (
+        "vendedores",
+        "Todos los vendedores",
+        (
+            "vendedor_combo_comv",
+            "vendedor_combo_cpp",
+            "vendedor_combo_ac",
+            "vendedor_combo_aging",
+            "vendedor_combo_bcv",
+            "vendedor_combo_vpc",
+        ),
+    ),
+    ("cajeros", "Todos los cajeros", ("usuario_combo_cierre",)),
+    ("productos", None, ("producto_combo_kardex", "producto_combo_hp")),
+    ("productos", "Todos los productos", ("producto_combo_vpc",)),
+    (
+        "categorias",
+        "Todas las categorías",
+        (
+            "categoria_combo_valorizacion",
+            "categoria_combo_bajo_minimo",
+            "categoria_combo_sm",
+            "categoria_combo_ppv",
+        ),
+    ),
+    ("cuentas", "Todas las cuentas", ("cuenta_bancaria_combo_cxpo", "cuenta_bancaria_combo_conc")),
+    ("cuentas", None, ("cuenta_bancaria_combo_mcb",)),
+)
+
+
+class ReportesPanel(ExportacionCompletaMixin, QWidget):
     """Panel principal del modulo Reportes: selector de reporte + filtros propios de
     cada uno + tabla de resultados + exportacion a Excel/PDF."""
 
@@ -993,6 +1153,10 @@ class ReportesPanel(QWidget):
         self.usuario = usuario
         self._ultimo_modo: str | None = None
         self._ultimo_resultado: dict | None = None
+        self._filas_ocultas = 0
+        # (tarea, filtros) del reporte paginado que se esta mostrando, para volver a pedirlo completo al exportar.
+        self._consulta_pendiente: tuple | None = None
+        self._consulta_completa: tuple | None = None
         self.setObjectName("ContentArea")
         self._setup_ui()
         self._cargar_catalogos()
@@ -1015,6 +1179,7 @@ class ReportesPanel(QWidget):
         root.addWidget(self._make_toolbar())
         root.addWidget(self._make_resumen())
         root.addWidget(self._make_table(), stretch=1)
+        root.addWidget(self._make_pie_paginacion())
 
         aplicar_fondo_panel(self)
 
@@ -1147,61 +1312,63 @@ class ReportesPanel(QWidget):
         filtros_layout = QHBoxLayout(self.filtros_container)
         filtros_layout.setContentsMargins(0, 0, 0, 0)
         filtros_layout.setSpacing(0)
-        self._filtros_paginas = {
-            REPORTE_AGING_CXC: self._make_filtros_aging(),
-            REPORTE_AGING_CXC_BCV: self._make_filtros_aging_cxc_bcv(),
-            REPORTE_AGING_CXP: self._make_filtros_aging_cxp(),
-            REPORTE_LIBRO_VENTAS: self._make_filtros_libro_ventas(),
-            REPORTE_VENTAS_PERIODO: self._make_filtros_ventas_periodo(),
-            REPORTE_VENTAS_CLIENTE: self._make_filtros_ventas_cliente(),
-            REPORTE_VENTAS_VENDEDOR: self._make_filtros_ventas_vendedor(),
-            REPORTE_VENTAS_RUTA: self._make_filtros_ventas_ruta(),
-            REPORTE_ACTIVACION_CLIENTES: self._make_filtros_activacion_clientes(),
-            REPORTE_VENTAS_PRODUCTOS_CLIENTES: self._make_filtros_ventas_productos_clientes(),
-            REPORTE_PRODUCTOS_VENDIDOS: self._make_filtros_productos_vendidos(),
-            REPORTE_FACTURAS_ANULADAS: self._make_filtros_facturas_anuladas(),
-            REPORTE_NC_EMITIDAS: self._make_filtros_nc_emitidas(),
-            REPORTE_CONTADO_CREDITO: self._make_filtros_contado_credito(),
-            REPORTE_MARGEN_UTILIDAD: self._make_filtros_margen_utilidad(),
-            REPORTE_COMPRAS_PERIODO: self._make_filtros_compras_periodo(),
-            REPORTE_COMPRAS_PROVEEDOR: self._make_filtros_compras_proveedor(),
-            REPORTE_COMPRAS_PRODUCTO: self._make_filtros_compras_producto(),
-            REPORTE_OC_ABIERTAS: self._make_filtros_oc_abiertas(),
-            REPORTE_CUMPLIMIENTO_PROVEEDORES: self._make_filtros_cumplimiento_proveedores(),
-            REPORTE_DEVOLUCIONES_PROVEEDOR: self._make_filtros_devoluciones_proveedor(),
-            REPORTE_NC_PROVEEDOR: self._make_filtros_nc_proveedor(),
-            REPORTE_ARQUEO_CAJA: self._make_filtros_arqueo(),
-            REPORTE_KARDEX: self._make_filtros_kardex(),
-            REPORTE_VALORIZACION: self._make_filtros_valorizacion(),
-            REPORTE_BAJO_MINIMO: self._make_filtros_bajo_minimo(),
-            REPORTE_SIN_MOVIMIENTO: self._make_filtros_sin_movimiento(),
-            REPORTE_HISTORICO_PRECIOS: self._make_filtros_historico_precios(),
-            REPORTE_ESTADO_CTA_CLIENTE: self._make_filtros_estado_cuenta_cliente(),
-            REPORTE_COBROS_PERIODO: self._make_filtros_cobros_periodo(),
-            REPORTE_CLIENTES_MOROSOS: self._make_filtros_clientes_morosos(),
-            REPORTE_CXC_OTRAS: self._make_filtros_cxc_otras(),
-            REPORTE_ESTADO_CTA_PROVEEDOR: self._make_filtros_estado_cuenta_proveedor(),
-            REPORTE_PAGOS_PERIODO: self._make_filtros_pagos_periodo(),
-            REPORTE_PROXIMOS_VENCIMIENTOS: self._make_filtros_proximos_vencimientos(),
-            REPORTE_CXP_OTRAS: self._make_filtros_cxp_otras(),
-            REPORTE_MOV_CAJA_PERIODO: self._make_filtros_mov_caja_periodo(),
-            REPORTE_CIERRE_CAJERO: self._make_filtros_cierre_cajero(),
-            REPORTE_FLUJO_CAJA: self._make_filtros_flujo_caja(),
-            REPORTE_MOV_CUENTA_BANCARIA: self._make_filtros_mov_cuenta_bancaria(),
-            REPORTE_CONCILIACION_BANCARIA: self._make_filtros_conciliacion_bancaria(),
-            REPORTE_SALDO_CONSOLIDADO: self._make_filtros_saldo_consolidado(),
-            REPORTE_COMISIONES_VENDEDOR: self._make_filtros_comisiones_vendedor(),
-            REPORTE_COMISIONES_PAGADAS_PENDIENTES: self._make_filtros_comisiones_pagadas_pendientes(),
-            REPORTE_PRODUCTOS_PROXIMOS_VENCER: self._make_filtros_productos_proximos_vencer(),
+        self._filtros_fabricas = {
+            REPORTE_AGING_CXC: self._make_filtros_aging,
+            REPORTE_AGING_CXC_BCV: self._make_filtros_aging_cxc_bcv,
+            REPORTE_AGING_CXP: self._make_filtros_aging_cxp,
+            REPORTE_LIBRO_VENTAS: self._make_filtros_libro_ventas,
+            REPORTE_VENTAS_PERIODO: self._make_filtros_ventas_periodo,
+            REPORTE_VENTAS_CLIENTE: self._make_filtros_ventas_cliente,
+            REPORTE_VENTAS_VENDEDOR: self._make_filtros_ventas_vendedor,
+            REPORTE_VENTAS_RUTA: self._make_filtros_ventas_ruta,
+            REPORTE_ACTIVACION_CLIENTES: self._make_filtros_activacion_clientes,
+            REPORTE_VENTAS_PRODUCTOS_CLIENTES: self._make_filtros_ventas_productos_clientes,
+            REPORTE_PRODUCTOS_VENDIDOS: self._make_filtros_productos_vendidos,
+            REPORTE_FACTURAS_ANULADAS: self._make_filtros_facturas_anuladas,
+            REPORTE_NC_EMITIDAS: self._make_filtros_nc_emitidas,
+            REPORTE_CONTADO_CREDITO: self._make_filtros_contado_credito,
+            REPORTE_MARGEN_UTILIDAD: self._make_filtros_margen_utilidad,
+            REPORTE_COMPRAS_PERIODO: self._make_filtros_compras_periodo,
+            REPORTE_COMPRAS_PROVEEDOR: self._make_filtros_compras_proveedor,
+            REPORTE_COMPRAS_PRODUCTO: self._make_filtros_compras_producto,
+            REPORTE_OC_ABIERTAS: self._make_filtros_oc_abiertas,
+            REPORTE_CUMPLIMIENTO_PROVEEDORES: self._make_filtros_cumplimiento_proveedores,
+            REPORTE_DEVOLUCIONES_PROVEEDOR: self._make_filtros_devoluciones_proveedor,
+            REPORTE_NC_PROVEEDOR: self._make_filtros_nc_proveedor,
+            REPORTE_ARQUEO_CAJA: self._make_filtros_arqueo,
+            REPORTE_KARDEX: self._make_filtros_kardex,
+            REPORTE_VALORIZACION: self._make_filtros_valorizacion,
+            REPORTE_BAJO_MINIMO: self._make_filtros_bajo_minimo,
+            REPORTE_SIN_MOVIMIENTO: self._make_filtros_sin_movimiento,
+            REPORTE_HISTORICO_PRECIOS: self._make_filtros_historico_precios,
+            REPORTE_ESTADO_CTA_CLIENTE: self._make_filtros_estado_cuenta_cliente,
+            REPORTE_COBROS_PERIODO: self._make_filtros_cobros_periodo,
+            REPORTE_CLIENTES_MOROSOS: self._make_filtros_clientes_morosos,
+            REPORTE_CXC_OTRAS: self._make_filtros_cxc_otras,
+            REPORTE_ESTADO_CTA_PROVEEDOR: self._make_filtros_estado_cuenta_proveedor,
+            REPORTE_PAGOS_PERIODO: self._make_filtros_pagos_periodo,
+            REPORTE_PROXIMOS_VENCIMIENTOS: self._make_filtros_proximos_vencimientos,
+            REPORTE_CXP_OTRAS: self._make_filtros_cxp_otras,
+            REPORTE_MOV_CAJA_PERIODO: self._make_filtros_mov_caja_periodo,
+            REPORTE_CIERRE_CAJERO: self._make_filtros_cierre_cajero,
+            REPORTE_FLUJO_CAJA: self._make_filtros_flujo_caja,
+            REPORTE_MOV_CUENTA_BANCARIA: self._make_filtros_mov_cuenta_bancaria,
+            REPORTE_CONCILIACION_BANCARIA: self._make_filtros_conciliacion_bancaria,
+            REPORTE_SALDO_CONSOLIDADO: self._make_filtros_saldo_consolidado,
+            REPORTE_COMISIONES_VENDEDOR: self._make_filtros_comisiones_vendedor,
+            REPORTE_COMISIONES_PAGADAS_PENDIENTES: self._make_filtros_comisiones_pagadas_pendientes,
+            REPORTE_PRODUCTOS_PROXIMOS_VENCER: self._make_filtros_productos_proximos_vencer,
         }
-        for modo, pagina in self._filtros_paginas.items():
-            filtros_layout.addWidget(pagina)
-            pagina.setVisible(modo == REPORTE_AGING_CXC)
+        # Las paginas de filtros se construyen al elegir su reporte, no todas al abrir el panel: las 45 juntas
+        # costaban 1,3-2,7 s de ventana congelada la primera vez que se entraba a Reportes.
+        self._filtros_paginas: dict[str, QWidget] = {}
+        self._filtros_layout = filtros_layout
+        self._asegurar_pagina(REPORTE_AGING_CXC).setVisible(True)
 
         self.btn_generar = QPushButton(" Generar")
         self.btn_generar.setIcon(qta.icon("fa5s.play", color="white"))
         self.btn_generar.setStyleSheet(BUTTON_PRIMARY_QSS)
-        self.btn_generar.clicked.connect(self._generar)
+        self.btn_generar.clicked.connect(self._generar_desde_inicio)
 
         self.btn_exportar = BotonExportar(on_excel=self._exportar_excel, on_pdf=self._exportar_pdf)
 
@@ -2404,6 +2571,19 @@ class ReportesPanel(QWidget):
         self.tabla.verticalHeader().setDefaultSectionSize(40)
         return self.tabla
 
+    def _make_pie_paginacion(self) -> QWidget:
+        """Control de paginacion de los reportes de listado paginados (ver REPORTES_PAGINADOS); oculto en los demas."""
+        self.pie_paginacion = QWidget()
+        self.pie_paginacion.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(self.pie_paginacion)
+        h.setContentsMargins(0, 0, 0, 0)
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self._generar())
+        h.addStretch()
+        h.addWidget(self.paginacion)
+        self.pie_paginacion.setVisible(False)
+        return self.pie_paginacion
+
     # ── Filtros auxiliares (combos) ────────────────────────────────────────
 
     def _cargar_catalogos(self) -> None:
@@ -2418,80 +2598,32 @@ class ReportesPanel(QWidget):
         MessageBox.warning(self, "Filtros", "No se pudieron cargar las listas de los filtros.")
 
     def _llenar_catalogos(self, datos: dict) -> None:
-        self._modelos_combo: list = []  # los combos no son dueños del modelo compartido
+        self._catalogos = datos
+        self._aplicar_catalogos()
 
-        def asignar(combos, filas, primero=None):
-            modelo = _modelo_combo(filas, primero)
-            self._modelos_combo.append(modelo)
-            for combo in combos:
+    def _aplicar_catalogos(self) -> None:
+        """Asigna los catalogos a los combos de las paginas de filtros que ya existen. Las paginas se construyen al
+        elegir su reporte, asi que se vuelve a llamar cada vez que se crea una: lo ya asignado no se repite."""
+        datos = getattr(self, "_catalogos", None)
+        if datos is None:
+            return
+        if not hasattr(self, "_modelos_combo"):
+            self._modelos_combo: dict[int, _ModeloLista] = {}  # los combos no son dueños del modelo compartido
+            self._combos_con_modelo: set[int] = set()
+        for i, (clave, primero, nombres) in enumerate(_GRUPOS_CATALOGO):
+            modelo = self._modelos_combo.get(i)
+            for nombre in nombres:
+                combo = getattr(self, nombre, None)
+                if combo is None or id(combo) in self._combos_con_modelo:
+                    continue
+                if modelo is None:
+                    modelo = self._modelos_combo[i] = _modelo_combo(datos[clave], primero)
                 combo.setModel(modelo)
                 combo.setCurrentIndex(0 if modelo.rowCount() else -1)
-
-        # Combos independientes, uno por pagina de filtros: un QWidget no puede pertenecer a dos layouts a la vez.
-        asignar(
-            (
-                self.cliente_combo,
-                self.cliente_combo_bcv,
-                self.cliente_combo_lv,
-                self.cliente_combo_nc,
-                self.cliente_combo_ecc,
-                self.cliente_combo_cbp,
-                self.cliente_combo_cxco,
-            ),
-            datos["clientes"],
-            "Todos los clientes",
-        )
-        asignar(
-            (
-                self.proveedor_combo,
-                self.proveedor_combo_oc,
-                self.proveedor_combo_dp,
-                self.proveedor_combo_ncp,
-                self.proveedor_combo_ecp,
-                self.proveedor_combo_pp,
-                self.proveedor_combo_pv,
-            ),
-            datos["proveedores"],
-            "Todos los proveedores",
-        )
-        # caja_combo (arqueo) siempre requiere una caja puntual; caja_combo_mcp (movimientos por periodo) es
-        # opcional y lleva su propia opcion "Todas".
-        asignar((self.caja_combo,), datos["cajas"])
-        asignar((self.caja_combo_mcp,), datos["cajas"], "Todas las cajas")
-        asignar(
-            (
-                self.vendedor_combo_comv,
-                self.vendedor_combo_cpp,
-                self.vendedor_combo_ac,
-                self.vendedor_combo_aging,
-                self.vendedor_combo_bcv,
-                self.vendedor_combo_vpc,
-            ),
-            datos["vendedores"],
-            "Todos los vendedores",
-        )
-        asignar((self.usuario_combo_cierre,), datos["cajeros"], "Todos los cajeros")
-        # Kardex e historico de precios requieren un producto puntual; ventas por producto y cliente admite todos.
-        asignar((self.producto_combo_kardex, self.producto_combo_hp), datos["productos"])
-        asignar((self.producto_combo_vpc,), datos["productos"], "Todos los productos")
-        asignar(
-            (
-                self.categoria_combo_valorizacion,
-                self.categoria_combo_bajo_minimo,
-                self.categoria_combo_sm,
-                self.categoria_combo_ppv,
-            ),
-            datos["categorias"],
-            "Todas las categorías",
-        )
-        asignar(
-            (self.cuenta_bancaria_combo_cxpo, self.cuenta_bancaria_combo_conc), datos["cuentas"], "Todas las cuentas"
-        )
-        # Movimientos por cuenta requiere una cuenta puntual (sin "Todas").
-        asignar((self.cuenta_bancaria_combo_mcb,), datos["cuentas"])
+                self._combos_con_modelo.add(id(combo))
 
     def closeEvent(self, event) -> None:
-        for nombre in ("_worker_catalogos", "_worker"):
+        for nombre in ("_worker_catalogos", "_worker", "_worker_export"):
             worker = getattr(self, nombre, None)
             if worker is not None:
                 worker.wait(2000)
@@ -2499,10 +2631,51 @@ class ReportesPanel(QWidget):
 
     def _on_tipo_cambiado(self, index: int) -> None:
         modo = self.tipo_combo.itemData(index)
+        self._asegurar_pagina(modo)
         for m, pagina in self._filtros_paginas.items():
             pagina.setVisible(m == modo)
+        self.paginacion.reiniciar()
+        self.pie_paginacion.setVisible(modo in REPORTES_PAGINADOS)
+
+    def _asegurar_pagina(self, modo: str) -> QWidget:
+        """Pagina de filtros del reporte `modo`; la construye la primera vez que se pide."""
+        pagina = self._filtros_paginas.get(modo)
+        if pagina is None:
+            pagina = self._filtros_fabricas[modo]()
+            pagina.setVisible(False)
+            self._filtros_layout.addWidget(pagina)
+            self._filtros_paginas[modo] = pagina
+            self._aplicar_catalogos()
+        return pagina
 
     # ── Generación del reporte ──────────────────────────────────────────────
+
+    def _pedir_paginado(self, tarea, filtros: dict) -> None:
+        """Pide la pagina actual de un reporte paginado (ver REPORTES_PAGINADOS) y guarda `(tarea, filtros)` para que
+        la exportacion lo vuelva a pedir completo con los mismos filtros."""
+        self._consulta_pendiente = (tarea, filtros)
+        if self.tipo_combo.currentData() in REPORTES_PAGINADOS_EN_SQL:
+            self._worker = QueryWorker(
+                self.session_factory,
+                tarea,
+                pagina=self.paginacion.pagina,
+                por_pagina=POR_PAGINA_REPORTE,
+                **filtros,
+            )
+        else:
+            self._worker = QueryWorker(
+                self.session_factory,
+                _tarea_paginada,
+                tarea,
+                self.paginacion.pagina,
+                POR_PAGINA_REPORTE,
+                **filtros,
+            )
+
+    def _generar_desde_inicio(self) -> None:
+        """Boton Generar: un reporte nuevo (o con otros filtros) empieza en la pagina 1."""
+        self.paginacion.reiniciar()
+        self._generar()
 
     def _generar(self) -> None:
         # Mismo guard que dashboard_panel/facturacion_panel: reasignar self._worker a un
@@ -2511,34 +2684,38 @@ class ReportesPanel(QWidget):
             return
 
         modo = self.tipo_combo.currentData()
+        self._asegurar_pagina(modo)
         if modo == REPORTE_AGING_CXC:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_aging_cxc,
-                id_usuario=self.usuario.id_usuario,
-                fecha_corte=self.fecha_corte_input.date().toPython(),
-                id_cliente=self.cliente_combo.currentData(),
-                id_vendedor=self.vendedor_combo_aging.currentData(),
-                orden=self.orden_combo.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_corte": self.fecha_corte_input.date().toPython(),
+                    "id_cliente": self.cliente_combo.currentData(),
+                    "id_vendedor": self.vendedor_combo_aging.currentData(),
+                    "orden": self.orden_combo.currentData(),
+                },
             )
         elif modo == REPORTE_AGING_CXC_BCV:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_aging_cxc_bcv,
-                id_usuario=self.usuario.id_usuario,
-                fecha_corte=self.fecha_corte_bcv_input.date().toPython(),
-                id_cliente=self.cliente_combo_bcv.currentData(),
-                id_vendedor=self.vendedor_combo_bcv.currentData(),
-                orden=self.orden_bcv_combo.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_corte": self.fecha_corte_bcv_input.date().toPython(),
+                    "id_cliente": self.cliente_combo_bcv.currentData(),
+                    "id_vendedor": self.vendedor_combo_bcv.currentData(),
+                    "orden": self.orden_bcv_combo.currentData(),
+                },
             )
         elif modo == REPORTE_AGING_CXP:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_aging_cxp,
-                id_usuario=self.usuario.id_usuario,
-                fecha_corte=self.fecha_corte_cxp_input.date().toPython(),
-                id_proveedor=self.proveedor_combo.currentData(),
-                orden=self.orden_cxp_combo.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_corte": self.fecha_corte_cxp_input.date().toPython(),
+                    "id_proveedor": self.proveedor_combo.currentData(),
+                    "orden": self.orden_cxp_combo.currentData(),
+                },
             )
         elif modo == REPORTE_LIBRO_VENTAS:
             fecha_desde = self.fecha_desde_lv_input.date().toPython()
@@ -2550,13 +2727,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_libro_ventas,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_cliente=self.cliente_combo_lv.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_cliente": self.cliente_combo_lv.currentData(),
+                },
             )
         elif modo == REPORTE_VENTAS_PERIODO:
             fecha_desde = self.fecha_desde_vp_input.date().toPython()
@@ -2656,13 +2834,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_activacion_clientes,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_vendedor=self.vendedor_combo_ac.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_vendedor": self.vendedor_combo_ac.currentData(),
+                },
             )
         elif modo == REPORTE_PRODUCTOS_VENDIDOS:
             fecha_desde = self.fecha_desde_pv_input.date().toPython()
@@ -2692,12 +2871,13 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_facturas_anuladas,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                },
             )
         elif modo == REPORTE_NC_EMITIDAS:
             fecha_desde = self.fecha_desde_nc_input.date().toPython()
@@ -2709,13 +2889,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_nc_emitidas,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_cliente=self.cliente_combo_nc.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_cliente": self.cliente_combo_nc.currentData(),
+                },
             )
         elif modo == REPORTE_CONTADO_CREDITO:
             fecha_desde = self.fecha_desde_cc_input.date().toPython()
@@ -2805,11 +2986,12 @@ class ReportesPanel(QWidget):
                 orden=self.orden_compras_producto_combo.currentData(),
             )
         elif modo == REPORTE_OC_ABIERTAS:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_oc_abiertas,
-                id_usuario=self.usuario.id_usuario,
-                id_proveedor=self.proveedor_combo_oc.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_proveedor": self.proveedor_combo_oc.currentData(),
+                },
             )
         elif modo == REPORTE_CUMPLIMIENTO_PROVEEDORES:
             fecha_desde = self.fecha_desde_cump_input.date().toPython()
@@ -2838,13 +3020,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_devoluciones_proveedor,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_proveedor=self.proveedor_combo_dp.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_proveedor": self.proveedor_combo_dp.currentData(),
+                },
             )
         elif modo == REPORTE_NC_PROVEEDOR:
             fecha_desde = self.fecha_desde_ncp_input.date().toPython()
@@ -2856,13 +3039,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_nc_proveedor,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_proveedor=self.proveedor_combo_ncp.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_proveedor": self.proveedor_combo_ncp.currentData(),
+                },
             )
         elif modo == REPORTE_ARQUEO_CAJA:
             id_caja = self.caja_combo.currentData()
@@ -2897,27 +3081,30 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_kardex,
-                id_usuario=self.usuario.id_usuario,
-                id_producto=id_producto,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_producto": id_producto,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                },
             )
         elif modo == REPORTE_VALORIZACION:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_valorizacion_inventario,
-                id_usuario=self.usuario.id_usuario,
-                id_categoria=self.categoria_combo_valorizacion.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_categoria": self.categoria_combo_valorizacion.currentData(),
+                },
             )
         elif modo == REPORTE_BAJO_MINIMO:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_bajo_minimo,
-                id_usuario=self.usuario.id_usuario,
-                id_categoria=self.categoria_combo_bajo_minimo.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_categoria": self.categoria_combo_bajo_minimo.currentData(),
+                },
             )
         elif modo == REPORTE_SIN_MOVIMIENTO:
             fecha_desde = self.fecha_desde_sm_input.date().toPython()
@@ -2929,24 +3116,26 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_sin_movimiento,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_categoria=self.categoria_combo_sm.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_categoria": self.categoria_combo_sm.currentData(),
+                },
             )
         elif modo == REPORTE_HISTORICO_PRECIOS:
             id_producto = self.producto_combo_hp.currentData()
             if id_producto is None:
                 MessageBox.information(self, "Sin productos", "No hay productos registrados.")
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_historico_precios,
-                id_usuario=self.usuario.id_usuario,
-                id_producto=id_producto,
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_producto": id_producto,
+                },
             )
         elif modo == REPORTE_ESTADO_CTA_CLIENTE:
             id_cliente = self.cliente_combo_ecc.currentData()
@@ -2962,13 +3151,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_estado_cuenta_cliente,
-                id_usuario=self.usuario.id_usuario,
-                id_cliente=id_cliente,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_cliente": id_cliente,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                },
             )
         elif modo == REPORTE_COBROS_PERIODO:
             fecha_desde = self.fecha_desde_cbp_input.date().toPython()
@@ -2980,28 +3170,31 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_cobros_periodo,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_cliente=self.cliente_combo_cbp.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_cliente": self.cliente_combo_cbp.currentData(),
+                },
             )
         elif modo == REPORTE_CLIENTES_MOROSOS:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_clientes_morosos,
-                id_usuario=self.usuario.id_usuario,
-                fecha_corte=self.fecha_corte_morosos_input.date().toPython(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_corte": self.fecha_corte_morosos_input.date().toPython(),
+                },
             )
         elif modo == REPORTE_CXC_OTRAS:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_cxc_otras,
-                id_usuario=self.usuario.id_usuario,
-                id_cliente=self.cliente_combo_cxco.currentData(),
-                estado=self.estado_combo_cxco.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_cliente": self.cliente_combo_cxco.currentData(),
+                    "estado": self.estado_combo_cxco.currentData(),
+                },
             )
         elif modo == REPORTE_ESTADO_CTA_PROVEEDOR:
             id_proveedor = self.proveedor_combo_ecp.currentData()
@@ -3017,13 +3210,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_estado_cuenta_proveedor,
-                id_usuario=self.usuario.id_usuario,
-                id_proveedor=id_proveedor,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_proveedor": id_proveedor,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                },
             )
         elif modo == REPORTE_PAGOS_PERIODO:
             fecha_desde = self.fecha_desde_pp_input.date().toPython()
@@ -3035,29 +3229,32 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_pagos_periodo,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_proveedor=self.proveedor_combo_pp.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_proveedor": self.proveedor_combo_pp.currentData(),
+                },
             )
         elif modo == REPORTE_PROXIMOS_VENCIMIENTOS:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_proximos_vencimientos,
-                id_usuario=self.usuario.id_usuario,
-                dias_horizonte=int(self.dias_horizonte_input.get_value()),
-                id_proveedor=self.proveedor_combo_pv.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "dias_horizonte": int(self.dias_horizonte_input.get_value()),
+                    "id_proveedor": self.proveedor_combo_pv.currentData(),
+                },
             )
         elif modo == REPORTE_CXP_OTRAS:
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_cxp_otras,
-                id_usuario=self.usuario.id_usuario,
-                id_cuenta_bancaria=self.cuenta_bancaria_combo_cxpo.currentData(),
-                estado=self.estado_combo_cxpo.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_cuenta_bancaria": self.cuenta_bancaria_combo_cxpo.currentData(),
+                    "estado": self.estado_combo_cxpo.currentData(),
+                },
             )
         elif modo == REPORTE_MOV_CAJA_PERIODO:
             fecha_desde = self.fecha_desde_mcp_input.date().toPython()
@@ -3069,14 +3266,15 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_mov_caja_periodo,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_caja=self.caja_combo_mcp.currentData(),
-                tipo_movimiento=self.tipo_combo_mcp.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_caja": self.caja_combo_mcp.currentData(),
+                    "tipo_movimiento": self.tipo_combo_mcp.currentData(),
+                },
             )
         elif modo == REPORTE_CIERRE_CAJERO:
             fecha_desde = self.fecha_desde_cc_cajero_input.date().toPython()
@@ -3088,13 +3286,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_cierre_cajero,
-                id_usuario=self.usuario.id_usuario,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                id_usuario_cajero=self.usuario_combo_cierre.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "id_usuario_cajero": self.usuario_combo_cierre.currentData(),
+                },
             )
         elif modo == REPORTE_FLUJO_CAJA:
             fecha_desde = self.fecha_desde_flujo_input.date().toPython()
@@ -3128,13 +3327,14 @@ class ReportesPanel(QWidget):
                     "La fecha 'Desde' no puede ser posterior a 'Hasta'.",
                 )
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_mov_cuenta_bancaria,
-                id_usuario=self.usuario.id_usuario,
-                id_cuenta_bancaria=id_cuenta_bancaria,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "id_cuenta_bancaria": id_cuenta_bancaria,
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                },
             )
         elif modo == REPORTE_CONCILIACION_BANCARIA:
             self._worker = QueryWorker(
@@ -3172,12 +3372,13 @@ class ReportesPanel(QWidget):
             if dias_horizonte <= 0:
                 MessageBox.warning(self, "Valor inválido", "El horizonte de días debe ser mayor a 0.")
                 return
-            self._worker = QueryWorker(
-                self.session_factory,
+            self._pedir_paginado(
                 _tarea_productos_proximos_vencer,
-                id_usuario=self.usuario.id_usuario,
-                dias_horizonte=dias_horizonte,
-                id_categoria=self.categoria_combo_ppv.currentData(),
+                {
+                    "id_usuario": self.usuario.id_usuario,
+                    "dias_horizonte": dias_horizonte,
+                    "id_categoria": self.categoria_combo_ppv.currentData(),
+                },
             )
         else:
             fecha_desde = self.fecha_desde_cpp_com_input.date().toPython()
@@ -3210,6 +3411,13 @@ class ReportesPanel(QWidget):
     def _mostrar_resultado(self, resultado: dict) -> None:
         self.btn_generar.setEnabled(True)
         self._ultimo_resultado = resultado
+        self._filas_ocultas = 0
+        if self._ultimo_modo in REPORTES_PAGINADOS:
+            self._consulta_completa = self._consulta_pendiente
+            if resultado.get("paginacion"):
+                self.paginacion.actualizar_desde(resultado["paginacion"], mostrar_total=True)
+                # Con una sola pagina no hay nada que navegar: el control solo estorba.
+                self.pie_paginacion.setVisible(self.paginacion.total_paginas > 1)
         if self._ultimo_modo == REPORTE_AGING_CXC:
             self._mostrar_aging(resultado)
         elif self._ultimo_modo == REPORTE_AGING_CXC_BCV:
@@ -3300,6 +3508,23 @@ class ReportesPanel(QWidget):
             self._mostrar_productos_proximos_vencer(resultado)
         else:
             self._mostrar_comisiones_pagadas_pendientes(resultado)
+        if self._filas_ocultas:
+            self.lbl_total.setText(
+                f"{self.lbl_total.text()} · en pantalla las primeras {self.tabla.rowCount():,}"
+                " (la exportación incluye todas)"
+            )
+
+    @staticmethod
+    def _total_filas(resultado: dict, filas: list) -> int:
+        """Cantidad real de filas del reporte: en uno paginado `filas` es solo la pagina en pantalla."""
+        paginacion = resultado.get("paginacion")
+        return paginacion["total"] if paginacion else len(filas)
+
+    def _filas_visibles(self, total: int) -> int:
+        """Cuantas filas dibujar en la tabla de pantalla (ver LIMITE_FILAS_PANTALLA)."""
+        visibles = min(total, LIMITE_FILAS_PANTALLA)
+        self._filas_ocultas = total - visibles
+        return visibles
 
     def _capturar_combos(self) -> dict[int, str]:
         return {id(c): c.currentText() for c in vars(self).values() if isinstance(c, QComboBox)}
@@ -3349,8 +3574,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_factura"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "Consumidor final"))
             fecha_venc = f["fecha_vencimiento"].strftime("%d/%m/%Y") if f["fecha_vencimiento"] else "N/A"
@@ -3360,9 +3586,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 5, self._item_num(str(f["dias_transcurridos"])))
             self.tabla.setItem(row, 6, QTableWidgetItem(ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"])))
 
-        self.lbl_total.setText(
-            f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''} abierta{'s' if len(filas) != 1 else ''}"
-        )
+        self.lbl_total.setText(f"{n_filas} cuenta{'s' if n_filas != 1 else ''} abierta{'s' if n_filas != 1 else ''}")
         self._mostrar_resumen_aging(resultado)
 
     def _mostrar_aging_cxc_bcv(self, resultado: dict) -> None:
@@ -3380,8 +3604,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_factura"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "Consumidor final"))
             fecha_venc = f["fecha_vencimiento"].strftime("%d/%m/%Y") if f["fecha_vencimiento"] else "N/A"
@@ -3394,7 +3619,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 7, QTableWidgetItem(ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"])))
 
         self.lbl_total.setText(
-            f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''} BCV abierta{'s' if len(filas) != 1 else ''}"
+            f"{n_filas} cuenta{'s' if n_filas != 1 else ''} BCV abierta{'s' if n_filas != 1 else ''}"
         )
         self._mostrar_resumen_aging(resultado)
 
@@ -3429,8 +3654,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_compra"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             fecha_venc = f["fecha_vencimiento"].strftime("%d/%m/%Y") if f["fecha_vencimiento"] else "N/A"
@@ -3439,9 +3665,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 4, self._item_num(str(f["dias_vencido"])))
             self.tabla.setItem(row, 5, QTableWidgetItem(ETIQUETAS_BUCKET.get(f["bucket"], f["bucket"])))
 
-        self.lbl_total.setText(
-            f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''} abierta{'s' if len(filas) != 1 else ''}"
-        )
+        self.lbl_total.setText(f"{n_filas} cuenta{'s' if n_filas != 1 else ''} abierta{'s' if n_filas != 1 else ''}")
         # Mismo formato de resultado que aging CxC (totales_por_bucket/total_general),
         # asi que reusa el mismo constructor de chips de resumen.
         self._mostrar_resumen_aging(resultado)
@@ -3457,8 +3681,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             tasa = f["tasa_cambio"]
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_emision"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["numero_control"]))
@@ -3524,8 +3748,8 @@ class ReportesPanel(QWidget):
         )
         filas = resultado["filas"]
         formato_fecha = "%d/%m/%Y" if resultado["agrupacion"] == "dia" else "%m/%Y"
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime(formato_fecha)))
             self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_facturas"])))
             self.tabla.setItem(row, 2, self._item_num(f"${float(f['total']):,.2f}"))
@@ -3565,8 +3789,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f[clave_nombre] or "N/A"))
             valor_cantidad = f[clave_cantidad]
             texto_cantidad = str(valor_cantidad) if isinstance(valor_cantidad, int) else f"{float(valor_cantidad):,.2f}"
@@ -3649,8 +3873,8 @@ class ReportesPanel(QWidget):
                 },
             )
             filas = resultado["filas"]
-            self.tabla.setRowCount(len(filas))
-            for row, f in enumerate(filas):
+            self.tabla.setRowCount(self._filas_visibles(len(filas)))
+            for row, f in enumerate(filas[: self.tabla.rowCount()]):
                 # Crear lista de clientes con formato: "Cliente1 ($X), Cliente2 ($Y)"
                 clientes_texto = ", ".join(
                     [
@@ -3695,8 +3919,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cliente"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["vendedor"] or "N/A"))
             self.tabla.setItem(row, 2, self._item_num(str(f["cantidad_facturas"])))
@@ -3708,7 +3933,7 @@ class ReportesPanel(QWidget):
             texto_efectividad = f"{f['efectividad_pct']:.2f}%" if f["efectividad_pct"] is not None else "—"
             self.tabla.setItem(row, 4, self._item_num(texto_efectividad))
 
-        self.lbl_total.setText(f"{len(filas)} cliente{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{n_filas} cliente{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Clientes activos: {resultado['total_activos']}"))
         efectividad_promedio = resultado["efectividad_promedio"]
@@ -3730,8 +3955,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["producto"] or "N/A"))
             self.tabla.setItem(row, 1, self._item_num(f"{float(f['bultos']):,.2f}"))
             self.tabla.setItem(row, 2, self._item_num(f"{float(f['unidades']):,.2f}"))
@@ -3752,8 +3977,9 @@ class ReportesPanel(QWidget):
             {col: Qt.AlignmentFlag.AlignLeft for col in range(6)},
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_factura"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "Consumidor final"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["vendedor"] or "N/A"))
@@ -3761,9 +3987,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 4, QTableWidgetItem(f["fecha_anulacion"].strftime("%d/%m/%Y %H:%M")))
             self.tabla.setItem(row, 5, QTableWidgetItem(f["motivo"] or "Sin registrar"))
 
-        self.lbl_total.setText(
-            f"{len(filas)} factura{'s' if len(filas) != 1 else ''} anulada{'s' if len(filas) != 1 else ''}"
-        )
+        self.lbl_total.setText(f"{n_filas} factura{'s' if n_filas != 1 else ''} anulada{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Total: {resultado['total_facturas']} facturas", COLOR_DANGER))
         self.resumen_layout.addStretch()
@@ -3784,8 +4008,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_nota_credito"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_factura_origen"] or "N/A"))
@@ -3798,7 +4023,7 @@ class ReportesPanel(QWidget):
                 QTableWidgetItem(ETIQUETAS_ESTADO_NC.get(f["estado"], f["estado"])),
             )
 
-        self.lbl_total.setText(f"{len(filas)} nota{'s' if len(filas) != 1 else ''} de crédito")
+        self.lbl_total.setText(f"{n_filas} nota{'s' if n_filas != 1 else ''} de crédito")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(
             self._chip(
@@ -3822,8 +4047,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["condicion_pago"].capitalize()))
             self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_facturas"])))
             self.tabla.setItem(row, 2, self._item_num(f"${float(f['total']):,.2f}"))
@@ -3856,8 +4081,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["producto"] or "N/A"))
             self.tabla.setItem(row, 1, self._item_num(f"{float(f['bultos']):,.2f}"))
             self.tabla.setItem(row, 2, self._item_num(f"{float(f['unidades']):,.2f}"))
@@ -3892,8 +4117,8 @@ class ReportesPanel(QWidget):
         )
         filas = resultado["filas"]
         formato_fecha = "%d/%m/%Y" if resultado["agrupacion"] == "dia" else "%m/%Y"
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime(formato_fecha)))
             self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_compras"])))
             self.tabla.setItem(row, 2, self._item_num(f"${float(f['total']):,.2f}"))
@@ -3937,8 +4162,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_oc"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["fecha_oc"].strftime("%d/%m/%Y")))
@@ -3955,11 +4181,9 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 8, self._item_num(f"${float(f['total_oc']):,.2f}"))
             self.tabla.setItem(row, 9, QTableWidgetItem("Sí" if f["vencida"] else "No"))
 
-        self.lbl_total.setText(
-            f"{len(filas)} orden{'es' if len(filas) != 1 else ''} abierta{'s' if len(filas) != 1 else ''}"
-        )
+        self.lbl_total.setText(f"{n_filas} orden{'es' if n_filas != 1 else ''} abierta{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
-        n_vencidas = sum(1 for f in filas if f["vencida"])
+        n_vencidas = resultado["total_vencidas"]
         if n_vencidas:
             self.resumen_layout.addWidget(self._chip(f"Vencidas: {n_vencidas}", COLOR_DANGER))
         self.resumen_layout.addWidget(
@@ -3986,8 +4210,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_oc"])))
             self.tabla.setItem(row, 2, self._item_num(str(f["a_tiempo"])))
@@ -4020,8 +4244,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_nota_devolucion"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_oc"]))
@@ -4030,7 +4255,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 5, self._item_num(f"{float(f['cantidad_total']):,.2f}"))
             self.tabla.setItem(row, 6, QTableWidgetItem(f["estado"].capitalize()))
 
-        self.lbl_total.setText(f"{len(filas)} {'devolución' if len(filas) == 1 else 'devoluciones'}")
+        self.lbl_total.setText(f"{n_filas} {'devolución' if n_filas == 1 else 'devoluciones'}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Total devoluciones: {resultado['total_devoluciones']}"))
         self.resumen_layout.addWidget(
@@ -4058,8 +4283,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(str(f["id_nota_credito"])))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_compra_origen"] or "N/A"))
@@ -4072,7 +4298,7 @@ class ReportesPanel(QWidget):
                 QTableWidgetItem(ETIQUETAS_ESTADO_NC.get(f["estado"], f["estado"])),
             )
 
-        self.lbl_total.setText(f"{len(filas)} nota{'s' if len(filas) != 1 else ''} de crédito")
+        self.lbl_total.setText(f"{n_filas} nota{'s' if n_filas != 1 else ''} de crédito")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(
             self._chip(
@@ -4138,8 +4364,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia"] or "N/A"))
@@ -4155,9 +4382,7 @@ class ReportesPanel(QWidget):
             )
             self.tabla.setItem(row, 5, self._item_num(f"{float(f['saldo']):,.2f}"))
 
-        self.lbl_total.setText(
-            f"{resultado['nombre_producto']} — {len(filas)} movimiento{'s' if len(filas) != 1 else ''}"
-        )
+        self.lbl_total.setText(f"{resultado['nombre_producto']} — {n_filas} movimiento{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Saldo inicial: {float(resultado['saldo_inicial']):,.2f}"))
         if resultado["saldo_apertura"]:
@@ -4188,8 +4413,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["nombre_producto"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"]))
@@ -4197,7 +4423,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 4, self._item_num(f"${float(f['costo_producto']):,.2f}"))
             self.tabla.setItem(row, 5, self._item_num(f"${float(f['valor_total']):,.2f}"))
 
-        self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{n_filas} producto{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(
             self._chip(
@@ -4223,8 +4449,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["nombre_producto"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"] or "N/A"))
@@ -4253,8 +4479,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["nombre_producto"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"] or "N/A"))
@@ -4285,8 +4511,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_evento"].strftime("%d/%m/%Y %H:%M")))
             precio = f["precio_venta"]
             self.tabla.setItem(
@@ -4302,7 +4529,7 @@ class ReportesPanel(QWidget):
             )
             self.tabla.setItem(row, 3, QTableWidgetItem(f["usuario"] or "N/A"))
 
-        self.lbl_total.setText(f"{resultado['nombre_producto']} — {len(filas)} cambio{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{resultado['nombre_producto']} — {n_filas} cambio{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addStretch()
 
@@ -4321,8 +4548,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia"] or "N/A"))
@@ -4338,7 +4566,7 @@ class ReportesPanel(QWidget):
             )
             self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo']):,.2f}"))
 
-        self.lbl_total.setText(f"{resultado['cliente']} — {len(filas)} movimiento{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{resultado['cliente']} — {n_filas} movimiento{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Saldo inicial: ${float(resultado['saldo_inicial']):,.2f}"))
         self.resumen_layout.addWidget(
@@ -4361,8 +4589,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_pago"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_factura"]))
@@ -4371,7 +4600,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 5, QTableWidgetItem(f["moneda"]))
             self.tabla.setItem(row, 6, self._item_num(f"${float(f['monto']):,.2f}"))
 
-        self.lbl_total.setText(f"{len(filas)} cobro{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{n_filas} cobro{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         for metodo, monto in resultado["totales_por_metodo"].items():
             self.resumen_layout.addWidget(self._chip(f"{metodo.capitalize()}: ${float(monto):,.2f}"))
@@ -4397,14 +4626,15 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cliente"] or "N/A"))
             self.tabla.setItem(row, 1, self._item_num(f"${float(f['saldo_vencido']):,.2f}"))
             self.tabla.setItem(row, 2, self._item_num(str(f["dias_vencido_max"])))
             self.tabla.setItem(row, 3, self._item_num(str(f["facturas_vencidas"])))
 
-        total = len(filas)
+        total = n_filas
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''} moroso{'s' if total != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(
@@ -4432,8 +4662,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cliente"] or "N/A"))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["descripcion"] or ""))
             fecha_em = f["fecha_emision"].strftime("%d/%m/%Y") if f["fecha_emision"] else "N/A"
@@ -4448,7 +4679,7 @@ class ReportesPanel(QWidget):
                 QTableWidgetItem(ETIQUETAS_ESTADO_CXC_OTRO.get(f["estado"], f["estado"])),
             )
 
-        self.lbl_total.setText(f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{n_filas} cuenta{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(
             self._chip(
@@ -4474,8 +4705,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia"] or "N/A"))
@@ -4491,7 +4723,7 @@ class ReportesPanel(QWidget):
             )
             self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo']):,.2f}"))
 
-        self.lbl_total.setText(f"{resultado['proveedor']} — {len(filas)} movimiento{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{resultado['proveedor']} — {n_filas} movimiento{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Saldo inicial: ${float(resultado['saldo_inicial']):,.2f}"))
         self.resumen_layout.addWidget(
@@ -4517,15 +4749,16 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_pago"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_compra"]))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["metodo_pago"].capitalize()))
             self.tabla.setItem(row, 4, self._item_num(f"${float(f['monto']):,.2f}"))
 
-        self.lbl_total.setText(f"{len(filas)} pago{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{n_filas} pago{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         for metodo, monto in resultado["totales_por_metodo"].items():
             self.resumen_layout.addWidget(self._chip(f"{metodo.capitalize()}: ${float(monto):,.2f}"))
@@ -4552,15 +4785,16 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_compra"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["proveedor"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["fecha_vencimiento"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 3, self._item_num(str(f["dias_para_vencer"])))
             self.tabla.setItem(row, 4, self._item_num(f"${float(f['saldo_pendiente']):,.2f}"))
 
-        self.lbl_total.setText(f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''} por vencer")
+        self.lbl_total.setText(f"{n_filas} cuenta{'s' if n_filas != 1 else ''} por vencer")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(
             self._chip(
@@ -4588,8 +4822,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cuenta_bancaria"] or "N/A"))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["referencia_bancaria"] or ""))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["descripcion"] or ""))
@@ -4603,7 +4838,7 @@ class ReportesPanel(QWidget):
                 QTableWidgetItem(ETIQUETAS_ESTADO_CXP_OTRO.get(f["estado"], f["estado"])),
             )
 
-        self.lbl_total.setText(f"{len(filas)} cuenta{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{n_filas} cuenta{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(
             self._chip(
@@ -4629,8 +4864,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_registro"].strftime("%d/%m/%Y %H:%M")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["caja"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["tipo_movimiento"].capitalize()))
@@ -4638,7 +4873,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 4, QTableWidgetItem(f["descripcion_movimiento"] or ""))
             self.tabla.setItem(row, 5, self._item_num(f"${float(f['monto_movimiento']):,.2f}"))
 
-        self.lbl_total.setText(f"{len(filas)} movimiento{'s' if len(filas) != 1 else ''}")
+        total = self._total_filas(resultado, filas)
+        self.lbl_total.setText(f"{total} movimiento{'s' if total != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(
             self._chip(f"Entradas: ${float(resultado['total_entradas']):,.2f}", COLOR_SUCCESS)
@@ -4666,8 +4902,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["caja"] or "N/A"))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cajero"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["fecha_apertura"].strftime("%d/%m/%Y %H:%M")))
@@ -4702,8 +4938,8 @@ class ReportesPanel(QWidget):
         )
         filas = resultado["filas"]
         formato_fecha = "%d/%m/%Y" if resultado["agrupacion"] == "dia" else "%m/%Y"
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["periodo"].strftime(formato_fecha)))
             self.tabla.setItem(row, 1, self._item_num(f"${float(f['entradas_caja']):,.2f}"))
             self.tabla.setItem(row, 2, self._item_num(f"${float(f['salidas_caja']):,.2f}"))
@@ -4734,8 +4970,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_movimiento"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo_movimiento"].capitalize()))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia_movimiento"] or "N/A"))
@@ -4743,7 +4979,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 4, self._item_num(f"${float(f['monto_movimiento']):,.2f}"))
             self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo']):,.2f}"))
 
-        total = len(filas)
+        total = self._total_filas(resultado, filas)
         self.lbl_total.setText(f"{resultado['numero_cuenta']} — {total} movimiento{'s' if total != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Saldo inicial: ${float(resultado['saldo_inicial']):,.2f}"))
@@ -4770,8 +5006,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["numero_cuenta"] or "N/A"))
             self.tabla.setItem(row, 1, self._item_num(f"${float(f['total_pendiente']):,.2f}"))
             self.tabla.setItem(row, 2, self._item_num(str(f["cantidad_pendiente"])))
@@ -4805,8 +5041,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["banco"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["numero_cuenta"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["tipo_cuenta"] or "N/A"))
@@ -4836,8 +5072,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["vendedor"] or "N/A"))
             self.tabla.setItem(row, 1, self._item_num(str(f["cantidad_facturas"])))
             self.tabla.setItem(row, 2, self._item_num(f"${float(f['monto_comision']):,.2f}"))
@@ -4866,8 +5102,8 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["vendedor"] or "N/A"))
             self.tabla.setItem(row, 1, self._item_num(f"${float(f['pagado']):,.2f}"))
             self.tabla.setItem(row, 2, self._item_num(f"${float(f['liberada']):,.2f}"))
@@ -4905,8 +5141,9 @@ class ReportesPanel(QWidget):
             },
         )
         filas = resultado["filas"]
-        self.tabla.setRowCount(len(filas))
-        for row, f in enumerate(filas):
+        n_filas = self._total_filas(resultado, filas)
+        self.tabla.setRowCount(self._filas_visibles(len(filas)))
+        for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["cod_producto"]))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["producto"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["categoria"] or "N/A"))
@@ -4914,7 +5151,7 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 4, QTableWidgetItem(str(f["fecha_vencimiento"])))
             self.tabla.setItem(row, 5, self._item_num(f"{f['dias_para_vencer']}"))
 
-        self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
+        self.lbl_total.setText(f"{n_filas} producto{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Horizonte: {resultado['dias_horizonte']} días", COLOR_INFO))
         self.resumen_layout.addWidget(self._chip(f"Fecha actual: {resultado['fecha_actual']}", COLOR_TEXT_MUTED))
@@ -6013,106 +6250,64 @@ class ReportesPanel(QWidget):
         }
         return "Comisiones Pagadas vs. Pendientes", filtros, [1.8, 1.0, 1.0, 1.0]
 
-    def _obtener_config_empresa(self):
-        session = self.session_factory()
-        try:
-            return EmpresaService.obtener_datos_documento(session)
-        finally:
-            session.close()
-
     def _exportar_excel(self) -> None:
-        if self._ultimo_resultado is None:
-            MessageBox.information(self, "Sin datos", "Genere un reporte antes de exportarlo.")
-            return
-        # Mismo guard que _generar(): reasignar self._worker_export a un QThread nuevo
-        # mientras el viejo sigue corriendo lo destruye a mitad de ejecucion.
-        if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
-            return
-
-        nombre_sugerido, encabezados, filas = self._filas_para_exportar()
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar reporte", f"{nombre_sugerido}.xlsx", "Excel (*.xlsx)")
-        if not ruta:
-            return
-
-        try:
-            titulo, filtros, _col_widths = self._info_pdf()
-            config_empresa = self._obtener_config_empresa()
-            secciones = self._secciones_para_exportar()
-        except Exception:
-            logger.exception("Fallo al preparar la exportacion del reporte a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
-            return
-
-        ocupar_boton(self.btn_exportar)
-        self._worker_export = QueryWorker(
-            self.session_factory,
-            _tarea_exportar_reporte_excel,
-            ruta=ruta,
-            encabezados=encabezados,
-            filas=filas,
-            titulo=titulo,
-            config_empresa=config_empresa,
-            filtros=filtros,
-            secciones=secciones,
-        )
-        self._worker_export.resultado.connect(self._on_exportar_ok)
-        self._worker_export.error.connect(self._on_exportar_error)
-        self._worker_export.start()
+        self._exportar("excel", "xlsx", "Excel (*.xlsx)")
 
     def _exportar_pdf(self) -> None:
+        self._exportar("pdf", "pdf", "PDF (*.pdf)")
+
+    def _exportar(self, formato: str, extension: str, filtro_archivo: str) -> None:
+        """Pide el destino y exporta con TODAS las filas del reporte, en un hilo aparte (ExportacionCompletaMixin)."""
         if self._ultimo_resultado is None:
             MessageBox.information(self, "Sin datos", "Genere un reporte antes de exportarlo.")
             return
+        # Un segundo clic durante una exportacion se ignora (ver ExportacionCompletaMixin).
         if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
 
-        nombre_sugerido, encabezados, filas = self._filas_para_exportar()
-        if len(filas) > LIMITE_FILAS_PDF:
-            # Un PDF tarda ~1,5 ms por fila: 100 000 filas son minutos de trabajo y miles de paginas que nadie lee.
-            MessageBox.information(
-                self,
-                "Demasiadas filas para un PDF",
-                f"El reporte tiene {len(filas):,} filas y un PDF de ese tamaño tardaría varios minutos y tendría miles "
-                f"de páginas. Exporta a Excel, o reduce el rango de fechas (máximo {LIMITE_FILAS_PDF:,} filas en PDF).",
+        paginado = self._ultimo_modo in REPORTES_PAGINADOS
+        nombre_sugerido, _encabezados, filas = self._filas_para_exportar()
+        if formato == "pdf":
+            # En un reporte paginado `filas` es solo la pagina en pantalla: el total lo dice la paginacion.
+            total_filas = (
+                (self._ultimo_resultado.get("paginacion") or {}).get("total", len(filas)) if paginado else len(filas)
             )
-            return
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar reporte", f"{nombre_sugerido}.pdf", "PDF (*.pdf)")
+            if total_filas > LIMITE_FILAS_PDF:
+                # Un PDF tarda ~1,5 ms por fila: 100 000 filas son minutos de trabajo y miles de paginas que nadie lee.
+                MessageBox.information(
+                    self,
+                    "Demasiadas filas para un PDF",
+                    f"El reporte tiene {total_filas:,} filas y un PDF de ese tamaño tardaría varios minutos y tendría "
+                    f"miles de páginas. Exporta a Excel, o reduce el rango de fechas (máximo {LIMITE_FILAS_PDF:,} "
+                    "filas en PDF).",
+                )
+                return
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar reporte", f"{nombre_sugerido}.{extension}", filtro_archivo
+        )
         if not ruta:
             return
 
         try:
-            titulo, filtros, col_widths = self._info_pdf()
-            config_empresa = self._obtener_config_empresa()
-            secciones = self._secciones_para_exportar()
+            titulo, filtros, col_widths = self._info_pdf()  # lee los combos: se resuelve aqui, en el hilo de la ventana
         except Exception:
-            logger.exception("Fallo al preparar la exportacion del reporte a PDF")
+            logger.exception("Fallo al preparar la exportacion del reporte")
             MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
             return
 
-        ocupar_boton(self.btn_exportar)
-        self._worker_export = QueryWorker(
-            self.session_factory,
-            _tarea_exportar_reporte_pdf,
-            ruta=ruta,
-            encabezados=encabezados,
-            filas=filas,
+        self._exportar_listado_completo(
+            _tarea_exportar_reporte,
+            ruta,
+            self.btn_exportar,
+            "filas",
+            formato=formato,
+            modo=self._ultimo_modo,
+            # Paginado: se vuelve a pedir completo con los filtros con que se genero lo que se ve (no los que el usuario
+            # haya tocado despues). No paginado: el resultado en pantalla ya es el completo.
+            resultado=None if paginado else self._ultimo_resultado,
+            consulta=self._consulta_completa if paginado else None,
             titulo=titulo,
             filtros=filtros,
             col_widths=col_widths,
-            config_empresa=config_empresa,
-            secciones=secciones,
             apaisado=self._ultimo_modo in REPORTES_APAISADOS,
         )
-        self._worker_export.resultado.connect(self._on_exportar_ok)
-        self._worker_export.error.connect(self._on_exportar_error)
-        self._worker_export.start()
-
-    def _on_exportar_ok(self, resultado: tuple[str, int]) -> None:
-        liberar_boton(self.btn_exportar)
-        ruta, cantidad = resultado
-        MessageBox.information(self, "Exportación completa", f"Se exportaron {cantidad} filas a:\n{ruta}")
-
-    def _on_exportar_error(self, mensaje: str) -> None:
-        liberar_boton(self.btn_exportar)
-        logger.error("Fallo al exportar el reporte: %s", mensaje)
-        MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")

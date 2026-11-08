@@ -12,6 +12,8 @@ from app.db.models import (
     CuentaPorCobrar,
     CuentaPorPagar,
     FacturaDetalle,
+    NotaCreditoCliente,
+    NotaCreditoProveedor,
 )
 from app.services.banco_movimientos import BancoMovimientoService
 from app.services.comisiones import PagoComisionService
@@ -1308,6 +1310,7 @@ def test_ordenes_compra_abiertas_marca_vencida_si_paso_fecha_estimada(db_session
 
     fila = next(f for f in resultado["filas"] if f["numero_oc"] == oc.numero_oc)
     assert fila["vencida"] is True
+    assert resultado["total_vencidas"] == 1  # el conteo no depende de la pagina que se muestre
 
 
 # --- cumplimiento_proveedores -----------------------------------------------------------
@@ -3639,3 +3642,444 @@ def test_libro_ventas_separa_exento_de_base_imponible_y_convierte_a_bs(db_sessio
     assert resultado["total_iva"] == Decimal("16.00")
     assert resultado["total_general"] == Decimal("216.00")
     assert resultado["total_bs"] == Decimal("4640.00")
+
+
+# --- libro_ventas paginado: la pantalla pide una pagina, la exportacion todas --------------------------------------
+
+
+def _libro_con_varias_facturas(db_session, cantidad=7):
+    """`cantidad` facturas (la primera anulada) con distintos totales; algunas gravadas con tasa y otras exentas."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=1000)
+    crear_precio_producto(db_session, producto, "10.00")
+    tasa = ControlDeTasa(tasa_dolar_bcv=Decimal("40.125"), creado_por=admin.id_usuario)
+    db_session.add(tasa)
+    db_session.commit()
+    facturas = []
+    for i in range(cantidad):
+        factura = _factura_contado(db_session, admin, cliente, vendedor, producto, i + 1, "10.00")
+        fv = db_session.query(FacturaVenta).filter_by(id_factura=factura.id_factura).one()
+        if i % 2 == 0:  # gravadas, con tasa
+            fv.iva_aplicado = True
+            fv.porcentaje_iva_aplicado = Decimal("16.00")
+            fv.monto_iva = (fv.total_venta * Decimal("0.16")).quantize(Decimal("0.01"))
+            fv.id_tasa_factura = tasa.id_tasa
+        else:  # exentas, sin tasa
+            fv.iva_aplicado = False
+            fv.monto_iva = Decimal("0.00")
+            fv.id_tasa_factura = None
+        db_session.commit()
+        facturas.append(factura)
+    VentaService.anular_factura(db_session, facturas[0].id_factura, id_usuario=admin.id_usuario, motivo="error")
+    return admin, facturas
+
+
+def test_libro_ventas_sin_pagina_devuelve_todas_las_filas_y_sin_paginacion(db_session):
+    admin, facturas = _libro_con_varias_facturas(db_session)
+
+    completo = ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy())
+
+    assert len(completo["filas"]) == len(facturas)
+    assert completo["paginacion"] is None
+
+
+def test_libro_ventas_paginado_reparte_las_filas_sin_repetir_ni_saltar(db_session):
+    admin, facturas = _libro_con_varias_facturas(db_session)
+    completo = ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy())
+
+    paginas = [
+        ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy(), pagina=n, por_pagina=3)
+        for n in (1, 2, 3)
+    ]
+
+    assert [len(p["filas"]) for p in paginas] == [3, 3, 1]
+    assert [f["numero_factura"] for p in paginas for f in p["filas"]] == [
+        f["numero_factura"] for f in completo["filas"]
+    ]
+    assert paginas[0]["paginacion"]["total"] == len(facturas)
+    assert paginas[0]["paginacion"]["total_paginas"] == 3 and paginas[2]["paginacion"]["pagina"] == 3
+
+
+def test_libro_ventas_los_totales_son_los_de_todo_el_filtro_en_cualquier_pagina(db_session):
+    admin, _facturas = _libro_con_varias_facturas(db_session)
+    completo = ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy())
+    claves = (
+        "cantidad_facturas",
+        "cantidad_anuladas",
+        "total_base_imponible",
+        "total_exento",
+        "total_iva",
+        "total_general",
+        "total_bs",
+    )
+
+    for numero in (1, 2, 3):
+        pagina = ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy(), pagina=numero, por_pagina=3)
+        assert {k: pagina[k] for k in claves} == {k: completo[k] for k in claves}
+
+
+def test_libro_ventas_los_totales_coinciden_con_la_suma_de_las_filas(db_session):
+    """Lo que se suma en la base debe dar lo mismo que sumar fila por fila (incluido el redondeo del total en Bs)."""
+    admin, _facturas = _libro_con_varias_facturas(db_session, cantidad=9)
+
+    completo = ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy())
+
+    vigentes = [f for f in completo["filas"] if f["estado"] == "EMITIDA"]
+    assert completo["cantidad_facturas"] == len(vigentes) and completo["cantidad_anuladas"] == 1
+    assert completo["total_base_imponible"] == sum((f["base_imponible"] for f in vigentes), Decimal("0"))
+    assert completo["total_exento"] == sum((f["monto_exento"] for f in vigentes), Decimal("0"))
+    assert completo["total_iva"] == sum((f["monto_iva"] for f in vigentes), Decimal("0"))
+    assert completo["total_bs"] == sum((f["total_bs"] or Decimal("0") for f in vigentes), Decimal("0"))
+    assert completo["total_bs"] > 0
+
+
+def test_libro_ventas_una_pagina_pasada_la_ultima_se_lleva_a_la_ultima(db_session):
+    admin, _facturas = _libro_con_varias_facturas(db_session)
+
+    pagina = ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy(), pagina=99, por_pagina=3)
+
+    assert pagina["paginacion"]["pagina"] == 3 and len(pagina["filas"]) == 1
+
+
+# --- movimientos de caja y de cuenta bancaria paginados ------------------------------------------------------------
+
+
+def test_movimientos_caja_paginado_reparte_las_filas_y_los_totales_son_de_todo_el_filtro(db_session):
+    admin = crear_usuario_admin(db_session)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    hoy = date.today()
+    # primero entran 10 + 20 + 30 + 40 y despues salen 5 + 6 + 7 (una salida exige saldo en la caja)
+    for i, (tipo, monto) in enumerate(
+        [("entrada", 10), ("entrada", 20), ("entrada", 30), ("entrada", 40)]
+        + [("salida", 5), ("salida", 6), ("salida", 7)]
+    ):
+        CajaService.registrar_movimiento_manual(
+            db_session, caja.id_caja, tipo, f"{monto}.00", f"Mov {i}", admin.id_usuario
+        )
+    completo = ReporteService.movimientos_caja_periodo(db_session, admin.id_usuario, hoy, hoy)
+
+    paginas = [
+        ReporteService.movimientos_caja_periodo(db_session, admin.id_usuario, hoy, hoy, pagina=n, por_pagina=3)
+        for n in (1, 2, 3)
+    ]
+
+    assert completo["paginacion"] is None and len(completo["filas"]) == 7
+    assert [len(p["filas"]) for p in paginas] == [3, 3, 1]
+    assert [f["descripcion_movimiento"] for p in paginas for f in p["filas"]] == [
+        f["descripcion_movimiento"] for f in completo["filas"]
+    ]
+    assert paginas[0]["paginacion"]["total"] == 7
+    for p in paginas:
+        assert (p["total_entradas"], p["total_salidas"], p["neto"]) == (
+            Decimal("100.00"),
+            Decimal("18.00"),
+            Decimal("82.00"),
+        )
+
+
+def test_movimientos_cuenta_bancaria_paginado_mantiene_el_saldo_corrido_entre_paginas(db_session):
+    admin = crear_usuario_admin(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+    hoy = date.today()
+    montos = [("abono", 200.00), ("cargo", 75.00), ("abono", 40.00), ("cargo", 10.00), ("abono", 5.00)]
+    for tipo, monto in montos:
+        BancoMovimientoService.crear(db_session, cuenta.id_cuenta, tipo, monto, id_usuario=admin.id_usuario)
+    completo = ReporteService.movimientos_cuenta_bancaria(db_session, admin.id_usuario, cuenta.id_cuenta, hoy, hoy)
+
+    paginas = [
+        ReporteService.movimientos_cuenta_bancaria(
+            db_session, admin.id_usuario, cuenta.id_cuenta, hoy, hoy, pagina=n, por_pagina=2
+        )
+        for n in (1, 2, 3)
+    ]
+
+    assert [f["saldo"] for f in completo["filas"]] == [
+        Decimal(x) for x in ("200.00", "125.00", "165.00", "155.00", "160.00")
+    ]
+    assert [f["saldo"] for p in paginas for f in p["filas"]] == [f["saldo"] for f in completo["filas"]]
+    assert [len(p["filas"]) for p in paginas] == [2, 2, 1]
+    assert paginas[0]["paginacion"]["total"] == 5
+    for p in paginas:
+        assert p["saldo_inicial"] == Decimal("0.00") and p["saldo_final"] == Decimal("160.00")
+
+
+def test_movimientos_cuenta_bancaria_el_saldo_inicial_suma_lo_anterior_al_rango(db_session):
+    admin = crear_usuario_admin(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+    antes = BancoMovimientoService.crear(db_session, cuenta.id_cuenta, "abono", 300.00, id_usuario=admin.id_usuario)
+    antes.fecha_movimiento = datetime.combine(date.today() - timedelta(days=10), time(12, 0))
+    BancoMovimientoService.crear(db_session, cuenta.id_cuenta, "cargo", 50.00, id_usuario=admin.id_usuario)
+    db_session.commit()
+
+    resultado = ReporteService.movimientos_cuenta_bancaria(
+        db_session, admin.id_usuario, cuenta.id_cuenta, date.today(), date.today(), pagina=1, por_pagina=5
+    )
+
+    assert resultado["saldo_inicial"] == Decimal("300.00")
+    assert [f["saldo"] for f in resultado["filas"]] == [Decimal("250.00")]
+    assert resultado["saldo_final"] == Decimal("250.00")
+
+
+# --- listados paginados en la base: notas de credito, devoluciones, pagos y cobros ---------------------------------
+
+
+def _claves_de_filas(paginas, clave):
+    return [fila[clave] for pagina in paginas for fila in pagina["filas"]]
+
+
+def test_notas_credito_emitidas_paginado_reparte_las_filas_y_el_total_es_de_todo_el_filtro(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session)
+    for i in range(7):
+        db_session.add(
+            NotaCreditoCliente(
+                numero_nota_credito=f"NC-PAG-{i:03d}",
+                id_cliente=cliente.id_cliente,
+                monto=Decimal(10 * (i + 1)),
+                saldo_disponible=Decimal(10 * (i + 1)),
+                estado="disponible",
+                creado_por=admin.id_usuario,
+            )
+        )
+    db_session.commit()
+    completo = ReporteService.notas_credito_emitidas(db_session, admin.id_usuario, *_rango_hoy())
+
+    paginas = [
+        ReporteService.notas_credito_emitidas(db_session, admin.id_usuario, *_rango_hoy(), pagina=n, por_pagina=3)
+        for n in (1, 2, 3)
+    ]
+
+    assert completo["paginacion"] is None and len(completo["filas"]) == 7
+    assert [len(p["filas"]) for p in paginas] == [3, 3, 1] and paginas[0]["paginacion"]["total"] == 7
+    assert _claves_de_filas(paginas, "numero_nota_credito") == [f["numero_nota_credito"] for f in completo["filas"]]
+    assert all(p["total_general"] == Decimal("280.00") == completo["total_general"] for p in paginas)
+
+
+def test_notas_credito_proveedor_paginado_reparte_las_filas_y_el_total_es_de_todo_el_filtro(db_session):
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("10000.00"))
+    compra = _compra_a_credito(db_session, admin, proveedor, "50.00", date.today() + timedelta(days=10))
+    for i in range(5):
+        db_session.add(
+            NotaCreditoProveedor(
+                id_proveedor=proveedor.id_proveedor,
+                id_compra_origen=compra.id_compra,
+                monto=Decimal(5 * (i + 1)),
+                saldo_disponible=Decimal(5 * (i + 1)),
+                creado_por=admin.id_usuario,
+            )
+        )
+    db_session.commit()
+
+    paginas = [
+        ReporteService.notas_credito_proveedor(db_session, admin.id_usuario, *_rango_hoy(), pagina=n, por_pagina=2)
+        for n in (1, 2, 3)
+    ]
+
+    assert [len(p["filas"]) for p in paginas] == [2, 2, 1] and paginas[0]["paginacion"]["total"] == 5
+    assert len(set(_claves_de_filas(paginas, "id_nota_credito"))) == 5  # ninguna se repite ni se salta
+    assert all(p["total_general"] == Decimal("75.00") for p in paginas)
+
+
+def test_pagos_del_periodo_paginado_reparte_las_filas_y_los_totales_son_de_todo_el_filtro(db_session):
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    hoy = date.today()
+    compra = _compra_a_credito(db_session, admin, proveedor, "100.00", hoy + timedelta(days=10))
+    cxp = db_session.query(CuentaPorPagar).filter_by(id_compra=compra.id_compra).one()
+    for monto in ("10.00", "20.00", "30.00", "5.00", "15.00"):
+        PagoService.registrar_pago_proveedor(
+            db_session,
+            id_cuenta_por_pagar=cxp.id_cuenta,
+            monto=monto,
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+    completo = ReporteService.pagos_del_periodo(db_session, admin.id_usuario, hoy, hoy)
+
+    paginas = [
+        ReporteService.pagos_del_periodo(db_session, admin.id_usuario, hoy, hoy, pagina=n, por_pagina=2)
+        for n in (1, 2, 3)
+    ]
+
+    assert [len(p["filas"]) for p in paginas] == [2, 2, 1] and paginas[0]["paginacion"]["total"] == 5
+    assert _claves_de_filas(paginas, "monto") == [f["monto"] for f in completo["filas"]]
+    assert all(p["totales_por_metodo"] == {"efectivo": Decimal("80.00")} for p in paginas)
+    assert all(p["total_general"] == Decimal("80.00") == completo["total_general"] for p in paginas)
+
+
+def test_cobros_del_periodo_paginado_mezcla_las_dos_carteras_sin_repetir_ni_saltar(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    caja = _caja_abierta(db_session, admin)
+    hoy = date.today()
+    factura_bcv = _factura_bcv_a_credito(db_session, admin, cliente, "100.00", hoy + timedelta(days=10))
+    factura = _factura_a_credito(db_session, admin, cliente, "100.00", hoy + timedelta(days=10))
+    cuenta_bcv = _cuenta_bcv(db_session, factura_bcv)
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    for monto in ("10.00", "20.00", "30.00"):
+        PagoService.registrar_pago_cobro(
+            db_session,
+            id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+            monto=monto,
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+        PagoBCVService.registrar_pago_cobro_bcv(
+            db_session,
+            id_cuenta_por_cobrar=cuenta_bcv.id_cuenta_por_cobrar,
+            monto=monto,
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+    completo = ReporteService.cobros_del_periodo(db_session, admin.id_usuario, hoy, hoy)
+
+    paginas = [
+        ReporteService.cobros_del_periodo(db_session, admin.id_usuario, hoy, hoy, pagina=n, por_pagina=4)
+        for n in (1, 2)
+    ]
+
+    assert completo["paginacion"] is None and len(completo["filas"]) == 6
+    assert [len(p["filas"]) for p in paginas] == [4, 2] and paginas[0]["paginacion"]["total"] == 6
+    paginado = [(f["cartera"], f["monto"], f["fecha_pago"]) for p in paginas for f in p["filas"]]
+    assert paginado == [(f["cartera"], f["monto"], f["fecha_pago"]) for f in completo["filas"]]
+    assert sorted(c for c, _m, _f in paginado) == ["BCV"] * 3 + ["Normal"] * 3
+    for p in paginas:
+        assert p["totales_por_metodo"] == {"efectivo": Decimal("120.00")}
+        assert p["total_general"] == Decimal("120.00")
+
+
+def test_cobros_del_periodo_paginado_filtra_por_cliente(db_session):
+    admin = crear_usuario_admin(db_session)
+    ana = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    beto = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    caja = _caja_abierta(db_session, admin)
+    hoy = date.today()
+    for cliente, monto in ((ana, "10.00"), (beto, "99.00")):
+        factura = _factura_a_credito(db_session, admin, cliente, "100.00", hoy + timedelta(days=10))
+        cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+        PagoService.registrar_pago_cobro(
+            db_session,
+            id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+            monto=monto,
+            metodo_pago="efectivo",
+            id_caja=caja.id_caja,
+            id_usuario=admin.id_usuario,
+        )
+
+    resultado = ReporteService.cobros_del_periodo(
+        db_session, admin.id_usuario, hoy, hoy, id_cliente=ana.id_cliente, pagina=1, por_pagina=10
+    )
+
+    assert [f["monto"] for f in resultado["filas"]] == [Decimal("10.00")]
+    assert resultado["total_general"] == Decimal("10.00") and resultado["paginacion"]["total"] == 1
+
+
+def test_devoluciones_proveedor_paginado_cuenta_y_suma_sobre_todo_el_filtro(db_session):
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=0)
+    oc = CompraOCService.crear_oc(
+        db_session,
+        id_proveedor=proveedor.id_proveedor,
+        items=[{"id_producto": producto.id_producto, "cantidad_solicitada": 10, "precio_unitario": "10.00"}],
+        id_usuario=admin.id_usuario,
+    )
+    nr = NotaRecepcionService.crear_nota_recepcion(
+        db_session,
+        id_oc=oc.id_oc,
+        items=[{"id_oc_detalle": oc.detalles[0].id_detalle, "cantidad_recibida": 10, "cantidad_rechazada": 3}],
+        id_usuario=admin.id_usuario,
+    )
+    NotaRecepcionService.crear_nota_devolucion(
+        db_session,
+        id_nr=nr.id_nr,
+        items=[{"id_producto": producto.id_producto, "cantidad_devuelta": 3}],
+        motivo="Defectuoso",
+        id_usuario=admin.id_usuario,
+    )
+
+    pagina = ReporteService.devoluciones_proveedor(db_session, admin.id_usuario, *_rango_hoy(), pagina=1, por_pagina=1)
+
+    assert len(pagina["filas"]) == 1 and pagina["paginacion"]["total"] == 1
+    assert pagina["total_devoluciones"] == 1 and pagina["total_cantidad"] == Decimal("3")
+
+
+# --- cxc_otras, cxp_otras y proximos_vencimientos paginados ----------------------------------------------------------
+
+
+def test_cxc_otras_paginado_reparte_las_filas_y_el_total_es_de_todo_el_filtro(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("10000.00"))
+    for i in range(5):
+        OtrosMovimientosService.crear_cuenta_cobrar_otro(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            monto_total=Decimal(10 * (i + 1)),
+            descripcion=f"Anticipo {i}",
+            fecha_vencimiento=None,
+            creado_por=admin.id_usuario,
+            id_caja=caja.id_caja,
+        )
+    completo = ReporteService.cxc_otras(db_session, id_usuario=admin.id_usuario)
+
+    paginas = [
+        ReporteService.cxc_otras(db_session, id_usuario=admin.id_usuario, pagina=n, por_pagina=2) for n in (1, 2, 3)
+    ]
+
+    assert completo["paginacion"] is None and len(completo["filas"]) == 5
+    assert [len(p["filas"]) for p in paginas] == [2, 2, 1] and paginas[0]["paginacion"]["total"] == 5
+    assert _claves_de_filas(paginas, "id_cuenta") == [f["id_cuenta"] for f in completo["filas"]]
+    assert all(p["total_general"] == Decimal("150.00") == completo["total_general"] for p in paginas)
+
+
+def test_cxp_otras_paginado_reparte_las_filas_y_el_total_es_de_todo_el_filtro(db_session):
+    admin = crear_usuario_admin(db_session)
+    cuenta = crear_cuenta_bancaria(db_session)
+    for monto in ("10.00", "20.00", "30.00"):
+        _partida_con_movimiento(db_session, admin, cuenta, Decimal(monto))
+    completo = ReporteService.cxp_otras(db_session, id_usuario=admin.id_usuario)
+
+    paginas = [
+        ReporteService.cxp_otras(db_session, id_usuario=admin.id_usuario, pagina=n, por_pagina=2) for n in (1, 2)
+    ]
+
+    assert [len(p["filas"]) for p in paginas] == [2, 1] and paginas[0]["paginacion"]["total"] == 3
+    assert _claves_de_filas(paginas, "id_cuenta") == [f["id_cuenta"] for f in completo["filas"]]
+    assert all(p["total_general"] == Decimal("60.00") == completo["total_general"] for p in paginas)
+
+
+def test_proximos_vencimientos_paginado_reparte_las_filas_y_el_total_es_de_todo_el_filtro(db_session):
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("10000.00"))
+    otro = crear_proveedor(db_session, limite_credito=Decimal("10000.00"))
+    hoy = date.today()
+    for dias, monto in ((3, "10.00"), (5, "20.00"), (9, "30.00")):
+        _compra_a_credito(db_session, admin, proveedor, monto, hoy + timedelta(days=dias))
+    _compra_a_credito(db_session, admin, otro, "99.00", hoy + timedelta(days=4))
+    _compra_a_credito(db_session, admin, proveedor, "77.00", hoy + timedelta(days=90))  # fuera del horizonte
+
+    paginas = [
+        ReporteService.proximos_vencimientos(
+            db_session, admin.id_usuario, 30, proveedor.id_proveedor, pagina=n, por_pagina=2
+        )
+        for n in (1, 2)
+    ]
+
+    assert [len(p["filas"]) for p in paginas] == [2, 1] and paginas[0]["paginacion"]["total"] == 3
+    assert [f["saldo_pendiente"] for p in paginas for f in p["filas"]] == [
+        Decimal("10.00"),
+        Decimal("20.00"),
+        Decimal("30.00"),
+    ]  # por fecha de vencimiento
+    assert all(p["total_general"] == Decimal("60.00") for p in paginas)

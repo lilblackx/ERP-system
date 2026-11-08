@@ -35,7 +35,8 @@ def test_todo_listado_paginado_de_servicio_usa_el_helper_central():
             if not any(a.arg == "por_pagina" for a in fn.args.args + fn.args.kwonlyargs):
                 continue
             llamadas = {n.func.id for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-            if not llamadas & {"paginar", "paginar_lista"}:
+            # `_pagina_o_todo` (reportes.py) solo envuelve paginar(): pagina, o devuelve todo si no se pide pagina.
+            if not llamadas & {"paginar", "paginar_lista", "_pagina_o_todo"}:
                 sin_helper.append(f"{archivo.name}::{fn.name}")
 
     assert sin_helper == []
