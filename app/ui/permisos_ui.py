@@ -13,7 +13,7 @@ Esto es una ayuda de usabilidad, no la barrera de seguridad: la barrera sigue si
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Rol, Usuario
+from app.services.permisos import consultar_permiso
 from app.services.usuarios import UsuarioService
 from app.ui.message_box import MessageBox
 
@@ -30,11 +30,11 @@ def es_admin_en_sesion(session: Session, id_usuario: int | None) -> bool:
     crear bancos, etc.), sin importar la matriz de permisos."""
     if id_usuario is None:
         return False
-    usuario = session.get(Usuario, id_usuario)
+    # Una sola consulta (usuario + rol) en vez de dos: ver consultar_permiso().
+    usuario, nombre_rol, _ = consultar_permiso(session, id_usuario, "", "")
     if usuario is None or usuario.id_rol is None or usuario.estado != "ACTIVO":
         return False
-    rol = session.get(Rol, usuario.id_rol)
-    return rol is not None and rol.nombre == "ADMIN"
+    return nombre_rol == "ADMIN"
 
 
 def tiene_permiso(session_factory, id_usuario: int | None, recurso: str, accion: str) -> bool:

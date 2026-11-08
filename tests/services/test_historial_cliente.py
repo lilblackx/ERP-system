@@ -142,3 +142,48 @@ def test_la_factura_del_historial_trae_lo_pagado_y_su_saldo(db_session):
     assert sorted(a["monto"] for a in abonos) == [Decimal("-30.00"), Decimal("-10.00")]
     assert total_pagado(historial) == Decimal("40.00")
     assert filtrar_historial(historial, VISTA_FACTURAS) == [item]
+
+
+def test_el_historial_no_hace_una_consulta_por_factura(db_session):
+    """La cuenta por cobrar de cada factura se trae en una sola consulta: con 3 000 facturas el historial hacia 3 000
+    consultas y tardaba segundos. El numero de consultas no debe crecer con el numero de facturas."""
+    from sqlalchemy import event
+
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "10.00")
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+
+    def emitir_facturas(cantidad: int) -> None:
+        for _ in range(cantidad):
+            VentaService.emitir_factura(
+                db_session,
+                id_cliente=cliente.id_cliente,
+                id_usuario=admin.id_usuario,
+                id_vendedor=vendedor.id_vendedor,
+                condicion_pago="credito",
+                items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "10.00"}],
+            )
+
+    def contar_consultas() -> int:
+        consultas = []
+        motor = db_session.get_bind()
+        db_session.expire_all()
+
+        def registrar(*args):
+            consultas.append(args[2])
+
+        event.listen(motor, "before_cursor_execute", registrar)
+        try:
+            obtener_historial_cliente(db_session, cliente.id_cliente)
+        finally:
+            event.remove(motor, "before_cursor_execute", registrar)
+        return len(consultas)
+
+    emitir_facturas(2)
+    con_dos = contar_consultas()
+    emitir_facturas(4)
+    con_seis = contar_consultas()
+
+    assert con_seis == con_dos

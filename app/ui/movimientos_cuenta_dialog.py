@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
+from app.ui.paginacion import ControlPaginacion
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
@@ -26,6 +27,8 @@ from app.ui.styles import (
     alinear_encabezados,
 )
 
+POR_PAGINA = 50
+
 
 class MovimientosCuentaDialog(QDialog):
     """Diálogo para ver los movimientos de una cuenta bancaria."""
@@ -35,7 +38,11 @@ class MovimientosCuentaDialog(QDialog):
         self.session = session
         self.cuenta = cuenta
         self.usuario = usuario
+        # El monto "local" de cada movimiento es en pesos para una cuenta COP y en bolivares para las demas.
+        self._moneda_local = "COP" if getattr(cuenta, "moneda", None) == "COP" else "BS"
         self._movimientos = []
+        self.paginacion = ControlPaginacion()
+        self.paginacion.pagina_cambiada.connect(lambda _pagina: self._cargar_movimientos())
 
         self.setWindowTitle(f"Movimientos - {cuenta.numero_cuenta}")
         ajustar_tamano(self, 900, 600)
@@ -94,7 +101,7 @@ class MovimientosCuentaDialog(QDialog):
                 "Fecha",
                 "Tipo",
                 "Monto",
-                "Monto BS",
+                f"Monto {self._moneda_local}",
                 "Tasa",
                 "Origen",
                 "Referencia",
@@ -146,15 +153,16 @@ class MovimientosCuentaDialog(QDialog):
         self.lbl_total_salidas.setStyleSheet("color: #DC2626; font-size: 13px; font-weight: 600;")
         footer_layout.addWidget(self.lbl_total_salidas)
 
-        self.lbl_total_entradas_bs = QLabel("Total Entradas BS: 0.00")
+        self.lbl_total_entradas_bs = QLabel(f"Total Entradas {self._moneda_local}: 0.00")
         self.lbl_total_entradas_bs.setStyleSheet("color: #16A34A; font-size: 13px; font-weight: 600;")
         footer_layout.addWidget(self.lbl_total_entradas_bs)
 
-        self.lbl_total_salidas_bs = QLabel("Total Salidas BS: 0.00")
+        self.lbl_total_salidas_bs = QLabel(f"Total Salidas {self._moneda_local}: 0.00")
         self.lbl_total_salidas_bs.setStyleSheet("color: #DC2626; font-size: 13px; font-weight: 600;")
         footer_layout.addWidget(self.lbl_total_salidas_bs)
 
         footer_layout.addStretch()
+        footer_layout.addWidget(self.paginacion)
 
         btn_cerrar = QPushButton("Cerrar")
         btn_cerrar.setIcon(qta.icon("fa5s.times", color=COLOR_TEXT_DARK))
@@ -167,14 +175,18 @@ class MovimientosCuentaDialog(QDialog):
         layout.addLayout(footer_layout)
 
     def _cargar_movimientos(self):
-        """Carga los movimientos de la cuenta bancaria."""
-        self._movimientos = BancoMovimientoService.listar(
+        """Carga una pagina de movimientos de la cuenta bancaria (y los totales de toda la cuenta)."""
+        resultado = BancoMovimientoService.listar_paginado(
             self.session,
             id_cuenta=self.cuenta.id_cuenta,
+            pagina=self.paginacion.pagina,
+            por_pagina=POR_PAGINA,
             id_usuario=self.usuario.id_usuario,
         )
+        self._movimientos = resultado["items"]
+        self.paginacion.actualizar_desde(resultado, mostrar_total=True)
         self._actualizar_tabla()
-        self._calcular_totales()
+        self._mostrar_totales(resultado["totales"])
 
     def _actualizar_tabla(self):
         """Actualiza la tabla con los movimientos cargados."""
@@ -253,34 +265,9 @@ class MovimientosCuentaDialog(QDialog):
                 pago_rel = f"Comisión #{movimiento.id_pago_comision}"
             self.table.setItem(row, 9, QTableWidgetItem(pago_rel))
 
-    def _calcular_totales(self):
-        """Calcula y muestra los totales de entradas y salidas."""
-        total_entradas = 0.0
-        total_salidas = 0.0
-        total_entradas_bs = 0.0
-        total_salidas_bs = 0.0
-
-        for movimiento in self._movimientos:
-            if movimiento.monto_movimiento:
-                monto = float(movimiento.monto_movimiento)
-                if movimiento.tipo_movimiento == "abono":
-                    total_entradas += monto
-                elif movimiento.tipo_movimiento == "cargo":
-                    total_salidas += monto
-
-            # Calcular monto en bolívares
-            monto_bs = 0.0
-            if movimiento.monto_bolivares:
-                monto_bs = float(movimiento.monto_bolivares)
-            elif movimiento.monto_movimiento and movimiento.tasa_cambio and movimiento.tasa_cambio > 0:
-                monto_bs = float(movimiento.monto_movimiento) * float(movimiento.tasa_cambio)
-
-            if movimiento.tipo_movimiento == "abono":
-                total_entradas_bs += monto_bs
-            elif movimiento.tipo_movimiento == "cargo":
-                total_salidas_bs += monto_bs
-
-        self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
-        self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
-        self.lbl_total_entradas_bs.setText(f"Total Entradas BS: {total_entradas_bs:,.2f}")
-        self.lbl_total_salidas_bs.setText(f"Total Salidas BS: {total_salidas_bs:,.2f}")
+    def _mostrar_totales(self, totales: dict):
+        """Muestra los totales de entradas y salidas de toda la cuenta (calculados en la base)."""
+        self.lbl_total_entradas.setText(f"Total Entradas: ${totales['entradas']:,.2f}")
+        self.lbl_total_salidas.setText(f"Total Salidas: ${totales['salidas']:,.2f}")
+        self.lbl_total_entradas_bs.setText(f"Total Entradas {self._moneda_local}: {totales['entradas_bs']:,.2f}")
+        self.lbl_total_salidas_bs.setText(f"Total Salidas {self._moneda_local}: {totales['salidas_bs']:,.2f}")

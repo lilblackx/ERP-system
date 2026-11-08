@@ -1,9 +1,11 @@
 import datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import BancoMovimiento, CuentaBancaria
 from app.services.auditoria import AuditoriaService
+from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
 TIPOS_MOVIMIENTO = {"abono", "cargo"}
@@ -101,6 +103,59 @@ class BancoMovimientoService:
             query = query.filter(BancoMovimiento.tipo_movimiento == tipo_movimiento)
 
         return query.order_by(BancoMovimiento.fecha_movimiento.desc()).all()
+
+    @staticmethod
+    def listar_paginado(
+        session: Session,
+        id_cuenta: int,
+        pagina: int = 1,
+        por_pagina: int = 50,
+        id_usuario: int | None = None,
+    ) -> dict:
+        """Una pagina de movimientos de la cuenta (mas recientes primero) y los totales de TODA la cuenta.
+
+        Los totales se suman en la base: la pantalla traia todos los movimientos de la cuenta para sumarlos en
+        Python (y consultaba al usuario creador de cada fila por separado), y una cuenta con anos de historia
+        tardaba mucho en abrir. El monto en bolivares es `monto_bolivares` si viene, y si no `monto * tasa`."""
+        require_permiso(session, id_usuario, "bancos", "ver")
+        resultado = paginar(
+            session.query(BancoMovimiento)
+            .options(joinedload(BancoMovimiento.creador))
+            .filter(BancoMovimiento.id_cuenta == id_cuenta),
+            pagina,
+            por_pagina,
+            BancoMovimiento.fecha_movimiento.desc(),
+            BancoMovimiento.id_movimiento.desc(),
+        )
+        monto_bs = case(
+            (BancoMovimiento.monto_bolivares > 0, BancoMovimiento.monto_bolivares),
+            (
+                (BancoMovimiento.monto_movimiento > 0) & (BancoMovimiento.tasa_cambio > 0),
+                BancoMovimiento.monto_movimiento * BancoMovimiento.tasa_cambio,
+            ),
+            else_=0,
+        )
+
+        def suma(columna, tipo):
+            return func.coalesce(func.sum(case((BancoMovimiento.tipo_movimiento == tipo, columna), else_=0)), 0)
+
+        entradas, salidas, entradas_bs, salidas_bs = (
+            session.query(
+                suma(BancoMovimiento.monto_movimiento, "abono"),
+                suma(BancoMovimiento.monto_movimiento, "cargo"),
+                suma(monto_bs, "abono"),
+                suma(monto_bs, "cargo"),
+            )
+            .filter(BancoMovimiento.id_cuenta == id_cuenta)
+            .one()
+        )
+        resultado["totales"] = {
+            "entradas": float(entradas),
+            "salidas": float(salidas),
+            "entradas_bs": float(entradas_bs),
+            "salidas_bs": float(salidas_bs),
+        }
+        return resultado
 
     @staticmethod
     def obtener_saldo_actual(session: Session, id_cuenta: int, id_usuario: int | None = None) -> float:

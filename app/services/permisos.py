@@ -1,3 +1,4 @@
+from sqlalchemy import case, exists
 from sqlalchemy.orm import Session
 
 from app.db.models import Permiso, Rol, RolPermiso, Usuario
@@ -12,6 +13,37 @@ class PermisoDenegadoError(PermissionError):
     """Se lanza cuando un usuario no tiene el permiso requerido para una operacion.
     Subclase de PermissionError (no ValueError) a proposito: es un tipo de falla
     distinto a un dato invalido, y los llamadores pueden distinguirlos."""
+
+
+def consultar_permiso(
+    session: Session, id_usuario: int, recurso: str, accion: str
+) -> tuple[Usuario | None, str | None, bool]:
+    """(usuario, nombre de su rol, si su rol tiene `recurso:accion`) en UNA sola consulta.
+
+    Antes eran tres idas a la base por cada llamada (usuario, rol, permiso), y esta verificacion corre en cada accion
+    de la app -- cada busqueda, cada boton, cada carga --: con la base en otra red eran tres esperas de red cada vez.
+    El usuario vuelve como entidad (queda en el mapa de identidad de la sesion, igual que con `session.get`)."""
+    tiene = case(
+        (
+            exists().where(
+                RolPermiso.id_rol == Usuario.id_rol,
+                RolPermiso.id_permiso == Permiso.id_permiso,
+                Permiso.recurso == recurso,
+                Permiso.accion == accion,
+            ),
+            True,
+        ),
+        else_=False,
+    )
+    fila = (
+        session.query(Usuario, Rol.nombre, tiene)
+        .outerjoin(Rol, Rol.id_rol == Usuario.id_rol)
+        .filter(Usuario.id_usuario == id_usuario)
+        .first()
+    )
+    if fila is None:
+        return None, None, False
+    return fila[0], fila[1], bool(fila[2])
 
 
 def require_permiso(session: Session, id_usuario: int | None, recurso: str, accion: str) -> None:
@@ -39,7 +71,7 @@ def require_permiso(session: Session, id_usuario: int | None, recurso: str, acci
             f"Accion no autorizada: '{accion}' sobre '{recurso}' requiere un usuario autenticado"
         )
 
-    usuario = session.get(Usuario, id_usuario)
+    usuario, nombre_rol, tiene_permiso = consultar_permiso(session, id_usuario, recurso, accion)
     if usuario is None:
         raise PermisoDenegadoError(f"Accion no autorizada: usuario {id_usuario} no encontrado")
 
@@ -52,21 +84,9 @@ def require_permiso(session: Session, id_usuario: int | None, recurso: str, acci
     if usuario.id_rol is None:
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' no tiene rol asignado")
 
-    rol = session.get(Rol, usuario.id_rol)
-    if rol is not None and rol.nombre == "ADMIN":
+    if nombre_rol == "ADMIN":
         return
 
-    tiene_permiso = (
-        session.query(RolPermiso)
-        .join(Permiso, Permiso.id_permiso == RolPermiso.id_permiso)
-        .filter(
-            RolPermiso.id_rol == usuario.id_rol,
-            Permiso.recurso == recurso,
-            Permiso.accion == accion,
-        )
-        .first()
-        is not None
-    )
     if not tiene_permiso:
         raise PermisoDenegadoError(
             f"El usuario '{usuario.nombre_usuario}' no tiene permiso '{accion}' sobre '{recurso}'"

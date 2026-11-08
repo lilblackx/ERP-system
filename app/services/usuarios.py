@@ -2,11 +2,12 @@ import re
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import Permiso, Rol, RolPermiso, Usuario, Vendedor
+from app.db.models import Rol, Usuario, Vendedor
 from app.services.auditoria import AuditoriaService
 from app.services.auth import hash_password, validar_password_policy
 from app.services.bloqueo import esta_bloqueado
-from app.services.permisos import PermisoDenegadoError, require_permiso
+from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.permisos import PermisoDenegadoError, consultar_permiso, require_permiso
 
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
@@ -356,9 +357,11 @@ class UsuarioService:
         query = session.query(Usuario).options(joinedload(Usuario.rol))
 
         if texto_busqueda:
-            like = f"%{texto_busqueda}%"
+            like = patron_contiene(texto_busqueda)
             query = query.filter(
-                Usuario.nombre_usuario.ilike(like) | Usuario.nombre.ilike(like) | Usuario.apellido.ilike(like)
+                contiene(session, Usuario.nombre_usuario, like)
+                | contiene(session, Usuario.nombre, like)
+                | contiene(session, Usuario.apellido, like)
             )
         if id_rol:
             query = query.filter(Usuario.id_rol == id_rol)
@@ -384,7 +387,8 @@ class UsuarioService:
     # 2026-08-22, resuelto el mismo dia.
     @staticmethod
     def verificar_permiso(session: Session, id_usuario: int, recurso: str, accion: str) -> bool:
-        usuario = session.get(Usuario, id_usuario)
+        # Una sola consulta (usuario + rol + permiso) en vez de tres idas a la base: ver consultar_permiso().
+        usuario, nombre_rol, tiene_permiso = consultar_permiso(session, id_usuario, recurso, accion)
         if usuario is None or usuario.id_rol is None:
             return False
         if usuario.estado != "ACTIVO" or esta_bloqueado(usuario):
@@ -395,18 +399,7 @@ class UsuarioService:
         # tuviera ningun permiso -- bug preexistente sin caller real hasta que
         # app/ui/sidebar.py empezo a usar este metodo para filtrar el menu por rol
         # (2026-08-27): sin el bypass, un ADMIN se hubiera quedado sin ver ningun modulo.
-        rol = session.get(Rol, usuario.id_rol)
-        if rol is not None and rol.nombre == "ADMIN":
+        if nombre_rol == "ADMIN":
             return True
 
-        existe = (
-            session.query(RolPermiso)
-            .join(Permiso, Permiso.id_permiso == RolPermiso.id_permiso)
-            .filter(
-                RolPermiso.id_rol == usuario.id_rol,
-                Permiso.recurso == recurso,
-                Permiso.accion == accion,
-            )
-            .first()
-        )
-        return existe is not None
+        return tiene_permiso

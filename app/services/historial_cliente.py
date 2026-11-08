@@ -193,8 +193,21 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
     # Ordenar facturas por fecha de emisión ascendente para calcular saldo corrido
     facturas_ordenadas = sorted(facturas, key=lambda f: f.fecha_emision or datetime.min)
 
+    # La cuenta por cobrar de cada factura, todas en UNA consulta (antes se consultaba dentro del bucle, una por
+    # factura: un cliente con 3 000 facturas hacia 3 000 consultas y el historial tardaba segundos). Si una factura
+    # tuviera mas de una cuenta se usa la primera, igual que antes.
+    cxc_por_factura: dict[int, CuentaPorCobrar] = {}
+    for cuenta in (
+        session.query(CuentaPorCobrar)
+        .join(FacturaVenta, CuentaPorCobrar.id_factura == FacturaVenta.id_factura)
+        .filter(FacturaVenta.id_cliente_factura == id_cliente)
+        .order_by(CuentaPorCobrar.id_cuenta_por_cobrar)
+        .all()
+    ):
+        cxc_por_factura.setdefault(cuenta.id_factura, cuenta)
+
     for factura in facturas_ordenadas:
-        cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == factura.id_factura).first()
+        cxc = cxc_por_factura.get(factura.id_factura)
         fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d %H:%M") if factura.fecha_emision else ""
         fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
 
