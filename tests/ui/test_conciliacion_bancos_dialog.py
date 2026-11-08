@@ -80,24 +80,20 @@ def test_movimiento_manual_monto_input_arranca_en_cero_formateado(qtbot):
 
 
 def test_movimiento_manual_monto_input_no_admite_negativos(qtbot):
-    dialogo = MovimientoManualDialog("cargo")
+    dialogo = MovimientoManualDialog("cargo", moneda="USD")  # el campo en dolares solo se escribe en una cuenta USD
     qtbot.addWidget(dialogo)
     dialogo.show()
     qtbot.waitExposed(dialogo, timeout=15000)
-    # monto_input is read-only (disabled), so we test via set_value instead
-    dialogo.monto_input.setEnabled(True)  # Temporarily enable for testing
     _dar_foco(qtbot, dialogo.monto_input)
     qtbot.keyClicks(dialogo.monto_input, "-5")
     assert dialogo.monto_input.text() == "5"
 
 
 def test_movimiento_manual_get_data_devuelve_monto_float(qtbot):
-    dialogo = MovimientoManualDialog("abono")
+    dialogo = MovimientoManualDialog("abono", moneda="USD")
     qtbot.addWidget(dialogo)
     dialogo.show()
     qtbot.waitExposed(dialogo, timeout=15000)
-    # monto_input is read-only (disabled), so we test via set_value instead
-    dialogo.monto_input.setEnabled(True)  # Temporarily enable for testing
     _escribir_y_perder_foco(qtbot, dialogo.monto_input, "1234,56")
 
     datos = dialogo.get_data()

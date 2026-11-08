@@ -16,10 +16,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.db.models import Banco, BancoMovimiento, ControlDeTasa, CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
+from app.services.moneda_cuentas import MONEDA_BS, MONEDA_COP, MONEDA_USD
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
@@ -35,6 +37,11 @@ from app.ui.styles import (
     alinear_encabezados,
 )
 
+# Columnas de la tabla de movimientos del dia.
+COL_MONTO_USD = 2
+COL_TASA = 3
+COL_MONTO_LOCAL = 4
+
 
 class ConciliacionBancosDialog(QDialog):
     """Diálogo para conciliación de bancos."""
@@ -46,6 +53,10 @@ class ConciliacionBancosDialog(QDialog):
         self._cuentas = []
         self._movimientos_manuales = []
         self._fecha_conciliacion = QDate.currentDate()
+        # Moneda de cada cuenta del combo y de la seleccionada: manda sobre que montos se muestran (ver
+        # _aplicar_modo_moneda). Sin cuentas se muestra el lado en dolares.
+        self._monedas: dict[int, str] = {}
+        self._moneda = MONEDA_USD
 
         self.setWindowTitle("Conciliación de Bancos")
         self.setStyleSheet(TABLE_QSS)
@@ -144,6 +155,7 @@ class ConciliacionBancosDialog(QDialog):
         resumen_layout.setColumnStretch(1, 1)
         resumen_layout.setColumnStretch(2, 1)
 
+        # Todo el resumen va en la moneda de la cuenta (dolares, o bolivares/pesos): ver _aplicar_modo_moneda.
         self.lbl_saldo_inicial = QLabel("Saldo Inicial: $0.00")
         self.lbl_saldo_inicial.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         resumen_layout.addWidget(self.lbl_saldo_inicial, 0, 0)
@@ -156,62 +168,33 @@ class ConciliacionBancosDialog(QDialog):
         self.lbl_total_salidas.setStyleSheet("font-size: 12px; font-weight: 600; color: #DC2626;")
         resumen_layout.addWidget(self.lbl_total_salidas, 0, 2)
 
-        # Sección de bolívares
-        self.lbl_saldo_inicial_bs = QLabel("Saldo Inicial BS: 0.00")
-        self.lbl_saldo_inicial_bs.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
-        resumen_layout.addWidget(self.lbl_saldo_inicial_bs, 1, 0)
-
-        self.lbl_total_entradas_bs = QLabel("Total Entradas BS: 0.00")
-        self.lbl_total_entradas_bs.setStyleSheet("font-size: 12px; font-weight: 600; color: #16A34A;")
-        resumen_layout.addWidget(self.lbl_total_entradas_bs, 1, 1)
-
-        self.lbl_total_salidas_bs = QLabel("Total Salidas BS: 0.00")
-        self.lbl_total_salidas_bs.setStyleSheet("font-size: 12px; font-weight: 600; color: #DC2626;")
-        resumen_layout.addWidget(self.lbl_total_salidas_bs, 1, 2)
-
-        # Saldo final en bolívares
-        saldo_final_bs_layout = QVBoxLayout()
-        saldo_final_bs_layout.setSpacing(4)
-        lbl_saldo_final_bs = QLabel("Saldo Final BS:")
-        lbl_saldo_final_bs.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
-        self.saldo_final_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, decimals=2)
-        self.saldo_final_bs_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
-        self.saldo_final_bs_input.valueChanged.connect(self._calcular_saldo_final_usd)
-        saldo_final_bs_layout.addWidget(lbl_saldo_final_bs)
-        saldo_final_bs_layout.addWidget(self.saldo_final_bs_input)
-        resumen_layout.addLayout(saldo_final_bs_layout, 2, 0)
-
-        # Tasa de cambio
-        tasa_layout = QVBoxLayout()
-        tasa_layout.setSpacing(4)
-        lbl_tasa = QLabel("Tasa de Cambio:")
-        lbl_tasa.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
-        self.tasa_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=False, decimals=2)
-        self.tasa_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
-        self.tasa_input.valueChanged.connect(self._calcular_saldo_final_usd)
-        tasa_layout.addWidget(lbl_tasa)
-        tasa_layout.addWidget(self.tasa_input)
-        resumen_layout.addLayout(tasa_layout, 2, 1)
-
-        # Saldo final en USD (calculado)
+        # Saldo final que dice el estado de cuenta del banco. Hay un campo por moneda y solo se muestra el de la
+        # moneda de la cuenta.
         saldo_final_layout = QVBoxLayout()
         saldo_final_layout.setSpacing(4)
-        lbl_saldo_final = QLabel("Saldo Final USD (Calc):")
-        lbl_saldo_final.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        estilo_saldo_final = f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
+        self.lbl_saldo_final = QLabel("Saldo Final USD:")
+        self.lbl_saldo_final.setStyleSheet(estilo_saldo_final)
         self.saldo_final_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, prefix="$ ")
         self.saldo_final_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
-        self.saldo_final_input.setEnabled(False)  # Solo lectura, calculado automáticamente
-        saldo_final_layout.addWidget(lbl_saldo_final)
-        saldo_final_layout.addWidget(self.saldo_final_input)
-        resumen_layout.addLayout(saldo_final_layout, 2, 2)
+        self.saldo_final_input.valueChanged.connect(self._calcular_conciliacion)
+        self.lbl_saldo_final_bs = QLabel("Saldo Final BS:")
+        self.lbl_saldo_final_bs.setStyleSheet(estilo_saldo_final)
+        self.saldo_final_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, decimals=2)
+        self.saldo_final_bs_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
+        self.saldo_final_bs_input.valueChanged.connect(self._calcular_conciliacion)
+        for widget in (
+            self.lbl_saldo_final,
+            self.saldo_final_input,
+            self.lbl_saldo_final_bs,
+            self.saldo_final_bs_input,
+        ):
+            saldo_final_layout.addWidget(widget)
+        resumen_layout.addLayout(saldo_final_layout, 1, 0)
 
         self.lbl_diferencia = QLabel("Diferencia: $0.00")
         self.lbl_diferencia.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
-        resumen_layout.addWidget(self.lbl_diferencia, 3, 0)
-
-        self.lbl_diferencia_bs = QLabel("Diferencia BS: 0.00")
-        self.lbl_diferencia_bs.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
-        resumen_layout.addWidget(self.lbl_diferencia_bs, 3, 1)
+        resumen_layout.addWidget(self.lbl_diferencia, 1, 1)
 
         # Icono real (qtawesome) en vez de "✓"/"✗" sueltos en el texto -- ver
         # GUIA_ESTILO_UI.md 3.1.
@@ -225,7 +208,7 @@ class ConciliacionBancosDialog(QDialog):
         estado_layout.addWidget(self.icon_estado)
         estado_layout.addWidget(self.lbl_estado_texto)
         estado_layout.addStretch()
-        resumen_layout.addWidget(self.lbl_estado, 3, 2)
+        resumen_layout.addWidget(self.lbl_estado, 1, 2)
 
         layout.addWidget(resumen_card)
 
@@ -341,10 +324,49 @@ class ConciliacionBancosDialog(QDialog):
             .order_by(Banco.nombre_banco, CuentaBancaria.numero_cuenta)
             .all()
         )
+        self._monedas = {c.id_cuenta: (c.moneda or MONEDA_BS) for c in cuentas}
+        self.cuenta_combo.blockSignals(True)
         self.cuenta_combo.clear()
         for cuenta in cuentas:
             banco_nombre = cuenta.banco.nombre_banco if cuenta.banco else "N/A"
             self.cuenta_combo.addItem(f"{banco_nombre} - {cuenta.numero_cuenta}", cuenta.id_cuenta)
+        self.cuenta_combo.blockSignals(False)
+        self._aplicar_modo_moneda()
+        self._calcular_conciliacion()
+
+    @property
+    def _es_usd(self) -> bool:
+        return self._moneda == MONEDA_USD
+
+    @property
+    def _etiqueta_local(self) -> str:
+        """Como se llama la moneda local de la cuenta en pantalla: BS, o COP para una cuenta en pesos."""
+        return "COP" if self._moneda == MONEDA_COP else "BS"
+
+    def _formato_monto(self, monto: float) -> str:
+        return f"${monto:,.2f}" if self._es_usd else f"{self._etiqueta_local} {monto:,.2f}"
+
+    def _aplicar_modo_moneda(self) -> None:
+        """Una cuenta en USD solo muestra dolares; una en bolivares (o pesos), solo su moneda: ni saldos, ni tasa, ni
+        columnas de la otra moneda."""
+        self._moneda = self._monedas.get(self.cuenta_combo.currentData(), MONEDA_USD)
+        es_usd = self._es_usd
+        etiqueta = self._etiqueta_local
+        self.lbl_saldo_final.setVisible(es_usd)
+        self.saldo_final_input.setVisible(es_usd)
+        self.lbl_saldo_final_bs.setVisible(not es_usd)
+        self.saldo_final_bs_input.setVisible(not es_usd)
+        self.lbl_saldo_final_bs.setText(f"Saldo Final {etiqueta}:")
+        # Columnas de la tabla: Monto ($) solo en USD, Monto en la moneda local solo en las demas; la tasa nunca.
+        self.table.setColumnHidden(COL_MONTO_USD, not es_usd)
+        self.table.setColumnHidden(COL_TASA, True)
+        self.table.setColumnHidden(COL_MONTO_LOCAL, es_usd)
+        encabezado = self.table.horizontalHeaderItem(COL_MONTO_LOCAL)
+        if encabezado is not None:
+            encabezado.setText(f"Monto {etiqueta}")
+        # Con una sola columna de monto visible hay espacio para que el encabezado y la cifra entren completos.
+        self.table.setColumnWidth(COL_MONTO_USD, 110)
+        self.table.setColumnWidth(COL_MONTO_LOCAL, 130)
 
     def _on_fecha_cambiada(self):
         """Maneja el cambio de fecha."""
@@ -352,19 +374,66 @@ class ConciliacionBancosDialog(QDialog):
         self._calcular_conciliacion()
 
     def _on_cuenta_cambiada(self, index: int):
-        """Maneja el cambio de cuenta."""
+        """Maneja el cambio de cuenta: los movimientos manuales sin guardar eran de la otra cuenta y de otra moneda."""
+        self._movimientos_manuales.clear()
+        self._aplicar_modo_moneda()
         self._calcular_conciliacion()
 
-    def _calcular_saldo_final_usd(self):
-        """Calcula el saldo final USD basado en el saldo final BS y la tasa."""
-        saldo_final_bs = self.saldo_final_bs_input.get_value()
-        tasa = self.tasa_input.get_value()
+    def _saldo_final_manual(self) -> float:
+        """Saldo final que dice el estado de cuenta del banco, en la moneda de la cuenta."""
+        campo = self.saldo_final_input if self._es_usd else self.saldo_final_bs_input
+        valor = campo.get_value()
+        return float(valor) if valor is not None else 0.0
 
-        if saldo_final_bs is not None and tasa is not None and tasa > 0:
-            saldo_final_usd = saldo_final_bs / tasa
-            self.saldo_final_input.set_value(saldo_final_usd)
-        else:
-            self.saldo_final_input.set_value(0)
+    def _tasa_sugerida(self) -> float:
+        """Tasa del dia para precargar el movimiento manual de una cuenta en bolivares (o en pesos)."""
+        registro = self.session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc()).first()
+        if registro is None:
+            return 0.0
+        tasa = registro.tasa_cop if self._moneda == MONEDA_COP else registro.tasa_dolar_bcv
+        return float(tasa) if tasa else 0.0
+
+    def _columna_monto(self):
+        """Columna de `banco_movimientos` con el monto en la moneda de la cuenta."""
+        return BancoMovimiento.monto_movimiento if self._es_usd else BancoMovimiento.monto_bolivares
+
+    def _suma_por_tipo(self, id_cuenta: int, desde, hasta) -> tuple[float, float]:
+        """(entradas, salidas) de la cuenta entre dos fechas, en la moneda de la cuenta, sumadas en la base."""
+        monto = func.coalesce(self._columna_monto(), 0)
+        filtros = [BancoMovimiento.id_cuenta == id_cuenta, BancoMovimiento.fecha_movimiento <= hasta]
+        if desde is not None:
+            filtros.append(BancoMovimiento.fecha_movimiento >= desde)
+        entradas, salidas = (
+            self.session.query(
+                func.coalesce(func.sum(case((BancoMovimiento.tipo_movimiento == "abono", monto), else_=0)), 0),
+                func.coalesce(func.sum(case((BancoMovimiento.tipo_movimiento == "cargo", monto), else_=0)), 0),
+            )
+            .filter(*filtros)
+            .one()
+        )
+        return float(entradas), float(salidas)
+
+    def _totales_conciliacion(self, id_cuenta: int, fecha) -> dict:
+        """Saldo inicial (al cierre del dia anterior), entradas y salidas del dia, y el saldo calculado, todo en la
+        moneda de la cuenta. Incluye los movimientos manuales aun sin guardar."""
+        inicio = datetime.datetime.combine(fecha, datetime.time.min)
+        fin = datetime.datetime.combine(fecha, datetime.time.max)
+        fin_anterior = datetime.datetime.combine(fecha - datetime.timedelta(days=1), datetime.time.max)
+        previas, previas_salidas = self._suma_por_tipo(id_cuenta, None, fin_anterior)
+        entradas, salidas = self._suma_por_tipo(id_cuenta, inicio, fin)
+        clave_manual = "monto" if self._es_usd else "monto_bs"
+        for mov in self._movimientos_manuales:
+            if mov["tipo"] == "abono":
+                entradas += mov.get(clave_manual, 0.0)
+            else:
+                salidas += mov.get(clave_manual, 0.0)
+        saldo_inicial = previas - previas_salidas
+        return {
+            "saldo_inicial": saldo_inicial,
+            "entradas": entradas,
+            "salidas": salidas,
+            "saldo_calculado": saldo_inicial + entradas - salidas,
+        }
 
     def _on_agregar_entrada(self):
         """Abre diálogo para agregar una entrada manual."""
@@ -381,11 +450,10 @@ class ConciliacionBancosDialog(QDialog):
             MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
             return
 
-        # Obtener tasa actual del diálogo principal
-        tasa_value = self.tasa_input.get_value()
-        tasa_actual = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
-
-        dialog = MovimientoManualDialog(tipo, parent=self, tasa_inicial=tasa_actual)
+        # Una cuenta en USD registra el monto en dolares y nada mas; una en bolivares (o pesos) registra el monto en
+        # su moneda con la tasa del dia (precargada), de donde sale el equivalente en dolares que lleva el saldo.
+        tasa_actual = 0.0 if self._es_usd else self._tasa_sugerida()
+        dialog = MovimientoManualDialog(tipo, parent=self, tasa_inicial=tasa_actual, moneda=self._moneda)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             datos = dialog.get_data()
@@ -503,10 +571,10 @@ class ConciliacionBancosDialog(QDialog):
                 tipo_item.setForeground(Qt.GlobalColor.red)
             self.table.setItem(row, 1, tipo_item)
 
-            # Monto
+            # Monto (columna de dolares: solo se ve en una cuenta en USD)
             item_monto = QTableWidgetItem(f"${movimiento['monto']:,.2f}")
             item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(row, 2, item_monto)
+            self.table.setItem(row, COL_MONTO_USD, item_monto)
 
             # Tasa
             tasa_texto = (
@@ -514,12 +582,12 @@ class ConciliacionBancosDialog(QDialog):
             )
             item_tasa = QTableWidgetItem(tasa_texto)
             item_tasa.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(row, 3, item_tasa)
+            self.table.setItem(row, COL_TASA, item_tasa)
 
             # Monto BS
             item_monto_bs = QTableWidgetItem(f"{movimiento['monto_bs']:,.2f}" if movimiento["monto_bs"] > 0 else "0.00")
             item_monto_bs.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(row, 4, item_monto_bs)
+            self.table.setItem(row, COL_MONTO_LOCAL, item_monto_bs)
 
             # Origen
             self.table.setItem(row, 5, QTableWidgetItem(movimiento["origen"]))
@@ -538,131 +606,24 @@ class ConciliacionBancosDialog(QDialog):
             self._calcular_conciliacion()
 
     def _marcar_conciliado(self):
-        """Marca el día como conciliado si la diferencia en bolívares es 0."""
+        """Marca el día como conciliado si la diferencia (en la moneda de la cuenta) es 0."""
         id_cuenta = self.cuenta_combo.currentData()
         if id_cuenta is None:
             MessageBox.warning(self, "Selección requerida", "Seleccione una cuenta bancaria.")
             return
 
-        # Verificar que la diferencia en bolívares sea 0
-        saldo_final_bs_value = self.saldo_final_bs_input.get_value()
-        saldo_final_manual_bs = float(saldo_final_bs_value) if saldo_final_bs_value is not None else 0.0
-        tasa_value = self.tasa_input.get_value()
-        tasa_cambio = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
-
-        # Calcular saldo final en USD
-        saldo_final_manual = 0.0
-        if tasa_cambio > 0:
-            saldo_final_manual = saldo_final_manual_bs / tasa_cambio
-
-        if tasa_cambio == 0:
-            MessageBox.warning(
-                self,
-                "Tasa requerida",
-                "Debe ingresar una tasa de cambio para conciliar.",
-            )
-            return
-
-        id_cuenta = self.cuenta_combo.currentData()
         fecha = self._fecha_conciliacion.toPython()
+        totales = self._totales_conciliacion(id_cuenta, fecha)
+        saldo_final = self._saldo_final_manual()
+        diferencia = totales["saldo_calculado"] - saldo_final
+        moneda = "USD" if self._es_usd else self._etiqueta_local
 
-        # Recalcular para verificar
-        fecha_inicio = datetime.datetime.combine(fecha, datetime.time.min)
-        fecha_fin = datetime.datetime.combine(fecha, datetime.time.max)
-
-        fecha_anterior = fecha - datetime.timedelta(days=1)
-        fecha_anterior_fin = datetime.datetime.combine(fecha_anterior, datetime.time.max)
-
-        movimientos_anteriores = (
-            self.session.query(BancoMovimiento)
-            .filter(
-                BancoMovimiento.id_cuenta == id_cuenta,
-                BancoMovimiento.fecha_movimiento <= fecha_anterior_fin,
-            )
-            .all()
-        )
-
-        saldo_inicial = 0.0
-        saldo_inicial_bs = 0.0
-        for mov in movimientos_anteriores:
-            if mov.monto_movimiento:
-                monto = float(mov.monto_movimiento)
-                if mov.tipo_movimiento == "abono":
-                    saldo_inicial += monto
-                elif mov.tipo_movimiento == "cargo":
-                    saldo_inicial -= monto
-
-                # Calcular en bolívares - usar el monto en BS directamente, no multiplicar por tasa
-                if mov.monto_bolivares:
-                    monto_bs = float(mov.monto_bolivares)
-                else:
-                    monto_bs = 0.0
-
-                if mov.tipo_movimiento == "abono":
-                    saldo_inicial_bs += monto_bs
-                elif mov.tipo_movimiento == "cargo":
-                    saldo_inicial_bs -= monto_bs
-
-        movimientos_dia = (
-            self.session.query(BancoMovimiento)
-            .filter(
-                BancoMovimiento.id_cuenta == id_cuenta,
-                BancoMovimiento.fecha_movimiento >= fecha_inicio,
-                BancoMovimiento.fecha_movimiento <= fecha_fin,
-            )
-            .all()
-        )
-
-        total_entradas = 0.0
-        total_salidas = 0.0
-        total_entradas_bs = 0.0
-        total_salidas_bs = 0.0
-
-        for mov in movimientos_dia:
-            if mov.monto_movimiento:
-                monto = float(mov.monto_movimiento)
-                if mov.tipo_movimiento == "abono":
-                    total_entradas += monto
-                elif mov.tipo_movimiento == "cargo":
-                    total_salidas += monto
-
-                # Calcular en bolívares - usar el monto en BS directamente, no multiplicar por tasa
-                if mov.monto_bolivares:
-                    monto_bs = float(mov.monto_bolivares)
-                else:
-                    monto_bs = 0.0
-
-                if mov.tipo_movimiento == "abono":
-                    total_entradas_bs += monto_bs
-                elif mov.tipo_movimiento == "cargo":
-                    total_salidas_bs += monto_bs
-
-        for mov in self._movimientos_manuales:
-            if mov["tipo"] == "abono":
-                total_entradas += mov["monto"]
-            else:
-                total_salidas += mov["monto"]
-
-            # Calcular en bolívares para movimientos manuales - usar el monto en BS directamente
-            monto_bs = mov.get("monto_bs", 0.0)
-
-            if mov["tipo"] == "abono":
-                total_entradas_bs += monto_bs
-            else:
-                total_salidas_bs += monto_bs
-
-        saldo_calculado_bs = saldo_inicial_bs + total_entradas_bs - total_salidas_bs
-
-        # El saldo final manual ya está en BS, no multiplicar por tasa
-        saldo_final_manual_bs = saldo_final_manual
-        diferencia_bs = saldo_calculado_bs - saldo_final_manual_bs
-
-        if abs(diferencia_bs) > 0.01:
+        if abs(diferencia) > 0.01:
             MessageBox.warning(
                 self,
                 "No se puede conciliar",
-                f"La conciliación presenta una diferencia de {diferencia_bs:,.2f} BS. "
-                "Solo se puede marcar como conciliado cuando la diferencia en bolívares sea 0.",
+                f"La conciliación presenta una diferencia de {diferencia:,.2f} {moneda}. "
+                f"Solo se puede marcar como conciliado cuando la diferencia en {moneda} sea 0.",
             )
             return
 
@@ -672,8 +633,7 @@ class ConciliacionBancosDialog(QDialog):
             self,
             "Conciliación Exitosa",
             f"El día {fecha.strftime('%d/%m/%Y')} ha sido marcado como conciliado.\n"
-            f"Saldo Final BS: {saldo_final_manual_bs:,.2f} (${saldo_final_manual:,.2f} USD)\n"
-            f"Tasa: {tasa_cambio:,.2f}",
+            f"Saldo Final {moneda}: {saldo_final:,.2f}",
         )
 
     def _guardar_movimientos(self):
@@ -689,23 +649,18 @@ class ConciliacionBancosDialog(QDialog):
 
         fecha = self._fecha_conciliacion.toPython()
         fecha_movimiento = datetime.datetime.combine(fecha, datetime.datetime.now().time())
-        tasa_value = self.tasa_input.get_value()
-        tasa_cambio = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
-
-        # Obtener la tasa actual de control_de_tasas si existe
         tasa_registro = None
-        if tasa_cambio > 0:
+        if not self._es_usd:
             tasa_registro = self.session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc()).first()
 
         try:
             for movimiento in self._movimientos_manuales:
-                monto_bs = movimiento.get("monto_bs", 0.0)
-                tasa_mov = movimiento.get("tasa", tasa_cambio)
+                # Cuenta en USD: solo el monto en dolares. Las demas: el monto en su moneda y la tasa con que se
+                # calculo el equivalente en dolares.
+                monto_bs = None if self._es_usd else movimiento.get("monto_bs", 0.0)
+                tasa_mov = None if self._es_usd else movimiento.get("tasa", 0.0)
 
-                # Si no se proporcionó monto_bs, dejarlo en 0.0
-                # No se debe calcular multiplicando por tasa, se debe usar el monto en BS directamente
-
-                BancoMovimientoService.crear(
+                creado = BancoMovimientoService.crear(
                     self.session,
                     id_cuenta=id_cuenta,
                     tipo_movimiento=movimiento["tipo"],
@@ -713,18 +668,14 @@ class ConciliacionBancosDialog(QDialog):
                     referencia=movimiento["referencia"],
                     descripcion=movimiento["descripcion"],
                     id_usuario=self.usuario.id_usuario,
+                    monto_bolivares=monto_bs,
+                    tasa_cambio=tasa_mov,
                 )
                 # Actualizar la fecha del movimiento a la fecha de conciliación
-                movimientos = (
-                    self.session.query(BancoMovimiento).order_by(BancoMovimiento.id_movimiento.desc()).limit(1).all()
-                )
-                if movimientos:
-                    movimientos[0].fecha_movimiento = fecha_movimiento
-                    movimientos[0].monto_bolivares = monto_bs
-                    movimientos[0].tasa_cambio = tasa_mov
-                    if tasa_registro:
-                        movimientos[0].id_tasa = tasa_registro.id_tasa
-                    self.session.commit()
+                creado.fecha_movimiento = fecha_movimiento
+                if tasa_registro is not None:
+                    creado.id_tasa = tasa_registro.id_tasa
+                self.session.commit()
 
             self._movimientos_manuales.clear()
             self._actualizar_tabla_manuales()
@@ -739,133 +690,23 @@ class ConciliacionBancosDialog(QDialog):
             MessageBox.critical(self, "Error", f"Error al guardar movimientos: {str(e)}")
 
     def _calcular_conciliacion(self):
-        """Calcula la conciliación bancaria."""
+        """Calcula la conciliación bancaria en la moneda de la cuenta."""
         id_cuenta = self.cuenta_combo.currentData()
         if id_cuenta is None:
             return
 
-        fecha = self._fecha_conciliacion.toPython()
-        fecha_inicio = datetime.datetime.combine(fecha, datetime.time.min)
-        fecha_fin = datetime.datetime.combine(fecha, datetime.time.max)
+        totales = self._totales_conciliacion(id_cuenta, self._fecha_conciliacion.toPython())
+        diferencia = totales["saldo_calculado"] - self._saldo_final_manual()
 
-        # Obtener tasa de cambio actual
-        tasa_value = self.tasa_input.get_value()
-        tasa_cambio = float(tasa_value) if tasa_value is not None and tasa_value > 0 else 0.0
+        # Un solo juego de etiquetas, en la moneda de la cuenta: (Saldo Inicial + Entradas - Salidas) - Saldo Final
+        # que dice el banco = Diferencia.
+        self.lbl_saldo_inicial.setText(f"Saldo Inicial: {self._formato_monto(totales['saldo_inicial'])}")
+        self.lbl_total_entradas.setText(f"Total Entradas: {self._formato_monto(totales['entradas'])}")
+        self.lbl_total_salidas.setText(f"Total Salidas: {self._formato_monto(totales['salidas'])}")
+        self.lbl_diferencia.setText(f"Diferencia: {self._formato_monto(diferencia)}")
 
-        # Obtener saldo inicial (saldo al final del día anterior)
-        fecha_anterior = fecha - datetime.timedelta(days=1)
-        fecha_anterior_fin = datetime.datetime.combine(fecha_anterior, datetime.time.max)
-
-        movimientos_anteriores = (
-            self.session.query(BancoMovimiento)
-            .filter(
-                BancoMovimiento.id_cuenta == id_cuenta,
-                BancoMovimiento.fecha_movimiento <= fecha_anterior_fin,
-            )
-            .all()
-        )
-
-        saldo_inicial = 0.0
-        saldo_inicial_bs = 0.0
-        for mov in movimientos_anteriores:
-            if mov.monto_movimiento:
-                monto = float(mov.monto_movimiento)
-                if mov.tipo_movimiento == "abono":
-                    saldo_inicial += monto
-                elif mov.tipo_movimiento == "cargo":
-                    saldo_inicial -= monto
-
-                # Calcular en bolívares - usar el monto en BS directamente, no multiplicar por tasa
-                if mov.monto_bolivares:
-                    monto_bs = float(mov.monto_bolivares)
-                else:
-                    monto_bs = 0.0
-
-                if mov.tipo_movimiento == "abono":
-                    saldo_inicial_bs += monto_bs
-                elif mov.tipo_movimiento == "cargo":
-                    saldo_inicial_bs -= monto_bs
-
-        # Obtener movimientos del día
-        movimientos_dia = (
-            self.session.query(BancoMovimiento)
-            .filter(
-                BancoMovimiento.id_cuenta == id_cuenta,
-                BancoMovimiento.fecha_movimiento >= fecha_inicio,
-                BancoMovimiento.fecha_movimiento <= fecha_fin,
-            )
-            .all()
-        )
-
-        total_entradas = 0.0
-        total_salidas = 0.0
-        total_entradas_bs = 0.0
-        total_salidas_bs = 0.0
-
-        for mov in movimientos_dia:
-            if mov.monto_movimiento:
-                monto = float(mov.monto_movimiento)
-                if mov.tipo_movimiento == "abono":
-                    total_entradas += monto
-                elif mov.tipo_movimiento == "cargo":
-                    total_salidas += monto
-
-                # Calcular en bolívares - usar el monto en BS directamente, no multiplicar por tasa
-                if mov.monto_bolivares:
-                    monto_bs = float(mov.monto_bolivares)
-                else:
-                    monto_bs = 0.0
-
-                if mov.tipo_movimiento == "abono":
-                    total_entradas_bs += monto_bs
-                elif mov.tipo_movimiento == "cargo":
-                    total_salidas_bs += monto_bs
-
-        # Agregar movimientos manuales
-        for mov in self._movimientos_manuales:
-            if mov["tipo"] == "abono":
-                total_entradas += mov["monto"]
-            else:
-                total_salidas += mov["monto"]
-
-            # Calcular en bolívares para movimientos manuales - usar el monto en BS directamente
-            monto_bs = mov.get("monto_bs", 0.0)
-
-            if mov["tipo"] == "abono":
-                total_entradas_bs += monto_bs
-            else:
-                total_salidas_bs += monto_bs
-
-        # Saldo final en bolívares ingresado por el usuario
-        saldo_final_bs_value = self.saldo_final_bs_input.get_value()
-        saldo_final_manual_bs = float(saldo_final_bs_value) if saldo_final_bs_value is not None else 0.0
-
-        # Calcular saldo final en USD (monto BS / tasa)
-        saldo_final_manual = 0.0
-        if tasa_cambio > 0:
-            saldo_final_manual = saldo_final_manual_bs / tasa_cambio
-            self.saldo_final_input.set_value(saldo_final_manual)
-
-        # Cálculo en USD: (Saldo Inicial + Entradas - Salidas) - Saldo Final Manual = Diferencia
-        saldo_calculado = saldo_inicial + total_entradas - total_salidas
-        diferencia = saldo_calculado - saldo_final_manual
-
-        # Cálculo en BS: (Saldo Inicial BS + Entradas BS - Salidas BS) - Saldo Final Manual BS = Diferencia BS
-        saldo_calculado_bs = saldo_inicial_bs + total_entradas_bs - total_salidas_bs
-        diferencia_bs = saldo_calculado_bs - saldo_final_manual_bs
-
-        # Actualizar etiquetas
-        self.lbl_saldo_inicial.setText(f"Saldo Inicial: ${saldo_inicial:,.2f}")
-        self.lbl_total_entradas.setText(f"Total Entradas: ${total_entradas:,.2f}")
-        self.lbl_total_salidas.setText(f"Total Salidas: ${total_salidas:,.2f}")
-        self.lbl_saldo_inicial_bs.setText(f"Saldo Inicial BS: {saldo_inicial_bs:,.2f}")
-        self.lbl_total_entradas_bs.setText(f"Total Entradas BS: {total_entradas_bs:,.2f}")
-        self.lbl_total_salidas_bs.setText(f"Total Salidas BS: {total_salidas_bs:,.2f}")
-        self.lbl_diferencia.setText(f"Diferencia: ${diferencia:,.2f}")
-        self.lbl_diferencia_bs.setText(f"Diferencia BS: {diferencia_bs:,.2f}")
-
-        # Verificar si está cuadrado (diferencia debe ser 0 en BS)
-        if abs(diferencia_bs) < 0.01:
+        # Está cuadrado si la diferencia es 0
+        if abs(diferencia) < 0.01:
             self.icon_estado.setPixmap(qta.icon("fa5s.check-circle", color="#16A34A").pixmap(QSize(14, 14)))
             self.lbl_estado_texto.setText("Estado: Cuadrado")
             self.lbl_estado_texto.setStyleSheet("font-size: 12px; font-weight: 600; color: #16A34A;")
@@ -879,12 +720,18 @@ class ConciliacionBancosDialog(QDialog):
 
 
 class MovimientoManualDialog(QDialog):
-    """Diálogo para agregar un movimiento manual."""
+    """Diálogo para agregar un movimiento manual a una cuenta.
 
-    def __init__(self, tipo: str, parent=None, tasa_inicial: float = 0.0):
+    Cuenta en USD (`moneda="USD"`): solo el monto en dolares. Cuenta en bolivares o pesos: el monto en esa moneda y la
+    tasa (el equivalente en dolares que lleva el saldo se calcula, sin mostrarse)."""
+
+    def __init__(self, tipo: str, parent=None, tasa_inicial: float = 0.0, moneda: str = MONEDA_BS):
         super().__init__(parent)
         self.tipo = tipo
         self.tasa_inicial = tasa_inicial
+        self.moneda = moneda
+        self._en_usd = moneda == MONEDA_USD
+        self._etiqueta = "COP" if moneda == MONEDA_COP else "BS"
         self.setWindowTitle(f"Agregar {'Entrada' if tipo == 'abono' else 'Salida'} Manual")
         self.setMinimumSize(450, 400)  # Tamaño mínimo en lugar de fijo
         self.resize(500, 450)  # Tamaño inicial mayor
@@ -914,7 +761,7 @@ class MovimientoManualDialog(QDialog):
         form_layout.setColumnStretch(0, 1)  # Columnas flexibles
         form_layout.setColumnStretch(1, 2)
 
-        lbl_monto_bs = QLabel("Monto BS:")
+        lbl_monto_bs = QLabel(f"Monto {self._etiqueta}:")
         lbl_monto_bs.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
         self.monto_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, decimals=2)
         self.monto_bs_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
@@ -930,13 +777,20 @@ class MovimientoManualDialog(QDialog):
         form_layout.addWidget(lbl_tasa, 1, 0)
         form_layout.addWidget(self.tasa_input, 1, 1)
 
-        lbl_monto = QLabel("Monto USD (Calc):")
+        # Monto en dolares: lo escribe el usuario en una cuenta USD; en las demas se calcula (monto / tasa) y no se
+        # muestra.
+        lbl_monto = QLabel("Monto USD:" if self._en_usd else "Monto USD (Calc):")
         lbl_monto.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         self.monto_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
         self.monto_input.setMinimumHeight(36)  # Altura mínima en lugar de fija
-        self.monto_input.setEnabled(False)  # Solo lectura, calculado automáticamente
+        self.monto_input.setEnabled(self._en_usd)
         form_layout.addWidget(lbl_monto, 2, 0)
         form_layout.addWidget(self.monto_input, 2, 1)
+        # Cuenta en USD: no hay monto en otra moneda ni tasa. Las demas: no se muestra el equivalente en dolares.
+        for widget in (lbl_monto_bs, self.monto_bs_input, lbl_tasa, self.tasa_input):
+            widget.setVisible(not self._en_usd)
+        for widget in (lbl_monto, self.monto_input):
+            widget.setVisible(self._en_usd)
 
         lbl_referencia = QLabel("Referencia:")
         lbl_referencia.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_DARK};")
@@ -977,7 +831,9 @@ class MovimientoManualDialog(QDialog):
         layout.addLayout(botones_layout)
 
     def _calcular_monto(self):
-        """Calcula el monto en USD basado en el monto BS y la tasa."""
+        """Calcula el monto en USD basado en el monto BS y la tasa (no aplica a una cuenta en USD)."""
+        if self._en_usd:
+            return
         monto_bs = self.monto_bs_input.get_value()
         tasa = self.tasa_input.get_value()
 
@@ -988,15 +844,20 @@ class MovimientoManualDialog(QDialog):
             self.monto_input.set_value(0)
 
     def _validar_y_aceptar(self):
-        monto_bs = self.monto_bs_input.get_value()
-        tasa = self.tasa_input.get_value()
-
-        if monto_bs is None or monto_bs <= 0:
-            MessageBox.warning(self, "Dato requerido", "El monto BS debe ser mayor a 0.")
-            return
-        if tasa is None or tasa <= 0:
-            MessageBox.warning(self, "Dato requerido", "La tasa de cambio debe ser mayor a 0.")
-            return
+        if self._en_usd:
+            monto = self.monto_input.get_value()
+            if monto is None or monto <= 0:
+                MessageBox.warning(self, "Dato requerido", "El monto USD debe ser mayor a 0.")
+                return
+        else:
+            monto_bs = self.monto_bs_input.get_value()
+            tasa = self.tasa_input.get_value()
+            if monto_bs is None or monto_bs <= 0:
+                MessageBox.warning(self, "Dato requerido", f"El monto {self._etiqueta} debe ser mayor a 0.")
+                return
+            if tasa is None or tasa <= 0:
+                MessageBox.warning(self, "Dato requerido", "La tasa de cambio debe ser mayor a 0.")
+                return
         if not self.referencia_input.text().strip():
             MessageBox.warning(self, "Dato requerido", "La referencia es obligatoria.")
             return
@@ -1008,8 +869,9 @@ class MovimientoManualDialog(QDialog):
         monto = self.monto_input.get_value()
         return {
             "monto": float(monto) if monto is not None else 0.0,
-            "monto_bs": float(monto_bs) if monto_bs is not None else 0.0,
-            "tasa": float(tasa) if tasa is not None else 0.0,
+            # Cuenta en USD: no hay monto en otra moneda ni tasa.
+            "monto_bs": 0.0 if self._en_usd else (float(monto_bs) if monto_bs is not None else 0.0),
+            "tasa": 0.0 if self._en_usd else (float(tasa) if tasa is not None else 0.0),
             "referencia": self.referencia_input.text().strip(),
             "descripcion": self.descripcion_input.text().strip(),
         }
