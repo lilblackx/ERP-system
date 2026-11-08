@@ -744,6 +744,46 @@ def test_productos_mas_vendidos_respeta_orden_asc_y_desc(db_session):
     assert menos_vendidos["filas"][0]["producto"] == "Lento"
 
 
+def test_productos_mas_vendidos_separa_bultos_y_unidades(db_session):
+    """Los bultos y las unidades del mismo producto no se suman en una sola cantidad."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    cliente = crear_cliente(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=200, cantidad_caja=12, nombre_producto="Mixto")
+    crear_precio_producto(db_session, producto, "24.00")
+
+    for cantidad, tipo, precio in ((2, "bulto", "24.00"), (3, "unidad", "2.00"), (1, "bulto", "24.00")):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            pagos=pago_contado(db_session),
+            items=[
+                {
+                    "id_producto": producto.id_producto,
+                    "cantidad": cantidad,
+                    "precio_unitario": precio,
+                    "tipo_venta": tipo,
+                }
+            ],
+        )
+
+    resultado = ReporteService.productos_mas_vendidos(
+        db_session,
+        id_usuario=admin.id_usuario,
+        fecha_desde=date.today(),
+        fecha_hasta=date.today(),
+    )
+
+    fila = resultado["filas"][0]
+    assert fila["bultos"] == Decimal("3.00")
+    assert fila["unidades"] == Decimal("3.00")
+    assert fila["total"] == Decimal("78.00")  # 3 x 24 + 3 x 2
+    assert "cantidad" not in fila
+
+
 # --- facturas_anuladas -----------------------------------------------------------------
 
 
@@ -995,6 +1035,46 @@ def test_margen_utilidad_calcula_ingreso_costo_y_margen(db_session):
     assert fila["margen"] == Decimal("40.00")
     assert fila["margen_pct"] == Decimal("40.00")
     assert resultado["total_margen"] == Decimal("40.00")
+
+
+def test_margen_utilidad_linea_por_bulto_costea_las_unidades_del_bulto(db_session):
+    """costo_producto es el costo de UNA unidad: 2 bultos de 12 unidades a $2 la unidad cuestan $48, no $4."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    cliente = crear_cliente(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100, cantidad_caja=12, costo_producto=Decimal("2.00"))
+    crear_precio_producto(db_session, producto, "30.00")
+
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[
+            {
+                "id_producto": producto.id_producto,
+                "cantidad": 2,
+                "precio_unitario": "30.00",
+                "tipo_venta": "bulto",
+            }
+        ],
+    )
+
+    resultado = ReporteService.margen_utilidad_productos(
+        db_session,
+        id_usuario=admin.id_usuario,
+        fecha_desde=date.today(),
+        fecha_hasta=date.today(),
+    )
+
+    fila = resultado["filas"][0]
+    assert fila["ingreso"] == Decimal("60.00")
+    assert fila["costo"] == Decimal("48.00")
+    assert fila["margen"] == Decimal("12.00")
+    assert fila["bultos"] == Decimal("2.00")
+    assert fila["unidades"] == Decimal("0.00")
 
 
 # --- compras_por_periodo -------------------------------------------------------------
@@ -3050,14 +3130,50 @@ def test_ventas_productos_clientes_agrupa_por_producto_y_cliente_ordenado_por_mo
 
     assert [f["producto"] for f in resultado["filas"]] == ["Harina", "Aceite"]
     harina, aceite = resultado["filas"]
-    assert (harina["cantidad_total"], harina["monto_total"]) == (Decimal("1"), Decimal("50.00"))
-    assert (aceite["cantidad_total"], aceite["monto_total"]) == (Decimal("3"), Decimal("30.00"))
-    assert [(c["cliente"], c["cantidad_total"], c["monto_total"]) for c in aceite["clientes"]] == [
+    # El escenario vende sin tipo_venta: todo cuenta como unidades y no hay bultos.
+    assert (harina["unidades"], harina["bultos"], harina["monto_total"]) == (Decimal("1"), 0, Decimal("50.00"))
+    assert (aceite["unidades"], aceite["bultos"], aceite["monto_total"]) == (Decimal("3"), 0, Decimal("30.00"))
+    assert [(c["cliente"], c["unidades"], c["monto_total"]) for c in aceite["clientes"]] == [
         ("Cliente A", Decimal("2"), Decimal("20.00")),
         ("Cliente B", Decimal("1"), Decimal("10.00")),
     ]
     assert resultado["total_general"] == Decimal("80.00")
-    assert resultado["cantidad_general"] == Decimal("4")
+    assert resultado["unidades_general"] == Decimal("4")
+    assert resultado["bultos_general"] == Decimal("0")
+
+
+def test_ventas_productos_clientes_separa_bultos_y_unidades(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    cliente = crear_cliente(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=200, cantidad_caja=12, nombre_producto="Mixto")
+    crear_precio_producto(db_session, producto, "24.00")
+
+    for cantidad, tipo, precio in ((2, "bulto", "24.00"), (3, "unidad", "2.00")):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="contado",
+            pagos=pago_contado(db_session),
+            items=[
+                {
+                    "id_producto": producto.id_producto,
+                    "cantidad": cantidad,
+                    "precio_unitario": precio,
+                    "tipo_venta": tipo,
+                }
+            ],
+        )
+    desde, hasta = _rango_hoy()
+
+    resultado = ReporteService.ventas_productos_clientes(db_session, admin.id_usuario, desde, hasta)
+
+    fila = resultado["filas"][0]
+    assert (fila["bultos"], fila["unidades"], fila["monto_total"]) == (Decimal("2"), Decimal("3"), Decimal("54.00"))
+    assert (fila["clientes"][0]["bultos"], fila["clientes"][0]["unidades"]) == (Decimal("2"), Decimal("3"))
+    assert (resultado["bultos_general"], resultado["unidades_general"]) == (Decimal("2"), Decimal("3"))
 
 
 def test_ventas_productos_clientes_filtra_por_producto(db_session):
@@ -3109,7 +3225,7 @@ def test_ventas_productos_clientes_excluye_facturas_anuladas(db_session):
     resultado = ReporteService.ventas_productos_clientes(db_session, admin.id_usuario, desde, hasta)
 
     aceite_fila = next(f for f in resultado["filas"] if f["producto"] == "Aceite")
-    assert aceite_fila["cantidad_total"] == Decimal("3")
+    assert aceite_fila["unidades"] == Decimal("3")
 
 
 def test_ventas_productos_clientes_fuera_del_rango_no_devuelve_filas(db_session):
@@ -3149,3 +3265,377 @@ def test_libro_ventas_informa_la_cantidad_de_facturas(db_session):
     resultado = ReporteService.libro_ventas(db_session, admin.id_usuario, desde, hasta)
 
     assert resultado["cantidad_facturas"] == 3
+
+
+# --- auditoria de reportes (2026-11): corte historico, BCV, kardex, libro de ventas ---------------------
+
+from app.db.models import ControlDeTasa, CuentaPorCobrarBCV, FacturaVenta  # noqa: E402
+from app.services.notas_credito import NotaCreditoService  # noqa: E402
+from app.services.pagos_bcv import PagoBCVService  # noqa: E402
+
+
+def _factura_bcv_a_credito(session, admin, cliente, total, fecha_vencimiento):
+    vendedor = crear_vendedor(session)
+    producto = crear_producto(session, cantidad_unidad=1000)
+    crear_precio_producto(session, producto, total)
+    return VentaService.emitir_factura(
+        session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": str(total)}],
+        fecha_vencimiento=fecha_vencimiento,
+        porcentaje_bcv=Decimal("10"),
+    )
+
+
+def _cuenta_bcv(session, factura) -> CuentaPorCobrarBCV:
+    return session.query(CuentaPorCobrarBCV).filter_by(id_factura=factura.id_factura).one()
+
+
+def _caja_abierta(session, admin):
+    caja = crear_caja(session)
+    CajaService.abrir_caja(session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    return caja
+
+
+def _retroceder_factura(session, factura, dias):
+    """La fecha de emision es GETDATE() del trigger: se mueve a mano para simular una factura vieja."""
+    fv = session.query(FacturaVenta).filter_by(id_factura=factura.id_factura).one()
+    fv.fecha_emision = datetime.combine(date.today() - timedelta(days=dias), time(10, 0))
+    session.commit()
+
+
+def test_aging_con_corte_pasado_reconstruye_el_saldo_de_ese_dia(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = _caja_abierta(db_session, admin)
+    hoy = date.today()
+    factura = _factura_a_credito(db_session, admin, cliente, "100.00", hoy - timedelta(days=5))
+    _retroceder_factura(db_session, factura, 20)
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto="40.00",
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    actual = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario, fecha_corte=hoy)
+    ayer = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario, fecha_corte=hoy - timedelta(days=1))
+    hace_10 = ReporteService.aging_cuentas_por_cobrar(
+        db_session, admin.id_usuario, fecha_corte=hoy - timedelta(days=10)
+    )
+
+    assert actual["total_general"] == Decimal("60.00")
+    # El pago se hizo hoy: ayer y hace 10 dias la factura todavia debia los 100.
+    assert ayer["total_general"] == Decimal("100.00")
+    assert hace_10["total_general"] == Decimal("100.00")
+
+
+def test_aging_con_corte_pasado_excluye_facturas_emitidas_despues(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    hoy = date.today()
+    _factura_a_credito(db_session, admin, cliente, "100.00", hoy + timedelta(days=10))
+
+    resultado = ReporteService.aging_cuentas_por_cobrar(
+        db_session, admin.id_usuario, fecha_corte=hoy - timedelta(days=3)
+    )
+
+    assert resultado["filas"] == []
+
+
+def test_aging_con_corte_pasado_incluye_la_cuenta_hoy_pagada_que_estaba_abierta(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = _caja_abierta(db_session, admin)
+    hoy = date.today()
+    factura = _factura_a_credito(db_session, admin, cliente, "70.00", hoy + timedelta(days=5))
+    _retroceder_factura(db_session, factura, 15)
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto="70.00",
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    actual = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario, fecha_corte=hoy)
+    pasado = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario, fecha_corte=hoy - timedelta(days=2))
+
+    assert actual["filas"] == []
+    assert [f["saldo_pendiente"] for f in pasado["filas"]] == [Decimal("70.00")]
+
+
+def test_aging_con_corte_pasado_suma_la_nota_de_credito_aplicada_despues(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    hoy = date.today()
+    factura = _factura_a_credito(db_session, admin, cliente, "100.00", hoy + timedelta(days=5))
+    _retroceder_factura(db_session, factura, 15)
+    nota = NotaCreditoService._crear_nota_credito_cliente(
+        db_session, cliente.id_cliente, None, "30.00", "Sobreabono", admin.id_usuario
+    )
+    db_session.commit()
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session, nota.id_nota_credito, factura.id_factura, "30.00", admin.id_usuario
+    )
+
+    actual = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario, fecha_corte=hoy)
+    pasado = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario, fecha_corte=hoy - timedelta(days=2))
+
+    assert actual["total_general"] == Decimal("70.00")
+    assert pasado["total_general"] == Decimal("100.00")
+
+
+def test_aging_cxp_con_corte_pasado_reconstruye_el_saldo(db_session):
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("10000.00"))
+    caja = _caja_abierta(db_session, admin)
+    caja_db = db_session.query(Caja).filter_by(id_caja=caja.id_caja).one()
+    caja_db.saldo_apertura = Decimal("1000.00")
+    db_session.commit()
+    hoy = date.today()
+    compra = _compra_a_credito(db_session, admin, proveedor, "200.00", hoy + timedelta(days=10))
+    compra_db = db_session.query(Compra).filter_by(id_compra=compra.id_compra).one()
+    compra_db.fecha_emision = datetime.combine(hoy - timedelta(days=20), time(9, 0))
+    db_session.commit()
+    cxp = db_session.query(CuentaPorPagar).filter_by(id_compra=compra.id_compra).one()
+    PagoService.registrar_pago_proveedor(
+        db_session,
+        id_cuenta_por_pagar=cxp.id_cuenta,
+        monto="50.00",
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    actual = ReporteService.aging_cuentas_por_pagar(db_session, admin.id_usuario, fecha_corte=hoy)
+    ayer = ReporteService.aging_cuentas_por_pagar(db_session, admin.id_usuario, fecha_corte=hoy - timedelta(days=1))
+
+    assert actual["total_general"] == Decimal("150.00")
+    assert ayer["total_general"] == Decimal("200.00")  # el pago de 50 es de hoy
+
+
+def test_aging_cxc_no_lista_la_cuenta_normal_en_cero_de_una_factura_bcv(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    _factura_bcv_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+
+    normal = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario)
+    bcv = ReporteService.aging_cuentas_por_cobrar_bcv(db_session, admin.id_usuario)
+
+    assert normal["filas"] == []
+    assert len(bcv["filas"]) == 1
+
+
+def test_clientes_morosos_incluye_la_deuda_bcv_vencida(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    hoy = date.today()
+    factura = _factura_bcv_a_credito(db_session, admin, cliente, "100.00", hoy - timedelta(days=12))
+    _factura_a_credito(db_session, admin, cliente, "40.00", hoy - timedelta(days=3))
+    saldo_bcv = _cuenta_bcv(db_session, factura).saldo_pendiente
+
+    resultado = ReporteService.clientes_morosos(db_session, admin.id_usuario, fecha_corte=hoy)
+
+    assert len(resultado["filas"]) == 1
+    assert resultado["filas"][0]["facturas_vencidas"] == 2
+    assert resultado["filas"][0]["saldo_vencido"] == saldo_bcv + Decimal("40.00")
+    assert resultado["filas"][0]["dias_vencido_max"] == 12
+
+
+def test_cobros_del_periodo_incluye_los_pagos_de_la_cartera_bcv(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = _caja_abierta(db_session, admin)
+    hoy = date.today()
+    factura_bcv = _factura_bcv_a_credito(db_session, admin, cliente, "100.00", hoy + timedelta(days=10))
+    factura = _factura_a_credito(db_session, admin, cliente, "50.00", hoy + timedelta(days=10))
+    PagoBCVService.registrar_pago_cobro_bcv(
+        db_session,
+        id_cuenta_por_cobrar=_cuenta_bcv(db_session, factura_bcv).id_cuenta_por_cobrar,
+        monto="20.00",
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto="10.00",
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.cobros_del_periodo(db_session, admin.id_usuario, *_rango_hoy())
+
+    assert sorted((f["cartera"], f["monto"]) for f in resultado["filas"]) == [
+        ("BCV", Decimal("20.00")),
+        ("Normal", Decimal("10.00")),
+    ]
+    assert resultado["total_general"] == Decimal("30.00")
+    assert resultado["totales_por_metodo"]["efectivo"] == Decimal("30.00")
+
+
+def test_estado_cuenta_cliente_incluye_facturas_y_pagos_bcv(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = _caja_abierta(db_session, admin)
+    factura = _factura_bcv_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+    cuenta = _cuenta_bcv(db_session, factura)
+    total_bcv = cuenta.saldo_pendiente
+    PagoBCVService.registrar_pago_cobro_bcv(
+        db_session,
+        id_cuenta_por_cobrar=cuenta.id_cuenta_por_cobrar,
+        monto="25.00",
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)
+
+    assert [f["tipo"] for f in resultado["filas"]] == ["Factura", "Pago"]
+    assert resultado["filas"][0]["cargo"] == total_bcv
+    assert resultado["filas"][0]["referencia"].endswith("(BCV)")
+    assert resultado["filas"][1]["abono"] == Decimal("25.00")
+    assert resultado["saldo_final"] == total_bcv - Decimal("25.00")
+
+
+def test_estado_cuenta_cliente_muestra_las_notas_de_credito_aplicadas(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    factura = _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+    nota = NotaCreditoService._crear_nota_credito_cliente(
+        db_session, cliente.id_cliente, None, "30.00", "Sobreabono", admin.id_usuario
+    )
+    db_session.commit()
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session, nota.id_nota_credito, factura.id_factura, "30.00", admin.id_usuario
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)
+
+    assert [f["tipo"] for f in resultado["filas"]] == ["Factura", "Nota de crédito"]
+    assert resultado["filas"][0]["cargo"] == Decimal("100.00")  # el monto original, no el saldo tras la nota
+    assert resultado["filas"][1]["abono"] == Decimal("30.00")
+    assert resultado["filas"][1]["referencia"] == nota.numero_nota_credito
+    assert resultado["saldo_final"] == Decimal("70.00")
+
+
+def test_kardex_incluye_el_stock_previo_al_primer_movimiento(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "8.00")
+    _factura_contado(db_session, admin, cliente, vendedor, producto, 3, "8.00")
+    hoy = date.today()
+
+    resultado = ReporteService.kardex_producto(db_session, admin.id_usuario, producto.id_producto, hoy, hoy)
+
+    # Arranca con las 50 unidades que ya tenia, no en 0: el saldo final es el stock real (47).
+    assert resultado["saldo_apertura"] == Decimal("50")
+    assert resultado["saldo_inicial"] == Decimal("50")
+    assert resultado["saldo_final"] == Decimal("47")
+    db_session.refresh(producto)
+    assert resultado["saldo_final"] == producto.cantidad_unidad
+
+
+def test_facturas_anuladas_se_filtra_por_fecha_de_anulacion_no_de_emision(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
+    factura = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="error")
+    _retroceder_factura(db_session, factura, 40)  # emitida hace 40 dias, anulada hoy
+    hoy = date.today()
+
+    este_mes = ReporteService.facturas_anuladas(db_session, admin.id_usuario, hoy, hoy)
+    mes_de_emision = ReporteService.facturas_anuladas(
+        db_session, admin.id_usuario, hoy - timedelta(days=45), hoy - timedelta(days=30)
+    )
+
+    assert [f["numero_factura"] for f in este_mes["filas"]] == [factura.numero_factura]
+    assert este_mes["filas"][0]["fecha_anulacion"].date() == hoy
+    assert este_mes["filas"][0]["fecha_emision"].date() == hoy - timedelta(days=40)
+    assert mes_de_emision["filas"] == []
+
+
+def test_libro_ventas_lista_las_anuladas_sin_sumarlas_a_los_totales(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "10.00")
+    vigente = _factura_contado(db_session, admin, cliente, vendedor, producto, 2, "10.00")
+    anulada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "10.00")
+    VentaService.anular_factura(db_session, anulada.id_factura, id_usuario=admin.id_usuario, motivo="error")
+
+    resultado = ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy())
+
+    por_numero = {f["numero_factura"]: f for f in resultado["filas"]}
+    assert por_numero[anulada.numero_factura]["estado"] == "ANULADA"
+    assert por_numero[anulada.numero_factura]["total"] == Decimal("0.00")
+    assert por_numero[vigente.numero_factura]["estado"] == "EMITIDA"
+    assert resultado["cantidad_facturas"] == 1
+    assert resultado["cantidad_anuladas"] == 1
+    assert resultado["total_general"] == por_numero[vigente.numero_factura]["total"]
+
+
+def test_libro_ventas_separa_exento_de_base_imponible_y_convierte_a_bs(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "100.00")
+    gravada = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "100.00")
+    exenta = _factura_contado(db_session, admin, cliente, vendedor, producto, 1, "100.00")
+    tasa = ControlDeTasa(tasa_dolar_bcv=Decimal("40.00"), creado_por=admin.id_usuario)
+    db_session.add(tasa)
+    db_session.commit()
+    fv = db_session.query(FacturaVenta).filter_by(id_factura=gravada.id_factura).one()
+    fv.iva_aplicado = True
+    fv.porcentaje_iva_aplicado = Decimal("16.00")
+    fv.monto_iva = Decimal("16.00")
+    fv.id_tasa_factura = tasa.id_tasa
+    fe = db_session.query(FacturaVenta).filter_by(id_factura=exenta.id_factura).one()
+    fe.iva_aplicado = False
+    fe.monto_iva = Decimal("0.00")
+    fe.id_tasa_factura = None
+    db_session.commit()
+
+    resultado = ReporteService.libro_ventas(db_session, admin.id_usuario, *_rango_hoy())
+
+    por_numero = {f["numero_factura"]: f for f in resultado["filas"]}
+    g = por_numero[gravada.numero_factura]
+    e = por_numero[exenta.numero_factura]
+    assert (g["base_imponible"], g["monto_exento"], g["monto_iva"], g["total"]) == (
+        Decimal("100.00"),
+        Decimal("0.00"),
+        Decimal("16.00"),
+        Decimal("116.00"),
+    )
+    assert g["tasa_cambio"] == Decimal("40.00") and g["total_bs"] == Decimal("4640.00")
+    assert (e["base_imponible"], e["monto_exento"], e["monto_iva"]) == (
+        Decimal("0.00"),
+        Decimal("100.00"),
+        Decimal("0.00"),
+    )
+    assert e["tasa_cambio"] is None and e["total_bs"] is None
+    assert resultado["total_base_imponible"] == Decimal("100.00")
+    assert resultado["total_exento"] == Decimal("100.00")
+    assert resultado["total_iva"] == Decimal("16.00")
+    assert resultado["total_general"] == Decimal("216.00")
+    assert resultado["total_bs"] == Decimal("4640.00")

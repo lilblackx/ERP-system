@@ -14,7 +14,7 @@ _make_filtros_productos_proximos_vencer) sobre una instancia sin inicializar
 autocontenidos (solo arman un QWidget con QLabel/QComboBox/NumericLineEdit locales, sin
 tocar self.session_factory ni ninguna otra dependencia)."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -107,11 +107,12 @@ def panel(qtbot, monkeypatch):
     return panel
 
 
-def _cliente(nombre, monto, cantidad="1"):
+def _cliente(nombre, monto, cantidad="1", bultos="0"):
     return {
         "cliente": nombre,
         "identificacion_cliente": f"V-{nombre}",
-        "cantidad_total": Decimal(cantidad),
+        "bultos": Decimal(bultos),
+        "unidades": Decimal(cantidad),
         "monto_total": Decimal(monto),
     }
 
@@ -120,7 +121,8 @@ def _fila(producto, codigo, clientes):
     return {
         "producto": producto,
         "cod_producto": codigo,
-        "cantidad_total": sum((c["cantidad_total"] for c in clientes), Decimal("0")),
+        "bultos": sum((c["bultos"] for c in clientes), Decimal("0")),
+        "unidades": sum((c["unidades"] for c in clientes), Decimal("0")),
         "monto_total": sum((c["monto_total"] for c in clientes), Decimal("0")),
         "clientes": clientes,
     }
@@ -134,7 +136,8 @@ def _resultado(filas, id_producto=None):
         "id_producto": id_producto,
         "filas": filas,
         "total_general": sum((f["monto_total"] for f in filas), Decimal("0")),
-        "cantidad_general": sum((f["cantidad_total"] for f in filas), Decimal("0")),
+        "bultos_general": sum((f["bultos"] for f in filas), Decimal("0")),
+        "unidades_general": sum((f["unidades"] for f in filas), Decimal("0")),
     }
 
 
@@ -167,11 +170,11 @@ def test_vista_general_lista_un_producto_por_fila_con_sus_clientes(panel):
 
     panel._mostrar_ventas_productos_clientes(_resultado(filas))
 
-    assert [panel.tabla.horizontalHeaderItem(c).text() for c in range(5)] == rp.COLS_VENTAS_PRODUCTOS_CLIENTES
-    assert _celdas_tabla(panel, 0) == ["Harina", "H-1", "1.00", "$50.00", "Ana ($50.00)"]
-    assert _celdas_tabla(panel, 1) == ["Aceite", "A-1", "3.00", "$30.00", "Ana ($20.00), Beto ($10.00)"]
+    assert [panel.tabla.horizontalHeaderItem(c).text() for c in range(6)] == rp.COLS_VENTAS_PRODUCTOS_CLIENTES
+    assert _celdas_tabla(panel, 0) == ["Harina", "H-1", "0.00", "1.00", "$50.00", "Ana ($50.00)"]
+    assert _celdas_tabla(panel, 1) == ["Aceite", "A-1", "0.00", "3.00", "$30.00", "Ana ($20.00), Beto ($10.00)"]
     assert panel.lbl_total.text() == "2 productos"
-    assert _chips(panel) == ["Productos: 2", "Cantidad total: 4.00", "Monto total: $80.00"]
+    assert _chips(panel) == ["Productos: 2", "Bultos: 0.00", "Unidades: 4.00", "Monto total: $80.00"]
 
 
 def test_vista_general_con_un_solo_producto_usa_singular(panel):
@@ -185,24 +188,25 @@ def test_vista_general_limita_a_cinco_clientes_y_resume_el_resto(panel):
 
     panel._mostrar_ventas_productos_clientes(_resultado([_fila("Aceite", "A-1", clientes)]))
 
-    texto = panel.tabla.item(0, 4).text()
+    texto = panel.tabla.item(0, 5).text()
     assert "C5 ($95.00)" in texto
     assert "C6" not in texto
     assert texto.endswith("(+2 más)")
 
 
 def test_vista_de_un_producto_lista_los_clientes_con_la_cantidad_vendida(panel):
-    filas = [_fila("Aceite", "A-1", [_cliente("Ana", "20.00", "2"), _cliente("Beto", "10.00")])]
+    filas = [_fila("Aceite", "A-1", [_cliente("Ana", "20.00", "2", bultos="1"), _cliente("Beto", "10.00")])]
 
     panel._mostrar_ventas_productos_clientes(_resultado(filas, id_producto=5))
 
-    assert [panel.tabla.horizontalHeaderItem(c).text() for c in range(3)] == [
+    assert [panel.tabla.horizontalHeaderItem(c).text() for c in range(4)] == [
         "Cliente",
         "Identificación",
-        "Cantidad Vendida",
+        "Bultos",
+        "Unidades",
     ]
-    assert _celdas_tabla(panel, 0) == ["Ana", "V-Ana", "2.00"]
-    assert _celdas_tabla(panel, 1) == ["Beto", "V-Beto", "1.00"]
+    assert _celdas_tabla(panel, 0) == ["Ana", "V-Ana", "1.00", "2.00"]
+    assert _celdas_tabla(panel, 1) == ["Beto", "V-Beto", "0.00", "1.00"]
     assert panel.lbl_total.text() == "2 clientes"
 
 
@@ -229,8 +233,12 @@ def test_exportar_arma_filas_del_reporte(panel):
     nombre, columnas, filas = panel._filas_para_exportar()
 
     assert nombre == "ventas_productos_clientes"
-    assert columnas == rp.COLS_VENTAS_PRODUCTOS_CLIENTES
-    assert filas == [["Aceite", "A-1", 3.0, 30.0, "Ana, Beto"]]
+    assert columnas == rp.COLS_VENTAS_PRODUCTOS_CLIENTES_EXPORT
+    # Una fila por producto y cliente: la pantalla resume a 5 clientes, el archivo trae a todos.
+    assert filas == [
+        ["Aceite", "A-1", "Ana", "V-Ana", 0.0, 2.0, 20.0],
+        ["Aceite", "A-1", "Beto", "V-Beto", 0.0, 1.0, 10.0],
+    ]
 
 
 def test_exportar_pdf_incluye_vendedor_y_total_general(panel):
@@ -244,7 +252,7 @@ def test_exportar_pdf_incluye_vendedor_y_total_general(panel):
     assert filtros["Hasta"] == "16/10/2026"
     assert filtros["Vendedor"] == "Todos los vendedores"
     assert filtros["Total general"] == "$20.00"
-    assert len(anchos) == len(rp.COLS_VENTAS_PRODUCTOS_CLIENTES)
+    assert len(anchos) == len(rp.COLS_VENTAS_PRODUCTOS_CLIENTES_EXPORT)
 
 
 @pytest.fixture()
@@ -285,6 +293,9 @@ def test_generar_pasa_los_filtros_de_vendedor_y_producto_a_la_tarea(panel_con_ge
         def start(self):
             lanzados["iniciado"] = True
 
+        def wait(self, _ms):
+            return True
+
     monkeypatch.setattr(rp, "QueryWorker", _WorkerFalso)
     panel.tipo_combo.setCurrentIndex(panel.tipo_combo.findData(rp.REPORTE_VENTAS_PRODUCTOS_CLIENTES))
     panel.vendedor_combo_vpc.addItem("Vendedor Uno", 7)
@@ -307,9 +318,12 @@ def test_generar_pasa_los_filtros_de_vendedor_y_producto_a_la_tarea(panel_con_ge
 def test_resumen_del_libro_de_ventas_empieza_con_la_cantidad_de_ventas(panel):
     resultado = {
         "cantidad_facturas": 12,
+        "cantidad_anuladas": 0,
+        "total_exento": Decimal("0.00"),
         "total_base_imponible": Decimal("100.00"),
         "total_iva": Decimal("16.00"),
         "total_general": Decimal("116.00"),
+        "total_bs": Decimal("0.00"),
         "notas_credito": [],
         "total_notas_credito": Decimal("0.00"),
     }
@@ -318,3 +332,376 @@ def test_resumen_del_libro_de_ventas_empieza_con_la_cantidad_de_ventas(panel):
 
     assert _chips(panel)[0] == "Ventas: 12"
     assert _chips(panel)[1] == "Base imponible: $100.00"
+
+
+# ── Auditoria de reportes: exportacion completa y filtros congelados ─────────────────────────
+
+
+def _resultado_libro(**extra):
+    fila = {
+        "fecha_emision": datetime(2026, 10, 3, 10, 0),
+        "numero_control": "00-000001",
+        "numero_factura": "FV-000001",
+        "estado": "EMITIDA",
+        "cliente": "Ana",
+        "identificacion_cliente": "V-1",
+        "monto_exento": Decimal("0.00"),
+        "base_imponible": Decimal("100.00"),
+        "porcentaje_iva": Decimal("16.00"),
+        "monto_iva": Decimal("16.00"),
+        "total": Decimal("116.00"),
+        "tasa_cambio": Decimal("40.00"),
+        "total_bs": Decimal("4640.00"),
+    }
+    resultado = {
+        "fecha_desde": date(2026, 10, 1),
+        "fecha_hasta": date(2026, 10, 31),
+        "filas": [fila],
+        "cantidad_facturas": 1,
+        "cantidad_anuladas": 0,
+        "total_base_imponible": Decimal("100.00"),
+        "total_exento": Decimal("0.00"),
+        "total_iva": Decimal("16.00"),
+        "total_general": Decimal("116.00"),
+        "total_bs": Decimal("4640.00"),
+        "notas_credito": [],
+        "total_notas_credito": Decimal("0.00"),
+    }
+    resultado.update(extra)
+    return resultado
+
+
+def test_libro_de_ventas_exporta_tantas_celdas_como_encabezados(panel):
+    panel._ultimo_modo = rp.REPORTE_LIBRO_VENTAS
+    panel._ultimo_resultado = _resultado_libro()
+
+    _nombre, columnas, filas = panel._filas_para_exportar()
+    _titulo, _filtros, anchos = panel._info_pdf()
+
+    assert len(columnas) == len(filas[0]) == len(anchos) == 13
+    assert filas[0][3] == "Emitida" and filas[0][12] == 4640.0
+
+
+def test_libro_de_ventas_exporta_las_notas_de_credito_como_seccion_aparte(panel):
+    panel._ultimo_modo = rp.REPORTE_LIBRO_VENTAS
+    nota = {
+        "fecha_creacion": datetime(2026, 10, 5, 9, 0),
+        "numero_nota_credito": "NC-000001",
+        "cliente": "Ana",
+        "identificacion_cliente": "V-1",
+        "monto": Decimal("30.00"),
+        "motivo": "Sobreabono",
+    }
+    panel._ultimo_resultado = _resultado_libro(notas_credito=[nota], total_notas_credito=Decimal("30.00"))
+
+    secciones = panel._secciones_para_exportar()
+
+    assert [s["titulo"] for s in secciones] == ["Notas de crédito del período"]
+    assert secciones[0]["encabezados"] == rp.COLS_LIBRO_VENTAS_NC
+    assert secciones[0]["filas"] == [[nota["fecha_creacion"], "NC-000001", "Ana", "V-1", 30.0, "Sobreabono"]]
+    assert len(secciones[0]["col_widths"]) == len(rp.COLS_LIBRO_VENTAS_NC)
+
+
+def test_libro_de_ventas_sin_notas_de_credito_no_agrega_secciones(panel):
+    panel._ultimo_modo = rp.REPORTE_LIBRO_VENTAS
+    panel._ultimo_resultado = _resultado_libro()
+
+    assert panel._secciones_para_exportar() is None
+
+
+def test_los_reportes_anchos_salen_en_hoja_horizontal():
+    assert rp.REPORTE_LIBRO_VENTAS in rp.REPORTES_APAISADOS
+    assert rp.REPORTE_CIERRE_CAJERO in rp.REPORTES_APAISADOS
+    assert rp.REPORTE_VENTAS_PERIODO not in rp.REPORTES_APAISADOS
+
+
+def test_el_arqueo_exporta_saldos_y_diferencia(panel):
+    panel._ultimo_modo = rp.REPORTE_ARQUEO_CAJA
+    panel._ultimo_resultado = {
+        "nombre_caja": "Caja 1",
+        "fecha_apertura": datetime(2026, 10, 1, 8, 0),
+        "fecha_cierre": datetime(2026, 10, 1, 18, 0),
+        "saldo_apertura": Decimal("100.00"),
+        "total_entradas": Decimal("50.00"),
+        "total_salidas": Decimal("20.00"),
+        "saldo_esperado": Decimal("130.00"),
+        "saldo_cierre": Decimal("125.00"),
+        "diferencia": Decimal("-5.00"),
+        "movimientos": [],
+    }
+
+    _titulo, filtros, _anchos = panel._info_pdf()
+
+    assert filtros["Saldo apertura"] == "$100.00"
+    assert filtros["Entradas"] == "$50.00" and filtros["Salidas"] == "$20.00"
+    assert filtros["Diferencia"] == "$-5.00"
+
+
+def test_los_filtros_del_archivo_son_los_del_momento_de_generar_no_los_del_combo_actual(panel):
+    panel._ultimo_modo = rp.REPORTE_AGING_CXC
+    panel._ultimo_resultado = {
+        "fecha_corte": date(2026, 10, 16),
+        "total_general": Decimal("10.00"),
+        "filas": [],
+        "totales_por_bucket": {},
+    }
+    panel.cliente_combo.addItem("Cliente A", 1)
+    panel.cliente_combo.addItem("Cliente B", 2)
+    panel.cliente_combo.setCurrentIndex(panel.cliente_combo.findData(1))
+    panel._combos_snapshot = panel._capturar_combos()  # lo que hace _generar() al lanzar la consulta
+
+    panel.cliente_combo.setCurrentIndex(panel.cliente_combo.findData(2))  # cambia el filtro DESPUES de generar
+    _titulo, filtros, _anchos = panel._info_pdf()
+
+    assert filtros["Cliente"] == "Cliente A"
+
+
+def test_los_productos_proximos_a_vencer_exportan_la_fecha_como_fecha(panel):
+    panel._ultimo_modo = rp.REPORTE_PRODUCTOS_PROXIMOS_VENCER
+    panel._ultimo_resultado = {
+        "filas": [
+            {
+                "cod_producto": "A-1",
+                "producto": "Aceite",
+                "categoria": None,
+                "cantidad_unidad": Decimal("5"),
+                "fecha_vencimiento": date(2026, 11, 20),
+                "dias_para_vencer": 13,
+            }
+        ]
+    }
+
+    _nombre, _columnas, filas = panel._filas_para_exportar()
+
+    assert filas[0][4] == date(2026, 11, 20)
+
+
+def test_facturas_anuladas_exporta_la_fecha_de_anulacion(panel):
+    panel._ultimo_modo = rp.REPORTE_FACTURAS_ANULADAS
+    anulacion = datetime(2026, 11, 2, 15, 30)
+    panel._ultimo_resultado = {
+        "filas": [
+            {
+                "numero_factura": "FV-000001",
+                "cliente": "Ana",
+                "vendedor": "Pedro",
+                "fecha_emision": datetime(2026, 10, 1, 9, 0),
+                "fecha_anulacion": anulacion,
+                "motivo": "error",
+            }
+        ]
+    }
+
+    _nombre, columnas, filas = panel._filas_para_exportar()
+
+    assert columnas == rp.COLS_FACTURAS_ANULADAS
+    assert filas[0][4] == anulacion and len(filas[0]) == len(columnas)
+
+
+def test_cobros_exporta_la_cartera(panel):
+    panel._ultimo_modo = rp.REPORTE_COBROS_PERIODO
+    panel._ultimo_resultado = {
+        "filas": [
+            {
+                "fecha_pago": datetime(2026, 10, 3, 9, 0),
+                "cliente": "Ana",
+                "numero_factura": "FV-000001",
+                "cartera": "BCV",
+                "metodo_pago": "efectivo",
+                "moneda": "USD",
+                "monto": Decimal("20.00"),
+            }
+        ]
+    }
+
+    _nombre, columnas, filas = panel._filas_para_exportar()
+
+    assert columnas[3] == "Cartera" and filas[0][3] == "BCV" and len(filas[0]) == len(columnas)
+
+
+# ── Catalogos de los combos de filtros ───────────────────────────────────────
+
+
+def _catalogos(**extra):
+    base = {
+        "clientes": [(1, "Ana"), (2, "Beto")],
+        "proveedores": [(5, "Prov Uno")],
+        "cajas": [(3, "Caja 1")],
+        "vendedores": [(9, "Vende Uno")],
+        "cajeros": [(4, "cajero1")],
+        "productos": [(42, "A-1 - Aceite")],
+        "categorias": [(8, "Bebidas")],
+        "cuentas": [(6, "Banco X - 0001")],
+    }
+    base.update(extra)
+    return base
+
+
+def test_los_combos_de_cliente_comparten_un_modelo_con_la_opcion_todos(panel):
+    panel._llenar_catalogos(_catalogos())
+
+    assert panel.cliente_combo.model() is panel.cliente_combo_lv.model()
+    assert [panel.cliente_combo.itemText(i) for i in range(panel.cliente_combo.count())] == [
+        "Todos los clientes",
+        "Ana",
+        "Beto",
+    ]
+    assert panel.cliente_combo.currentData() is None
+    panel.cliente_combo_lv.setCurrentIndex(panel.cliente_combo_lv.findData(2))
+    assert panel.cliente_combo_lv.currentData() == 2
+    assert panel.cliente_combo.currentData() is None  # cada combo conserva su propia seleccion
+
+
+def test_los_combos_de_producto_puntual_no_llevan_opcion_todos(panel):
+    panel._llenar_catalogos(_catalogos())
+
+    assert panel.producto_combo_kardex.count() == 1
+    assert panel.producto_combo_kardex.currentData() == 42
+    assert panel.producto_combo_vpc.count() == 2
+    assert panel.producto_combo_vpc.currentData() is None
+    assert panel.caja_combo.currentData() == 3
+    assert panel.caja_combo_mcp.currentData() is None
+    assert panel.cuenta_bancaria_combo_mcb.currentData() == 6
+
+
+def test_un_catalogo_vacio_deja_solo_la_opcion_todos(panel):
+    panel._llenar_catalogos(_catalogos(clientes=[], cajas=[]))
+
+    assert panel.cliente_combo.count() == 1
+    assert panel.cliente_combo.currentData() is None
+    assert panel.caja_combo.count() == 0
+    assert panel.caja_combo.currentData() is None
+
+
+def test_la_tarea_de_catalogos_devuelve_tuplas_simples_de_la_base(db_session):
+    from tests.factories import crear_cliente
+
+    crear_cliente(db_session, nombre_razon_social="Zeta SA")
+    crear_cliente(db_session, nombre_razon_social="Alfa SA")
+
+    datos = rp._tarea_catalogos_filtros(db_session)
+
+    nombres = [nombre for _id, nombre in datos["clientes"]]
+    assert nombres == sorted(nombres)
+    assert "Alfa SA" in nombres and "Zeta SA" in nombres
+    assert set(datos) == {
+        "clientes",
+        "proveedores",
+        "cajas",
+        "vendedores",
+        "cajeros",
+        "productos",
+        "categorias",
+        "cuentas",
+    }
+
+
+# --- Productos mas/menos vendidos: bultos y unidades en columnas separadas ---------------------
+
+
+def _resultado_vendidos():
+    filas = [
+        {"producto": "Harina", "bultos": Decimal("3.00"), "unidades": Decimal("5.00"), "total": Decimal("78.00")},
+        {"producto": "Aceite", "bultos": Decimal("0.00"), "unidades": Decimal("2.00"), "total": Decimal("4.00")},
+    ]
+    return {
+        "fecha_desde": date(2026, 10, 1),
+        "fecha_hasta": date(2026, 10, 16),
+        "orden": "desc",
+        "filas": filas,
+        "total_general": Decimal("82.00"),
+    }
+
+
+def test_productos_vendidos_muestra_bultos_y_unidades_en_columnas_separadas(panel):
+    panel._mostrar_productos_vendidos(_resultado_vendidos())
+
+    assert [panel.tabla.horizontalHeaderItem(c).text() for c in range(4)] == ["Producto", "Bultos", "Unidades", "Total"]
+    assert _celdas_tabla(panel, 0) == ["Harina", "3.00", "5.00", "$78.00"]
+    assert _celdas_tabla(panel, 1) == ["Aceite", "0.00", "2.00", "$4.00"]
+    assert panel.lbl_total.text() == "2 filas"
+    assert _chips(panel) == ["Total general: $82.00"]
+
+
+def test_productos_vendidos_exporta_las_cuatro_columnas_y_el_pdf_tiene_cuatro_anchos(panel):
+    panel._ultimo_modo = rp.REPORTE_PRODUCTOS_VENDIDOS
+    panel._ultimo_resultado = _resultado_vendidos()
+
+    nombre, columnas, filas = panel._filas_para_exportar()
+    _titulo, _filtros, anchos = panel._info_pdf()
+
+    assert nombre == "productos_vendidos"
+    assert columnas == ["Producto", "Bultos", "Unidades", "Total"]
+    assert filas[0] == ["Harina", 3.0, 5.0, 78.0]
+    assert len(anchos) == len(columnas)
+
+
+def test_margen_utilidad_muestra_y_exporta_bultos_y_unidades_por_separado(panel):
+    panel._ultimo_modo = rp.REPORTE_MARGEN_UTILIDAD
+    panel._ultimo_resultado = {
+        "fecha_desde": date(2026, 10, 1),
+        "fecha_hasta": date(2026, 10, 16),
+        "filas": [
+            {
+                "producto": "Harina",
+                "bultos": Decimal("2.00"),
+                "unidades": Decimal("3.00"),
+                "ingreso": Decimal("60.00"),
+                "costo": Decimal("54.00"),
+                "margen": Decimal("6.00"),
+                "margen_pct": Decimal("10.00"),
+            }
+        ],
+        "total_ingreso": Decimal("60.00"),
+        "total_costo": Decimal("54.00"),
+        "total_margen": Decimal("6.00"),
+    }
+
+    panel._mostrar_margen_utilidad(panel._ultimo_resultado)
+    nombre, columnas, filas = panel._filas_para_exportar()
+    _titulo, _filtros, anchos = panel._info_pdf()
+
+    assert _celdas_tabla(panel, 0) == ["Harina", "2.00", "3.00", "$60.00", "$54.00", "$6.00", "10.0%"]
+    assert nombre == "margen_utilidad"
+    assert columnas[:3] == ["Producto", "Bultos", "Unidades"]
+    assert filas[0] == ["Harina", 2.0, 3.0, 60.0, 54.0, 6.0, 10.0]
+    assert len(anchos) == len(columnas) == panel.tabla.columnCount()
+
+
+def test_un_pdf_con_demasiadas_filas_avisa_y_no_pide_el_destino(panel, monkeypatch):
+    panel._ultimo_modo = rp.REPORTE_PRODUCTOS_VENDIDOS
+    panel._ultimo_resultado = {"fecha_desde": date(2026, 1, 1), "fecha_hasta": date(2026, 12, 31), "orden": "desc"}
+    monkeypatch.setattr(panel, "_filas_para_exportar", lambda: ("x", ["A"], [["fila"]] * (rp.LIMITE_FILAS_PDF + 1)))
+    avisos = []
+    monkeypatch.setattr(rp.MessageBox, "information", lambda *a, **k: avisos.append(a[1]))
+    monkeypatch.setattr(
+        rp.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: pytest.fail("no debe pedir ruta"))
+    )
+
+    panel._exportar_pdf()
+
+    assert avisos == ["Demasiadas filas para un PDF"]
+
+
+def test_los_combos_comparten_un_modelo_ligero_con_id_y_texto(panel):
+    datos = {
+        "clientes": [(7, "Ana"), (9, "Beto")],
+        "proveedores": [],
+        "cajas": [],
+        "vendedores": [],
+        "cajeros": [],
+        "productos": [(1, "P-1 - Harina")],
+        "categorias": [],
+        "cuentas": [],
+    }
+
+    panel._llenar_catalogos(datos)
+
+    combo = panel.cliente_combo
+    assert [combo.itemText(i) for i in range(combo.count())] == ["Todos los clientes", "Ana", "Beto"]
+    assert combo.itemData(0) is None and combo.itemData(2) == 9
+    combo.setCurrentIndex(1)
+    assert combo.currentData() == 7
+    assert panel.cliente_combo_nc.model() is combo.model()  # todos los combos de clientes comparten el modelo
+    assert panel.producto_combo_vpc.itemText(0) == "Todos los productos"
+    assert panel.producto_combo_kardex.itemText(0) == "P-1 - Harina"

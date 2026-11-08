@@ -30,6 +30,7 @@ import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
+from sqlalchemy import Date, case, cast, exists, func, literal_column, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
@@ -58,8 +59,10 @@ from app.db.models import (
     NotaRecepcion,
     NotaRecepcionDetalle,
     PagoCobro,
+    PagoCobroBCV,
     PagoProveedor,
     Proveedor,
+    Ruta,
     Vendedor,
 )
 from app.services.otros_movimientos import ESTADOS_CXC_OTRO
@@ -68,6 +71,9 @@ from app.services.tesoreria import TIPOS_MOVIMIENTO_CAJA
 from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
+
+# Tamano maximo de un IN (...): SQL Server rechaza consultas con mas de ~2100 parametros.
+_TAMANO_LOTE_IN = 1000
 
 ESTADOS_CXC_ABIERTOS = ("pendiente", "parcial", "vencida")
 ESTADOS_CXP_ABIERTOS = ("pendiente", "parcial", "vencida")
@@ -95,6 +101,17 @@ _ORDEN_AGING_CXC_BCV = {
 }
 
 
+# Total de una factura: subtotal - descuento + IVA. Expresion SQL para sumar en la base de datos.
+_TOTAL_FACTURA_SQL = FacturaVenta.total_venta - FacturaVenta.monto_descuento + FacturaVenta.monto_iva
+
+
+def _periodo_sql(columna, agrupacion: str):
+    """Expresion SQL que agrupa una fecha por dia (date) o por mes (primer dia del mes)."""
+    if agrupacion == "dia":
+        return cast(columna, Date)
+    return func.datefromparts(func.year(columna), func.month(columna), literal_column("1"))
+
+
 def _bucket_aging(dias_vencido: int) -> str:
     if dias_vencido <= 0:
         return "vigente"
@@ -105,6 +122,92 @@ def _bucket_aging(dias_vencido: int) -> str:
     if dias_vencido <= 90:
         return "61-90"
     return "90+"
+
+
+def _aplicaciones_nc_cliente(
+    session: Session, desde: datetime | None = None, hasta: datetime | None = None
+) -> list[dict]:
+    """Aplicaciones de notas de credito de cliente a facturas (NotaCreditoService.aplicar_nota_credito_cliente).
+    No hay una tabla propia: esa operacion solo baja el saldo de la cuenta por cobrar y deja constancia en
+    Auditoria (accion APLICACION_NOTA_CREDITO_CLIENTE, con factura destino y monto), asi que de ahi se leen."""
+    query = session.query(Auditoria).filter(
+        Auditoria.accion == "APLICACION_NOTA_CREDITO_CLIENTE", Auditoria.modulo == "NOTAS_CREDITO"
+    )
+    if desde is not None:
+        query = query.filter(Auditoria.fecha_evento >= desde)
+    if hasta is not None:
+        query = query.filter(Auditoria.fecha_evento <= hasta)
+    aplicaciones = []
+    for evento in query.order_by(Auditoria.fecha_evento).all():
+        try:
+            detalle = json.loads(evento.detalle) if evento.detalle else {}
+            aplicaciones.append(
+                {
+                    "fecha": evento.fecha_evento,
+                    "numero_nota_credito": detalle.get("numero_nota_credito"),
+                    "id_factura": int(detalle["id_factura_destino"]),
+                    "monto": Decimal(str(detalle["monto"])),
+                }
+            )
+        except (TypeError, ValueError, KeyError, ArithmeticError):
+            continue
+    return aplicaciones
+
+
+def _cuentas_al_corte(
+    session: Session,
+    query,
+    modelo,
+    pago_modelo,
+    pago_fk,
+    fecha_emision,
+    estados_abiertos: tuple,
+    fecha_corte: date,
+    orden,
+    nc_por_factura: dict[int, Decimal] | None = None,
+) -> list[tuple]:
+    """Pares (cuenta, saldo) con saldo > 0 a `fecha_corte`.
+
+    Corte de hoy o futuro: las cuentas abiertas con su saldo actual. Corte pasado: el saldo actual es el de
+    hoy, no el de entonces, asi que se reconstruye -- solo facturas/compras emitidas hasta el corte, y a cada
+    saldo se le suman los pagos (y notas de credito aplicadas, `nc_por_factura`) posteriores al corte. Las
+    cuentas hoy pagadas que a esa fecha estaban abiertas entran por eso mismo."""
+    if fecha_corte >= date.today():
+        cuentas = query.filter(modelo.estado.in_(estados_abiertos)).order_by(orden).all()
+        return [(c, c.saldo_pendiente) for c in cuentas if c.saldo_pendiente > 0]
+
+    fin_corte = datetime.combine(fecha_corte, time.max)
+    cuentas = query.filter(modelo.estado != "anulada").filter(fecha_emision <= fin_corte).order_by(orden).all()
+    posteriores = dict(
+        session.query(pago_fk, func.sum(pago_modelo.monto))
+        .filter(pago_modelo.fecha_pago > fin_corte)
+        .group_by(pago_fk)
+        .all()
+    )
+    pares = []
+    for cuenta in cuentas:
+        saldo = cuenta.saldo_pendiente + to_decimal(posteriores.get(_pk_cuenta(cuenta), 0))
+        if nc_por_factura:
+            saldo += nc_por_factura.get(getattr(cuenta, "id_factura", None), Decimal("0.00"))
+        if saldo > 0:
+            pares.append((cuenta, saldo))
+    return pares
+
+
+def _nc_aplicadas_despues_del_corte(session: Session, fecha_corte: date) -> dict[int, Decimal] | None:
+    """Total de notas de credito aplicadas por factura DESPUES de `fecha_corte` (None si el corte es de hoy o
+    futuro: no hay nada que reconstruir)."""
+    if fecha_corte >= date.today():
+        return None
+    por_factura: dict[int, Decimal] = {}
+    for aplicacion in _aplicaciones_nc_cliente(session, desde=datetime.combine(fecha_corte, time.max)):
+        id_factura = aplicacion["id_factura"]
+        por_factura[id_factura] = por_factura.get(id_factura, Decimal("0.00")) + aplicacion["monto"]
+    return por_factura
+
+
+def _pk_cuenta(cuenta) -> int:
+    return getattr(cuenta, "id_cuenta_por_cobrar", None) or cuenta.id_cuenta
 
 
 class ReporteService:
@@ -130,30 +233,40 @@ class ReporteService:
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
             .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente))
-            .filter(CuentaPorCobrar.estado.in_(ESTADOS_CXC_ABIERTOS))
         )
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if id_vendedor:
             query = query.filter(Cliente.vendedor_cliente == id_vendedor)
-        cuentas = query.order_by(_ORDEN_AGING_CXC[orden]).all()
+        cuentas = _cuentas_al_corte(
+            session,
+            query,
+            CuentaPorCobrar,
+            PagoCobro,
+            PagoCobro.id_cuenta_por_cobrar,
+            FacturaVenta.fecha_emision,
+            ESTADOS_CXC_ABIERTOS,
+            fecha_corte,
+            _ORDEN_AGING_CXC[orden],
+            nc_por_factura=_nc_aplicadas_despues_del_corte(session, fecha_corte),
+        )
 
         filas = []
         totales_por_bucket: dict[str, Decimal] = {}
-        for cuenta in cuentas:
+        for cuenta, saldo in cuentas:
             dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
             dias_transcurridos = (
                 (fecha_corte - cuenta.factura.fecha_emision.date()).days if cuenta.factura.fecha_emision else 0
             )
             bucket = _bucket_aging(dias_vencido)
-            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
+            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + saldo
             filas.append(
                 {
                     "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
                     "numero_factura": cuenta.factura.numero_factura,
                     "cliente": (cuenta.factura.cliente.nombre_razon_social if cuenta.factura.cliente else None),
                     "fecha_vencimiento": cuenta.fecha_vencimiento,
-                    "saldo_pendiente": cuenta.saldo_pendiente,
+                    "saldo_pendiente": saldo,
                     "dias_vencido": dias_vencido,
                     "dias_transcurridos": dias_transcurridos,
                     "bucket": bucket,
@@ -189,28 +302,37 @@ class ReporteService:
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
             .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
             .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
-            .filter(CuentaPorCobrarBCV.estado.in_(ESTADOS_CXC_BCV_ABIERTOS))
         )
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         if id_vendedor:
             query = query.filter(Cliente.vendedor_cliente == id_vendedor)
-        cuentas = query.order_by(_ORDEN_AGING_CXC_BCV[orden]).all()
+        cuentas = _cuentas_al_corte(
+            session,
+            query,
+            CuentaPorCobrarBCV,
+            PagoCobroBCV,
+            PagoCobroBCV.id_cuenta_por_cobrar,
+            FacturaVenta.fecha_emision,
+            ESTADOS_CXC_BCV_ABIERTOS,
+            fecha_corte,
+            _ORDEN_AGING_CXC_BCV[orden],
+        )
 
         filas = []
         totales_por_bucket: dict[str, Decimal] = {}
-        for cuenta in cuentas:
+        for cuenta, saldo in cuentas:
             dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
             dias_transcurridos = (fecha_corte - cuenta.fecha_emision).days if cuenta.fecha_emision else 0
             bucket = _bucket_aging(dias_vencido)
-            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
+            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + saldo
             filas.append(
                 {
                     "id_cuenta_por_cobrar": cuenta.id_cuenta_por_cobrar,
                     "numero_factura": cuenta.factura.numero_factura,
                     "cliente": (cuenta.factura.cliente.nombre_razon_social if cuenta.factura.cliente else None),
                     "fecha_vencimiento": cuenta.fecha_vencimiento,
-                    "saldo_pendiente": cuenta.saldo_pendiente,
+                    "saldo_pendiente": saldo,
                     "porcentaje_bcv": cuenta.porcentaje,
                     "dias_vencido": dias_vencido,
                     "dias_transcurridos": dias_transcurridos,
@@ -245,25 +367,34 @@ class ReporteService:
             session.query(CuentaPorPagar)
             .join(Compra, Compra.id_compra == CuentaPorPagar.id_compra)
             .options(joinedload(CuentaPorPagar.compra).joinedload(Compra.proveedor))
-            .filter(CuentaPorPagar.estado.in_(ESTADOS_CXP_ABIERTOS))
         )
         if id_proveedor:
             query = query.filter(Compra.id_proveedor == id_proveedor)
-        cuentas = query.order_by(_ORDEN_AGING_CXP[orden]).all()
+        cuentas = _cuentas_al_corte(
+            session,
+            query,
+            CuentaPorPagar,
+            PagoProveedor,
+            PagoProveedor.id_cuenta_por_pagar,
+            Compra.fecha_emision,
+            ESTADOS_CXP_ABIERTOS,
+            fecha_corte,
+            _ORDEN_AGING_CXP[orden],
+        )
 
         filas = []
         totales_por_bucket: dict[str, Decimal] = {}
-        for cuenta in cuentas:
+        for cuenta, saldo in cuentas:
             dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
             bucket = _bucket_aging(dias_vencido)
-            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + cuenta.saldo_pendiente
+            totales_por_bucket[bucket] = totales_por_bucket.get(bucket, Decimal("0.00")) + saldo
             filas.append(
                 {
                     "id_cuenta": cuenta.id_cuenta,
                     "numero_compra": cuenta.compra.numero_compra,
                     "proveedor": (cuenta.compra.proveedor.nombre_razon_social if cuenta.compra.proveedor else None),
                     "fecha_vencimiento": cuenta.fecha_vencimiento,
-                    "saldo_pendiente": cuenta.saldo_pendiente,
+                    "saldo_pendiente": saldo,
                     "dias_vencido": dias_vencido,
                     "bucket": bucket,
                 }
@@ -285,9 +416,12 @@ class ReporteService:
         id_cliente: int | None = None,
     ) -> dict:
         """Libro de Ventas para el IVA (base del formato exigido por el SENIAT): detalle
-        de facturas emitidas (excluye ANULADA) en el rango, con base imponible y monto de
-        IVA desglosados por factura, mas las notas de credito emitidas en el mismo rango
-        (se listan aparte, ver nota del modulo sobre por que no se restan del IVA)."""
+        de facturas emitidas en el rango, con base imponible, monto exento y monto de IVA
+        desglosados por factura, y su equivalente en Bs a la tasa BCV de la factura. Las
+        facturas ANULADA se listan (el SENIAT exige conservar el correlativo) con montos en
+        cero y no entran en los totales. Las notas de credito emitidas en el mismo rango se
+        listan aparte: no se restan del IVA porque las unicas que existen nacen de anular una
+        factura (que ya cuenta en cero) o de un sobreabono (que no es una venta)."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
@@ -296,8 +430,7 @@ class ReporteService:
 
         query = (
             session.query(FacturaVenta)
-            .options(joinedload(FacturaVenta.cliente))
-            .filter(FacturaVenta.estado_factura != "ANULADA")
+            .options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.tasa))
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
         )
@@ -305,25 +438,47 @@ class ReporteService:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
         facturas = query.order_by(FacturaVenta.fecha_emision, FacturaVenta.numero_control).all()
 
+        centavo = Decimal("0.01")
         filas = []
         total_base = Decimal("0.00")
+        total_exento = Decimal("0.00")
         total_iva = Decimal("0.00")
+        total_bs = Decimal("0.00")
+        cantidad_vigentes = 0
         for factura in facturas:
-            base_imponible = factura.total_venta - factura.monto_descuento
-            total = base_imponible + factura.monto_iva
-            total_base += base_imponible
-            total_iva += factura.monto_iva
+            anulada = factura.estado_factura == "ANULADA"
+            if anulada:
+                base_total = monto_iva = Decimal("0.00")
+            else:
+                base_total = factura.total_venta - factura.monto_descuento
+                monto_iva = factura.monto_iva
+            base_imponible = base_total if factura.iva_aplicado else Decimal("0.00")
+            monto_exento = Decimal("0.00") if factura.iva_aplicado else base_total
+            total = base_total + monto_iva
+            tasa = factura.tasa.tasa_dolar_bcv if factura.tasa else None
+            total_en_bs = (total * to_decimal(tasa)).quantize(centavo) if tasa else None
+
+            if not anulada:
+                cantidad_vigentes += 1
+                total_base += base_imponible
+                total_exento += monto_exento
+                total_iva += monto_iva
+                total_bs += total_en_bs or Decimal("0.00")
             filas.append(
                 {
                     "fecha_emision": factura.fecha_emision,
                     "numero_control": factura.numero_control,
                     "numero_factura": factura.numero_factura,
+                    "estado": "ANULADA" if anulada else "EMITIDA",
                     "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
                     "identificacion_cliente": (factura.cliente.identificacion_cliente if factura.cliente else None),
+                    "monto_exento": monto_exento,
                     "base_imponible": base_imponible,
                     "porcentaje_iva": factura.porcentaje_iva_aplicado,
-                    "monto_iva": factura.monto_iva,
+                    "monto_iva": monto_iva,
                     "total": total,
+                    "tasa_cambio": tasa,
+                    "total_bs": total_en_bs,
                 }
             )
 
@@ -353,10 +508,13 @@ class ReporteService:
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
             "filas": filas,
-            "cantidad_facturas": len(facturas),
+            "cantidad_facturas": cantidad_vigentes,
+            "cantidad_anuladas": len(filas) - cantidad_vigentes,
             "total_base_imponible": total_base,
+            "total_exento": total_exento,
             "total_iva": total_iva,
-            "total_general": total_base + total_iva,
+            "total_general": total_base + total_exento + total_iva,
+            "total_bs": total_bs,
             "notas_credito": filas_nc,
             "total_notas_credito": sum((nc["monto"] for nc in filas_nc), Decimal("0.00")),
         }
@@ -380,27 +538,21 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        facturas = (
-            session.query(FacturaVenta)
+        # Se agrupa y suma en la base de datos (una fila por dia o mes), no en Python sobre cada factura.
+        clave_sql = _periodo_sql(FacturaVenta.fecha_emision, agrupacion)
+        agrupado = (
+            session.query(clave_sql, func.count(FacturaVenta.id_factura), func.sum(_TOTAL_FACTURA_SQL))
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .group_by(clave_sql)
+            .order_by(clave_sql)
             .all()
         )
-
-        grupos: dict[date, dict] = {}
-        for factura in facturas:
-            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
-            fecha = factura.fecha_emision.date()
-            clave = fecha if agrupacion == "dia" else fecha.replace(day=1)
-            grupo = grupos.setdefault(
-                clave,
-                {"fecha": clave, "cantidad_facturas": 0, "total": Decimal("0.00")},
-            )
-            grupo["cantidad_facturas"] += 1
-            grupo["total"] += total_factura
-
-        filas = sorted(grupos.values(), key=lambda g: g["fecha"])
+        filas = [
+            {"fecha": clave, "cantidad_facturas": cantidad, "total": to_decimal(total)}
+            for clave, cantidad, total in agrupado
+        ]
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -420,30 +572,25 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        facturas = (
-            session.query(FacturaVenta)
-            .options(joinedload(FacturaVenta.cliente))
+        # Se agrupa y suma en la base de datos (una fila por cliente), no en Python sobre cada factura.
+        total_sql = func.sum(_TOTAL_FACTURA_SQL)
+        agrupado = (
+            session.query(
+                Cliente.id_cliente, Cliente.nombre_razon_social, func.count(FacturaVenta.id_factura), total_sql
+            )
+            .select_from(FacturaVenta)
+            .outerjoin(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .group_by(Cliente.id_cliente, Cliente.nombre_razon_social)
+            .order_by(total_sql.desc(), Cliente.id_cliente)
             .all()
         )
-
-        grupos: dict[int, dict] = {}
-        for factura in facturas:
-            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
-            grupo = grupos.setdefault(
-                factura.id_cliente_factura,
-                {
-                    "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
-                    "cantidad_facturas": 0,
-                    "total": Decimal("0.00"),
-                },
-            )
-            grupo["cantidad_facturas"] += 1
-            grupo["total"] += total_factura
-
-        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=True)
+        filas = [
+            {"cliente": nombre, "cantidad_facturas": cantidad, "total": to_decimal(total)}
+            for _id, nombre, cantidad, total in agrupado
+        ]
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -461,33 +608,32 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        facturas = (
-            session.query(FacturaVenta)
-            .options(joinedload(FacturaVenta.vendedor))
+        # Se agrupa y suma en la base de datos (una fila por vendedor), no en Python sobre cada factura.
+        total_sql = func.sum(_TOTAL_FACTURA_SQL)
+        agrupado = (
+            session.query(
+                Vendedor.id_vendedor, Vendedor.nombre_vendedor, func.count(FacturaVenta.id_factura), total_sql
+            )
+            .select_from(FacturaVenta)
+            .outerjoin(Vendedor, Vendedor.id_vendedor == FacturaVenta.id_vendedor)
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .group_by(Vendedor.id_vendedor, Vendedor.nombre_vendedor)
+            .order_by(total_sql.desc(), Vendedor.id_vendedor)
             .all()
         )
-
-        grupos: dict[int, dict] = {}
-        for factura in facturas:
-            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
-            grupo = grupos.setdefault(
-                factura.id_vendedor,
+        filas = []
+        for _id, nombre, cantidad, total in agrupado:
+            total = to_decimal(total)
+            filas.append(
                 {
-                    "vendedor": (factura.vendedor.nombre_vendedor if factura.vendedor else None),
-                    "cantidad_facturas": 0,
-                    "total": Decimal("0.00"),
-                },
+                    "vendedor": nombre,
+                    "cantidad_facturas": cantidad,
+                    "total": total,
+                    "ticket_promedio": total / to_decimal(cantidad),
+                }
             )
-            grupo["cantidad_facturas"] += 1
-            grupo["total"] += total_factura
-
-        for grupo in grupos.values():
-            grupo["ticket_promedio"] = to_decimal(grupo["total"]) / to_decimal(grupo["cantidad_facturas"])
-
-        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=True)
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -509,34 +655,31 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        facturas = (
-            session.query(FacturaVenta)
-            .options(joinedload(FacturaVenta.vendedor).joinedload(Vendedor.ruta))
+        # Se agrupa y suma en la base de datos (una fila por ruta), no en Python sobre cada factura.
+        total_sql = func.sum(_TOTAL_FACTURA_SQL)
+        agrupado = (
+            session.query(Ruta.id_ruta, Ruta.nombre_ruta, func.count(FacturaVenta.id_factura), total_sql)
+            .select_from(FacturaVenta)
+            .outerjoin(Vendedor, Vendedor.id_vendedor == FacturaVenta.id_vendedor)
+            .outerjoin(Ruta, Ruta.id_ruta == Vendedor.id_ruta)
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .group_by(Ruta.id_ruta, Ruta.nombre_ruta)
+            .order_by(total_sql.desc(), Ruta.id_ruta)
             .all()
         )
-
-        grupos: dict[int | None, dict] = {}
-        for factura in facturas:
-            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
-            ruta = factura.vendedor.ruta if factura.vendedor else None
-            grupo = grupos.setdefault(
-                ruta.id_ruta if ruta else None,
+        filas = []
+        for id_ruta, nombre, cantidad, total in agrupado:
+            total = to_decimal(total)
+            filas.append(
                 {
-                    "ruta": ruta.nombre_ruta if ruta else "Sin ruta",
-                    "cantidad_facturas": 0,
-                    "total": Decimal("0.00"),
-                },
+                    "ruta": nombre if id_ruta is not None else "Sin ruta",
+                    "cantidad_facturas": cantidad,
+                    "total": total,
+                    "ticket_promedio": total / to_decimal(cantidad),
+                }
             )
-            grupo["cantidad_facturas"] += 1
-            grupo["total"] += total_factura
-
-        for grupo in grupos.values():
-            grupo["ticket_promedio"] = to_decimal(grupo["total"]) / to_decimal(grupo["cantidad_facturas"])
-
-        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=True)
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -563,14 +706,26 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
+        # Se suma en la base de datos (una fila por producto y cliente), no en Python sobre todas las lineas del
+        # periodo. Bultos y unidades van aparte (medidas distintas); lineas sin tipo_venta = unidades.
+        es_bulto = FacturaDetalle.tipo_venta == "bulto"
+        monto_sql = func.sum(FacturaDetalle.cantidad_producto * FacturaDetalle.precio_unitario)
         query = (
-            session.query(FacturaDetalle)
-            .join(FacturaVenta, FacturaDetalle.id_factura == FacturaVenta.id_factura)
-            .options(
-                joinedload(FacturaDetalle.producto),
-                joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.cliente),
-                joinedload(FacturaDetalle.factura).joinedload(FacturaVenta.vendedor),
+            session.query(
+                Inventario.id_producto,
+                Inventario.nombre_producto,
+                Inventario.cod_producto,
+                Cliente.id_cliente,
+                Cliente.nombre_razon_social,
+                Cliente.identificacion_cliente,
+                func.sum(case((es_bulto, FacturaDetalle.cantidad_producto), else_=0)),
+                func.sum(case((es_bulto, 0), else_=FacturaDetalle.cantidad_producto)),
+                monto_sql,
             )
+            .select_from(FacturaDetalle)
+            .join(FacturaVenta, FacturaDetalle.id_factura == FacturaVenta.id_factura)
+            .join(Inventario, Inventario.id_producto == FacturaDetalle.id_producto_factura)
+            .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
@@ -580,51 +735,38 @@ class ReporteService:
         if id_producto:
             query = query.filter(FacturaDetalle.id_producto_factura == id_producto)
 
-        detalles = query.all()
+        agrupado = query.group_by(
+            Inventario.id_producto,
+            Inventario.nombre_producto,
+            Inventario.cod_producto,
+            Cliente.id_cliente,
+            Cliente.nombre_razon_social,
+            Cliente.identificacion_cliente,
+        ).order_by(monto_sql.desc(), Cliente.id_cliente)
 
         # Agrupar por producto, luego por cliente
         grupos: dict[int, dict] = {}
-        for detalle in detalles:
-            id_producto_detalle = detalle.id_producto_factura
-            id_cliente = detalle.factura.id_cliente_factura
-
-            grupo_producto = grupos.setdefault(
-                id_producto_detalle,
-                {
-                    "producto": detalle.producto.nombre_producto if detalle.producto else "N/A",
-                    "cod_producto": detalle.producto.cod_producto if detalle.producto else "N/A",
-                    "clientes": {},
-                },
-            )
-
-            grupo_cliente = grupo_producto["clientes"].setdefault(
-                id_cliente,
-                {
-                    "cliente": detalle.factura.cliente.nombre_razon_social if detalle.factura.cliente else "N/A",
-                    "identificacion_cliente": (
-                        detalle.factura.cliente.identificacion_cliente if detalle.factura.cliente else "N/A"
-                    ),
-                    "cantidad_total": Decimal("0.00"),
-                    "monto_total": Decimal("0.00"),
-                },
-            )
-
-            cantidad = detalle.cantidad_producto or Decimal("0")
-            monto = cantidad * detalle.precio_unitario
-            grupo_cliente["cantidad_total"] += cantidad
-            grupo_cliente["monto_total"] += monto
+        for id_prod, nombre, codigo, id_cli, cliente, identificacion, bultos, unidades, monto in agrupado.all():
+            grupo_producto = grupos.setdefault(id_prod, {"producto": nombre, "cod_producto": codigo, "clientes": {}})
+            grupo_producto["clientes"][id_cli] = {
+                "cliente": cliente,
+                "identificacion_cliente": identificacion,
+                "bultos": to_decimal(bultos),
+                "unidades": to_decimal(unidades),
+                "monto_total": to_decimal(monto),
+            }
 
         # Convertir a lista de filas (producto + lista de clientes)
         filas = []
         for _id_producto, grupo in grupos.items():
             clientes_lista = sorted(grupo["clientes"].values(), key=lambda c: c["monto_total"], reverse=True)
             total_producto = sum(c["monto_total"] for c in clientes_lista)
-            cantidad_producto = sum(c["cantidad_total"] for c in clientes_lista)
             filas.append(
                 {
                     "producto": grupo["producto"],
                     "cod_producto": grupo["cod_producto"],
-                    "cantidad_total": cantidad_producto,
+                    "bultos": sum((c["bultos"] for c in clientes_lista), Decimal("0.00")),
+                    "unidades": sum((c["unidades"] for c in clientes_lista), Decimal("0.00")),
                     "monto_total": total_producto,
                     "clientes": clientes_lista,
                 }
@@ -634,7 +776,6 @@ class ReporteService:
         filas = sorted(filas, key=lambda f: f["monto_total"], reverse=True)
 
         total_general = sum(f["monto_total"] for f in filas)
-        cantidad_general = sum(f["cantidad_total"] for f in filas)
 
         return {
             "fecha_desde": fecha_desde,
@@ -643,7 +784,8 @@ class ReporteService:
             "id_producto": id_producto,
             "filas": filas,
             "total_general": total_general,
-            "cantidad_general": cantidad_general,
+            "bultos_general": sum((f["bultos"] for f in filas), Decimal("0.00")),
+            "unidades_general": sum((f["unidades"] for f in filas), Decimal("0.00")),
         }
 
     @staticmethod
@@ -666,29 +808,32 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        query = (
-            session.query(Cliente)
-            .options(joinedload(Cliente.vendedor))
-            .filter(Cliente.estado_cliente == "ACTIVO")
-            .filter(Cliente.vendedor_cliente.isnot(None))
-        )
-        if id_vendedor is not None:
-            query = query.filter(Cliente.vendedor_cliente == id_vendedor)
-        clientes = query.order_by(Cliente.nombre_razon_social).all()
+        def _filtros_clientes(query):
+            query = query.filter(Cliente.estado_cliente == "ACTIVO").filter(Cliente.vendedor_cliente.isnot(None))
+            if id_vendedor is not None:
+                query = query.filter(Cliente.vendedor_cliente == id_vendedor)
+            return query
 
-        ids_cliente = [c.id_cliente for c in clientes]
-        conteo_facturas: dict[int, int] = {}
-        if ids_cliente:
-            facturas = (
-                session.query(FacturaVenta.id_cliente_factura)
-                .filter(FacturaVenta.id_cliente_factura.in_(ids_cliente))
-                .filter(FacturaVenta.estado_factura != "ANULADA")
-                .filter(FacturaVenta.fecha_emision >= desde_dt)
-                .filter(FacturaVenta.fecha_emision <= hasta_dt)
-                .all()
+        clientes = (
+            _filtros_clientes(session.query(Cliente).options(joinedload(Cliente.vendedor)))
+            .order_by(Cliente.nombre_razon_social)
+            .all()
+        )
+
+        # El conteo se hace en la base, unido a los mismos clientes: antes se pasaba la lista de ids en un
+        # IN, que SQL Server rechaza con mas de ~2100 clientes.
+        conteo_facturas: dict[int, int] = dict(
+            _filtros_clientes(
+                session.query(FacturaVenta.id_cliente_factura, func.count(FacturaVenta.id_factura)).join(
+                    Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura
+                )
             )
-            for (id_cliente,) in facturas:
-                conteo_facturas[id_cliente] = conteo_facturas.get(id_cliente, 0) + 1
+            .filter(FacturaVenta.estado_factura != "ANULADA")
+            .filter(FacturaVenta.fecha_emision >= desde_dt)
+            .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .group_by(FacturaVenta.id_cliente_factura)
+            .all()
+        )
 
         filas = []
         for cliente in clientes:
@@ -743,30 +888,37 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        detalles = (
-            session.query(FacturaDetalle)
+        # Se suma en la base de datos (una fila por producto), no en Python sobre todas las lineas del periodo: con un
+        # rango de meses eran decenas de miles de lineas traidas una por una. Bultos y unidades van aparte: sumarlos
+        # en una sola cantidad mezclaria medidas distintas; las lineas viejas sin tipo_venta cuentan como unidades.
+        es_bulto = FacturaDetalle.tipo_venta == "bulto"
+        total_sql = func.sum(FacturaDetalle.cantidad_producto * FacturaDetalle.precio_unitario)
+        agrupado = (
+            session.query(
+                Inventario.nombre_producto,
+                func.sum(case((es_bulto, FacturaDetalle.cantidad_producto), else_=0)),
+                func.sum(case((es_bulto, 0), else_=FacturaDetalle.cantidad_producto)),
+                total_sql,
+            )
+            .select_from(FacturaDetalle)
             .join(FacturaVenta, FacturaVenta.id_factura == FacturaDetalle.id_factura)
-            .options(joinedload(FacturaDetalle.producto))
+            .join(Inventario, Inventario.id_producto == FacturaDetalle.id_producto_factura)
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .group_by(Inventario.id_producto, Inventario.nombre_producto)
+            .order_by(total_sql.desc() if orden == "desc" else total_sql.asc(), Inventario.id_producto)
             .all()
         )
-
-        grupos: dict[int, dict] = {}
-        for detalle in detalles:
-            grupo = grupos.setdefault(
-                detalle.id_producto_factura,
-                {
-                    "producto": (detalle.producto.nombre_producto if detalle.producto else detalle.descripcion),
-                    "cantidad": Decimal("0.00"),
-                    "total": Decimal("0.00"),
-                },
-            )
-            grupo["cantidad"] += detalle.cantidad_producto
-            grupo["total"] += detalle.cantidad_producto * detalle.precio_unitario
-
-        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=(orden == "desc"))
+        filas = [
+            {
+                "producto": nombre,
+                "bultos": to_decimal(bultos),
+                "unidades": to_decimal(unidades),
+                "total": to_decimal(total),
+            }
+            for nombre, bultos, unidades, total in agrupado
+        ]
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -830,46 +982,50 @@ class ReporteService:
 
     @staticmethod
     def facturas_anuladas(session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date) -> dict:
-        """Listado de facturas ANULADA emitidas en el rango, con el motivo de anulacion
-        (viene de Auditoria.detalle, la unica fuente que lo guarda -- FacturaVenta no
-        tiene columna propia para eso). No incluye un monto: total_venta/monto_iva quedan
+        """Listado de facturas anuladas EN el rango (por fecha de anulacion, no de emision: una factura
+        de octubre anulada en noviembre sale en el reporte de noviembre), con el motivo. La fecha y el
+        motivo vienen de Auditoria (accion ANULACION_FACTURA), la unica fuente que los guarda --
+        FacturaVenta no tiene columnas propias para eso. Se parte de los eventos del rango y no de las
+        facturas, para no recorrer toda la auditoria. No incluye un monto: total_venta/monto_iva quedan
         en 0 despues de anular (el trigger de recalculo se dispara al borrar las lineas de
-        factura_detalle, ver CLAUDE.md seccion de triggers) y no hay ningun otro lado
-        donde el monto original haya quedado guardado -- mostrar un total aca seria
-        inventar un dato que el sistema no conserva."""
+        factura_detalle, ver CLAUDE.md seccion de triggers) y no hay ningun otro lado donde el monto
+        original haya quedado guardado -- mostrar un total aca seria inventar un dato que el sistema no
+        conserva."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        facturas = (
-            session.query(FacturaVenta)
-            .options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor))
-            .filter(FacturaVenta.estado_factura == "ANULADA")
-            .filter(FacturaVenta.fecha_emision >= desde_dt)
-            .filter(FacturaVenta.fecha_emision <= hasta_dt)
-            .order_by(FacturaVenta.fecha_emision)
+        eventos = (
+            session.query(Auditoria)
+            .filter(Auditoria.accion == "ANULACION_FACTURA")
+            .filter(Auditoria.modulo == "VENTAS")
+            .filter(Auditoria.fecha_evento >= desde_dt)
+            .filter(Auditoria.fecha_evento <= hasta_dt)
+            .order_by(Auditoria.fecha_evento)
             .all()
         )
+        anulaciones: dict[str, tuple[datetime, str | None]] = {}
+        for evento in eventos:
+            try:
+                detalle = json.loads(evento.detalle) if evento.detalle else {}
+            except (TypeError, ValueError):
+                continue
+            numero = detalle.get("numero_factura") if isinstance(detalle, dict) else None
+            if numero:
+                anulaciones[numero] = (evento.fecha_evento, detalle.get("motivo"))
 
-        numeros = {f.numero_factura for f in facturas}
-        motivos_por_factura: dict[str, str | None] = {}
-        if numeros:
-            eventos = (
-                session.query(Auditoria)
-                .filter(Auditoria.accion == "ANULACION_FACTURA")
-                .filter(Auditoria.modulo == "VENTAS")
+        facturas: list[FacturaVenta] = []
+        numeros = list(anulaciones)
+        for i in range(0, len(numeros), _TAMANO_LOTE_IN):  # por lotes: SQL Server limita los parametros de un IN
+            facturas.extend(
+                session.query(FacturaVenta)
+                .options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.vendedor))
+                .filter(FacturaVenta.estado_factura == "ANULADA")
+                .filter(FacturaVenta.numero_factura.in_(numeros[i : i + _TAMANO_LOTE_IN]))
                 .all()
             )
-            for evento in eventos:
-                try:
-                    detalle = json.loads(evento.detalle) if evento.detalle else {}
-                except (TypeError, ValueError):
-                    continue
-                numero = detalle.get("numero_factura")
-                if numero in numeros:
-                    motivos_por_factura[numero] = detalle.get("motivo")
 
         filas = [
             {
@@ -877,10 +1033,12 @@ class ReporteService:
                 "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
                 "vendedor": (factura.vendedor.nombre_vendedor if factura.vendedor else None),
                 "fecha_emision": factura.fecha_emision,
-                "motivo": motivos_por_factura.get(factura.numero_factura),
+                "fecha_anulacion": anulaciones[factura.numero_factura][0],
+                "motivo": anulaciones[factura.numero_factura][1],
             }
             for factura in facturas
         ]
+        filas.sort(key=lambda f: f["fecha_anulacion"])
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -949,26 +1107,25 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        facturas = (
-            session.query(FacturaVenta)
+        # Se agrupa y suma en la base de datos (una fila por condicion de pago), no en Python sobre cada factura.
+        agrupado = (
+            session.query(
+                FacturaVenta.condicion_pago, func.count(FacturaVenta.id_factura), func.sum(_TOTAL_FACTURA_SQL)
+            )
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .group_by(FacturaVenta.condicion_pago)
             .all()
         )
 
+        # contado y credito aparecen siempre, aunque no haya ventas de alguno
         resumen = {
             "contado": {"cantidad_facturas": 0, "total": Decimal("0.00")},
             "credito": {"cantidad_facturas": 0, "total": Decimal("0.00")},
         }
-        for factura in facturas:
-            total_factura = factura.total_venta - factura.monto_descuento + factura.monto_iva
-            grupo = resumen.setdefault(
-                factura.condicion_pago,
-                {"cantidad_facturas": 0, "total": Decimal("0.00")},
-            )
-            grupo["cantidad_facturas"] += 1
-            grupo["total"] += total_factura
+        for condicion, cantidad, total in agrupado:
+            resumen[condicion] = {"cantidad_facturas": cantidad, "total": to_decimal(total)}
 
         total_general = sum((g["total"] for g in resumen.values()), Decimal("0.00"))
         filas = [
@@ -996,7 +1153,8 @@ class ReporteService:
         session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date
     ) -> dict:
         """Margen de utilidad por producto vendido en el rango (ingreso - costo,
-        excluyendo ANULADA). Usa el costo ACTUAL de Inventario.costo_producto -- el schema
+        excluyendo ANULADA). Usa el costo ACTUAL de Inventario.costo_producto (costo de UNA
+        unidad; las lineas vendidas por bulto se pasan a unidades con cantidad_caja) -- el schema
         no guarda un costo historico por linea de venta, asi que el margen de una venta
         vieja es una aproximacion si el costo del producto cambio desde entonces."""
         require_permiso(session, id_usuario, "reportes", "ver")
@@ -1005,34 +1163,45 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        detalles = (
-            session.query(FacturaDetalle)
+        # Se suma en la base de datos (una fila por producto), no en Python sobre todas las lineas del periodo.
+        # Bultos y unidades van en columnas separadas (medidas distintas); lineas sin tipo_venta = unidades.
+        # costo_producto es el costo de UNA unidad: una linea vendida por bulto cuesta cantidad_caja unidades por
+        # bulto (mismo calculo que descuenta el stock en trg_factura_detalle_stock_ins).
+        es_bulto = FacturaDetalle.tipo_venta == "bulto"
+        unidades_por_bulto = func.coalesce(func.nullif(Inventario.cantidad_caja, 0), 1)
+        agrupado = (
+            session.query(
+                Inventario.nombre_producto,
+                Inventario.costo_producto,
+                func.sum(case((es_bulto, FacturaDetalle.cantidad_producto), else_=0)),
+                func.sum(case((es_bulto, 0), else_=FacturaDetalle.cantidad_producto)),
+                func.sum(FacturaDetalle.cantidad_producto * FacturaDetalle.precio_unitario),
+                func.sum(
+                    case(
+                        (es_bulto, FacturaDetalle.cantidad_producto * unidades_por_bulto),
+                        else_=FacturaDetalle.cantidad_producto,
+                    )
+                ),
+            )
+            .select_from(FacturaDetalle)
             .join(FacturaVenta, FacturaVenta.id_factura == FacturaDetalle.id_factura)
-            .options(joinedload(FacturaDetalle.producto))
+            .join(Inventario, Inventario.id_producto == FacturaDetalle.id_producto_factura)
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .group_by(Inventario.id_producto, Inventario.nombre_producto, Inventario.costo_producto)
             .all()
         )
 
-        grupos: dict[int, dict] = {}
-        for detalle in detalles:
-            costo_unitario = detalle.producto.costo_producto if detalle.producto else Decimal("0.00")
-            grupo = grupos.setdefault(
-                detalle.id_producto_factura,
-                {
-                    "producto": (detalle.producto.nombre_producto if detalle.producto else detalle.descripcion),
-                    "cantidad": Decimal("0.00"),
-                    "ingreso": Decimal("0.00"),
-                    "costo": Decimal("0.00"),
-                },
-            )
-            grupo["cantidad"] += detalle.cantidad_producto
-            grupo["ingreso"] += detalle.cantidad_producto * detalle.precio_unitario
-            grupo["costo"] += detalle.cantidad_producto * costo_unitario
-
         filas = []
-        for grupo in grupos.values():
+        for nombre, costo_unitario, bultos, unidades, ingreso, unidades_costeadas in agrupado:
+            grupo = {
+                "producto": nombre,
+                "bultos": to_decimal(bultos),
+                "unidades": to_decimal(unidades),
+                "ingreso": to_decimal(ingreso),
+                "costo": to_decimal(unidades_costeadas) * to_decimal(costo_unitario or 0),
+            }
             margen = to_decimal(grupo["ingreso"]) - to_decimal(grupo["costo"])
             if grupo["ingreso"]:
                 margen_pct = margen / to_decimal(grupo["ingreso"]) * Decimal("100")
@@ -1069,25 +1238,21 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        compras = (
-            session.query(Compra)
+        # Se agrupa y suma en la base de datos (una fila por dia o mes), no en Python sobre cada compra.
+        clave_sql = _periodo_sql(Compra.fecha_emision, agrupacion)
+        agrupado = (
+            session.query(clave_sql, func.count(Compra.id_compra), func.sum(Compra.total_compra))
             .filter(Compra.estado_compra != "ANULADA")
             .filter(Compra.fecha_emision >= desde_dt)
             .filter(Compra.fecha_emision <= hasta_dt)
+            .group_by(clave_sql)
+            .order_by(clave_sql)
             .all()
         )
-
-        grupos: dict[date, dict] = {}
-        for compra in compras:
-            if compra.fecha_emision is None:
-                continue
-            fecha = compra.fecha_emision.date()
-            clave = fecha if agrupacion == "dia" else fecha.replace(day=1)
-            grupo = grupos.setdefault(clave, {"fecha": clave, "cantidad_compras": 0, "total": Decimal("0.00")})
-            grupo["cantidad_compras"] += 1
-            grupo["total"] += compra.total_compra
-
-        filas = sorted(grupos.values(), key=lambda g: g["fecha"])
+        filas = [
+            {"fecha": clave, "cantidad_compras": cantidad, "total": to_decimal(total)}
+            for clave, cantidad, total in agrupado
+        ]
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -1106,29 +1271,25 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        compras = (
-            session.query(Compra)
-            .options(joinedload(Compra.proveedor))
+        # Se agrupa y suma en la base de datos (una fila por proveedor), no en Python sobre cada compra.
+        total_sql = func.sum(Compra.total_compra)
+        agrupado = (
+            session.query(
+                Proveedor.id_proveedor, Proveedor.nombre_razon_social, func.count(Compra.id_compra), total_sql
+            )
+            .select_from(Compra)
+            .outerjoin(Proveedor, Proveedor.id_proveedor == Compra.id_proveedor)
             .filter(Compra.estado_compra != "ANULADA")
             .filter(Compra.fecha_emision >= desde_dt)
             .filter(Compra.fecha_emision <= hasta_dt)
+            .group_by(Proveedor.id_proveedor, Proveedor.nombre_razon_social)
+            .order_by(total_sql.desc(), Proveedor.id_proveedor)
             .all()
         )
-
-        grupos: dict[int, dict] = {}
-        for compra in compras:
-            grupo = grupos.setdefault(
-                compra.id_proveedor,
-                {
-                    "proveedor": (compra.proveedor.nombre_razon_social if compra.proveedor else None),
-                    "cantidad_compras": 0,
-                    "total": Decimal("0.00"),
-                },
-            )
-            grupo["cantidad_compras"] += 1
-            grupo["total"] += compra.total_compra
-
-        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=True)
+        filas = [
+            {"proveedor": nombre, "cantidad_compras": cantidad, "total": to_decimal(total)}
+            for _id, nombre, cantidad, total in agrupado
+        ]
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -1155,30 +1316,24 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        detalles = (
-            session.query(CompraDetalle)
+        # Se suma en la base de datos (una fila por producto), no en Python sobre todas las lineas del periodo.
+        total_sql = func.sum(CompraDetalle.cantidad_producto * CompraDetalle.costo_unitario)
+        agrupado = (
+            session.query(Inventario.nombre_producto, func.sum(CompraDetalle.cantidad_producto), total_sql)
+            .select_from(CompraDetalle)
             .join(Compra, Compra.id_compra == CompraDetalle.id_compra)
-            .options(joinedload(CompraDetalle.producto))
+            .join(Inventario, Inventario.id_producto == CompraDetalle.id_producto_compra)
             .filter(Compra.estado_compra != "ANULADA")
             .filter(Compra.fecha_emision >= desde_dt)
             .filter(Compra.fecha_emision <= hasta_dt)
+            .group_by(Inventario.id_producto, Inventario.nombre_producto)
+            .order_by(total_sql.desc() if orden == "desc" else total_sql.asc(), Inventario.id_producto)
             .all()
         )
-
-        grupos: dict[int, dict] = {}
-        for detalle in detalles:
-            grupo = grupos.setdefault(
-                detalle.id_producto_compra,
-                {
-                    "producto": (detalle.producto.nombre_producto if detalle.producto else detalle.descripcion),
-                    "cantidad": Decimal("0.00"),
-                    "total": Decimal("0.00"),
-                },
-            )
-            grupo["cantidad"] += detalle.cantidad_producto
-            grupo["total"] += detalle.cantidad_producto * detalle.costo_unitario
-
-        filas = sorted(grupos.values(), key=lambda g: g["total"], reverse=(orden == "desc"))
+        filas = [
+            {"producto": nombre, "cantidad": to_decimal(cantidad), "total": to_decimal(total)}
+            for nombre, cantidad, total in agrupado
+        ]
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -1242,51 +1397,50 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        recepciones = (
-            session.query(NotaRecepcion)
-            .join(CompraOC, CompraOC.id_oc == NotaRecepcion.id_oc)
-            .options(joinedload(NotaRecepcion.oc).joinedload(CompraOC.proveedor))
+        # Fecha de la ultima recepcion de cada OC (dentro del rango), calculada en la base; despues se cuenta por
+        # proveedor tambien en la base, no en Python sobre cada recepcion.
+        ultima = (
+            session.query(
+                NotaRecepcion.id_oc.label("id_oc"), func.max(NotaRecepcion.fecha_recepcion).label("ultima_recepcion")
+            )
             .filter(NotaRecepcion.estado != "ANULADA")
             .filter(NotaRecepcion.fecha_recepcion >= desde_dt)
             .filter(NotaRecepcion.fecha_recepcion <= hasta_dt)
+            .group_by(NotaRecepcion.id_oc)
+            .subquery()
+        )
+        sin_fecha = CompraOC.fecha_estimada_entrega.is_(None)
+        llego_a_tiempo = cast(ultima.c.ultima_recepcion, Date) <= CompraOC.fecha_estimada_entrega
+        agrupado = (
+            session.query(
+                CompraOC.id_proveedor,
+                Proveedor.nombre_razon_social,
+                func.count(CompraOC.id_oc),
+                func.sum(case((~sin_fecha & llego_a_tiempo, 1), else_=0)),
+                func.sum(case((~sin_fecha & ~llego_a_tiempo, 1), else_=0)),
+                func.sum(case((sin_fecha, 1), else_=0)),
+            )
+            .select_from(CompraOC)
+            .join(ultima, ultima.c.id_oc == CompraOC.id_oc)
+            .outerjoin(Proveedor, Proveedor.id_proveedor == CompraOC.id_proveedor)
+            .group_by(CompraOC.id_proveedor, Proveedor.nombre_razon_social)
+            .order_by(func.count(CompraOC.id_oc).desc(), CompraOC.id_proveedor)
             .all()
         )
-
-        ultima_recepcion_por_oc: dict[int, datetime] = {}
-        ocs_por_id = {}
-        for nr in recepciones:
-            ocs_por_id[nr.id_oc] = nr.oc
-            actual = ultima_recepcion_por_oc.get(nr.id_oc)
-            if actual is None or nr.fecha_recepcion > actual:
-                ultima_recepcion_por_oc[nr.id_oc] = nr.fecha_recepcion
-
-        grupos: dict[int, dict] = {}
-        for id_oc, fecha_ultima in ultima_recepcion_por_oc.items():
-            oc = ocs_por_id[id_oc]
-            grupo = grupos.setdefault(
-                oc.id_proveedor,
-                {
-                    "proveedor": (oc.proveedor.nombre_razon_social if oc.proveedor else None),
-                    "cantidad_oc": 0,
-                    "a_tiempo": 0,
-                    "tardias": 0,
-                    "sin_fecha_estimada": 0,
-                },
-            )
-            grupo["cantidad_oc"] += 1
-            if oc.fecha_estimada_entrega is None:
-                grupo["sin_fecha_estimada"] += 1
-            elif fecha_ultima.date() <= oc.fecha_estimada_entrega:
-                grupo["a_tiempo"] += 1
-            else:
-                grupo["tardias"] += 1
-
         filas = []
-        for grupo in grupos.values():
-            evaluables = to_decimal(grupo["a_tiempo"]) + to_decimal(grupo["tardias"])
-            pct_a_tiempo = (to_decimal(grupo["a_tiempo"]) / evaluables * Decimal("100")) if evaluables else None
-            filas.append({**grupo, "pct_a_tiempo": pct_a_tiempo})
-        filas.sort(key=lambda f: f["cantidad_oc"], reverse=True)
+        for _id, nombre, cantidad_oc, a_tiempo, tardias, sin_fecha_estimada in agrupado:
+            evaluables = to_decimal(a_tiempo) + to_decimal(tardias)
+            pct_a_tiempo = (to_decimal(a_tiempo) / evaluables * Decimal("100")) if evaluables else None
+            filas.append(
+                {
+                    "proveedor": nombre,
+                    "cantidad_oc": cantidad_oc,
+                    "a_tiempo": int(a_tiempo),
+                    "tardias": int(tardias),
+                    "sin_fecha_estimada": int(sin_fecha_estimada),
+                    "pct_a_tiempo": pct_a_tiempo,
+                }
+            )
 
         return {
             "fecha_desde": fecha_desde,
@@ -1541,7 +1695,13 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        saldo_inicial = Decimal("0.00")
+        # Stock con que el producto ya contaba antes de su primer movimiento rastreable (carga inicial,
+        # ajustes manuales de inventario): lo que le falta al historial de eventos para llegar al stock
+        # real de hoy. Sin esto el kardex arrancaba en 0 y su saldo final no coincidia con el inventario.
+        movimiento_total = sum((e["entrada"] - e["salida"] for e in eventos), Decimal("0.00"))
+        saldo_apertura = to_decimal(producto.cantidad_unidad or 0) - movimiento_total
+
+        saldo_inicial = saldo_apertura
         for evento in eventos:
             if evento["fecha"] < desde_dt:
                 saldo_inicial += evento["entrada"] - evento["salida"]
@@ -1559,6 +1719,7 @@ class ReporteService:
             "nombre_producto": producto.nombre_producto,
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
+            "saldo_apertura": saldo_apertura,
             "saldo_inicial": saldo_inicial,
             "filas": filas,
             "saldo_final": saldo,
@@ -1644,61 +1805,57 @@ class ReporteService:
         fecha_hasta: date,
         id_categoria: int | None = None,
     ) -> dict:
+        """Productos activos sin ventas ni compras en el rango, con la fecha de su ultimo movimiento
+        (en cualquier fecha). Todo se resuelve en la base con tres consultas, sin importar cuantos
+        productos haya: la exclusion es un NOT EXISTS y las ultimas fechas un GROUP BY."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        ids_con_venta = {
-            fila[0]
-            for fila in session.query(FacturaDetalle.id_producto_factura)
-            .join(FacturaVenta, FacturaDetalle.id_factura == FacturaVenta.id_factura)
-            .filter(
-                FacturaVenta.fecha_emision >= desde_dt,
-                FacturaVenta.fecha_emision <= hasta_dt,
-            )
-            .distinct()
-            .all()
-        }
-        ids_con_compra = {
-            fila[0]
-            for fila in session.query(CompraDetalle.id_producto_compra)
-            .join(Compra, CompraDetalle.id_compra == Compra.id_compra)
-            .filter(Compra.fecha_emision >= desde_dt, Compra.fecha_emision <= hasta_dt)
-            .distinct()
-            .all()
-        }
-        ids_con_movimiento = ids_con_venta | ids_con_compra
-
+        con_venta = exists().where(
+            FacturaDetalle.id_producto_factura == Inventario.id_producto,
+            FacturaDetalle.id_factura == FacturaVenta.id_factura,
+            FacturaVenta.fecha_emision >= desde_dt,
+            FacturaVenta.fecha_emision <= hasta_dt,
+        )
+        con_compra = exists().where(
+            CompraDetalle.id_producto_compra == Inventario.id_producto,
+            CompraDetalle.id_compra == Compra.id_compra,
+            Compra.fecha_emision >= desde_dt,
+            Compra.fecha_emision <= hasta_dt,
+        )
         query = (
             session.query(Inventario)
             .options(joinedload(Inventario.categoria))
             .filter(Inventario.estado_producto == "ACTIVO")
+            .filter(~con_venta, ~con_compra)
         )
         if id_categoria is not None:
             query = query.filter(Inventario.id_categoria == id_categoria)
-        if ids_con_movimiento:
-            query = query.filter(~Inventario.id_producto.in_(ids_con_movimiento))
         productos = query.order_by(Inventario.nombre_producto).all()
+
+        ultima_venta = dict(
+            session.query(FacturaDetalle.id_producto_factura, func.max(FacturaVenta.fecha_emision))
+            .join(FacturaVenta, FacturaVenta.id_factura == FacturaDetalle.id_factura)
+            .group_by(FacturaDetalle.id_producto_factura)
+            .all()
+        )
+        ultima_compra = dict(
+            session.query(CompraDetalle.id_producto_compra, func.max(Compra.fecha_emision))
+            .join(Compra, Compra.id_compra == CompraDetalle.id_compra)
+            .group_by(CompraDetalle.id_producto_compra)
+            .all()
+        )
 
         filas = []
         for producto in productos:
-            ultima_venta = (
-                session.query(FacturaVenta.fecha_emision)
-                .join(FacturaDetalle, FacturaDetalle.id_factura == FacturaVenta.id_factura)
-                .filter(FacturaDetalle.id_producto_factura == producto.id_producto)
-                .order_by(FacturaVenta.fecha_emision.desc())
-                .first()
-            )
-            ultima_compra = (
-                session.query(Compra.fecha_emision)
-                .join(CompraDetalle, CompraDetalle.id_compra == Compra.id_compra)
-                .filter(CompraDetalle.id_producto_compra == producto.id_producto)
-                .order_by(Compra.fecha_emision.desc())
-                .first()
-            )
-            fechas = [f[0] for f in (ultima_venta, ultima_compra) if f and f[0] is not None]
+            fechas = [
+                f
+                for f in (ultima_venta.get(producto.id_producto), ultima_compra.get(producto.id_producto))
+                if f is not None
+            ]
             filas.append(
                 {
                     "cod_producto": producto.cod_producto,
@@ -1741,6 +1898,15 @@ class ReporteService:
             query = query.filter(Auditoria.fecha_evento >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
             query = query.filter(Auditoria.fecha_evento <= datetime.combine(fecha_hasta, time.max))
+        # El producto se filtra en la base (el detalle es un JSON con "id_producto": N); el chequeo exacto de
+        # abajo descarta las coincidencias parciales por prefijo ("id_producto": 12 dentro de "id_producto": 123
+        # no pasa el LIKE porque va seguido de coma o llave, pero el JSON podria cambiar de formato).
+        query = query.filter(
+            or_(
+                Auditoria.detalle.like(f'%"id_producto": {int(id_producto)},%'),
+                Auditoria.detalle.like(f'%"id_producto": {int(id_producto)}}}%'),
+            )
+        )
         eventos = query.options(joinedload(Auditoria.usuario)).order_by(Auditoria.fecha_evento).all()
 
         filas = []
@@ -1798,12 +1964,13 @@ class ReporteService:
         fecha_desde: date | None = None,
         fecha_hasta: date | None = None,
     ) -> dict:
-        """Estado de cuenta de un cliente: cargos (facturas a credito) y abonos (pagos
-        aplicados) en orden cronologico con saldo corrido. El cargo original de cada
-        factura se reconstruye como saldo_pendiente + pagos ya aplicados (CuentaPorCobrar
-        no guarda el monto original, solo el saldo que va quedando). Sin fecha_desde/hasta
-        muestra todo el historial (saldo_inicial=0); con rango, los movimientos previos a
-        fecha_desde se pliegan en saldo_inicial, mismo criterio que kardex_producto."""
+        """Estado de cuenta de un cliente: cargos (facturas a credito, normales y BCV) y abonos (pagos
+        aplicados y notas de credito aplicadas) en orden cronologico con saldo corrido. El cargo original
+        de cada factura se reconstruye como saldo_pendiente + pagos ya aplicados + notas de credito
+        aplicadas (la cuenta por cobrar no guarda el monto original, solo el saldo que va quedando). Las
+        facturas con cuenta BCV cargan su monto por la cuenta BCV: su cuenta normal queda en cero. Sin
+        fecha_desde/hasta muestra todo el historial (saldo_inicial=0); con rango, los movimientos previos
+        a fecha_desde se pliegan en saldo_inicial, mismo criterio que kardex_producto."""
         require_permiso(session, id_usuario, "reportes", "ver")
         cliente = session.get(Cliente, id_cliente)
         if cliente is None:
@@ -1829,6 +1996,28 @@ class ReporteService:
             .options(joinedload(PagoCobro.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura))
             .all()
         )
+        cuentas_bcv = (
+            session.query(CuentaPorCobrarBCV)
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .options(joinedload(CuentaPorCobrarBCV.factura))
+            .filter(FacturaVenta.id_cliente_factura == id_cliente)
+            .filter(CuentaPorCobrarBCV.estado != "anulada")
+            .all()
+        )
+        pagos_bcv = (
+            session.query(PagoCobroBCV)
+            .join(
+                CuentaPorCobrarBCV,
+                CuentaPorCobrarBCV.id_cuenta_por_cobrar == PagoCobroBCV.id_cuenta_por_cobrar,
+            )
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .filter(FacturaVenta.id_cliente_factura == id_cliente)
+            .options(joinedload(PagoCobroBCV.cuenta_por_cobrar).joinedload(CuentaPorCobrarBCV.factura))
+            .all()
+        )
+        ids_facturas_cliente = {c.id_factura for c in cuentas}
+        aplicaciones_nc = [a for a in _aplicaciones_nc_cliente(session) if a["id_factura"] in ids_facturas_cliente]
+        ids_facturas_bcv = {c.id_factura for c in cuentas_bcv}
 
         eventos = []
         for cuenta in cuentas:
@@ -1836,11 +2025,31 @@ class ReporteService:
                 (p.monto for p in pagos if p.id_cuenta_por_cobrar == cuenta.id_cuenta_por_cobrar),
                 Decimal("0.00"),
             )
+            nc_de_cuenta = sum(
+                (a["monto"] for a in aplicaciones_nc if a["id_factura"] == cuenta.id_factura), Decimal("0.00")
+            )
+            cargo = cuenta.saldo_pendiente + pagos_de_cuenta + nc_de_cuenta
+            if cargo == 0 and cuenta.id_factura in ids_facturas_bcv:
+                continue  # factura BCV: su cargo va por la cuenta BCV, esta cuenta normal solo esta en cero
             eventos.append(
                 {
                     "fecha": cuenta.factura.fecha_emision,
                     "tipo": "Factura",
                     "referencia": cuenta.factura.numero_factura,
+                    "cargo": cargo,
+                    "abono": Decimal("0.00"),
+                }
+            )
+        for cuenta in cuentas_bcv:
+            pagos_de_cuenta = sum(
+                (p.monto for p in pagos_bcv if p.id_cuenta_por_cobrar == cuenta.id_cuenta_por_cobrar),
+                Decimal("0.00"),
+            )
+            eventos.append(
+                {
+                    "fecha": cuenta.factura.fecha_emision,
+                    "tipo": "Factura",
+                    "referencia": f"{cuenta.factura.numero_factura} (BCV)",
                     "cargo": cuenta.saldo_pendiente + pagos_de_cuenta,
                     "abono": Decimal("0.00"),
                 }
@@ -1853,6 +2062,26 @@ class ReporteService:
                     "referencia": pago.referencia or pago.cuenta_por_cobrar.factura.numero_factura,
                     "cargo": Decimal("0.00"),
                     "abono": pago.monto,
+                }
+            )
+        for pago in pagos_bcv:
+            eventos.append(
+                {
+                    "fecha": pago.fecha_pago,
+                    "tipo": "Pago",
+                    "referencia": pago.referencia or f"{pago.cuenta_por_cobrar.factura.numero_factura} (BCV)",
+                    "cargo": Decimal("0.00"),
+                    "abono": pago.monto,
+                }
+            )
+        for aplicacion in aplicaciones_nc:
+            eventos.append(
+                {
+                    "fecha": aplicacion["fecha"],
+                    "tipo": "Nota de crédito",
+                    "referencia": aplicacion["numero_nota_credito"],
+                    "cargo": Decimal("0.00"),
+                    "abono": aplicacion["monto"],
                 }
             )
         eventos.sort(key=lambda e: e["fecha"])
@@ -1893,6 +2122,8 @@ class ReporteService:
         fecha_hasta: date,
         id_cliente: int | None = None,
     ) -> dict:
+        """Cobros (pagos aplicados a cuentas por cobrar) del rango, de la cartera normal y de la BCV
+        (cada fila dice de cual viene en `cartera`), en orden cronologico."""
         require_permiso(session, id_usuario, "reportes", "ver")
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
@@ -1913,13 +2144,29 @@ class ReporteService:
             )
             .filter(PagoCobro.fecha_pago >= desde_dt, PagoCobro.fecha_pago <= hasta_dt)
         )
+        query_bcv = (
+            session.query(PagoCobroBCV)
+            .join(
+                CuentaPorCobrarBCV,
+                CuentaPorCobrarBCV.id_cuenta_por_cobrar == PagoCobroBCV.id_cuenta_por_cobrar,
+            )
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .options(
+                joinedload(PagoCobroBCV.cuenta_por_cobrar)
+                .joinedload(CuentaPorCobrarBCV.factura)
+                .joinedload(FacturaVenta.cliente)
+            )
+            .filter(PagoCobroBCV.fecha_pago >= desde_dt, PagoCobroBCV.fecha_pago <= hasta_dt)
+        )
         if id_cliente is not None:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
-        pagos = query.order_by(PagoCobro.fecha_pago).all()
+            query_bcv = query_bcv.filter(FacturaVenta.id_cliente_factura == id_cliente)
+        pagos = [("Normal", p) for p in query.all()] + [("BCV", p) for p in query_bcv.all()]
+        pagos.sort(key=lambda par: par[1].fecha_pago)
 
         filas = []
         totales_por_metodo: dict[str, Decimal] = {}
-        for pago in pagos:
+        for cartera, pago in pagos:
             factura = pago.cuenta_por_cobrar.factura
             totales_por_metodo[pago.metodo_pago] = (
                 totales_por_metodo.get(pago.metodo_pago, Decimal("0.00")) + pago.monto
@@ -1929,6 +2176,7 @@ class ReporteService:
                     "fecha_pago": pago.fecha_pago,
                     "cliente": (factura.cliente.nombre_razon_social if factura.cliente else None),
                     "numero_factura": factura.numero_factura,
+                    "cartera": cartera,
                     "metodo_pago": pago.metodo_pago,
                     "moneda": pago.moneda,
                     "monto": pago.monto,
@@ -1944,22 +2192,42 @@ class ReporteService:
 
     @staticmethod
     def clientes_morosos(session: Session, id_usuario: int | None, fecha_corte: date | None = None) -> dict:
-        """Agrupa por cliente las cuentas por cobrar abiertas y VENCIDAS (mismo universo que
-        aging_cuentas_por_cobrar excluyendo el bucket 'vigente'), agregando saldo total
-        vencido y antiguedad maxima por cliente en vez de por bucket."""
+        """Agrupa por cliente las cuentas por cobrar abiertas y VENCIDAS, de la cartera normal y de la BCV
+        (mismo universo que los aging excluyendo el bucket 'vigente'), agregando saldo total vencido y
+        antiguedad maxima por cliente en vez de por bucket. Con un corte pasado se reconstruye el saldo
+        que tenia cada cuenta a esa fecha (ver _cuentas_al_corte)."""
         require_permiso(session, id_usuario, "reportes", "ver")
         fecha_corte = fecha_corte or date.today()
 
-        cuentas = (
+        cuentas = _cuentas_al_corte(
+            session,
             session.query(CuentaPorCobrar)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
-            .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente))
-            .filter(CuentaPorCobrar.estado.in_(ESTADOS_CXC_ABIERTOS))
-            .all()
+            .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente)),
+            CuentaPorCobrar,
+            PagoCobro,
+            PagoCobro.id_cuenta_por_cobrar,
+            FacturaVenta.fecha_emision,
+            ESTADOS_CXC_ABIERTOS,
+            fecha_corte,
+            CuentaPorCobrar.fecha_vencimiento,
+            nc_por_factura=_nc_aplicadas_despues_del_corte(session, fecha_corte),
+        ) + _cuentas_al_corte(
+            session,
+            session.query(CuentaPorCobrarBCV)
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente)),
+            CuentaPorCobrarBCV,
+            PagoCobroBCV,
+            PagoCobroBCV.id_cuenta_por_cobrar,
+            FacturaVenta.fecha_emision,
+            ESTADOS_CXC_BCV_ABIERTOS,
+            fecha_corte,
+            CuentaPorCobrarBCV.fecha_vencimiento,
         )
 
         por_cliente: dict[int | None, dict] = {}
-        for cuenta in cuentas:
+        for cuenta, saldo in cuentas:
             dias_vencido = (fecha_corte - cuenta.fecha_vencimiento).days if cuenta.fecha_vencimiento else 0
             if dias_vencido <= 0:
                 continue
@@ -1975,7 +2243,7 @@ class ReporteService:
                     "facturas_vencidas": 0,
                 },
             )
-            entrada["saldo_vencido"] += cuenta.saldo_pendiente
+            entrada["saldo_vencido"] += saldo
             entrada["dias_vencido_max"] = max(entrada["dias_vencido_max"], dias_vencido)
             entrada["facturas_vencidas"] += 1
 
@@ -2120,27 +2388,34 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        query = (
-            session.query(Caja)
-            .options(joinedload(Caja.usuario))
-            .filter(Caja.fecha_apertura.isnot(None))
-            .filter(Caja.fecha_apertura >= desde_dt, Caja.fecha_apertura <= hasta_dt)
+        def _filtros_turnos(query):
+            query = query.filter(Caja.fecha_apertura.isnot(None)).filter(
+                Caja.fecha_apertura >= desde_dt, Caja.fecha_apertura <= hasta_dt
+            )
+            if id_usuario_cajero is not None:
+                query = query.filter(Caja.id_usuario == id_usuario_cajero)
+            return query
+
+        turnos = (
+            _filtros_turnos(session.query(Caja).options(joinedload(Caja.usuario))).order_by(Caja.fecha_apertura).all()
         )
-        if id_usuario_cajero is not None:
-            query = query.filter(Caja.id_usuario == id_usuario_cajero)
-        turnos = query.order_by(Caja.fecha_apertura).all()
+
+        # Entradas/salidas de todos los turnos en una sola consulta (antes una por turno).
+        totales: dict[tuple[int, str], Decimal] = {
+            (id_caja, tipo): to_decimal(monto)
+            for id_caja, tipo, monto in _filtros_turnos(
+                session.query(
+                    CajaMovimiento.id_caja, CajaMovimiento.tipo_movimiento, func.sum(CajaMovimiento.monto_movimiento)
+                ).join(Caja, Caja.id_caja == CajaMovimiento.id_caja)
+            )
+            .group_by(CajaMovimiento.id_caja, CajaMovimiento.tipo_movimiento)
+            .all()
+        }
 
         filas = []
         for caja in turnos:
-            movimientos = session.query(CajaMovimiento).filter(CajaMovimiento.id_caja == caja.id_caja).all()
-            total_entradas = sum(
-                (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "entrada"),
-                Decimal("0.00"),
-            )
-            total_salidas = sum(
-                (to_decimal(m.monto_movimiento) for m in movimientos if m.tipo_movimiento == "salida"),
-                Decimal("0.00"),
-            )
+            total_entradas = totales.get((caja.id_caja, "entrada"), Decimal("0.00"))
+            total_salidas = totales.get((caja.id_caja, "salida"), Decimal("0.00"))
             saldo_apertura = caja.saldo_apertura or Decimal("0.00")
             saldo_esperado = saldo_apertura + total_entradas - total_salidas
             diferencia = (caja.saldo_cierre - saldo_esperado) if caja.saldo_cierre is not None else None
@@ -2187,9 +2462,6 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
-        def _periodo(fecha: datetime) -> date:
-            return date(fecha.year, fecha.month, 1) if agrupacion == "mes" else fecha.date()
-
         def _fila_vacia(periodo: date) -> dict:
             return {
                 "periodo": periodo,
@@ -2199,36 +2471,41 @@ class ReporteService:
                 "salidas_banco": Decimal("0.00"),
             }
 
-        movimientos_caja = (
-            session.query(CajaMovimiento)
-            .filter(
-                CajaMovimiento.fecha_registro >= desde_dt,
-                CajaMovimiento.fecha_registro <= hasta_dt,
+        # Se suma en la base de datos (una fila por periodo y direccion), no en Python sobre cada movimiento.
+        periodo_caja = _periodo_sql(CajaMovimiento.fecha_registro, agrupacion)
+        periodo_banco = _periodo_sql(BancoMovimiento.fecha_movimiento, agrupacion)
+        entra_caja = CajaMovimiento.tipo_movimiento == "entrada"
+        entra_banco = BancoMovimiento.tipo_movimiento.in_(("abono", "deposito"))
+        caja_por_periodo = (
+            session.query(
+                periodo_caja,
+                func.sum(case((entra_caja, CajaMovimiento.monto_movimiento), else_=0)),
+                func.sum(case((entra_caja, 0), else_=CajaMovimiento.monto_movimiento)),
             )
+            .filter(CajaMovimiento.fecha_registro >= desde_dt, CajaMovimiento.fecha_registro <= hasta_dt)
+            .group_by(periodo_caja)
             .all()
         )
-        movimientos_banco = (
-            session.query(BancoMovimiento)
-            .filter(
-                BancoMovimiento.fecha_movimiento >= desde_dt,
-                BancoMovimiento.fecha_movimiento <= hasta_dt,
+        banco_por_periodo = (
+            session.query(
+                periodo_banco,
+                func.sum(case((entra_banco, BancoMovimiento.monto_movimiento), else_=0)),
+                func.sum(case((entra_banco, 0), else_=BancoMovimiento.monto_movimiento)),
             )
+            .filter(BancoMovimiento.fecha_movimiento >= desde_dt, BancoMovimiento.fecha_movimiento <= hasta_dt)
+            .group_by(periodo_banco)
             .all()
         )
 
         por_periodo: dict[date, dict] = {}
-        for m in movimientos_caja:
-            fila = por_periodo.setdefault(_periodo(m.fecha_registro), _fila_vacia(_periodo(m.fecha_registro)))
-            if m.tipo_movimiento == "entrada":
-                fila["entradas_caja"] += m.monto_movimiento
-            else:
-                fila["salidas_caja"] += m.monto_movimiento
-        for m in movimientos_banco:
-            fila = por_periodo.setdefault(_periodo(m.fecha_movimiento), _fila_vacia(_periodo(m.fecha_movimiento)))
-            if m.tipo_movimiento in ("abono", "deposito"):
-                fila["entradas_banco"] += m.monto_movimiento
-            else:
-                fila["salidas_banco"] += m.monto_movimiento
+        for periodo, entradas, salidas in caja_por_periodo:
+            fila = por_periodo.setdefault(periodo, _fila_vacia(periodo))
+            fila["entradas_caja"] += to_decimal(entradas)
+            fila["salidas_caja"] += to_decimal(salidas)
+        for periodo, entradas, salidas in banco_por_periodo:
+            fila = por_periodo.setdefault(periodo, _fila_vacia(periodo))
+            fila["entradas_banco"] += to_decimal(entradas)
+            fila["salidas_banco"] += to_decimal(salidas)
 
         filas = sorted(por_periodo.values(), key=lambda f: f["periodo"])
         for fila in filas:
@@ -2580,37 +2857,43 @@ class ReporteService:
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
-        query = session.query(CuentaPorPagarOtro).options(joinedload(CuentaPorPagarOtro.cuenta_bancaria))
+        # Se agrupa y suma en la base de datos (una fila por cuenta bancaria), no en Python sobre cada partida.
+        conciliada = CuentaPorPagarOtro.estado == "conciliado"
+        total_pendiente_sql = func.sum(case((conciliada, 0), else_=CuentaPorPagarOtro.saldo_pendiente))
+        query = (
+            session.query(
+                CuentaPorPagarOtro.id_cuenta_bancaria,
+                CuentaBancaria.numero_cuenta,
+                total_pendiente_sql,
+                func.sum(case((conciliada, CuentaPorPagarOtro.monto_total), else_=0)),
+                func.sum(case((conciliada, 0), else_=1)),
+                func.sum(case((conciliada, 1), else_=0)),
+            )
+            .select_from(CuentaPorPagarOtro)
+            .outerjoin(CuentaBancaria, CuentaBancaria.id_cuenta == CuentaPorPagarOtro.id_cuenta_bancaria)
+        )
         if id_cuenta_bancaria is not None:
             query = query.filter(CuentaPorPagarOtro.id_cuenta_bancaria == id_cuenta_bancaria)
         if fecha_desde is not None:
             query = query.filter(CuentaPorPagarOtro.fecha_recepcion >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
             query = query.filter(CuentaPorPagarOtro.fecha_recepcion <= datetime.combine(fecha_hasta, time.max))
-        partidas = query.all()
-
-        por_cuenta: dict[int, dict] = {}
-        for partida in partidas:
-            cuenta = partida.cuenta_bancaria
-            entrada = por_cuenta.setdefault(
-                partida.id_cuenta_bancaria,
-                {
-                    "id_cuenta_bancaria": partida.id_cuenta_bancaria,
-                    "numero_cuenta": cuenta.numero_cuenta if cuenta else None,
-                    "total_pendiente": Decimal("0.00"),
-                    "total_conciliado": Decimal("0.00"),
-                    "cantidad_pendiente": 0,
-                    "cantidad_conciliada": 0,
-                },
-            )
-            if partida.estado == "conciliado":
-                entrada["total_conciliado"] += partida.monto_total
-                entrada["cantidad_conciliada"] += 1
-            else:
-                entrada["total_pendiente"] += partida.saldo_pendiente
-                entrada["cantidad_pendiente"] += 1
-
-        filas = sorted(por_cuenta.values(), key=lambda f: f["total_pendiente"], reverse=True)
+        agrupado = (
+            query.group_by(CuentaPorPagarOtro.id_cuenta_bancaria, CuentaBancaria.numero_cuenta)
+            .order_by(total_pendiente_sql.desc(), CuentaPorPagarOtro.id_cuenta_bancaria)
+            .all()
+        )
+        filas = [
+            {
+                "id_cuenta_bancaria": id_cuenta,
+                "numero_cuenta": numero,
+                "total_pendiente": to_decimal(pendiente),
+                "total_conciliado": to_decimal(conciliado_total),
+                "cantidad_pendiente": int(n_pendientes),
+                "cantidad_conciliada": int(n_conciliadas),
+            }
+            for id_cuenta, numero, pendiente, conciliado_total, n_pendientes, n_conciliadas in agrupado
+        ]
         return {
             "filas": filas,
             "total_pendiente": sum((f["total_pendiente"] for f in filas), Decimal("0.00")),
@@ -2673,9 +2956,17 @@ class ReporteService:
         desde_dt = datetime.combine(fecha_desde, time.min)
         hasta_dt = datetime.combine(fecha_hasta, time.max)
 
+        # Se agrupa y suma en la base de datos (una fila por vendedor), no en Python sobre cada comision.
+        monto_sql = func.sum(func.coalesce(ComisionFactura.monto_comision, 0))
         query = (
-            session.query(ComisionFactura)
-            .options(joinedload(ComisionFactura.vendedor))
+            session.query(
+                ComisionFactura.id_vendedor,
+                Vendedor.nombre_vendedor,
+                func.count(ComisionFactura.id_comision),
+                monto_sql,
+            )
+            .select_from(ComisionFactura)
+            .outerjoin(Vendedor, Vendedor.id_vendedor == ComisionFactura.id_vendedor)
             .filter(
                 ComisionFactura.fecha_calculo >= desde_dt,
                 ComisionFactura.fecha_calculo <= hasta_dt,
@@ -2683,24 +2974,20 @@ class ReporteService:
         )
         if id_vendedor is not None:
             query = query.filter(ComisionFactura.id_vendedor == id_vendedor)
-        comisiones = query.all()
-
-        por_vendedor: dict[int, dict] = {}
-        for c in comisiones:
-            vendedor = c.vendedor
-            entrada = por_vendedor.setdefault(
-                c.id_vendedor,
-                {
-                    "id_vendedor": c.id_vendedor,
-                    "vendedor": vendedor.nombre_vendedor if vendedor else None,
-                    "cantidad_facturas": 0,
-                    "monto_comision": Decimal("0.00"),
-                },
-            )
-            entrada["cantidad_facturas"] += 1
-            entrada["monto_comision"] += c.monto_comision or Decimal("0.00")
-
-        filas = sorted(por_vendedor.values(), key=lambda f: f["monto_comision"], reverse=True)
+        agrupado = (
+            query.group_by(ComisionFactura.id_vendedor, Vendedor.nombre_vendedor)
+            .order_by(monto_sql.desc(), ComisionFactura.id_vendedor)
+            .all()
+        )
+        filas = [
+            {
+                "id_vendedor": id_vend,
+                "vendedor": nombre,
+                "cantidad_facturas": cantidad,
+                "monto_comision": to_decimal(monto),
+            }
+            for id_vend, nombre, cantidad, monto in agrupado
+        ]
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
@@ -2720,37 +3007,43 @@ class ReporteService:
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
-        query = session.query(ComisionFactura).options(joinedload(ComisionFactura.vendedor))
+        # Se agrupa y suma en la base de datos (una fila por vendedor), no en Python sobre cada comision.
+        monto = func.coalesce(ComisionFactura.monto_comision, 0)
+        pagada = ComisionFactura.estado_pago == "pagada"
+        liberada = ComisionFactura.estado_pago == "liberada"
+        liberada_sql = func.sum(case((liberada, monto), else_=0))
+        query = (
+            session.query(
+                ComisionFactura.id_vendedor,
+                Vendedor.nombre_vendedor,
+                func.sum(case((pagada, monto), else_=0)),
+                liberada_sql,
+                func.sum(case((pagada | liberada, 0), else_=monto)),
+            )
+            .select_from(ComisionFactura)
+            .outerjoin(Vendedor, Vendedor.id_vendedor == ComisionFactura.id_vendedor)
+        )
         if id_vendedor is not None:
             query = query.filter(ComisionFactura.id_vendedor == id_vendedor)
         if fecha_desde is not None:
             query = query.filter(ComisionFactura.fecha_calculo >= datetime.combine(fecha_desde, time.min))
         if fecha_hasta is not None:
             query = query.filter(ComisionFactura.fecha_calculo <= datetime.combine(fecha_hasta, time.max))
-        comisiones = query.all()
-
-        por_vendedor: dict[int, dict] = {}
-        for c in comisiones:
-            vendedor = c.vendedor
-            entrada = por_vendedor.setdefault(
-                c.id_vendedor,
-                {
-                    "id_vendedor": c.id_vendedor,
-                    "vendedor": vendedor.nombre_vendedor if vendedor else None,
-                    "pagado": Decimal("0.00"),
-                    "liberada": Decimal("0.00"),
-                    "pendiente": Decimal("0.00"),
-                },
-            )
-            monto = c.monto_comision or Decimal("0.00")
-            if c.estado_pago == "pagada":
-                entrada["pagado"] += monto
-            elif c.estado_pago == "liberada":
-                entrada["liberada"] += monto
-            else:
-                entrada["pendiente"] += monto
-
-        filas = sorted(por_vendedor.values(), key=lambda f: f["liberada"], reverse=True)
+        agrupado = (
+            query.group_by(ComisionFactura.id_vendedor, Vendedor.nombre_vendedor)
+            .order_by(liberada_sql.desc(), ComisionFactura.id_vendedor)
+            .all()
+        )
+        filas = [
+            {
+                "id_vendedor": id_vend,
+                "vendedor": nombre,
+                "pagado": to_decimal(pagado),
+                "liberada": to_decimal(liberada_total),
+                "pendiente": to_decimal(pendiente),
+            }
+            for id_vend, nombre, pagado, liberada_total, pendiente in agrupado
+        ]
         return {
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,

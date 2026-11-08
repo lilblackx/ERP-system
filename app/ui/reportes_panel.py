@@ -17,7 +17,7 @@ import logging
 from decimal import Decimal
 
 import qtawesome as qta
-from PySide6.QtCore import QDate, Qt, QTimer
+from PySide6.QtCore import QAbstractListModel, QDate, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QColor, QShowEvent, QTextCharFormat
 from PySide6.QtWidgets import (
     QComboBox,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.models import (
+    Banco,
     Caja,
     Categoria,
     Cliente,
@@ -155,21 +156,42 @@ COLS_LIBRO_VENTAS = [
     "Fecha",
     "N° Control",
     "N° Factura",
+    "Estado",
     "Cliente",
     "RIF/Cédula",
+    "Exento",
     "Base Imponible",
     "% IVA",
     "IVA",
     "Total",
+    "Tasa BCV",
+    "Total Bs",
 ]
+COLS_LIBRO_VENTAS_NC = ["Fecha", "N° NC", "Cliente", "RIF/Cédula", "Monto", "Motivo"]
 COLS_VENTAS_PERIODO = ["Fecha", "Facturas", "Total"]
 COLS_VENTAS_CLIENTE = ["Cliente", "Facturas", "Total"]
 COLS_VENTAS_VENDEDOR = ["Vendedor", "Facturas", "Total", "Ticket Promedio"]
 COLS_VENTAS_RUTA = ["Ruta", "Facturas", "Total", "Ticket Promedio"]
-COLS_VENTAS_PRODUCTOS_CLIENTES = ["Producto", "Código", "Cantidad Total", "Monto Total", "Clientes"]
+COLS_VENTAS_PRODUCTOS_CLIENTES = ["Producto", "Código", "Bultos", "Unidades", "Monto Total", "Clientes"]
+# Exportacion: una fila por producto y cliente (la pantalla resume solo los 5 principales por producto).
+COLS_VENTAS_PRODUCTOS_CLIENTES_EXPORT = [
+    "Producto",
+    "Código",
+    "Cliente",
+    "Identificación",
+    "Bultos",
+    "Unidades",
+    "Monto",
+]
+
+# Reportes anchos: el PDF sale en hoja horizontal.
+# Filas maximas que se exportan a PDF (a Excel no hay limite): ver _exportar_pdf.
+LIMITE_FILAS_PDF = 20_000
+
+REPORTES_APAISADOS = frozenset({REPORTE_LIBRO_VENTAS, REPORTE_OC_ABIERTAS, REPORTE_CIERRE_CAJERO})
 COLS_ACTIVACION_CLIENTES = ["Cliente", "Vendedor", "Facturas", "Meta", "Efectividad %"]
-COLS_PRODUCTOS_VENDIDOS = ["Producto", "Cantidad", "Total"]
-COLS_FACTURAS_ANULADAS = ["N° Factura", "Cliente", "Vendedor", "Fecha", "Motivo"]
+COLS_PRODUCTOS_VENDIDOS = ["Producto", "Bultos", "Unidades", "Total"]
+COLS_FACTURAS_ANULADAS = ["N° Factura", "Cliente", "Vendedor", "Emisión", "Anulación", "Motivo"]
 COLS_NC_EMITIDAS = [
     "N° NC",
     "Cliente",
@@ -182,7 +204,8 @@ COLS_NC_EMITIDAS = [
 COLS_CONTADO_CREDITO = ["Condición", "Facturas", "Total", "% del Total"]
 COLS_MARGEN_UTILIDAD = [
     "Producto",
-    "Cantidad",
+    "Bultos",
+    "Unidades",
     "Ingreso",
     "Costo",
     "Margen $",
@@ -250,7 +273,7 @@ COLS_SIN_MOVIMIENTO = [
 ]
 COLS_HISTORICO_PRECIOS = ["Fecha", "Precio Venta", "Margen %", "Usuario"]
 COLS_ESTADO_CTA_CLIENTE = ["Fecha", "Tipo", "Referencia", "Cargo", "Abono", "Saldo"]
-COLS_COBROS_PERIODO = ["Fecha", "Cliente", "Factura", "Método", "Moneda", "Monto"]
+COLS_COBROS_PERIODO = ["Fecha", "Cliente", "Factura", "Cartera", "Método", "Moneda", "Monto"]
 COLS_CLIENTES_MOROSOS = [
     "Cliente",
     "Saldo Vencido",
@@ -487,15 +510,19 @@ def _estilizar_fecha(date_edit: QDateEdit) -> None:
         calendario.setWeekdayTextFormat(dia, formato)
 
 
-def _tarea_exportar_reporte_excel(session, ruta, encabezados, filas, titulo, config_empresa) -> tuple[str, int]:
+def _tarea_exportar_reporte_excel(
+    session, ruta, encabezados, filas, titulo, config_empresa, filtros=None, secciones=None
+) -> tuple[str, int]:
     """Corre en un QThread aparte (QueryWorker) -- reportes con muchas filas pueden
     tardar varios segundos en volcarse a Excel/PDF, sin esto congelaban la ventana."""
-    exportar_excel(ruta, encabezados, filas, titulo=titulo, config_empresa=config_empresa)
+    exportar_excel(
+        ruta, encabezados, filas, titulo=titulo, config_empresa=config_empresa, filtros=filtros, secciones=secciones
+    )
     return ruta, len(filas)
 
 
 def _tarea_exportar_reporte_pdf(
-    session, ruta, encabezados, filas, titulo, filtros, col_widths, config_empresa
+    session, ruta, encabezados, filas, titulo, filtros, col_widths, config_empresa, secciones=None, apaisado=False
 ) -> tuple[str, int]:
     exportar_pdf(
         ruta,
@@ -505,6 +532,8 @@ def _tarea_exportar_reporte_pdf(
         filtros=filtros,
         col_widths=col_widths,
         config_empresa=config_empresa,
+        secciones=secciones,
+        apaisado=apaisado,
     )
     return ruta, len(filas)
 
@@ -874,9 +903,89 @@ def _tarea_productos_proximos_vencer(session, id_usuario, dias_horizonte, id_cat
     )
 
 
+def _tarea_catalogos_filtros(session) -> dict:
+    """Corre en un hilo aparte: los catalogos de los combos de filtros, como tuplas simples (id, texto) y sin
+    entidades ORM. Antes se cargaban 8 listas completas en el hilo de la ventana al abrir el modulo."""
+    return {
+        "clientes": [
+            (r.id_cliente, r.nombre_razon_social)
+            for r in session.query(Cliente.id_cliente, Cliente.nombre_razon_social)
+            .filter(Cliente.estado_cliente == "ACTIVO")
+            .order_by(Cliente.nombre_razon_social)
+        ],
+        "proveedores": [
+            (r.id_proveedor, r.nombre_razon_social)
+            for r in session.query(Proveedor.id_proveedor, Proveedor.nombre_razon_social)
+            .filter(Proveedor.estado_proveedor == "ACTIVO")
+            .order_by(Proveedor.nombre_razon_social)
+        ],
+        "cajas": [
+            (r.id_caja, r.nombre_caja or f"Caja {r.id_caja}")
+            for r in session.query(Caja.id_caja, Caja.nombre_caja).order_by(Caja.nombre_caja)
+        ],
+        "vendedores": [
+            (r.id_vendedor, r.nombre_vendedor)
+            for r in session.query(Vendedor.id_vendedor, Vendedor.nombre_vendedor).order_by(Vendedor.nombre_vendedor)
+        ],
+        "cajeros": [
+            (r.id_usuario, r.nombre_usuario)
+            for r in session.query(Usuario.id_usuario, Usuario.nombre_usuario)
+            .filter(Usuario.estado == "ACTIVO")
+            .order_by(Usuario.nombre_usuario)
+        ],
+        "productos": [
+            (r.id_producto, f"{r.cod_producto} - {r.nombre_producto}")
+            for r in session.query(Inventario.id_producto, Inventario.cod_producto, Inventario.nombre_producto)
+            .filter(Inventario.estado_producto == "ACTIVO")
+            .order_by(Inventario.nombre_producto)
+        ],
+        "categorias": [
+            (r.id_categoria, r.nombre)
+            for r in session.query(Categoria.id_categoria, Categoria.nombre).order_by(Categoria.nombre)
+        ],
+        "cuentas": [
+            (r.id_cuenta, f"{r.nombre_banco or 'N/A'} - {r.numero_cuenta}")
+            for r in session.query(CuentaBancaria.id_cuenta, Banco.nombre_banco, CuentaBancaria.numero_cuenta)
+            .outerjoin(Banco, Banco.id_banco == CuentaBancaria.id_banco)
+            .order_by(CuentaBancaria.numero_cuenta)
+        ],
+    }
+
+
+class _ModeloLista(QAbstractListModel):
+    """Modelo de solo lectura para los combos de filtros: guarda la lista de (id, texto) tal cual y responde bajo
+    demanda. Con QStandardItemModel se creaba un objeto por cada cliente/producto en el hilo de la ventana: 30 000
+    clientes y 15 000 productos eran 2,6 s de congelamiento y +100 MB al abrir Reportes."""
+
+    def __init__(self, filas: list[tuple], primero: str | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self._filas = ([(None, primero)] if primero is not None else []) + list(filas)
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: B008 - firma de Qt
+        return 0 if parent.isValid() else len(self._filas)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or not 0 <= index.row() < len(self._filas):
+            return None
+        id_, texto = self._filas[index.row()]
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
+            return texto
+        if role == Qt.ItemDataRole.UserRole:
+            return id_
+        return None
+
+
+def _modelo_combo(filas: list[tuple], primero: str | None = None) -> _ModeloLista:
+    """Un solo modelo que comparten todos los combos del mismo catalogo: llenar 7 combos de clientes uno por uno
+    multiplicaba por 7 el trabajo (y la memoria) sin necesidad. `primero` agrega la opcion sin filtro."""
+    return _ModeloLista(filas, primero)
+
+
 class ReportesPanel(QWidget):
     """Panel principal del modulo Reportes: selector de reporte + filtros propios de
     cada uno + tabla de resultados + exportacion a Excel/PDF."""
+
+    _combos_snapshot: dict[int, str] = {}
 
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
@@ -886,14 +995,7 @@ class ReportesPanel(QWidget):
         self._ultimo_resultado: dict | None = None
         self.setObjectName("ContentArea")
         self._setup_ui()
-        self._cargar_clientes()
-        self._cargar_proveedores()
-        self._cargar_cajas()
-        self._cargar_productos()
-        self._cargar_categorias()
-        self._cargar_cuentas_bancarias()
-        self._cargar_usuarios_cajero()
-        self._cargar_vendedores()
+        self._cargar_catalogos()
         QTimer.singleShot(100, self._generar)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -2304,19 +2406,30 @@ class ReportesPanel(QWidget):
 
     # ── Filtros auxiliares (combos) ────────────────────────────────────────
 
-    def _cargar_clientes(self) -> None:
-        session = self.session_factory()
-        try:
-            clientes = (
-                session.query(Cliente)
-                .filter(Cliente.estado_cliente == "ACTIVO")
-                .order_by(Cliente.nombre_razon_social)
-                .all()
-            )
-            # Combos independientes, uno por pagina de filtros que necesita elegir cliente
-            # -- un QWidget no puede pertenecer a dos layouts a la vez, asi que no se puede
-            # reusar la misma instancia entre paginas distintas.
-            for combo in (
+    def _cargar_catalogos(self) -> None:
+        """Pide en un hilo aparte los catalogos de los combos de filtros; los llena al llegar."""
+        self._worker_catalogos = QueryWorker(self.session_factory, _tarea_catalogos_filtros)
+        self._worker_catalogos.resultado.connect(self._llenar_catalogos)
+        self._worker_catalogos.error.connect(self._error_catalogos)
+        self._worker_catalogos.start()
+
+    def _error_catalogos(self, mensaje: str) -> None:
+        # QueryWorker ya dejo el detalle en el log.
+        MessageBox.warning(self, "Filtros", "No se pudieron cargar las listas de los filtros.")
+
+    def _llenar_catalogos(self, datos: dict) -> None:
+        self._modelos_combo: list = []  # los combos no son dueños del modelo compartido
+
+        def asignar(combos, filas, primero=None):
+            modelo = _modelo_combo(filas, primero)
+            self._modelos_combo.append(modelo)
+            for combo in combos:
+                combo.setModel(modelo)
+                combo.setCurrentIndex(0 if modelo.rowCount() else -1)
+
+        # Combos independientes, uno por pagina de filtros: un QWidget no puede pertenecer a dos layouts a la vez.
+        asignar(
+            (
                 self.cliente_combo,
                 self.cliente_combo_bcv,
                 self.cliente_combo_lv,
@@ -2324,27 +2437,12 @@ class ReportesPanel(QWidget):
                 self.cliente_combo_ecc,
                 self.cliente_combo_cbp,
                 self.cliente_combo_cxco,
-            ):
-                combo.clear()
-                combo.addItem("Todos los clientes")
-                for cliente in clientes:
-                    combo.addItem(cliente.nombre_razon_social, cliente.id_cliente)
-        finally:
-            session.close()
-
-    def _cargar_proveedores(self) -> None:
-        session = self.session_factory()
-        try:
-            proveedores = (
-                session.query(Proveedor)
-                .filter(Proveedor.estado_proveedor == "ACTIVO")
-                .order_by(Proveedor.nombre_razon_social)
-                .all()
-            )
-            # Combos independientes, uno por pagina de filtros que necesita elegir
-            # proveedor -- mismo motivo que _cargar_clientes: un QWidget no puede
-            # pertenecer a dos layouts a la vez.
-            for combo in (
+            ),
+            datos["clientes"],
+            "Todos los clientes",
+        )
+        asignar(
+            (
                 self.proveedor_combo,
                 self.proveedor_combo_oc,
                 self.proveedor_combo_dp,
@@ -2352,122 +2450,52 @@ class ReportesPanel(QWidget):
                 self.proveedor_combo_ecp,
                 self.proveedor_combo_pp,
                 self.proveedor_combo_pv,
-            ):
-                combo.clear()
-                combo.addItem("Todos los proveedores")
-                for proveedor in proveedores:
-                    combo.addItem(proveedor.nombre_razon_social, proveedor.id_proveedor)
-        finally:
-            session.close()
-
-    def _cargar_cajas(self) -> None:
-        session = self.session_factory()
-        try:
-            cajas = session.query(Caja).order_by(Caja.nombre_caja).all()
-            self.caja_combo.clear()
-            for caja in cajas:
-                self.caja_combo.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", caja.id_caja)
-            # caja_combo_mcp (movimientos de caja por periodo) es un filtro OPCIONAL, a
-            # diferencia de caja_combo (arqueo, siempre requiere una caja puntual) -- por
-            # eso lleva su propia opcion "Todas" y no puede compartir instancia.
-            self.caja_combo_mcp.clear()
-            self.caja_combo_mcp.addItem("Todas las cajas")
-            for caja in cajas:
-                self.caja_combo_mcp.addItem(caja.nombre_caja or f"Caja {caja.id_caja}", caja.id_caja)
-        finally:
-            session.close()
-
-    def _cargar_vendedores(self) -> None:
-        session = self.session_factory()
-        try:
-            vendedores = session.query(Vendedor).order_by(Vendedor.nombre_vendedor).all()
-            for combo in (
+            ),
+            datos["proveedores"],
+            "Todos los proveedores",
+        )
+        # caja_combo (arqueo) siempre requiere una caja puntual; caja_combo_mcp (movimientos por periodo) es
+        # opcional y lleva su propia opcion "Todas".
+        asignar((self.caja_combo,), datos["cajas"])
+        asignar((self.caja_combo_mcp,), datos["cajas"], "Todas las cajas")
+        asignar(
+            (
                 self.vendedor_combo_comv,
                 self.vendedor_combo_cpp,
                 self.vendedor_combo_ac,
                 self.vendedor_combo_aging,
                 self.vendedor_combo_bcv,
                 self.vendedor_combo_vpc,
-            ):
-                combo.clear()
-                combo.addItem("Todos los vendedores", None)
-                for vendedor in vendedores:
-                    combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
-        finally:
-            session.close()
-
-    def _cargar_usuarios_cajero(self) -> None:
-        session = self.session_factory()
-        try:
-            usuarios = session.query(Usuario).filter(Usuario.estado == "ACTIVO").order_by(Usuario.nombre_usuario).all()
-            self.usuario_combo_cierre.clear()
-            self.usuario_combo_cierre.addItem("Todos los cajeros")
-            for usuario in usuarios:
-                self.usuario_combo_cierre.addItem(usuario.nombre_usuario, usuario.id_usuario)
-        finally:
-            session.close()
-
-    def _cargar_productos(self) -> None:
-        session = self.session_factory()
-        try:
-            productos = (
-                session.query(Inventario)
-                .filter(Inventario.estado_producto == "ACTIVO")
-                .order_by(Inventario.nombre_producto)
-                .all()
-            )
-            # Combos independientes (kardex, historico de precios, ventas productos clientes)
-            # -- mismo motivo que _cargar_clientes: un QWidget no puede pertenecer a dos layouts.
-            for combo in (self.producto_combo_kardex, self.producto_combo_hp, self.producto_combo_vpc):
-                combo.clear()
-                if combo == self.producto_combo_vpc:
-                    combo.addItem("Todos los productos", None)
-                for producto in productos:
-                    combo.addItem(
-                        f"{producto.cod_producto} - {producto.nombre_producto}",
-                        producto.id_producto,
-                    )
-        finally:
-            session.close()
-
-    def _cargar_categorias(self) -> None:
-        session = self.session_factory()
-        try:
-            categorias = session.query(Categoria).order_by(Categoria.nombre).all()
-            for combo in (
+            ),
+            datos["vendedores"],
+            "Todos los vendedores",
+        )
+        asignar((self.usuario_combo_cierre,), datos["cajeros"], "Todos los cajeros")
+        # Kardex e historico de precios requieren un producto puntual; ventas por producto y cliente admite todos.
+        asignar((self.producto_combo_kardex, self.producto_combo_hp), datos["productos"])
+        asignar((self.producto_combo_vpc,), datos["productos"], "Todos los productos")
+        asignar(
+            (
                 self.categoria_combo_valorizacion,
                 self.categoria_combo_bajo_minimo,
                 self.categoria_combo_sm,
                 self.categoria_combo_ppv,
-            ):
-                combo.clear()
-                combo.addItem("Todas las categorías")
-                for categoria in categorias:
-                    combo.addItem(categoria.nombre, categoria.id_categoria)
-        finally:
-            session.close()
+            ),
+            datos["categorias"],
+            "Todas las categorías",
+        )
+        asignar(
+            (self.cuenta_bancaria_combo_cxpo, self.cuenta_bancaria_combo_conc), datos["cuentas"], "Todas las cuentas"
+        )
+        # Movimientos por cuenta requiere una cuenta puntual (sin "Todas").
+        asignar((self.cuenta_bancaria_combo_mcb,), datos["cuentas"])
 
-    def _cargar_cuentas_bancarias(self) -> None:
-        session = self.session_factory()
-        try:
-            cuentas = session.query(CuentaBancaria).order_by(CuentaBancaria.numero_cuenta).all()
-            for combo in (
-                self.cuenta_bancaria_combo_cxpo,
-                self.cuenta_bancaria_combo_conc,
-            ):
-                combo.clear()
-                combo.addItem("Todas las cuentas")
-                for cuenta in cuentas:
-                    banco = cuenta.banco.nombre_banco if cuenta.banco else "N/A"
-                    combo.addItem(f"{banco} - {cuenta.numero_cuenta}", cuenta.id_cuenta)
-            # cuenta_bancaria_combo_mcb (movimientos por cuenta) SIN "Todas": el reporte
-            # requiere una cuenta puntual, mismo criterio que producto_combo_kardex.
-            self.cuenta_bancaria_combo_mcb.clear()
-            for cuenta in cuentas:
-                banco = cuenta.banco.nombre_banco if cuenta.banco else "N/A"
-                self.cuenta_bancaria_combo_mcb.addItem(f"{banco} - {cuenta.numero_cuenta}", cuenta.id_cuenta)
-        finally:
-            session.close()
+    def closeEvent(self, event) -> None:
+        for nombre in ("_worker_catalogos", "_worker"):
+            worker = getattr(self, nombre, None)
+            if worker is not None:
+                worker.wait(2000)
+        super().closeEvent(event)
 
     def _on_tipo_cambiado(self, index: int) -> None:
         modo = self.tipo_combo.itemData(index)
@@ -3171,6 +3199,9 @@ class ReportesPanel(QWidget):
             )
 
         self._ultimo_modo = modo
+        # Lo que dicen los combos AHORA es lo que se uso: si el usuario los cambia despues de generar, el PDF
+        # y el Excel tienen que seguir diciendo con que filtros se hizo el reporte que muestran.
+        self._combos_snapshot = self._capturar_combos()
         self.btn_generar.setEnabled(False)
         self._worker.resultado.connect(self._mostrar_resultado)
         self._worker.error.connect(self._mostrar_error)
@@ -3269,6 +3300,13 @@ class ReportesPanel(QWidget):
             self._mostrar_productos_proximos_vencer(resultado)
         else:
             self._mostrar_comisiones_pagadas_pendientes(resultado)
+
+    def _capturar_combos(self) -> dict[int, str]:
+        return {id(c): c.currentText() for c in vars(self).values() if isinstance(c, QComboBox)}
+
+    def _texto_filtro(self, combo: QComboBox) -> str:
+        """Texto del combo cuando se genero el reporte (o el actual si aun no se genero ninguno)."""
+        return self._combos_snapshot.get(id(combo), combo.currentText())
 
     def _mostrar_error(self, mensaje: str) -> None:
         self.btn_generar.setEnabled(True)
@@ -3414,38 +3452,44 @@ class ReportesPanel(QWidget):
         self._reset_tabla(
             COLS_LIBRO_VENTAS,
             {
-                0: Qt.AlignmentFlag.AlignLeft,
-                1: Qt.AlignmentFlag.AlignLeft,
-                2: Qt.AlignmentFlag.AlignLeft,
-                3: Qt.AlignmentFlag.AlignLeft,
-                4: Qt.AlignmentFlag.AlignLeft,
-                5: Qt.AlignmentFlag.AlignRight,
-                6: Qt.AlignmentFlag.AlignRight,
-                7: Qt.AlignmentFlag.AlignRight,
-                8: Qt.AlignmentFlag.AlignRight,
+                **{col: Qt.AlignmentFlag.AlignLeft for col in range(6)},
+                **{col: Qt.AlignmentFlag.AlignRight for col in range(6, 13)},
             },
         )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
+            tasa = f["tasa_cambio"]
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_emision"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["numero_control"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_factura"]))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f["cliente"] or "Consumidor final"))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f["identificacion_cliente"] or "N/A"))
-            self.tabla.setItem(row, 5, self._item_num(f"${float(f['base_imponible']):,.2f}"))
-            self.tabla.setItem(row, 6, self._item_num(f"{float(f['porcentaje_iva']):.2f}%"))
-            self.tabla.setItem(row, 7, self._item_num(f"${float(f['monto_iva']):,.2f}"))
-            self.tabla.setItem(row, 8, self._item_num(f"${float(f['total']):,.2f}"))
+            self.tabla.setItem(row, 3, QTableWidgetItem("Anulada" if f["estado"] == "ANULADA" else "Emitida"))
+            self.tabla.setItem(row, 4, QTableWidgetItem(f["cliente"] or "Consumidor final"))
+            self.tabla.setItem(row, 5, QTableWidgetItem(f["identificacion_cliente"] or "N/A"))
+            self.tabla.setItem(row, 6, self._item_num(f"${float(f['monto_exento']):,.2f}"))
+            self.tabla.setItem(row, 7, self._item_num(f"${float(f['base_imponible']):,.2f}"))
+            self.tabla.setItem(row, 8, self._item_num(f"{float(f['porcentaje_iva']):.2f}%"))
+            self.tabla.setItem(row, 9, self._item_num(f"${float(f['monto_iva']):,.2f}"))
+            self.tabla.setItem(row, 10, self._item_num(f"${float(f['total']):,.2f}"))
+            self.tabla.setItem(row, 11, self._item_num(f"{float(tasa):,.2f}" if tasa else "N/A"))
+            self.tabla.setItem(
+                row, 12, self._item_num(f"Bs {float(f['total_bs']):,.2f}" if f["total_bs"] is not None else "N/A")
+            )
 
         cantidad = resultado["cantidad_facturas"]
         plural = "s" if cantidad != 1 else ""
-        self.lbl_total.setText(f"{cantidad} factura{plural}")
+        anuladas = resultado["cantidad_anuladas"]
+        extra = f" + {anuladas} anulada{'s' if anuladas != 1 else ''}" if anuladas else ""
+        self.lbl_total.setText(f"{cantidad} factura{plural}{extra}")
         self._mostrar_resumen_libro_ventas(resultado)
 
     def _mostrar_resumen_libro_ventas(self, resultado: dict) -> None:
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Ventas: {resultado['cantidad_facturas']}"))
+        if resultado["cantidad_anuladas"]:
+            self.resumen_layout.addWidget(self._chip(f"Anuladas: {resultado['cantidad_anuladas']}", COLOR_DANGER))
+        if resultado["total_exento"]:
+            self.resumen_layout.addWidget(self._chip(f"Exento: ${float(resultado['total_exento']):,.2f}"))
         self.resumen_layout.addWidget(self._chip(f"Base imponible: ${float(resultado['total_base_imponible']):,.2f}"))
         self.resumen_layout.addWidget(self._chip(f"IVA: ${float(resultado['total_iva']):,.2f}"))
         self.resumen_layout.addWidget(
@@ -3455,6 +3499,8 @@ class ReportesPanel(QWidget):
                 COLOR_PRIMARY,
             )
         )
+        if resultado["total_bs"]:
+            self.resumen_layout.addWidget(self._chip(f"Total Bs: {float(resultado['total_bs']):,.2f}"))
         n_notas = len(resultado["notas_credito"])
         if n_notas:
             self.resumen_layout.addWidget(
@@ -3570,11 +3616,12 @@ class ReportesPanel(QWidget):
         if id_producto:
             # Vista detallada: tabla de clientes para el producto seleccionado
             self._reset_tabla(
-                ["Cliente", "Identificación", "Cantidad Vendida"],
+                ["Cliente", "Identificación", "Bultos", "Unidades"],
                 {
                     0: Qt.AlignmentFlag.AlignLeft,
                     1: Qt.AlignmentFlag.AlignLeft,
                     2: Qt.AlignmentFlag.AlignRight,
+                    3: Qt.AlignmentFlag.AlignRight,
                 },
             )
             if resultado["filas"]:
@@ -3583,7 +3630,8 @@ class ReportesPanel(QWidget):
                 for row, c in enumerate(clientes):
                     self.tabla.setItem(row, 0, QTableWidgetItem(c["cliente"]))
                     self.tabla.setItem(row, 1, QTableWidgetItem(c["identificacion_cliente"]))
-                    self.tabla.setItem(row, 2, self._item_num(f"{float(c['cantidad_total']):,.2f}"))
+                    self.tabla.setItem(row, 2, self._item_num(f"{float(c['bultos']):,.2f}"))
+                    self.tabla.setItem(row, 3, self._item_num(f"{float(c['unidades']):,.2f}"))
                 self.lbl_total.setText(f"{len(clientes)} cliente{'s' if len(clientes) != 1 else ''}")
             else:
                 self.lbl_total.setText("0 clientes")
@@ -3596,7 +3644,8 @@ class ReportesPanel(QWidget):
                     1: Qt.AlignmentFlag.AlignLeft,
                     2: Qt.AlignmentFlag.AlignRight,
                     3: Qt.AlignmentFlag.AlignRight,
-                    4: Qt.AlignmentFlag.AlignLeft,
+                    4: Qt.AlignmentFlag.AlignRight,
+                    5: Qt.AlignmentFlag.AlignLeft,
                 },
             )
             filas = resultado["filas"]
@@ -3614,9 +3663,10 @@ class ReportesPanel(QWidget):
 
                 self.tabla.setItem(row, 0, QTableWidgetItem(f["producto"]))
                 self.tabla.setItem(row, 1, QTableWidgetItem(f["cod_producto"]))
-                self.tabla.setItem(row, 2, self._item_num(f"{float(f['cantidad_total']):,.2f}"))
-                self.tabla.setItem(row, 3, self._item_num(f"${float(f['monto_total']):,.2f}"))
-                self.tabla.setItem(row, 4, QTableWidgetItem(clientes_texto))
+                self.tabla.setItem(row, 2, self._item_num(f"{float(f['bultos']):,.2f}"))
+                self.tabla.setItem(row, 3, self._item_num(f"{float(f['unidades']):,.2f}"))
+                self.tabla.setItem(row, 4, self._item_num(f"${float(f['monto_total']):,.2f}"))
+                self.tabla.setItem(row, 5, QTableWidgetItem(clientes_texto))
 
             self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
 
@@ -3625,7 +3675,8 @@ class ReportesPanel(QWidget):
     def _mostrar_resumen_ventas_productos_clientes(self, resultado: dict) -> None:
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Productos: {len(resultado['filas'])}"))
-        self.resumen_layout.addWidget(self._chip(f"Cantidad total: {float(resultado['cantidad_general']):,.2f}"))
+        self.resumen_layout.addWidget(self._chip(f"Bultos: {float(resultado['bultos_general']):,.2f}"))
+        self.resumen_layout.addWidget(self._chip(f"Unidades: {float(resultado['unidades_general']):,.2f}"))
         self.resumen_layout.addWidget(self._chip(f"Monto total: ${float(resultado['total_general']):,.2f}"))
         self.resumen_layout.addStretch()
 
@@ -3668,20 +3719,37 @@ class ReportesPanel(QWidget):
         self.resumen_layout.addStretch()
 
     def _mostrar_productos_vendidos(self, resultado: dict) -> None:
-        self._mostrar_ranking(resultado, COLS_PRODUCTOS_VENDIDOS, "producto", "cantidad")
+        """Como un ranking, pero con bultos y unidades en columnas separadas (no se suman: son medidas distintas)."""
+        self._reset_tabla(
+            COLS_PRODUCTOS_VENDIDOS,
+            {
+                0: Qt.AlignmentFlag.AlignLeft,
+                1: Qt.AlignmentFlag.AlignRight,
+                2: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignRight,
+            },
+        )
+        filas = resultado["filas"]
+        self.tabla.setRowCount(len(filas))
+        for row, f in enumerate(filas):
+            self.tabla.setItem(row, 0, QTableWidgetItem(f["producto"] or "N/A"))
+            self.tabla.setItem(row, 1, self._item_num(f"{float(f['bultos']):,.2f}"))
+            self.tabla.setItem(row, 2, self._item_num(f"{float(f['unidades']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['total']):,.2f}"))
+
+        self.lbl_total.setText(f"{len(filas)} fila{'s' if len(filas) != 1 else ''}")
+        self._limpiar_resumen()
+        self.resumen_layout.addWidget(
+            self._chip(f"Total general: ${float(resultado['total_general']):,.2f}", "#FFFFFF", COLOR_PRIMARY)
+        )
+        self.resumen_layout.addStretch()
 
     # ── Resultados: facturas anuladas ─────────────────────────────────────────
 
     def _mostrar_facturas_anuladas(self, resultado: dict) -> None:
         self._reset_tabla(
             COLS_FACTURAS_ANULADAS,
-            {
-                0: Qt.AlignmentFlag.AlignLeft,
-                1: Qt.AlignmentFlag.AlignLeft,
-                2: Qt.AlignmentFlag.AlignLeft,
-                3: Qt.AlignmentFlag.AlignLeft,
-                4: Qt.AlignmentFlag.AlignLeft,
-            },
+            {col: Qt.AlignmentFlag.AlignLeft for col in range(6)},
         )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
@@ -3690,7 +3758,8 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "Consumidor final"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["vendedor"] or "N/A"))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["fecha_emision"].strftime("%d/%m/%Y")))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f["motivo"] or "Sin registrar"))
+            self.tabla.setItem(row, 4, QTableWidgetItem(f["fecha_anulacion"].strftime("%d/%m/%Y %H:%M")))
+            self.tabla.setItem(row, 5, QTableWidgetItem(f["motivo"] or "Sin registrar"))
 
         self.lbl_total.setText(
             f"{len(filas)} factura{'s' if len(filas) != 1 else ''} anulada{'s' if len(filas) != 1 else ''}"
@@ -3783,17 +3852,19 @@ class ReportesPanel(QWidget):
                 3: Qt.AlignmentFlag.AlignRight,
                 4: Qt.AlignmentFlag.AlignRight,
                 5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
             },
         )
         filas = resultado["filas"]
         self.tabla.setRowCount(len(filas))
         for row, f in enumerate(filas):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["producto"] or "N/A"))
-            self.tabla.setItem(row, 1, self._item_num(f"{float(f['cantidad']):,.2f}"))
-            self.tabla.setItem(row, 2, self._item_num(f"${float(f['ingreso']):,.2f}"))
-            self.tabla.setItem(row, 3, self._item_num(f"${float(f['costo']):,.2f}"))
-            self.tabla.setItem(row, 4, self._item_num(f"${float(f['margen']):,.2f}"))
-            self.tabla.setItem(row, 5, self._item_num(f"{float(f['margen_pct']):.1f}%"))
+            self.tabla.setItem(row, 1, self._item_num(f"{float(f['bultos']):,.2f}"))
+            self.tabla.setItem(row, 2, self._item_num(f"{float(f['unidades']):,.2f}"))
+            self.tabla.setItem(row, 3, self._item_num(f"${float(f['ingreso']):,.2f}"))
+            self.tabla.setItem(row, 4, self._item_num(f"${float(f['costo']):,.2f}"))
+            self.tabla.setItem(row, 5, self._item_num(f"${float(f['margen']):,.2f}"))
+            self.tabla.setItem(row, 6, self._item_num(f"{float(f['margen_pct']):.1f}%"))
 
         self.lbl_total.setText(f"{len(filas)} producto{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -4089,6 +4160,10 @@ class ReportesPanel(QWidget):
         )
         self._limpiar_resumen()
         self.resumen_layout.addWidget(self._chip(f"Saldo inicial: {float(resultado['saldo_inicial']):,.2f}"))
+        if resultado["saldo_apertura"]:
+            self.resumen_layout.addWidget(
+                self._chip(f"Stock previo al primer movimiento: {float(resultado['saldo_apertura']):,.2f}")
+            )
         self.resumen_layout.addWidget(
             self._chip(
                 f"Saldo final: {float(resultado['saldo_final']):,.2f}",
@@ -4281,12 +4356,8 @@ class ReportesPanel(QWidget):
         self._reset_tabla(
             COLS_COBROS_PERIODO,
             {
-                0: Qt.AlignmentFlag.AlignLeft,
-                1: Qt.AlignmentFlag.AlignLeft,
-                2: Qt.AlignmentFlag.AlignLeft,
-                3: Qt.AlignmentFlag.AlignLeft,
-                4: Qt.AlignmentFlag.AlignLeft,
-                5: Qt.AlignmentFlag.AlignRight,
+                **{col: Qt.AlignmentFlag.AlignLeft for col in range(6)},
+                6: Qt.AlignmentFlag.AlignRight,
             },
         )
         filas = resultado["filas"]
@@ -4295,9 +4366,10 @@ class ReportesPanel(QWidget):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha_pago"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["cliente"] or "N/A"))
             self.tabla.setItem(row, 2, QTableWidgetItem(f["numero_factura"]))
-            self.tabla.setItem(row, 3, QTableWidgetItem(f["metodo_pago"].capitalize()))
-            self.tabla.setItem(row, 4, QTableWidgetItem(f["moneda"]))
-            self.tabla.setItem(row, 5, self._item_num(f"${float(f['monto']):,.2f}"))
+            self.tabla.setItem(row, 3, QTableWidgetItem(f["cartera"]))
+            self.tabla.setItem(row, 4, QTableWidgetItem(f["metodo_pago"].capitalize()))
+            self.tabla.setItem(row, 5, QTableWidgetItem(f["moneda"]))
+            self.tabla.setItem(row, 6, self._item_num(f"${float(f['monto']):,.2f}"))
 
         self.lbl_total.setText(f"{len(filas)} cobro{'s' if len(filas) != 1 else ''}")
         self._limpiar_resumen()
@@ -4919,12 +4991,16 @@ class ReportesPanel(QWidget):
                     f["fecha_emision"],
                     f["numero_control"],
                     f["numero_factura"],
+                    "Anulada" if f["estado"] == "ANULADA" else "Emitida",
                     f["cliente"],
                     f["identificacion_cliente"],
+                    float(f["monto_exento"]),
                     float(f["base_imponible"]),
                     float(f["porcentaje_iva"]),
                     float(f["monto_iva"]),
                     float(f["total"]),
+                    float(f["tasa_cambio"]) if f["tasa_cambio"] is not None else None,
+                    float(f["total_bs"]) if f["total_bs"] is not None else None,
                 ]
                 for f in self._ultimo_resultado["filas"]
             ]
@@ -4967,13 +5043,16 @@ class ReportesPanel(QWidget):
                 [
                     f["producto"],
                     f["cod_producto"],
-                    float(f["cantidad_total"]),
-                    float(f["monto_total"]),
-                    ", ".join([c["cliente"] for c in f["clientes"][:5]]),
+                    c["cliente"],
+                    c["identificacion_cliente"],
+                    float(c["bultos"]),
+                    float(c["unidades"]),
+                    float(c["monto_total"]),
                 ]
                 for f in self._ultimo_resultado["filas"]
+                for c in f["clientes"]
             ]
-            return "ventas_productos_clientes", COLS_VENTAS_PRODUCTOS_CLIENTES, filas
+            return "ventas_productos_clientes", COLS_VENTAS_PRODUCTOS_CLIENTES_EXPORT, filas
 
         if self._ultimo_modo == REPORTE_ACTIVACION_CLIENTES:
             filas = [
@@ -4989,7 +5068,10 @@ class ReportesPanel(QWidget):
             return "activacion_clientes", COLS_ACTIVACION_CLIENTES, filas
 
         if self._ultimo_modo == REPORTE_PRODUCTOS_VENDIDOS:
-            filas = [[f["producto"], float(f["cantidad"]), float(f["total"])] for f in self._ultimo_resultado["filas"]]
+            filas = [
+                [f["producto"], float(f["bultos"]), float(f["unidades"]), float(f["total"])]
+                for f in self._ultimo_resultado["filas"]
+            ]
             return "productos_vendidos", COLS_PRODUCTOS_VENDIDOS, filas
 
         if self._ultimo_modo == REPORTE_FACTURAS_ANULADAS:
@@ -4999,6 +5081,7 @@ class ReportesPanel(QWidget):
                     f["cliente"],
                     f["vendedor"],
                     f["fecha_emision"],
+                    f["fecha_anulacion"],
                     f["motivo"],
                 ]
                 for f in self._ultimo_resultado["filas"]
@@ -5036,7 +5119,8 @@ class ReportesPanel(QWidget):
             filas = [
                 [
                     f["producto"],
-                    float(f["cantidad"]),
+                    float(f["bultos"]),
+                    float(f["unidades"]),
                     float(f["ingreso"]),
                     float(f["costo"]),
                     float(f["margen"]),
@@ -5222,6 +5306,7 @@ class ReportesPanel(QWidget):
                     f["fecha_pago"],
                     f["cliente"],
                     f["numero_factura"],
+                    f["cartera"],
                     f["metodo_pago"],
                     f["moneda"],
                     float(f["monto"]),
@@ -5413,7 +5498,7 @@ class ReportesPanel(QWidget):
                     f["producto"],
                     f["categoria"] or "N/A",
                     float(f["cantidad_unidad"]),
-                    str(f["fecha_vencimiento"]),
+                    f["fecha_vencimiento"],
                     f["dias_para_vencer"],
                 ]
                 for f in self._ultimo_resultado["filas"]
@@ -5435,36 +5520,60 @@ class ReportesPanel(QWidget):
             filas,
         )
 
+    def _secciones_para_exportar(self) -> list[dict] | None:
+        """Tablas adicionales que van debajo de la principal en el Excel/PDF: las notas de credito del
+        periodo en el Libro de Ventas (la pantalla las resume en un chip, pero el libro las lista)."""
+        if self._ultimo_modo == REPORTE_LIBRO_VENTAS and self._ultimo_resultado["notas_credito"]:
+            return [
+                {
+                    "titulo": "Notas de crédito del período",
+                    "encabezados": COLS_LIBRO_VENTAS_NC,
+                    "filas": [
+                        [
+                            nc["fecha_creacion"],
+                            nc["numero_nota_credito"],
+                            nc["cliente"],
+                            nc["identificacion_cliente"],
+                            float(nc["monto"]),
+                            nc["motivo"],
+                        ]
+                        for nc in self._ultimo_resultado["notas_credito"]
+                    ],
+                    "col_widths": [1.0, 1.0, 2.0, 1.2, 1.0, 2.2],
+                }
+            ]
+        return None
+
     def _info_pdf(self) -> tuple[str, dict, list[float]]:
         resultado = self._ultimo_resultado
         if self._ultimo_modo == REPORTE_AGING_CXC:
             filtros = {
                 "Corte": resultado["fecha_corte"].strftime("%d/%m/%Y"),
-                "Cliente": self.cliente_combo.currentText(),
+                "Cliente": self._texto_filtro(self.cliente_combo),
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
             return (
                 "Antigüedad de Saldos - Cuentas por Cobrar",
                 filtros,
-                [1.2, 2.0, 1.2, 1.3, 1.0, 1.0],
+                [1.2, 2.0, 1.2, 1.3, 1.0, 1.1, 1.0],
             )
 
         if self._ultimo_modo == REPORTE_AGING_CXC_BCV:
             filtros = {
                 "Corte": resultado["fecha_corte"].strftime("%d/%m/%Y"),
-                "Cliente": self.cliente_combo_bcv.currentText(),
+                "Cliente": self._texto_filtro(self.cliente_combo_bcv),
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
             return (
                 "Antigüedad de Saldos BCV - Cuentas por Cobrar",
                 filtros,
-                [1.2, 2.0, 1.2, 1.0, 1.0, 1.0, 1.0],
+                [1.2, 2.0, 1.2, 1.0, 0.8, 1.0, 1.1, 1.0],
             )
 
         if self._ultimo_modo == REPORTE_AGING_CXP:
             filtros = {
                 "Corte": resultado["fecha_corte"].strftime("%d/%m/%Y"),
-                "Proveedor": self.proveedor_combo.currentText(),
+                "Proveedor": self._texto_filtro(self.proveedor_combo),
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
             return (
@@ -5477,15 +5586,19 @@ class ReportesPanel(QWidget):
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Cliente": self.cliente_combo_lv.currentText(),
+                "Cliente": self._texto_filtro(self.cliente_combo_lv),
+                "Facturas": str(resultado["cantidad_facturas"]),
+                "Anuladas": str(resultado["cantidad_anuladas"]),
+                "Exento": f"${float(resultado['total_exento']):,.2f}",
                 "Base imponible": f"${float(resultado['total_base_imponible']):,.2f}",
                 "IVA": f"${float(resultado['total_iva']):,.2f}",
                 "Total": f"${float(resultado['total_general']):,.2f}",
+                "Total Bs": f"{float(resultado['total_bs']):,.2f}",
             }
             return (
                 "Libro de Ventas",
                 filtros,
-                [1.0, 1.0, 1.0, 1.8, 1.2, 1.2, 0.8, 1.0, 1.0],
+                [1.0, 1.0, 1.0, 0.9, 1.8, 1.1, 0.9, 1.0, 0.7, 0.9, 1.0, 0.8, 1.2],
             )
 
         if self._ultimo_modo == REPORTE_VENTAS_PERIODO:
@@ -5525,17 +5638,18 @@ class ReportesPanel(QWidget):
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Vendedor": self.vendedor_combo_vpc.currentText(),
+                "Vendedor": self._texto_filtro(self.vendedor_combo_vpc),
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
-            return "Ventas a Clientes por Producto", filtros, [2.0, 1.0, 1.0, 1.2, 2.5]
+            # un ancho por cada columna del ARCHIVO (COLS_VENTAS_PRODUCTOS_CLIENTES_EXPORT), no de la tabla de pantalla
+            return "Ventas a Clientes por Producto", filtros, [2.0, 1.0, 2.0, 1.2, 0.8, 0.8, 1.2]
 
         if self._ultimo_modo == REPORTE_ACTIVACION_CLIENTES:
             efectividad_promedio = resultado["efectividad_promedio"]
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Vendedor": self.vendedor_combo_ac.currentText(),
+                "Vendedor": self._texto_filtro(self.vendedor_combo_ac),
                 "Clientes activos": f"{resultado['total_activos']} / {resultado['total_clientes']}",
                 "Efectividad promedio": (
                     f"{efectividad_promedio:.2f}%" if efectividad_promedio is not None else "Sin metas configuradas"
@@ -5550,7 +5664,7 @@ class ReportesPanel(QWidget):
                 "Orden": ("Más vendidos" if resultado["orden"] == "desc" else "Menos vendidos"),
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
-            return "Productos Más/Menos Vendidos", filtros, [2.0, 1.0, 1.2]
+            return "Productos Más/Menos Vendidos", filtros, [2.0, 1.0, 1.0, 1.2]
 
         if self._ultimo_modo == REPORTE_FACTURAS_ANULADAS:
             filtros = {
@@ -5558,13 +5672,13 @@ class ReportesPanel(QWidget):
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
                 "Total": f"{resultado['total_facturas']} facturas",
             }
-            return "Facturas Anuladas", filtros, [1.0, 1.5, 1.3, 1.0, 2.0]
+            return "Facturas Anuladas", filtros, [1.0, 1.5, 1.2, 0.9, 1.1, 2.0]
 
         if self._ultimo_modo == REPORTE_NC_EMITIDAS:
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Cliente": self.cliente_combo_nc.currentText(),
+                "Cliente": self._texto_filtro(self.cliente_combo_nc),
                 "Total emitido": f"${float(resultado['total_general']):,.2f}",
             }
             return (
@@ -5592,7 +5706,7 @@ class ReportesPanel(QWidget):
             return (
                 "Margen de Utilidad por Producto",
                 filtros,
-                [1.8, 1.0, 1.0, 1.0, 1.0, 1.0],
+                [1.8, 0.9, 0.9, 1.0, 1.0, 1.0, 1.0],
             )
 
         if self._ultimo_modo == REPORTE_COMPRAS_PERIODO:
@@ -5624,7 +5738,7 @@ class ReportesPanel(QWidget):
         if self._ultimo_modo == REPORTE_OC_ABIERTAS:
             filtros = {
                 "Corte": resultado["fecha_corte"].strftime("%d/%m/%Y"),
-                "Proveedor": self.proveedor_combo_oc.currentText(),
+                "Proveedor": self._texto_filtro(self.proveedor_combo_oc),
                 "Total comprometido": f"${float(resultado['total_general']):,.2f}",
             }
             return (
@@ -5648,7 +5762,7 @@ class ReportesPanel(QWidget):
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Proveedor": self.proveedor_combo_dp.currentText(),
+                "Proveedor": self._texto_filtro(self.proveedor_combo_dp),
                 "Total devoluciones": str(resultado["total_devoluciones"]),
             }
             return (
@@ -5661,7 +5775,7 @@ class ReportesPanel(QWidget):
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Proveedor": self.proveedor_combo_ncp.currentText(),
+                "Proveedor": self._texto_filtro(self.proveedor_combo_ncp),
                 "Total emitido": f"${float(resultado['total_general']):,.2f}",
             }
             return (
@@ -5673,11 +5787,21 @@ class ReportesPanel(QWidget):
         if self._ultimo_modo == REPORTE_ARQUEO_CAJA:
             filtros = {
                 "Caja": resultado["nombre_caja"],
+                "Apertura": resultado["fecha_apertura"].strftime("%d/%m/%Y %H:%M"),
+                "Cierre": (
+                    resultado["fecha_cierre"].strftime("%d/%m/%Y %H:%M") if resultado["fecha_cierre"] else "Abierta"
+                ),
+                "Saldo apertura": f"${float(resultado['saldo_apertura']):,.2f}",
+                "Entradas": f"${float(resultado['total_entradas']):,.2f}",
+                "Salidas": f"${float(resultado['total_salidas']):,.2f}",
                 "Saldo esperado": f"${float(resultado['saldo_esperado']):,.2f}",
                 "Saldo cierre": (
                     f"${float(resultado['saldo_cierre']):,.2f}"
                     if resultado["saldo_cierre"] is not None
                     else "Caja abierta"
+                ),
+                "Diferencia": (
+                    f"${float(resultado['diferencia']):,.2f}" if resultado["diferencia"] is not None else None
                 ),
             }
             return "Arqueo de Caja", filtros, [1.3, 1.0, 2.5, 1.2]
@@ -5694,14 +5818,14 @@ class ReportesPanel(QWidget):
 
         if self._ultimo_modo == REPORTE_VALORIZACION:
             filtros = {
-                "Categoría": self.categoria_combo_valorizacion.currentText(),
+                "Categoría": self._texto_filtro(self.categoria_combo_valorizacion),
                 "Valor total": f"${float(resultado['total_general']):,.2f}",
             }
             return "Valorización de Inventario", filtros, [1.0, 2.0, 1.3, 1.0, 1.0, 1.2]
 
         if self._ultimo_modo == REPORTE_BAJO_MINIMO:
             filtros = {
-                "Categoría": self.categoria_combo_bajo_minimo.currentText(),
+                "Categoría": self._texto_filtro(self.categoria_combo_bajo_minimo),
                 "Total": f"{resultado['total_productos']} productos",
             }
             return "Stock Bajo Mínimo", filtros, [1.0, 2.0, 1.3, 1.0, 1.0, 1.0]
@@ -5736,10 +5860,10 @@ class ReportesPanel(QWidget):
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Cliente": self.cliente_combo_cbp.currentText(),
+                "Cliente": self._texto_filtro(self.cliente_combo_cbp),
                 "Total": f"${float(resultado['total_general']):,.2f}",
             }
-            return "Cobros del Período", filtros, [1.0, 1.6, 1.2, 1.0, 0.8, 1.0]
+            return "Cobros del Período", filtros, [1.0, 1.6, 1.1, 0.8, 1.0, 0.7, 1.0]
 
         if self._ultimo_modo == REPORTE_CLIENTES_MOROSOS:
             filtros = {
@@ -5750,8 +5874,8 @@ class ReportesPanel(QWidget):
 
         if self._ultimo_modo == REPORTE_CXC_OTRAS:
             filtros = {
-                "Cliente": self.cliente_combo_cxco.currentText(),
-                "Estado": self.estado_combo_cxco.currentText(),
+                "Cliente": self._texto_filtro(self.cliente_combo_cxco),
+                "Estado": self._texto_filtro(self.estado_combo_cxco),
                 "Saldo pendiente": f"${float(resultado['total_general']):,.2f}",
             }
             return "CxC Otras", filtros, [1.6, 1.6, 1.0, 1.0, 1.0, 1.0, 1.0]
@@ -5774,7 +5898,7 @@ class ReportesPanel(QWidget):
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Proveedor": self.proveedor_combo_pp.currentText(),
+                "Proveedor": self._texto_filtro(self.proveedor_combo_pp),
                 "Total": f"${float(resultado['total_general']):,.2f}",
             }
             return "Pagos del Período", filtros, [1.0, 1.6, 1.2, 1.0, 1.0]
@@ -5789,8 +5913,8 @@ class ReportesPanel(QWidget):
 
         if self._ultimo_modo == REPORTE_CXP_OTRAS:
             filtros = {
-                "Cuenta": self.cuenta_bancaria_combo_cxpo.currentText(),
-                "Estado": self.estado_combo_cxpo.currentText(),
+                "Cuenta": self._texto_filtro(self.cuenta_bancaria_combo_cxpo),
+                "Estado": self._texto_filtro(self.estado_combo_cxpo),
                 "Saldo pendiente": f"${float(resultado['total_general']):,.2f}",
             }
             return "CxP Otras", filtros, [1.3, 1.2, 1.6, 1.0, 1.3, 1.0, 1.0, 1.0]
@@ -5847,7 +5971,7 @@ class ReportesPanel(QWidget):
 
         if self._ultimo_modo == REPORTE_CONCILIACION_BANCARIA:
             filtros = {
-                "Cuenta": self.cuenta_bancaria_combo_conc.currentText(),
+                "Cuenta": self._texto_filtro(self.cuenta_bancaria_combo_conc),
                 "Pendiente": f"${float(resultado['total_pendiente']):,.2f}",
                 "Conciliado": f"${float(resultado['total_conciliado']):,.2f}",
             }
@@ -5861,7 +5985,7 @@ class ReportesPanel(QWidget):
             filtros = {
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
-                "Vendedor": self.vendedor_combo_comv.currentText(),
+                "Vendedor": self._texto_filtro(self.vendedor_combo_comv),
                 "Total": f"${float(resultado['total_general']):,.2f}",
             }
             return "Comisiones por Vendedor/Período", filtros, [2.0, 1.0, 1.2]
@@ -5870,7 +5994,7 @@ class ReportesPanel(QWidget):
             filtros = {
                 "Horizonte": f"{resultado['dias_horizonte']} días",
                 "Fecha actual": resultado["fecha_actual"].strftime("%d/%m/%Y"),
-                "Categoría": self.categoria_combo_ppv.currentText(),
+                "Categoría": self._texto_filtro(self.categoria_combo_ppv),
                 "Total": f"{resultado['total_productos']} productos",
             }
             return (
@@ -5882,7 +6006,7 @@ class ReportesPanel(QWidget):
         filtros = {
             "Desde": (resultado["fecha_desde"].strftime("%d/%m/%Y") if resultado["fecha_desde"] else "N/A"),
             "Hasta": (resultado["fecha_hasta"].strftime("%d/%m/%Y") if resultado["fecha_hasta"] else "N/A"),
-            "Vendedor": self.vendedor_combo_cpp.currentText(),
+            "Vendedor": self._texto_filtro(self.vendedor_combo_cpp),
             "Pagado": f"${float(resultado['total_pagado']):,.2f}",
             "Liberada": f"${float(resultado['total_liberada']):,.2f}",
             "Pendiente": f"${float(resultado['total_pendiente']):,.2f}",
@@ -5911,8 +6035,9 @@ class ReportesPanel(QWidget):
             return
 
         try:
-            titulo, _filtros, _col_widths = self._info_pdf()
+            titulo, filtros, _col_widths = self._info_pdf()
             config_empresa = self._obtener_config_empresa()
+            secciones = self._secciones_para_exportar()
         except Exception:
             logger.exception("Fallo al preparar la exportacion del reporte a Excel")
             MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
@@ -5927,6 +6052,8 @@ class ReportesPanel(QWidget):
             filas=filas,
             titulo=titulo,
             config_empresa=config_empresa,
+            filtros=filtros,
+            secciones=secciones,
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)
         self._worker_export.error.connect(self._on_exportar_error)
@@ -5940,6 +6067,15 @@ class ReportesPanel(QWidget):
             return
 
         nombre_sugerido, encabezados, filas = self._filas_para_exportar()
+        if len(filas) > LIMITE_FILAS_PDF:
+            # Un PDF tarda ~1,5 ms por fila: 100 000 filas son minutos de trabajo y miles de paginas que nadie lee.
+            MessageBox.information(
+                self,
+                "Demasiadas filas para un PDF",
+                f"El reporte tiene {len(filas):,} filas y un PDF de ese tamaño tardaría varios minutos y tendría miles "
+                f"de páginas. Exporta a Excel, o reduce el rango de fechas (máximo {LIMITE_FILAS_PDF:,} filas en PDF).",
+            )
+            return
         ruta, _ = QFileDialog.getSaveFileName(self, "Exportar reporte", f"{nombre_sugerido}.pdf", "PDF (*.pdf)")
         if not ruta:
             return
@@ -5947,6 +6083,7 @@ class ReportesPanel(QWidget):
         try:
             titulo, filtros, col_widths = self._info_pdf()
             config_empresa = self._obtener_config_empresa()
+            secciones = self._secciones_para_exportar()
         except Exception:
             logger.exception("Fallo al preparar la exportacion del reporte a PDF")
             MessageBox.critical(self, "Error", "No se pudo exportar el reporte.")
@@ -5963,6 +6100,8 @@ class ReportesPanel(QWidget):
             filtros=filtros,
             col_widths=col_widths,
             config_empresa=config_empresa,
+            secciones=secciones,
+            apaisado=self._ultimo_modo in REPORTES_APAISADOS,
         )
         self._worker_export.resultado.connect(self._on_exportar_ok)
         self._worker_export.error.connect(self._on_exportar_error)
