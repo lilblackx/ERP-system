@@ -48,6 +48,7 @@ from app.ui.styles import (
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
 )
+from app.utils.caja_local import guardar_caja_local
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -334,4 +335,6 @@ class CajaAperturaDialog(QDialog):
         except (ValueError, PermisoDenegadoError) as exc:
             MessageBox.warning(self, "No se pudo abrir la caja", str(exc))
             return
+        # Esta estacion queda atada a la caja que abrio: es la unica contra la que va a cobrar.
+        guardar_caja_local(self.caja_abierta.id_caja)
         self.accept()
