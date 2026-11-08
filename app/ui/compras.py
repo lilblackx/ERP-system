@@ -57,7 +57,9 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
 from app.services.usuarios import UsuarioService
 from app.ui.auto_refresco import AutoRefresco
+from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.compra_detalle_dialog import CompraDetalleDialog
+from app.ui.exportacion_completa import POR_PAGINA_EXPORTACION, ExportacionCompletaMixin
 from app.ui.message_box import MessageBox
 from app.ui.nota_recepcion_detalle_dialog import NotaRecepcionDetalleDialog
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
@@ -1462,7 +1464,134 @@ class CompraDesdeOCFormDialog(QDialog):
 # =============================================================================
 
 
-class ComprasView(MixinPermisos, QWidget):
+def _tarea_listar_ocs(session, **filtros):
+    """Corren en un hilo aparte (ver carga_asincrona.py): solo consultan, sin tocar widgets."""
+    return CompraOCService.listar_ocs(session, **filtros)
+
+
+def _tarea_listar_nrs(session, **filtros):
+    return NotaRecepcionService.listar_notas_recepcion(session, **filtros)
+
+
+def _tarea_listar_compras(session, **filtros):
+    return CompraService.listar_compras(session, **filtros)
+
+
+def filas_exportacion_ocs(ocs: list) -> list[list]:
+    """Las filas del archivo: las mismas celdas que la tabla de ordenes de compra (columnas 1 a 7)."""
+    filas = []
+    for oc in ocs:
+        textos = [
+            oc.numero_oc,
+            oc.proveedor.nombre_razon_social if oc.proveedor else "",
+            oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else "",
+            f"{float(_as_decimal(oc.cantidad_solicitada)):,.2f}",
+            f"{float(_as_decimal(oc.cantidad_recibida)):,.2f}",
+            f"${float(_as_decimal(oc.total_oc)):,.2f}",
+            oc.estado.capitalize(),
+        ]
+        filas.append([valor_para_exportar(texto) for texto in textos])
+    return filas
+
+
+def filas_exportacion_nrs(nrs: list) -> list[list]:
+    """Las filas del archivo: las mismas celdas que la tabla de recepciones (columnas 1 a 6)."""
+    filas = []
+    for nr in nrs:
+        oc = nr.oc
+        usuario = nr.usuario_recepcion
+        textos = [
+            nr.numero_nr,
+            oc.numero_oc if oc else "",
+            oc.proveedor.nombre_razon_social if oc and oc.proveedor else "",
+            nr.fecha_recepcion.strftime("%d/%m/%Y") if nr.fecha_recepcion else "",
+            usuario.nombre if usuario else "",
+            nr.estado.capitalize(),
+        ]
+        filas.append([valor_para_exportar(texto) for texto in textos])
+    return filas
+
+
+def filas_exportacion_compras(compras: list) -> list[list]:
+    """Las filas del archivo: las mismas celdas que la tabla de facturas de compra (columnas 1 a 7)."""
+    filas = []
+    for c in compras:
+        textos = [
+            c.numero_compra,
+            c.oc.numero_oc if c.oc else "",
+            c.proveedor.nombre_razon_social if c.proveedor else "",
+            c.fecha_emision.strftime("%d/%m/%Y") if c.fecha_emision else "",
+            "Contado" if c.condicion_pago == "contado" else "Crédito",
+            f"${float(_as_decimal(c.total_compra)):,.2f}",
+            (c.estado_compra or "EMITIDA").capitalize(),
+        ]
+        filas.append([valor_para_exportar(texto) for texto in textos])
+    return filas
+
+
+EXPORTACIONES_COMPRAS = {
+    "oc": {
+        "titulo": "Órdenes de Compra",
+        "dialogo": "Exportar Órdenes de Compra",
+        "archivo": "ordenes_compra",
+        "filas": "órdenes de compra",
+        "encabezados": ["N° ODC", "Proveedor", "Fecha", "Total Productos", "Cant. Rec.", "Total", "Estado"],
+        "anchos": [1.5, 2.5, 1.2, 1.5, 1.2, 1.5, 1.0],
+        "listar": lambda session, **kw: CompraOCService.listar_ocs(session, **kw),
+        "armar": filas_exportacion_ocs,
+    },
+    "nr": {
+        "titulo": "Recepciones",
+        "dialogo": "Exportar Recepciones",
+        "archivo": "recepciones",
+        "filas": "recepciones",
+        "encabezados": ["N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"],
+        "anchos": [1.5, 1.5, 2.5, 1.2, 1.5, 1.0],
+        "listar": lambda session, **kw: NotaRecepcionService.listar_notas_recepcion(session, **kw),
+        "armar": filas_exportacion_nrs,
+    },
+    "compra": {
+        "titulo": "Facturas de Compra",
+        "dialogo": "Exportar Facturas",
+        "archivo": "facturas_compra",
+        "filas": "facturas de compra",
+        "encabezados": ["N° Compra", "ODC", "Proveedor", "Fecha", "Condición", "Total", "Estado"],
+        "anchos": [1.5, 1.5, 2.5, 1.2, 1.2, 1.5, 1.0],
+        "listar": lambda session, **kw: CompraService.listar_compras(session, **kw),
+        "armar": filas_exportacion_compras,
+    },
+}
+
+
+def _tarea_exportar_compras(
+    session, ruta: str, tipo: str, formato: str, id_usuario: int, filtros_servicio: dict, filtros_pdf: dict
+) -> tuple[str, int]:
+    """Corre en un hilo aparte (ver exportacion_completa.py): vuelve a pedir TODAS las filas de la pestana con los
+    filtros de la pantalla -- la tabla solo tiene la pagina visible -- y escribe el archivo."""
+    definicion = EXPORTACIONES_COMPRAS[tipo]
+    resultado = definicion["listar"](
+        session, id_usuario=id_usuario, pagina=1, por_pagina=POR_PAGINA_EXPORTACION, **filtros_servicio
+    )
+    filas = definicion["armar"](resultado["items"])
+    config_empresa = EmpresaService.obtener_datos_documento(session)
+    if formato == "excel":
+        exportar_excel(
+            ruta, definicion["encabezados"], filas, titulo=definicion["titulo"], config_empresa=config_empresa
+        )
+    else:
+        exportar_pdf(
+            ruta,
+            definicion["titulo"],
+            definicion["encabezados"],
+            filas,
+            filtros=filtros_pdf,
+            col_widths=definicion["anchos"],
+            config_empresa=config_empresa,
+        )
+    return ruta, len(filas)
+
+
+class ComprasView(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, QWidget):
     """Modulo unico de Compras: cubre el flujo OC -> NR -> Compra -> Pago completo en 4
     pestanas. Cada pestana mantiene su propia paginacion, igual que un panel independiente
     -- son 4 listados distintos, no una sola tabla con filtros."""
@@ -1488,7 +1617,7 @@ class ComprasView(MixinPermisos, QWidget):
         # app/ui/auto_refresco.py) -- recarga solo la pestana visible.
         self._auto_refresco = AutoRefresco(
             self,
-            self._cargar_tab_actual,
+            self._refresco_periodico,
             lambda: [self.tabla_oc, self.tabla_nr, self.tabla_compra][self.tabs.currentIndex()],
         )
 
@@ -1588,9 +1717,13 @@ class ComprasView(MixinPermisos, QWidget):
         item = tabla.item(filas[0].row(), 0)
         return int(item.text()) if item is not None else None
 
-    def _cargar_tab_actual(self) -> None:
+    def _cargar_tab_actual(self, sincrono: bool = False) -> None:
         indice = self.tabs.currentIndex()
-        [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][indice]()
+        [self.cargar_ocs, self.cargar_nrs, self.cargar_compras][indice](sincrono=sincrono)
+
+    def _refresco_periodico(self) -> None:
+        # Sincrono: AutoRefresco vuelve a seleccionar la fila (por id) justo despues de recargar.
+        self._cargar_tab_actual(sincrono=True)
 
     # ── Pestana: Ordenes de Compra ───────────────────────────────────────
 
@@ -1612,8 +1745,8 @@ class ComprasView(MixinPermisos, QWidget):
         )
 
         # Agregar botón de exportación a la toolbar
-        btn_exportar_oc = BotonExportar(on_excel=self._exportar_ocs_excel, on_pdf=self._exportar_ocs_pdf)
-        toolbar.layout().addWidget(btn_exportar_oc)
+        self.btn_exportar_oc = BotonExportar(on_excel=self._exportar_ocs_excel, on_pdf=self._exportar_ocs_pdf)
+        toolbar.layout().addWidget(self.btn_exportar_oc)
 
         layout.addWidget(toolbar)
 
@@ -1664,64 +1797,54 @@ class ComprasView(MixinPermisos, QWidget):
         self.paginas["oc"] = 1
         self.cargar_ocs()
 
-    def cargar_ocs(self) -> None:
-        session = self.session_factory()
-        try:
-            resultado = CompraOCService.listar_ocs(
-                session,
-                texto_busqueda=self.oc_buscar_input.text().strip() or None,
-                estado=self.oc_estado_combo.currentData(),
-                pagina=self.paginas["oc"],
-                por_pagina=POR_PAGINA,
-                id_usuario=self.usuario.id_usuario,
-            )
-            ocs = resultado["items"]
-            self.tabla_oc.setRowCount(len(ocs))
-            for fila, oc in enumerate(ocs):
-                self.tabla_oc.setItem(fila, 0, QTableWidgetItem(str(oc.id_oc)))
-                self.tabla_oc.setItem(fila, 1, QTableWidgetItem(oc.numero_oc))
-                self.tabla_oc.setItem(
-                    fila,
-                    2,
-                    QTableWidgetItem(oc.proveedor.nombre_razon_social if oc.proveedor else ""),
-                )
-                self.tabla_oc.setItem(
-                    fila,
-                    3,
-                    QTableWidgetItem(oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else ""),
-                )
-                cantidad_solicitada = _as_decimal(oc.cantidad_solicitada)
-                item_solicitada = QTableWidgetItem(f"{float(cantidad_solicitada):,.2f}")
-                item_solicitada.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.tabla_oc.setItem(fila, 4, item_solicitada)
+    def cargar_ocs(self, sincrono: bool = False) -> None:
+        self.cargar_async(
+            "oc",
+            _tarea_listar_ocs,
+            self._mostrar_ocs,
+            texto_error="No se pudo cargar el listado de órdenes de compra.",
+            texto_sin_permiso="No tienes permiso para consultar órdenes de compra.",
+            sincrono=sincrono,
+            texto_busqueda=self.oc_buscar_input.text().strip() or None,
+            estado=self.oc_estado_combo.currentData(),
+            pagina=self.paginas["oc"],
+            por_pagina=POR_PAGINA,
+            id_usuario=self.usuario.id_usuario,
+        )
 
-                cantidad_recibida = _as_decimal(oc.cantidad_recibida)
-                item_recibida = QTableWidgetItem(f"{float(cantidad_recibida):,.2f}")
-                item_recibida.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.tabla_oc.setItem(fila, 5, item_recibida)
+    def _mostrar_ocs(self, resultado: dict) -> None:
+        ocs = resultado["items"]
+        self.tabla_oc.setRowCount(len(ocs))
+        for fila, oc in enumerate(ocs):
+            self.tabla_oc.setItem(fila, 0, QTableWidgetItem(str(oc.id_oc)))
+            self.tabla_oc.setItem(fila, 1, QTableWidgetItem(oc.numero_oc))
+            self.tabla_oc.setItem(
+                fila,
+                2,
+                QTableWidgetItem(oc.proveedor.nombre_razon_social if oc.proveedor else ""),
+            )
+            self.tabla_oc.setItem(
+                fila,
+                3,
+                QTableWidgetItem(oc.fecha_oc.strftime("%d/%m/%Y") if oc.fecha_oc else ""),
+            )
+            cantidad_solicitada = _as_decimal(oc.cantidad_solicitada)
+            item_solicitada = QTableWidgetItem(f"{float(cantidad_solicitada):,.2f}")
+            item_solicitada.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla_oc.setItem(fila, 4, item_solicitada)
 
-                total_oc = _as_decimal(oc.total_oc)
-                item_total = QTableWidgetItem(f"${float(total_oc):,.2f}")
-                item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.tabla_oc.setItem(fila, 6, item_total)
-                color = COLORES_ESTADO_OC.get(oc.estado, COLOR_TEXT_MUTED)
-                self.tabla_oc.setCellWidget(fila, 7, EstadoBadge(oc.estado.capitalize(), color))
-            self.paginacion["oc"].actualizar_desde(resultado, mostrar_total=True)
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para consultar órdenes de compra.",
-            )
-        except Exception as exc:
-            logger.exception("Fallo al cargar ordenes de compra")
-            MessageBox.critical(
-                self,
-                "Error",
-                f"No se pudo cargar el listado de órdenes de compra: {exc}",
-            )
-        finally:
-            session.close()
+            cantidad_recibida = _as_decimal(oc.cantidad_recibida)
+            item_recibida = QTableWidgetItem(f"{float(cantidad_recibida):,.2f}")
+            item_recibida.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla_oc.setItem(fila, 5, item_recibida)
+
+            total_oc = _as_decimal(oc.total_oc)
+            item_total = QTableWidgetItem(f"${float(total_oc):,.2f}")
+            item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla_oc.setItem(fila, 6, item_total)
+            color = COLORES_ESTADO_OC.get(oc.estado, COLOR_TEXT_MUTED)
+            self.tabla_oc.setCellWidget(fila, 7, EstadoBadge(oc.estado.capitalize(), color))
+        self.paginacion["oc"].actualizar_desde(resultado, mostrar_total=True)
 
     def nueva_oc(self) -> None:
         if not self._exigir_permiso("crear_oc", "No tienes permiso para crear órdenes de compra."):
@@ -1819,8 +1942,8 @@ class ComprasView(MixinPermisos, QWidget):
         )
 
         # Agregar botón de exportación a la toolbar
-        btn_exportar_nr = BotonExportar(on_excel=self._exportar_nrs_excel, on_pdf=self._exportar_nrs_pdf)
-        toolbar.layout().addWidget(btn_exportar_nr)
+        self.btn_exportar_nr = BotonExportar(on_excel=self._exportar_nrs_excel, on_pdf=self._exportar_nrs_pdf)
+        toolbar.layout().addWidget(self.btn_exportar_nr)
 
         layout.addWidget(toolbar)
 
@@ -1859,50 +1982,48 @@ class ComprasView(MixinPermisos, QWidget):
         self.paginas["nr"] = 1
         self.cargar_nrs()
 
-    def cargar_nrs(self) -> None:
-        session = self.session_factory()
-        try:
-            # Estado y texto (numero de NR, OC o proveedor) se filtran en la consulta, antes
-            # de paginar -- ver NotaRecepcionService.listar_notas_recepcion.
-            resultado = NotaRecepcionService.listar_notas_recepcion(
-                session,
-                pagina=self.paginas["nr"],
-                por_pagina=POR_PAGINA,
-                id_usuario=self.usuario.id_usuario,
-                texto_busqueda=self.nr_buscar_input.text().strip() or None,
-                estado=self.nr_estado_combo.currentData(),
-            )
-            nrs = resultado["items"]
+    def cargar_nrs(self, sincrono: bool = False) -> None:
+        # Estado y texto (numero de NR, OC o proveedor) se filtran en la consulta, antes de paginar -- ver
+        # NotaRecepcionService.listar_notas_recepcion.
+        self.cargar_async(
+            "nr",
+            _tarea_listar_nrs,
+            self._mostrar_nrs,
+            texto_error="No se pudo cargar el listado de recepciones.",
+            texto_sin_permiso="No tienes permiso para consultar recepciones.",
+            sincrono=sincrono,
+            pagina=self.paginas["nr"],
+            por_pagina=POR_PAGINA,
+            id_usuario=self.usuario.id_usuario,
+            texto_busqueda=self.nr_buscar_input.text().strip() or None,
+            estado=self.nr_estado_combo.currentData(),
+        )
 
-            self.tabla_nr.setRowCount(len(nrs))
-            for fila, nr in enumerate(nrs):
-                oc = nr.oc
-                self.tabla_nr.setItem(fila, 0, QTableWidgetItem(str(nr.id_nr)))
-                self.tabla_nr.setItem(fila, 1, QTableWidgetItem(nr.numero_nr))
-                self.tabla_nr.setItem(fila, 2, QTableWidgetItem(oc.numero_oc if oc else ""))
-                self.tabla_nr.setItem(
-                    fila,
-                    3,
-                    QTableWidgetItem(oc.proveedor.nombre_razon_social if oc and oc.proveedor else ""),
-                )
-                self.tabla_nr.setItem(
-                    fila,
-                    4,
-                    QTableWidgetItem(nr.fecha_recepcion.strftime("%d/%m/%Y") if nr.fecha_recepcion else ""),
-                )
-                # Usuario que realizó la recepción
-                usuario = nr.usuario_recepcion if nr.usuario_recepcion else None
-                self.tabla_nr.setItem(fila, 5, QTableWidgetItem(usuario.nombre if usuario else ""))
-                color = COLORES_ESTADO_NR.get(nr.estado, COLOR_TEXT_MUTED)
-                self.tabla_nr.setCellWidget(fila, 6, EstadoBadge(nr.estado.capitalize(), color))
-            self.paginacion["nr"].actualizar_desde(resultado, mostrar_total=True)
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar recepciones.")
-        except Exception:
-            logger.exception("Fallo al cargar notas de recepcion")
-            MessageBox.critical(self, "Error", "No se pudo cargar el listado de recepciones.")
-        finally:
-            session.close()
+    def _mostrar_nrs(self, resultado: dict) -> None:
+        nrs = resultado["items"]
+
+        self.tabla_nr.setRowCount(len(nrs))
+        for fila, nr in enumerate(nrs):
+            oc = nr.oc
+            self.tabla_nr.setItem(fila, 0, QTableWidgetItem(str(nr.id_nr)))
+            self.tabla_nr.setItem(fila, 1, QTableWidgetItem(nr.numero_nr))
+            self.tabla_nr.setItem(fila, 2, QTableWidgetItem(oc.numero_oc if oc else ""))
+            self.tabla_nr.setItem(
+                fila,
+                3,
+                QTableWidgetItem(oc.proveedor.nombre_razon_social if oc and oc.proveedor else ""),
+            )
+            self.tabla_nr.setItem(
+                fila,
+                4,
+                QTableWidgetItem(nr.fecha_recepcion.strftime("%d/%m/%Y") if nr.fecha_recepcion else ""),
+            )
+            # Usuario que realizó la recepción
+            usuario = nr.usuario_recepcion if nr.usuario_recepcion else None
+            self.tabla_nr.setItem(fila, 5, QTableWidgetItem(usuario.nombre if usuario else ""))
+            color = COLORES_ESTADO_NR.get(nr.estado, COLOR_TEXT_MUTED)
+            self.tabla_nr.setCellWidget(fila, 6, EstadoBadge(nr.estado.capitalize(), color))
+        self.paginacion["nr"].actualizar_desde(resultado, mostrar_total=True)
 
     def nueva_recepcion(self) -> None:
         if not self._exigir_permiso("recibir_mercancia", "No tienes permiso para registrar recepciones de mercancía."):
@@ -2022,8 +2143,10 @@ class ComprasView(MixinPermisos, QWidget):
         )
 
         # Agregar botón de exportación a la toolbar
-        btn_exportar_compra = BotonExportar(on_excel=self._exportar_compras_excel, on_pdf=self._exportar_compras_pdf)
-        toolbar.layout().addWidget(btn_exportar_compra)
+        self.btn_exportar_compra = BotonExportar(
+            on_excel=self._exportar_compras_excel, on_pdf=self._exportar_compras_pdf
+        )
+        toolbar.layout().addWidget(self.btn_exportar_compra)
 
         layout.addWidget(toolbar)
 
@@ -2075,57 +2198,55 @@ class ComprasView(MixinPermisos, QWidget):
         self.paginas["compra"] = 1
         self.cargar_compras()
 
-    def cargar_compras(self) -> None:
-        session = self.session_factory()
-        try:
-            resultado = CompraService.listar_compras(
-                session,
-                estado=self.compra_estado_combo.currentData(),
-                solo_desde_oc=True,
-                pagina=self.paginas["compra"],
-                por_pagina=POR_PAGINA,
-                id_usuario=self.usuario.id_usuario,
-                # Numero de compra, OC o proveedor, filtrado antes de paginar.
-                texto_busqueda=self.compra_buscar_input.text().strip() or None,
-            )
-            compras = resultado["items"]
+    def cargar_compras(self, sincrono: bool = False) -> None:
+        self.cargar_async(
+            "compra",
+            _tarea_listar_compras,
+            self._mostrar_compras,
+            texto_error="No se pudo cargar el listado de facturas.",
+            texto_sin_permiso="No tienes permiso para consultar compras.",
+            sincrono=sincrono,
+            estado=self.compra_estado_combo.currentData(),
+            solo_desde_oc=True,
+            pagina=self.paginas["compra"],
+            por_pagina=POR_PAGINA,
+            id_usuario=self.usuario.id_usuario,
+            # Numero de compra, OC o proveedor, filtrado antes de paginar.
+            texto_busqueda=self.compra_buscar_input.text().strip() or None,
+        )
 
-            self.tabla_compra.setRowCount(len(compras))
-            for fila, c in enumerate(compras):
-                self.tabla_compra.setItem(fila, 0, QTableWidgetItem(str(c.id_compra)))
-                self.tabla_compra.setItem(fila, 1, QTableWidgetItem(c.numero_compra))
-                oc = session.get(CompraOC, c.id_oc) if c.id_oc else None
-                self.tabla_compra.setItem(fila, 2, QTableWidgetItem(oc.numero_oc if oc else ""))
-                self.tabla_compra.setItem(
-                    fila,
-                    3,
-                    QTableWidgetItem(c.proveedor.nombre_razon_social if c.proveedor else ""),
-                )
-                self.tabla_compra.setItem(
-                    fila,
-                    4,
-                    QTableWidgetItem(c.fecha_emision.strftime("%d/%m/%Y") if c.fecha_emision else ""),
-                )
-                self.tabla_compra.setItem(
-                    fila,
-                    5,
-                    QTableWidgetItem("Contado" if c.condicion_pago == "contado" else "Crédito"),
-                )
-                total_compra = _as_decimal(c.total_compra)
-                item_total = QTableWidgetItem(f"${float(total_compra):,.2f}")
-                item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.tabla_compra.setItem(fila, 6, item_total)
-                estado = c.estado_compra or "EMITIDA"
-                color = COLORES_ESTADO_COMPRA.get(estado, COLOR_TEXT_MUTED)
-                self.tabla_compra.setCellWidget(fila, 7, EstadoBadge(estado.capitalize(), color))
-            self.paginacion["compra"].actualizar_desde(resultado, mostrar_total=True)
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para consultar compras.")
-        except Exception:
-            logger.exception("Fallo al cargar compras desde OC")
-            MessageBox.critical(self, "Error", "No se pudo cargar el listado de facturas.")
-        finally:
-            session.close()
+    def _mostrar_compras(self, resultado: dict) -> None:
+        compras = resultado["items"]
+
+        self.tabla_compra.setRowCount(len(compras))
+        for fila, c in enumerate(compras):
+            self.tabla_compra.setItem(fila, 0, QTableWidgetItem(str(c.id_compra)))
+            self.tabla_compra.setItem(fila, 1, QTableWidgetItem(c.numero_compra))
+            oc = c.oc
+            self.tabla_compra.setItem(fila, 2, QTableWidgetItem(oc.numero_oc if oc else ""))
+            self.tabla_compra.setItem(
+                fila,
+                3,
+                QTableWidgetItem(c.proveedor.nombre_razon_social if c.proveedor else ""),
+            )
+            self.tabla_compra.setItem(
+                fila,
+                4,
+                QTableWidgetItem(c.fecha_emision.strftime("%d/%m/%Y") if c.fecha_emision else ""),
+            )
+            self.tabla_compra.setItem(
+                fila,
+                5,
+                QTableWidgetItem("Contado" if c.condicion_pago == "contado" else "Crédito"),
+            )
+            total_compra = _as_decimal(c.total_compra)
+            item_total = QTableWidgetItem(f"${float(total_compra):,.2f}")
+            item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla_compra.setItem(fila, 6, item_total)
+            estado = c.estado_compra or "EMITIDA"
+            color = COLORES_ESTADO_COMPRA.get(estado, COLOR_TEXT_MUTED)
+            self.tabla_compra.setCellWidget(fila, 7, EstadoBadge(estado.capitalize(), color))
+        self.paginacion["compra"].actualizar_desde(resultado, mostrar_total=True)
 
     def nueva_factura_desde_oc(self) -> None:
         if not self._exigir_permiso("crear", "No tienes permiso para registrar facturas de compra."):
@@ -2231,244 +2352,70 @@ class ComprasView(MixinPermisos, QWidget):
     # ── Exportación ───────────────────────────────────────────────────────
 
     def _exportar_ocs_excel(self) -> None:
-        """Exporta las órdenes de compra actuales a Excel."""
-        filas = self._obtener_filas_para_exportar(self.tabla_oc)
-        if not filas:
+        self._exportar_pestana("oc", "excel")
+
+    def _exportar_ocs_pdf(self) -> None:
+        self._exportar_pestana("oc", "pdf")
+
+    def _exportar_nrs_excel(self) -> None:
+        self._exportar_pestana("nr", "excel")
+
+    def _exportar_nrs_pdf(self) -> None:
+        self._exportar_pestana("nr", "pdf")
+
+    def _exportar_compras_excel(self) -> None:
+        self._exportar_pestana("compra", "excel")
+
+    def _exportar_compras_pdf(self) -> None:
+        self._exportar_pestana("compra", "pdf")
+
+    def _exportar_pestana(self, tipo: str, formato: str) -> None:
+        """Exporta TODAS las filas de la pestana con sus filtros actuales (no solo la pagina visible)."""
+        definicion = EXPORTACIONES_COMPRAS[tipo]
+        tabla = {"oc": self.tabla_oc, "nr": self.tabla_nr, "compra": self.tabla_compra}[tipo]
+        if tabla.rowCount() == 0:
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
-
+        extension = "xlsx" if formato == "excel" else "pdf"
+        filtro_archivo = "Excel (*.xlsx)" if formato == "excel" else "PDF (*.pdf)"
         ruta, _ = QFileDialog.getSaveFileName(
-            self, "Exportar Órdenes de Compra", "ordenes_compra.xlsx", "Excel (*.xlsx)"
+            self, definicion["dialogo"], f"{definicion['archivo']}.{extension}", filtro_archivo
         )
         if not ruta:
             return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = [
-                "N° ODC",
-                "Proveedor",
-                "Fecha",
-                "Total Productos",
-                "Cant. Rec.",
-                "Total",
-                "Estado",
-            ]
-            exportar_excel(
-                ruta,
-                encabezados,
-                filas,
-                titulo="Órdenes de Compra",
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar órdenes de compra a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
-
-    def _exportar_ocs_pdf(self) -> None:
-        """Exporta las órdenes de compra actuales a PDF."""
-        filas = self._obtener_filas_para_exportar(self.tabla_oc)
-        if not filas:
-            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
-            return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Órdenes de Compra", "ordenes_compra.pdf", "PDF (*.pdf)")
-        if not ruta:
-            return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = [
-                "N° ODC",
-                "Proveedor",
-                "Fecha",
-                "Total Productos",
-                "Cant. Rec.",
-                "Total",
-                "Estado",
-            ]
-            filtros = self._obtener_filtros_oc_para_exportar()
-            col_widths = [1.5, 2.5, 1.2, 1.5, 1.2, 1.5, 1.0]
-            exportar_pdf(
-                ruta,
-                "Órdenes de Compra",
-                encabezados,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar órdenes de compra a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
-
-    def _exportar_nrs_excel(self) -> None:
-        """Exporta las notas de recepción actuales a Excel."""
-        filas = self._obtener_filas_para_exportar(self.tabla_nr)
-        if not filas:
-            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
-            return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Recepciones", "recepciones.xlsx", "Excel (*.xlsx)")
-        if not ruta:
-            return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = ["N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"]
-            exportar_excel(
-                ruta,
-                encabezados,
-                filas,
-                titulo="Recepciones",
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar recepciones a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
-
-    def _exportar_nrs_pdf(self) -> None:
-        """Exporta las notas de recepción actuales a PDF."""
-        filas = self._obtener_filas_para_exportar(self.tabla_nr)
-        if not filas:
-            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
-            return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Recepciones", "recepciones.pdf", "PDF (*.pdf)")
-        if not ruta:
-            return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = ["N° NR", "ODC", "Proveedor", "Fecha", "Usuario", "Estado"]
-            filtros = self._obtener_filtros_nr_para_exportar()
-            col_widths = [1.5, 1.5, 2.5, 1.2, 1.5, 1.0]
-            exportar_pdf(
-                ruta,
-                "Recepciones",
-                encabezados,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar recepciones a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
-
-    def _exportar_compras_excel(self) -> None:
-        """Exporta las facturas de compra actuales a Excel."""
-        filas = self._obtener_filas_para_exportar(self.tabla_compra)
-        if not filas:
-            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
-            return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Facturas", "facturas_compra.xlsx", "Excel (*.xlsx)")
-        if not ruta:
-            return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = [
-                "N° Compra",
-                "ODC",
-                "Proveedor",
-                "Fecha",
-                "Condición",
-                "Total",
-                "Estado",
-            ]
-            exportar_excel(
-                ruta,
-                encabezados,
-                filas,
-                titulo="Facturas de Compra",
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar facturas de compra a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
-
-    def _exportar_compras_pdf(self) -> None:
-        """Exporta las facturas de compra actuales a PDF."""
-        filas = self._obtener_filas_para_exportar(self.tabla_compra)
-        if not filas:
-            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
-            return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar Facturas", "facturas_compra.pdf", "PDF (*.pdf)")
-        if not ruta:
-            return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = [
-                "N° Compra",
-                "ODC",
-                "Proveedor",
-                "Fecha",
-                "Condición",
-                "Total",
-                "Estado",
-            ]
-            filtros = self._obtener_filtros_compras_para_exportar()
-            col_widths = [1.5, 1.5, 2.5, 1.2, 1.2, 1.5, 1.0]
-            exportar_pdf(
-                ruta,
-                "Facturas de Compra",
-                encabezados,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar facturas de compra a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
-
-    def _obtener_filas_para_exportar(self, tabla: QTableWidget) -> list[list]:
-        """Obtiene las filas de la tabla actual para exportación."""
-        filas = []
-        for row in range(tabla.rowCount()):
-            fila = []
-            for col in range(1, tabla.columnCount()):  # Saltar columna ID (0)
-                item = tabla.item(row, col)
-                if item:
-                    # Montos de la pantalla ("$1,234.50", "$-5.00") -> numero, para que Excel los reciba
-                    # como numeros con su signo y no como texto.
-                    fila.append(valor_para_exportar(item.text()))
-                else:
-                    # Para widgets como EstadoBadge
-                    widget = tabla.cellWidget(row, col)
-                    if widget:
-                        # EstadoBadge es un QWidget que contiene un QLabel
-                        # Buscamos el QLabel dentro del layout
-                        if hasattr(widget, "layout"):
-                            layout = widget.layout()
-                            if layout:
-                                for i in range(layout.count()):
-                                    layout_item = layout.itemAt(i)
-                                    if layout_item:
-                                        item_widget = layout_item.widget()
-                                        if isinstance(item_widget, QLabel):
-                                            fila.append(item_widget.text())
-                                            break
-                                else:
-                                    fila.append("")
-                            else:
-                                fila.append("")
-                        else:
-                            fila.append("")
-                    else:
-                        fila.append("")
-            filas.append(fila)
-        return filas
+        if tipo == "oc":
+            filtros_servicio = {
+                "texto_busqueda": self.oc_buscar_input.text().strip() or None,
+                "estado": self.oc_estado_combo.currentData(),
+            }
+            filtros_pdf = self._obtener_filtros_oc_para_exportar()
+            boton = self.btn_exportar_oc
+        elif tipo == "nr":
+            filtros_servicio = {
+                "texto_busqueda": self.nr_buscar_input.text().strip() or None,
+                "estado": self.nr_estado_combo.currentData(),
+            }
+            filtros_pdf = self._obtener_filtros_nr_para_exportar()
+            boton = self.btn_exportar_nr
+        else:
+            filtros_servicio = {
+                "texto_busqueda": self.compra_buscar_input.text().strip() or None,
+                "estado": self.compra_estado_combo.currentData(),
+                "solo_desde_oc": True,
+            }
+            filtros_pdf = self._obtener_filtros_compras_para_exportar()
+            boton = self.btn_exportar_compra
+        self._exportar_listado_completo(
+            _tarea_exportar_compras,
+            ruta,
+            boton,
+            nombre_filas=definicion["filas"],
+            tipo=tipo,
+            formato=formato,
+            id_usuario=self.usuario.id_usuario,
+            filtros_servicio=filtros_servicio,
+            filtros_pdf=filtros_pdf,
+        )
 
     def _obtener_filtros_oc_para_exportar(self) -> dict[str, str]:
         """Genera un diccionario con los filtros aplicados para las OC."""
@@ -2496,11 +2443,3 @@ class ComprasView(MixinPermisos, QWidget):
         if self.compra_estado_combo.currentData():
             filtros["Estado"] = self.compra_estado_combo.currentText()
         return filtros
-
-    def _obtener_config_empresa(self):
-        """Obtiene la configuración de la empresa para la exportación."""
-        session = self.session_factory()
-        try:
-            return EmpresaService.obtener_datos_documento(session)
-        finally:
-            session.close()

@@ -39,13 +39,16 @@ from app.services.compra_oc import CompraOCService
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf, valor_para_exportar
+from app.services.moneda_cuentas import filtrar_cuentas_por_metodo, moneda_para_metodo, nombre_moneda
 from app.services.notas_credito import NotaCreditoService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
 from app.ui.compra_detalle_dialog import CompraDetalleDialog
+from app.ui.exportacion_completa import POR_PAGINA_EXPORTACION, ExportacionCompletaMixin
 from app.ui.message_box import MessageBox
 from app.ui.notas_credito_proveedor_dialog import NotasCreditoProveedorDialog
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
@@ -423,12 +426,14 @@ class PagoProveedorDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas")
+            moneda_requerida = moneda_para_metodo(metodo, None)
+            cuentas = filtrar_cuentas_por_metodo(self._cuentas_activas, metodo, None)
+            if not cuentas:
+                self.origen_combo.addItem(f"Sin cuentas bancarias en {nombre_moneda(moneda_requerida)}")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas:
+                for cuenta in cuentas:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
@@ -542,11 +547,14 @@ class DetalleCuentaPorPagarDialog(QDialog):
         cuenta: CuentaPorPagar,
         id_usuario: int | None,
         parent=None,
+        pagos: list | None = None,
     ):
         super().__init__(parent)
         self.session = session
         self.cuenta = cuenta
         self.id_usuario = id_usuario
+        # `pagos` ya cargados (los trae el panel en un hilo aparte); sin ellos el dialogo los consulta el mismo.
+        self._pagos_precargados = pagos
 
         self.setWindowTitle("Detalle de Cuenta por Pagar")
         ajustar_tamano(self, 900, 600)
@@ -672,13 +680,16 @@ class DetalleCuentaPorPagarDialog(QDialog):
         return tabla
 
     def _cargar_datos(self) -> None:
-        """Carga los pagos realizados a esta cuenta por pagar."""
+        """Muestra los pagos realizados a esta cuenta por pagar (los precargados, o los consulta)."""
         try:
-            pagos = PagoService.listar_pagos_proveedor(
-                self.session,
-                id_cuenta_por_pagar=self.cuenta.id_cuenta,
-                id_usuario=self.id_usuario,
-            )
+            if self._pagos_precargados is not None:
+                pagos = self._pagos_precargados
+            else:
+                pagos = PagoService.listar_pagos_proveedor(
+                    self.session,
+                    id_cuenta_por_pagar=self.cuenta.id_cuenta,
+                    id_usuario=self.id_usuario,
+                )
 
             self.tabla_pagos.setRowCount(len(pagos))
             total_pagado = Decimal("0.00")
@@ -756,7 +767,104 @@ class DetalleCuentaPorPagarDialog(QDialog):
             MessageBox.warning(self, "Error", f"No se pudo cargar los pagos: {str(e)}")
 
 
-class CuentasPorPagarPanel(MixinPermisos, MixinPaginacion, QWidget):
+def _tarea_cargar_cuentas_pagar(session, id_usuario: int, **filtros) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): la pagina de cuentas, la tasa vigente y el resumen de
+    notas de credito. Tasa y notas son informativas: sin permiso se omiten, nunca bloquean el panel."""
+    resultado = PagoService.listar_cuentas_por_pagar(session, id_usuario=id_usuario, **filtros)
+    try:
+        tasa = TasaService.obtener_tasa_actual(session, id_usuario=id_usuario)
+    except PermisoDenegadoError:
+        tasa = None
+    try:
+        notas = NotaCreditoService.listar_notas_credito_proveedor_disponibles(session, id_usuario=id_usuario)
+        notas_credito = (len(notas), sum((_as_decimal(n.saldo_disponible) for n in notas), Decimal("0")))
+    except PermisoDenegadoError:
+        notas_credito = None
+    return {"resultado": resultado, "tasa": tasa, "notas_credito": notas_credito}
+
+
+def _tarea_detalle_pagos_proveedor(session, session_factory, id_cuenta: int, id_usuario: int | None) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): la cuenta por pagar (con su compra y proveedor) y sus pagos.
+    Devuelve la sesion usada, que el dialogo de detalle cierra al salir."""
+    sesion = sesion_para_dialogo(session_factory)
+    try:
+        cuenta = sesion.get(CuentaPorPagar, id_cuenta)
+        if cuenta is None:
+            return {"session": sesion, "cuenta": None, "pagos": []}
+        if cuenta.compra is not None:
+            _ = cuenta.compra.proveedor  # el dialogo muestra compra y proveedor: se cargan aqui, no en la ventana
+        pagos = PagoService.listar_pagos_proveedor(sesion, id_cuenta_por_pagar=id_cuenta, id_usuario=id_usuario)
+        return {"session": sesion, "cuenta": cuenta, "pagos": pagos}
+    except BaseException:
+        sesion.close()
+        raise
+
+
+ENCABEZADOS_EXPORTACION = ["Compra", "Proveedor", "Saldo Pendiente", "Fecha Factura", "Días", "Vencimiento", "Estado"]
+ANCHOS_PDF_EXPORTACION = [1.5, 2.5, 1.5, 1.2, 0.8, 1.2, 1.0]
+
+
+def filas_exportacion_cuentas_pagar(cuentas: list) -> list[list]:
+    """Las filas del archivo: las mismas celdas que la tabla (columnas 1 a 7), con los montos como numeros."""
+    hoy = date.today()
+    filas = []
+    for cuenta in cuentas:
+        compra = cuenta.compra
+        textos = [
+            compra.numero_compra if compra else "",
+            compra.proveedor.nombre_razon_social if compra and compra.proveedor else "",
+            f"${float(_as_decimal(cuenta.saldo_pendiente)):,.2f}",
+            cuenta.fecha_emision.strftime("%d/%m/%Y") if cuenta.fecha_emision else "Sin definir",
+            str((hoy - cuenta.fecha_emision).days) if cuenta.fecha_emision else "",
+            cuenta.fecha_vencimiento.strftime("%d/%m/%Y") if cuenta.fecha_vencimiento else "Sin definir",
+            cuenta.estado.capitalize(),
+        ]
+        filas.append([valor_para_exportar(texto) for texto in textos])
+    return filas
+
+
+def _tarea_exportar_cuentas_pagar(
+    session, ruta: str, formato: str, id_usuario: int, estado, texto_busqueda, filtros_pdf: dict
+) -> tuple[str, int]:
+    """Corre en un hilo aparte (ver exportacion_completa.py): vuelve a pedir TODAS las cuentas por pagar con los
+    filtros de la pantalla -- la tabla solo tiene la pagina visible -- y escribe el archivo."""
+    resultado = PagoService.listar_cuentas_por_pagar(
+        session,
+        id_usuario=id_usuario,
+        estado=estado,
+        texto_busqueda=texto_busqueda,
+        pagina=1,
+        por_pagina=POR_PAGINA_EXPORTACION,
+    )
+    filas = filas_exportacion_cuentas_pagar(resultado["items"])
+    config_empresa = EmpresaService.obtener_datos_documento(session)
+    total_row = ["", "", CuentasPorPagarPanel._total_saldo_pendiente(filas), "", "", "", ""]
+    if formato == "excel":
+        exportar_excel(
+            ruta,
+            ENCABEZADOS_EXPORTACION,
+            filas,
+            titulo="Cuentas por Pagar",
+            config_empresa=config_empresa,
+            total_row=total_row,
+            total_label="TOTAL:",
+        )
+    else:
+        exportar_pdf(
+            ruta,
+            "Cuentas por Pagar",
+            ENCABEZADOS_EXPORTACION,
+            filas,
+            filtros=filtros_pdf,
+            col_widths=ANCHOS_PDF_EXPORTACION,
+            config_empresa=config_empresa,
+            total_row=total_row,
+            total_label="TOTAL:",
+        )
+    return ruta, len(filas)
+
+
+class CuentasPorPagarPanel(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPermisos, MixinPaginacion, QWidget):
     """Panel principal del modulo Cuentas por Pagar: listado con filtro por estado,
     paginacion y pago contra PagoService.registrar_pago_proveedor."""
 
@@ -955,21 +1063,39 @@ class CuentasPorPagarPanel(MixinPermisos, MixinPaginacion, QWidget):
         self.cargar_cuentas()
 
     def _busqueda_dinamica(self) -> None:
-        """Búsqueda dinámica por nombre o RIF del proveedor."""
-        self.texto_busqueda = self.buscar_input.text().strip()
+        """Búsqueda dinámica por nombre o RIF del proveedor, con pausa al teclear."""
+        self.buscar_con_pausa(self._buscar_tecleando)
+
+    def _buscar_tecleando(self) -> None:
         self.pagina_actual = 1
-        self.cargar_cuentas()
+        self.cargar_cuentas(silencioso=True)  # no enciende la barra de carga
 
     # ── Logica de datos ────────────────────────────────────────────────────
 
-    def _cargar_tasa_actual(self, session) -> float | None:
-        """Tasa BCV vigente, solo para mostrar el equivalente en Bs -- nunca bloquea el
-        panel. Mismo patron que factura_form_dialog.py::_cargar_tasa_vigente()."""
-        try:
-            tasa = TasaService.obtener_tasa_actual(session, id_usuario=self.usuario.id_usuario)
-        except PermisoDenegadoError:
-            self.lbl_tasa.setVisible(False)
-            return None
+    def cargar_cuentas(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        self.texto_busqueda = self.buscar_input.text().strip()
+        self.cargar_async(
+            "cuentas",
+            _tarea_cargar_cuentas_pagar,
+            self._mostrar_cuentas,
+            texto_error="No se pudo cargar el listado de cuentas por pagar.",
+            texto_sin_permiso="No tienes permiso para consultar cuentas por pagar.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            id_usuario=self.usuario.id_usuario,
+            estado=self.estado_combo.currentData(),
+            pagina=self.pagina_actual,
+            por_pagina=POR_PAGINA,
+            texto_busqueda=self.texto_busqueda or None,
+        )
+
+    def _mostrar_cuentas(self, datos: dict) -> None:
+        self._tasa_bcv = self._mostrar_tasa(datos["tasa"])
+        self._poblar_tabla(datos["resultado"])
+        self._mostrar_notas_credito(datos["notas_credito"])
+
+    def _mostrar_tasa(self, tasa: dict | None) -> float | None:
+        """Tasa BCV vigente, solo para mostrar el equivalente en Bs."""
         if tasa is None:
             self.lbl_tasa.setVisible(False)
             return None
@@ -979,85 +1105,17 @@ class CuentasPorPagarPanel(MixinPermisos, MixinPaginacion, QWidget):
         self.lbl_tasa.setVisible(True)
         return float(tasa_bcv)
 
-    def cargar_cuentas(self) -> None:
-        session = self.session_factory()
-        try:
-            self.texto_busqueda = self.buscar_input.text().strip()
-            self._tasa_bcv = self._cargar_tasa_actual(session)
-            resultado = PagoService.listar_cuentas_por_pagar(
-                session,
-                estado=self.estado_combo.currentData(),
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
-                id_usuario=self.usuario.id_usuario,
-            )
-
-            # Aplicar filtros de búsqueda manualmente (nombre o RIF del proveedor)
-            cuentas_filtradas = []
-            for cuenta in resultado["items"]:
-                try:
-                    proveedor = cuenta.compra.proveedor if cuenta.compra else None
-
-                    # Filtro de búsqueda (nombre o RIF del proveedor)
-                    if self.texto_busqueda:
-                        nombre = proveedor.nombre_razon_social if proveedor else ""
-                        # Construir RIF completo desde id_legal e identificacion_proveedor
-                        if proveedor and proveedor.id_legal and proveedor.identificacion_proveedor:
-                            rif = f"{proveedor.id_legal}-{proveedor.identificacion_proveedor}"
-                        else:
-                            rif = proveedor.identificacion_proveedor if proveedor else ""
-                        # Buscar en nombre, RIF completo, identificación sola, o id_legal
-                        if (
-                            self.texto_busqueda.lower() not in nombre.lower()
-                            and self.texto_busqueda.lower() not in rif.lower()
-                            and self.texto_busqueda.lower() not in (proveedor.identificacion_proveedor or "").lower()
-                            and self.texto_busqueda.lower() not in (proveedor.id_legal or "").lower()
-                        ):
-                            continue
-
-                    cuentas_filtradas.append(cuenta)
-                except (AttributeError, TypeError):
-                    # Si hay error al acceder a atributos, saltar esta cuenta
-                    continue
-
-            # Actualizar resultado con cuentas filtradas
-            resultado["items"] = cuentas_filtradas
-            resultado["total"] = len(cuentas_filtradas)
-
-            self._poblar_tabla(resultado)
-            self._actualizar_notas_credito(session)
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para consultar cuentas por pagar.",
-            )
-        except Exception:
-            logger.exception("Fallo al cargar el listado de cuentas por pagar")
-            MessageBox.critical(
-                self,
-                "Error de conexión",
-                "No se pudo cargar el listado de cuentas por pagar.",
-            )
-        finally:
-            session.close()
-
-    def _actualizar_notas_credito(self, session) -> None:
-        """Badge de saldo a favor con proveedores. Informativo: sin permiso 'notas_credito'/
-        'ver' se oculta, nunca bloquea el panel."""
-        try:
-            notas = NotaCreditoService.listar_notas_credito_proveedor_disponibles(
-                session, id_usuario=self.usuario.id_usuario
-            )
-        except PermisoDenegadoError:
+    def _mostrar_notas_credito(self, notas_credito: tuple[int, Decimal] | None) -> None:
+        """Badge de saldo a favor con proveedores. Informativo: sin permiso 'notas_credito'/'ver' se oculta."""
+        if notas_credito is None:
             self.lbl_notas_credito.setVisible(False)
             self.btn_notas_credito.setVisible(False)
             return
-        total = sum((_as_decimal(n.saldo_disponible) for n in notas), Decimal("0"))
+        cantidad, total = notas_credito
         self.lbl_notas_credito.setText(
-            f"{len(notas)} nota{'s' if len(notas) != 1 else ''} de crédito · ${float(total):,.2f} a favor"
+            f"{cantidad} nota{'s' if cantidad != 1 else ''} de crédito · ${float(total):,.2f} a favor"
         )
-        self.lbl_notas_credito.setVisible(bool(notas))
+        self.lbl_notas_credito.setVisible(bool(cantidad))
         self.btn_notas_credito.setVisible(True)
 
     def abrir_notas_credito(self) -> None:
@@ -1187,23 +1245,32 @@ class CuentasPorPagarPanel(MixinPermisos, MixinPaginacion, QWidget):
             session.close()
 
     def _ver_detalle_pagos(self, id_cuenta: int) -> None:
-        """Abre el diálogo de detalle de pagos para una cuenta por pagar."""
-        session = self.session_factory()
+        """Pide en un hilo aparte la cuenta y sus pagos y abre el dialogo de detalle al llegar."""
+        self.cargar_async(
+            "detalle_pagos",
+            _tarea_detalle_pagos_proveedor,
+            self._abrir_detalle_pagos,
+            texto_error="No se pudo abrir el detalle de pagos.",
+            texto_sin_permiso="No tienes permiso para ver el detalle de pagos.",
+            session_factory=self.session_factory,
+            id_cuenta=id_cuenta,
+            id_usuario=self.usuario.id_usuario,
+        )
+
+    def _abrir_detalle_pagos(self, datos: dict) -> None:
+        session = datos["session"]
         try:
-            cuenta = session.get(CuentaPorPagar, id_cuenta)
-            if cuenta is None:
+            if datos["cuenta"] is None:
                 MessageBox.warning(self, "Cuenta no encontrada", "La cuenta por pagar no existe.")
                 return
-
             dialogo = DetalleCuentaPorPagarDialog(
                 session,
-                cuenta,
+                datos["cuenta"],
                 self.usuario.id_usuario,
                 parent=self,
+                pagos=datos["pagos"],
             )
             dialogo.exec()
-        except PermisoDenegadoError:
-            MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de pagos.")
         except Exception as e:
             logger.exception("Error al abrir detalle de pagos")
             MessageBox.warning(self, "Error", f"No se pudo abrir el detalle de pagos: {str(e)}")
@@ -1328,96 +1395,31 @@ class CuentasPorPagarPanel(MixinPermisos, MixinPaginacion, QWidget):
     # ── Exportación ───────────────────────────────────────────────────────
 
     def _exportar_excel(self) -> None:
-        """Exporta la tabla actual a un archivo Excel."""
-        filas = self._obtener_filas_para_exportar()
-        if not filas:
-            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
-            return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar a Excel", "cuentas_por_pagar.xlsx", "Excel (*.xlsx)")
-        if not ruta:
-            return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = [
-                "Compra",
-                "Proveedor",
-                "Saldo Pendiente",
-                "Fecha Factura",
-                "Días",
-                "Vencimiento",
-                "Estado",
-            ]
-
-            # Calcular total del saldo pendiente
-            total_saldo = self._total_saldo_pendiente(filas)
-
-            # Crear fila de totales
-            total_row = ["", "", total_saldo, "", "", "", ""]
-            total_label = "TOTAL:"
-
-            exportar_excel(
-                ruta,
-                encabezados,
-                filas,
-                titulo="Cuentas por Pagar",
-                config_empresa=config_empresa,
-                total_row=total_row,
-                total_label=total_label,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+        """Exporta TODAS las cuentas con los filtros actuales (no solo la pagina visible) a Excel."""
+        self._exportar("excel", "cuentas_por_pagar.xlsx", "Exportar a Excel", "Excel (*.xlsx)")
 
     def _exportar_pdf(self) -> None:
-        """Exporta la tabla actual a un archivo PDF."""
-        filas = self._obtener_filas_para_exportar()
-        if not filas:
+        """Exporta TODAS las cuentas con los filtros actuales (no solo la pagina visible) a PDF."""
+        self._exportar("pdf", "cuentas_por_pagar.pdf", "Exportar a PDF", "PDF (*.pdf)")
+
+    def _exportar(self, formato: str, nombre: str, titulo_dialogo: str, filtro_archivo: str) -> None:
+        if self.tabla.rowCount() == 0:
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar a PDF", "cuentas_por_pagar.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(self, titulo_dialogo, nombre, filtro_archivo)
         if not ruta:
             return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = [
-                "Compra",
-                "Proveedor",
-                "Saldo Pendiente",
-                "Fecha Factura",
-                "Días",
-                "Vencimiento",
-                "Estado",
-            ]
-            filtros = self._obtener_filtros_para_exportar()
-            col_widths = [1.5, 2.5, 1.5, 1.2, 0.8, 1.2, 1.0]
-
-            # Calcular total del saldo pendiente
-            total_saldo = self._total_saldo_pendiente(filas)
-
-            # Crear fila de totales
-            total_row = ["", "", total_saldo, "", "", "", ""]
-            total_label = "TOTAL:"
-
-            exportar_pdf(
-                ruta,
-                "Cuentas por Pagar",
-                encabezados,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-                config_empresa=config_empresa,
-                total_row=total_row,
-                total_label=total_label,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
+        self._exportar_listado_completo(
+            _tarea_exportar_cuentas_pagar,
+            ruta,
+            self.btn_exportar,
+            nombre_filas="cuentas",
+            formato=formato,
+            id_usuario=self.usuario.id_usuario,
+            estado=self.estado_combo.currentData(),
+            texto_busqueda=self.buscar_input.text().strip() or None,
+            filtros_pdf=self._obtener_filtros_para_exportar(),
+        )
 
     @staticmethod
     def _total_saldo_pendiente(filas: list[list]) -> Decimal:
@@ -1432,44 +1434,6 @@ class CuentasPorPagarPanel(MixinPermisos, MixinPaginacion, QWidget):
             if isinstance(valor, (int, float, Decimal)) and not isinstance(valor, bool):
                 total += Decimal(str(valor))
         return total
-
-    def _obtener_filas_para_exportar(self) -> list[list]:
-        """Obtiene las filas de la tabla actual para exportación."""
-        filas = []
-        for row in range(self.tabla.rowCount()):
-            fila = []
-            for col in range(1, self.tabla.columnCount()):  # Saltar columna ID (0)
-                item = self.tabla.item(row, col)
-                if item:
-                    # Montos de la pantalla ("$1,234.50", "$-5.00") -> numero, para que Excel los reciba
-                    # como numeros con su signo y no como texto.
-                    fila.append(valor_para_exportar(item.text()))
-                else:
-                    # Para widgets como EstadoBadge
-                    widget = self.tabla.cellWidget(row, col)
-                    if widget:
-                        # EstadoBadge es un QWidget que contiene un QLabel
-                        # Buscamos el QLabel dentro del layout
-                        if hasattr(widget, "layout"):
-                            layout = widget.layout()
-                            if layout:
-                                for i in range(layout.count()):
-                                    layout_item = layout.itemAt(i)
-                                    if layout_item:
-                                        item_widget = layout_item.widget()
-                                        if isinstance(item_widget, QLabel):
-                                            fila.append(item_widget.text())
-                                            break
-                                else:
-                                    fila.append("")
-                            else:
-                                fila.append("")
-                        else:
-                            fila.append("")
-                    else:
-                        fila.append("")
-            filas.append(fila)
-        return filas
 
     def _obtener_filtros_para_exportar(self) -> dict[str, str]:
         """Genera un diccionario con los filtros aplicados para el PDF."""

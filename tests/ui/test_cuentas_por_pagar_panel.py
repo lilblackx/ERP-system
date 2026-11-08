@@ -259,18 +259,21 @@ def test_ver_detalle_pagos_abre_el_dialogo_con_la_cuenta_y_cierra_la_sesion(pane
     abiertos = []
 
     class DialogoFalso:
-        def __init__(self, session, cuenta_, id_usuario, parent=None):
+        def __init__(self, session, cuenta_, id_usuario, parent=None, pagos=None):
             abiertos.append((session, cuenta_, id_usuario))
 
         def exec(self):
             return 0
 
     monkeypatch.setattr(cpp, "DetalleCuentaPorPagarDialog", DialogoFalso)
+    monkeypatch.setattr(cpp.PagoService, "listar_pagos_proveedor", lambda *a, **k: [])
+    monkeypatch.setattr(cpp.MessageBox, "warning", lambda *a, **k: pytest.fail("no debe avisar"))
 
     panel_cxp._ver_detalle_pagos(3)
 
     assert abiertos == [(sesion, cuenta, 5)]
-    sesion.close.assert_called_once()
+    # el mock hace de sesion del worker (la cierra el QueryWorker) y del dialogo (la cierra el panel)
+    assert sesion.close.call_count == 2
 
 
 def test_ver_detalle_pagos_cuenta_inexistente_avisa_y_no_abre_dialogo(panel_cxp, monkeypatch):
@@ -284,4 +287,4 @@ def test_ver_detalle_pagos_cuenta_inexistente_avisa_y_no_abre_dialogo(panel_cxp,
     panel_cxp._ver_detalle_pagos(99)
 
     assert avisos == ["Cuenta no encontrada"]
-    sesion.close.assert_called_once()
+    assert sesion.close.call_count == 2

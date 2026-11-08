@@ -38,16 +38,25 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import ConfiguracionEmpresa, CuentaPorCobrar, FacturaVenta, Usuario
+from app.db.models import CuentaPorCobrar, FacturaVenta, Usuario
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf, valor_para_exportar
+from app.services.moneda_cuentas import (
+    filtrar_cuentas_por_metodo,
+    moneda_pago_por_tasa,
+    moneda_para_metodo,
+    nombre_moneda,
+)
 from app.services.paginacion import paginar_lista
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
+from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
+from app.ui.conversion_bolivares import ConversionBolivaresMixin
+from app.ui.exportacion_completa import POR_PAGINA_EXPORTACION, ExportacionCompletaMixin
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
@@ -178,7 +187,7 @@ QPushButton#BtnSecondary:hover {{
 """
 
 
-class PagoCobroDialog(QDialog):
+class PagoCobroDialog(ConversionBolivaresMixin, QDialog):
     """Un unico pago en USD contra el saldo_pendiente de una CuentaPorCobrar. Mismo patron
     de origen caja/cuenta que PagoProveedorDialog (app/ui/cuentas_por_pagar_panel.py).
     """
@@ -282,21 +291,21 @@ class PagoCobroDialog(QDialog):
         fila_bolivares.setSpacing(8)
 
         col_bolivares = QVBoxLayout()
-        lbl_bolivares = QLabel("Monto (Bs)")
-        lbl_bolivares.setProperty("class", "FormLabel")
+        self.lbl_bolivares = QLabel("Monto (Bs)")
+        self.lbl_bolivares.setProperty("class", "FormLabel")
         self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
-        col_bolivares.addWidget(lbl_bolivares)
+        col_bolivares.addWidget(self.lbl_bolivares)
         col_bolivares.addWidget(self.bolivares_input)
 
         col_tasa = QVBoxLayout()
-        lbl_tasa = QLabel("Tasa del día (Bs/USD)")
-        lbl_tasa.setProperty("class", "FormLabel")
+        self.lbl_tasa_campo = QLabel("Tasa del día (Bs/USD)")
+        self.lbl_tasa_campo.setProperty("class", "FormLabel")
         self.tasa_input = NumericLineEdit(NumericFieldType.RATE)
         self.tasa_input.setFixedHeight(32)
         self.tasa_input.valueChanged.connect(self._calcular_monto_usd)
-        col_tasa.addWidget(lbl_tasa)
+        col_tasa.addWidget(self.lbl_tasa_campo)
         col_tasa.addWidget(self.tasa_input)
 
         fila_bolivares.addLayout(col_bolivares, stretch=1)
@@ -431,12 +440,16 @@ class PagoCobroDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas")
+            moneda_requerida = moneda_para_metodo(metodo, moneda_pago_por_tasa(self.tasa_combo.currentText()))
+            cuentas = filtrar_cuentas_por_metodo(
+                self._cuentas_activas, metodo, moneda_pago_por_tasa(self.tasa_combo.currentText())
+            )
+            if not cuentas:
+                self.origen_combo.addItem(f"Sin cuentas bancarias en {nombre_moneda(moneda_requerida)}")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas:
+                for cuenta in cuentas:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
@@ -459,17 +472,9 @@ class PagoCobroDialog(QDialog):
         mostrar_bolivares = es_banco and not es_efectivo
         self.campos_bolivares_widget.setVisible(bool(mostrar_bolivares))
 
-        if mostrar_bolivares:
-            # Habilitar cálculo automático
-            self.monto_input.setReadOnly(True)
-            self.monto_input.setStyleSheet("background-color: #F1F5F9;")
-            # Si no hay tasa seleccionada, seleccionar automáticamente la primera disponible (BCV)
-            if self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
-                self.tasa_combo.setCurrentIndex(1)  # El índice 0 es "-- Seleccionar --"
-        else:
-            # Restaurar campo de monto manual
-            self.monto_input.setReadOnly(False)
-            self.monto_input.setStyleSheet("")
+        self._aplicar_modo_conversion(mostrar_bolivares)
+        if mostrar_bolivares and self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
+            self.tasa_combo.setCurrentIndex(1)  # el indice 0 es "-- Seleccionar --"; dispara _on_tasa_seleccionada
 
     def _on_tasa_seleccionada(self) -> None:
         """Carga la tasa seleccionada del combo al campo de tasa y calcula bolivares."""
@@ -477,6 +482,8 @@ class PagoCobroDialog(QDialog):
         if tasa_data is not None:
             id_tasa, valor_tasa = tasa_data
             self._id_tasa_seleccionada = id_tasa
+            if self._cambio_la_moneda_de_la_tasa():
+                self._toggle_origen()
             self.tasa_input.set_value(valor_tasa)
             # Calcular automáticamente el monto en bolivares
             monto_usd = self.monto_input.get_value() or Decimal("0")
@@ -484,41 +491,6 @@ class PagoCobroDialog(QDialog):
                 bolivares = monto_usd * Decimal(str(valor_tasa))
                 self.bolivares_input.set_value(bolivares)
             self._calcular_monto_usd()
-
-    def _calcular_monto_usd(self) -> None:
-        """Calcula el monto USD automáticamente: bolivares / tasa."""
-        metodo = self.metodo_combo.currentData()
-        origen = self.origen_combo.currentData()
-        # Solo calcular para métodos bancarios (no efectivo)
-        if metodo == "efectivo" or not origen or origen[0] != "banco":
-            return
-
-        bolivares = self.bolivares_input.get_value() or Decimal("0")
-        tasa = self.tasa_input.get_value() or Decimal("0")
-
-        if tasa > 0:
-            monto_usd = bolivares / tasa
-            self.monto_input.set_value(monto_usd)
-            # set_value() reformatea con el estilo base del widget -- reaplicar el
-            # resaltado de solo-lectura para que no desaparezca en cada recalculo
-            # mientras el metodo de pago siga siendo bancario.
-            if self.monto_input.isReadOnly():
-                self.monto_input.setStyleSheet("background-color: #F1F5F9;")
-
-    def _calcular_bolivares_desde_usd(self) -> None:
-        """Calcula el monto en bolivares automáticamente: USD * tasa."""
-        metodo = self.metodo_combo.currentData()
-        origen = self.origen_combo.currentData()
-        # Solo calcular para métodos bancarios (no efectivo)
-        if metodo == "efectivo" or not origen or origen[0] != "banco":
-            return
-
-        monto_usd = self.monto_input.get_value() or Decimal("0")
-        tasa = self.tasa_input.get_value() or Decimal("0")
-
-        if tasa > 0 and monto_usd > 0:
-            bolivares = monto_usd * tasa
-            self.bolivares_input.set_value(bolivares)
 
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
@@ -573,7 +545,9 @@ class PagoCobroDialog(QDialog):
                     id_cuenta_por_cobrar=self.cuenta.id_cuenta_por_cobrar,
                     monto=self.monto_input.get_value(),
                     metodo_pago=metodo,
-                    moneda="VES" if monto_moneda_origen is not None else "USD",
+                    moneda=(moneda_pago_por_tasa(self.tasa_combo.currentText()) or "VES")
+                    if monto_moneda_origen is not None
+                    else "USD",
                     monto_moneda_origen=monto_moneda_origen,
                     monto_bolivares=monto_bolivares,
                     tasa_cambio=tasa_cambio,
@@ -603,7 +577,7 @@ class PagoCobroDialog(QDialog):
         self.accept()
 
 
-class AbonoGeneralDialog(QDialog):
+class AbonoGeneralDialog(ConversionBolivaresMixin, QDialog):
     """Diálogo para aplicar un abono general a un cliente usando el método FIFO."""
 
     def __init__(
@@ -730,21 +704,21 @@ class AbonoGeneralDialog(QDialog):
         fila_bolivares.setSpacing(8)
 
         col_bolivares = QVBoxLayout()
-        lbl_bolivares = QLabel("Monto (Bs)")
-        lbl_bolivares.setProperty("class", "FormLabel")
+        self.lbl_bolivares = QLabel("Monto (Bs)")
+        self.lbl_bolivares.setProperty("class", "FormLabel")
         self.bolivares_input = NumericLineEdit(NumericFieldType.AMOUNT, max_value=Decimal("999999999999"))
         self.bolivares_input.setFixedHeight(32)
         self.bolivares_input.valueChanged.connect(self._calcular_monto_usd)
-        col_bolivares.addWidget(lbl_bolivares)
+        col_bolivares.addWidget(self.lbl_bolivares)
         col_bolivares.addWidget(self.bolivares_input)
 
         col_tasa = QVBoxLayout()
-        lbl_tasa = QLabel("Tasa del día (Bs/USD)")
-        lbl_tasa.setProperty("class", "FormLabel")
+        self.lbl_tasa_campo = QLabel("Tasa del día (Bs/USD)")
+        self.lbl_tasa_campo.setProperty("class", "FormLabel")
         self.tasa_input = NumericLineEdit(NumericFieldType.RATE)
         self.tasa_input.setFixedHeight(32)
         self.tasa_input.valueChanged.connect(self._calcular_monto_usd)
-        col_tasa.addWidget(lbl_tasa)
+        col_tasa.addWidget(self.lbl_tasa_campo)
         col_tasa.addWidget(self.tasa_input)
 
         fila_bolivares.addLayout(col_bolivares, stretch=1)
@@ -874,12 +848,16 @@ class AbonoGeneralDialog(QDialog):
                         ("caja", caja.id_caja),
                     )
         else:
-            if not self._cuentas_activas:
-                self.origen_combo.addItem("Sin cuentas bancarias activas")
+            moneda_requerida = moneda_para_metodo(metodo, moneda_pago_por_tasa(self.tasa_combo.currentText()))
+            cuentas = filtrar_cuentas_por_metodo(
+                self._cuentas_activas, metodo, moneda_pago_por_tasa(self.tasa_combo.currentText())
+            )
+            if not cuentas:
+                self.origen_combo.addItem(f"Sin cuentas bancarias en {nombre_moneda(moneda_requerida)}")
                 self.origen_combo.setEnabled(False)
             else:
                 self.origen_combo.setEnabled(True)
-                for cuenta in self._cuentas_activas:
+                for cuenta in cuentas:
                     nombre_banco = cuenta.banco.nombre_banco if cuenta.banco else "Banco"
                     self.origen_combo.addItem(
                         f"{nombre_banco} - ...{cuenta.numero_cuenta[-4:]}",
@@ -899,19 +877,20 @@ class AbonoGeneralDialog(QDialog):
         mostrar_bolivares = es_banco and not es_efectivo
         self.campos_bolivares_widget.setVisible(bool(mostrar_bolivares))
 
-        if mostrar_bolivares:
-            self.monto_input.setReadOnly(True)
-            self.monto_input.setStyleSheet("background-color: #F1F5F9;")
-            if self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
-                self.tasa_combo.setCurrentIndex(1)
-        else:
-            self.monto_input.setReadOnly(False)
-            self.monto_input.setStyleSheet("")
-
-        # Para efectivo, ocultar completamente el campo de tasa ya que no se usa
+        # Efectivo no usa tasa; cualquier otro metodo la vuelve a habilitar (antes quedaba bloqueada para
+        # siempre porque el dialogo abre en "Efectivo" y nada la re-habilitaba al cambiar de metodo).
+        self.tasa_input.setEnabled(not es_efectivo)
         if es_efectivo:
-            self.tasa_input.set_value(Decimal("0.00"))
-            self.tasa_input.setEnabled(False)
+            self.tasa_input.set_value(None)
+            # Sin tasa elegida: al volver a un metodo bancario se vuelve a cargar la del combo.
+            self.tasa_combo.blockSignals(True)
+            self.tasa_combo.setCurrentIndex(0)
+            self.tasa_combo.blockSignals(False)
+            self._id_tasa_seleccionada = None
+
+        self._aplicar_modo_conversion(mostrar_bolivares)
+        if mostrar_bolivares and self._id_tasa_seleccionada is None and self.tasa_combo.count() > 1:
+            self.tasa_combo.setCurrentIndex(1)  # el indice 0 es "-- Seleccionar --"; dispara _on_tasa_seleccionada
 
     def _on_tasa_seleccionada(self) -> None:
         """Carga la tasa seleccionada del combo al campo de tasa y calcula bolivares."""
@@ -919,42 +898,14 @@ class AbonoGeneralDialog(QDialog):
         if tasa_data is not None:
             id_tasa, valor_tasa = tasa_data
             self._id_tasa_seleccionada = id_tasa
+            if self._cambio_la_moneda_de_la_tasa():
+                self._toggle_origen()
             self.tasa_input.set_value(valor_tasa)
             monto_usd = self.monto_input.get_value() or Decimal("0")
             if valor_tasa > 0 and monto_usd > 0:
                 bolivares = monto_usd * Decimal(str(valor_tasa))
                 self.bolivares_input.set_value(bolivares)
             self._calcular_monto_usd()
-
-    def _calcular_monto_usd(self) -> None:
-        """Calcula el monto USD automáticamente: bolivares / tasa."""
-        metodo = self.metodo_combo.currentData()
-        origen = self.origen_combo.currentData()
-        if metodo == "efectivo" or not origen or origen[0] != "banco":
-            return
-
-        bolivares = self.bolivares_input.get_value() or Decimal("0")
-        tasa = self.tasa_input.get_value() or Decimal("0")
-
-        if tasa > 0:
-            monto_usd = bolivares / tasa
-            self.monto_input.set_value(monto_usd)
-            if self.monto_input.isReadOnly():
-                self.monto_input.setStyleSheet("background-color: #F1F5F9;")
-
-    def _calcular_bolivares_desde_usd(self) -> None:
-        """Calcula el monto en bolivares automáticamente: USD * tasa."""
-        metodo = self.metodo_combo.currentData()
-        origen = self.origen_combo.currentData()
-        if metodo == "efectivo" or not origen or origen[0] != "banco":
-            return
-
-        monto_usd = self.monto_input.get_value() or Decimal("0")
-        tasa = self.tasa_input.get_value() or Decimal("0")
-
-        if tasa > 0 and monto_usd > 0:
-            bolivares = monto_usd * tasa
-            self.bolivares_input.set_value(bolivares)
 
     def _validar_y_aceptar(self) -> None:
         origen = self.origen_combo.currentData()
@@ -1021,6 +972,7 @@ class AbonoGeneralDialog(QDialog):
                     id_caja=id_origen if tipo_origen == "caja" else None,
                     id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
                     id_tasa=id_tasa,
+                    moneda_pago=moneda_pago_por_tasa(self.tasa_combo.currentText()) if tipo_origen == "banco" else None,
                     referencia=self.referencia_input.text().strip() or None,
                     id_usuario=self.id_usuario,
                 )
@@ -1440,7 +1392,139 @@ class DetalleClienteDialog(MixinPermisos, MixinPaginacion, QDialog):
             MessageBox.critical(self, "Error", "No se pudo aplicar el abono general.")
 
 
-class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
+def _tarea_cargar_cuentas_cobrar(session, id_usuario: int, **filtros) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): la pagina de clientes con deuda y la tasa vigente
+    (informativa: sin permiso se omite, nunca bloquea el panel)."""
+    resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(session, id_usuario=id_usuario, **filtros)
+    try:
+        tasa = TasaService.obtener_tasa_actual(session, id_usuario=id_usuario)
+    except PermisoDenegadoError:
+        tasa = None
+    return {"resultado": resultado, "tasa": tasa}
+
+
+def _tarea_detalle_cliente(session, session_factory, id_cliente: int, id_usuario: int | None) -> dict:
+    """Corre en un hilo aparte (ver carga_asincrona.py): todas las cuentas por cobrar del cliente. Devuelve ademas la
+    sesion con la que se consultaron: el dialogo de detalle sigue usandola (cobros, refrescos) y la cierra al salir."""
+    sesion = sesion_para_dialogo(session_factory)
+    try:
+        resultado = PagoService.listar_cuentas_por_cobrar(
+            sesion,
+            id_cliente=id_cliente,
+            pagina=1,
+            por_pagina=10000,  # Traer todas las facturas
+            id_usuario=id_usuario,
+        )
+        cuentas = resultado["items"]
+        cliente = None
+        if cuentas and cuentas[0].factura and cuentas[0].factura.cliente:
+            cliente = cuentas[0].factura.cliente
+        return {"session": sesion, "cuentas": cuentas, "cliente": cliente}
+    except BaseException:
+        sesion.close()
+        raise
+
+
+def estado_general_cliente(cuentas: list) -> str:
+    """Estado general de un cliente segun sus cuentas por cobrar: vencida > pendiente > parcial > pagada."""
+    hoy = date.today()
+    tiene_vencida = False
+    tiene_pendiente = False
+    tiene_parcial = False
+    tiene_pagada = False
+
+    for cuenta in cuentas:
+        estado = cuenta.estado
+        if estado == "pagada":
+            tiene_pagada = True
+        elif estado == "parcial":
+            tiene_parcial = True
+        elif estado == "pendiente":
+            tiene_pendiente = True
+            if cuenta.fecha_vencimiento and cuenta.fecha_vencimiento < hoy:
+                tiene_vencida = True
+
+    if tiene_vencida:
+        return "vencida"
+    if tiene_pendiente:
+        return "pendiente"
+    if tiene_parcial:
+        return "parcial"
+    if tiene_pagada:
+        return "pagada"
+    return "pendiente"
+
+
+ENCABEZADOS_EXPORTACION = [
+    "Cliente",
+    "Saldo Pendiente",
+    "Saldo a Favor",
+    "Saldo Vencido",
+    "Días",
+    "Fecha Factura",
+    "Estado",
+]
+ANCHOS_PDF_EXPORTACION = [2.6, 1.2, 1.1, 1.1, 0.6, 1.1, 1.0]
+
+
+def filas_exportacion_cuentas_cobrar(clientes_data: list[dict]) -> list[list]:
+    """Las filas del archivo: las mismas celdas que la tabla (columnas 1 a 7), con los montos como numeros."""
+    filas = []
+    for cliente_data in clientes_data:
+        cliente = cliente_data["cliente"]
+        fecha = cliente_data.get("fecha_emision_mas_antigua_pendiente")
+        textos = [
+            cliente.nombre_razon_social or "",
+            f"${float(_as_decimal(cliente_data['saldo_total'])):,.2f}",
+            f"${float(_as_decimal(cliente_data.get('saldo_favor', Decimal('0.00')))):,.2f}",
+            f"${float(_as_decimal(cliente_data.get('saldo_vencido', Decimal('0.00')))):,.2f}",
+            str(cliente_data.get("dias_transcurridos", 0)),
+            fecha.strftime("%d/%m/%Y") if fecha else "Sin definir",
+            estado_general_cliente(cliente_data["cuentas"]).capitalize(),
+        ]
+        filas.append([valor_para_exportar(texto) for texto in textos])
+    return filas
+
+
+def _tarea_exportar_cuentas_cobrar(
+    session,
+    ruta: str,
+    formato: str,
+    id_usuario: int,
+    estado,
+    id_vendedor,
+    texto_busqueda,
+    filtros_pdf: dict,
+) -> tuple[str, int]:
+    """Corre en un hilo aparte (ver exportacion_completa.py): vuelve a pedir TODOS los clientes con deuda con los
+    filtros de la pantalla -- la tabla solo tiene la pagina visible -- y escribe el archivo."""
+    resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(
+        session,
+        id_usuario=id_usuario,
+        estado=estado,
+        id_vendedor=id_vendedor,
+        texto_busqueda=texto_busqueda,
+        pagina=1,
+        por_pagina=POR_PAGINA_EXPORTACION,
+    )
+    filas = filas_exportacion_cuentas_cobrar(resultado["items"])
+    config_empresa = EmpresaService.obtener_datos_documento(session)
+    if formato == "excel":
+        exportar_excel(ruta, ENCABEZADOS_EXPORTACION, filas, titulo="Cuentas por Cobrar", config_empresa=config_empresa)
+    else:
+        exportar_pdf(
+            ruta,
+            "Cuentas por Cobrar",
+            ENCABEZADOS_EXPORTACION,
+            filas,
+            filtros=filtros_pdf,
+            col_widths=ANCHOS_PDF_EXPORTACION,
+            config_empresa=config_empresa,
+        )
+    return ruta, len(filas)
+
+
+class CuentasPorCobrarPanel(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPaginacion, QWidget):
     """Panel principal del modulo Cuentas por Cobrar: listado con filtro por estado,
     paginacion y cobro contra PagoService.registrar_pago_cobro."""
 
@@ -1643,23 +1727,18 @@ class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
         self.cargar_cuentas()
 
     def _busqueda_dinamica(self) -> None:
-        """Búsqueda en tiempo real con debounce."""
-        if hasattr(self, "_search_timer") and self._search_timer is not None:
-            self._search_timer.stop()
-        self._search_timer = QTimer.singleShot(300, self._buscar_desde_inicio)
+        """Búsqueda en tiempo real con pausa al teclear."""
+        self.buscar_con_pausa(self._buscar_tecleando)
+
+    def _buscar_tecleando(self) -> None:
+        self.pagina_actual = 1
+        self.cargar_cuentas(silencioso=True)  # no enciende la barra de carga
 
     # ── Logica de datos ────────────────────────────────────────────────────
 
-    def _cargar_tasa_actual(self, session) -> float | None:
-        """Tasa paralelo vigente, solo para mostrar el equivalente en Bs -- nunca bloquea el
-        panel. Mismo patron que factura_form_dialog.py::_cargar_tasa_vigente(): si el
-        usuario no tiene 'tasas'/'ver' o no hay ninguna tasa registrada, se oculta el
-        indicador y las columnas en Bs quedan vacías en vez de romper la carga."""
-        try:
-            tasa = TasaService.obtener_tasa_actual(session, id_usuario=self.usuario.id_usuario)
-        except PermisoDenegadoError:
-            self.lbl_tasa.setVisible(False)
-            return None
+    def _mostrar_tasa(self, tasa: dict | None) -> float | None:
+        """Tasa paralelo vigente, solo para mostrar el equivalente en Bs: si no hay (o no hay permiso), se
+        oculta el indicador y las columnas en Bs quedan vacías."""
         if tasa is None:
             self.lbl_tasa.setVisible(False)
             return None
@@ -1669,39 +1748,29 @@ class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
         self.lbl_tasa.setVisible(True)
         return float(tasa_paralelo)
 
-    def cargar_cuentas(self) -> None:
-        session = self.session_factory()
-        try:
-            self.texto_busqueda = self.buscar_input.text().strip()
-            self.filtro_vendedor = self.vendedor_combo.currentData()
-            self._tasa_paralelo = self._cargar_tasa_actual(session)
+    def cargar_cuentas(self, silencioso: bool = False, sincrono: bool = False) -> None:
+        self.texto_busqueda = self.buscar_input.text().strip()
+        self.filtro_vendedor = self.vendedor_combo.currentData()
+        # La busqueda por nombre y el filtro "con deuda o saldo a favor" los hace el servicio ANTES de paginar.
+        self.cargar_async(
+            "cuentas",
+            _tarea_cargar_cuentas_cobrar,
+            self._mostrar_cuentas,
+            texto_error="No se pudo cargar el listado de cuentas por cobrar.",
+            texto_sin_permiso="No tienes permiso para consultar cuentas por cobrar.",
+            silencioso=silencioso,
+            sincrono=sincrono,
+            id_usuario=self.usuario.id_usuario,
+            estado=self.estado_combo.currentData(),
+            id_vendedor=self.filtro_vendedor,
+            texto_busqueda=self.texto_busqueda or None,
+            pagina=self.pagina_actual,
+            por_pagina=POR_PAGINA,
+        )
 
-            # La busqueda por nombre y el filtro "con deuda o saldo a favor" los hace el servicio ANTES de paginar:
-            # antes se traian 10000 filas y se recortaban aqui, y los clientes sin saldo se descartaban DESPUES de
-            # paginar (el total anunciado no coincidia con las filas de cada pagina).
-            resultado = PagoService.listar_cuentas_por_cobrar_por_cliente(
-                session,
-                estado=self.estado_combo.currentData(),
-                id_vendedor=self.filtro_vendedor,
-                texto_busqueda=self.texto_busqueda or None,
-                pagina=self.pagina_actual,
-                por_pagina=POR_PAGINA,
-                id_usuario=self.usuario.id_usuario,
-            )
-
-            self._poblar_tabla(resultado)
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para consultar cuentas por cobrar.",
-            )
-        except Exception as e:
-            logger.exception("Fallo al cargar el listado de cuentas por cobrar: %s", e)
-            msg = f"No se pudo cargar el listado de cuentas por cobrar: {e}"
-            MessageBox.critical(self, "Error de conexión", msg)
-        finally:
-            session.close()
+    def _mostrar_cuentas(self, datos: dict) -> None:
+        self._tasa_paralelo = self._mostrar_tasa(datos["tasa"])
+        self._poblar_tabla(datos["resultado"])
 
     def _poblar_tabla(self, resultado: dict) -> None:
         clientes_data: list[dict] = resultado["items"]
@@ -1774,35 +1843,7 @@ class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
 
     def _determinar_estado_cliente(self, cuentas: list) -> str:
         """Determina el estado general de un cliente basado en sus cuentas por cobrar."""
-        hoy = date.today()
-        tiene_vencida = False
-        tiene_pendiente = False
-        tiene_parcial = False
-        tiene_pagada = False
-
-        for cuenta in cuentas:
-            estado = cuenta.estado
-            if estado == "pagada":
-                tiene_pagada = True
-            elif estado == "parcial":
-                tiene_parcial = True
-            elif estado == "pendiente":
-                tiene_pendiente = True
-                # Verificar si está vencida
-                if cuenta.fecha_vencimiento and cuenta.fecha_vencimiento < hoy:
-                    tiene_vencida = True
-
-        # Prioridad de estados para mostrar
-        if tiene_vencida:
-            return "vencida"
-        elif tiene_pendiente:
-            return "pendiente"
-        elif tiene_parcial:
-            return "parcial"
-        elif tiene_pagada:
-            return "pagada"
-        else:
-            return "pendiente"
+        return estado_general_cliente(cuentas)
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -1831,31 +1872,29 @@ class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
         self._mostrar_detalle_cliente(id_cliente)
 
     def _mostrar_detalle_cliente(self, id_cliente: int) -> None:
-        """Muestra el diálogo con el detalle de facturas del cliente."""
-        session = self.session_factory()
-        try:
-            # Obtener todas las cuentas por cobrar del cliente (sin paginación)
-            resultado = PagoService.listar_cuentas_por_cobrar(
-                session,
-                id_cliente=id_cliente,
-                pagina=1,
-                por_pagina=10000,  # Traer todas las facturas
-                id_usuario=self.usuario.id_usuario,
-            )
+        """Pide en un hilo aparte las cuentas del cliente y abre el dialogo de detalle al llegar."""
+        self.cargar_async(
+            "detalle_cliente",
+            _tarea_detalle_cliente,
+            self._abrir_detalle_cliente,
+            texto_error="No se pudo cargar el detalle del cliente.",
+            texto_sin_permiso="No tienes permiso para ver el detalle del cliente.",
+            session_factory=self.session_factory,
+            id_cliente=id_cliente,
+            id_usuario=self.usuario.id_usuario,
+        )
 
-            cuentas = resultado["items"]
+    def _abrir_detalle_cliente(self, datos: dict) -> None:
+        session = datos["session"]
+        try:
+            cuentas = datos["cuentas"]
             if not cuentas:
                 MessageBox.information(self, "Sin detalle", "Este cliente no tiene cuentas por cobrar.")
                 return
 
-            # Obtener información del cliente
-            cliente = None
-            if cuentas and cuentas[0].factura and cuentas[0].factura.cliente:
-                cliente = cuentas[0].factura.cliente
-
             dialog = DetalleClienteDialog(
                 session,
-                cliente,
+                datos["cliente"],
                 cuentas,
                 self._tasa_paralelo,
                 self.usuario.id_usuario,
@@ -1866,15 +1905,8 @@ class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
             # Si se realizó algún cobro, recargar la tabla principal
             if dialog.se_realizo_cobro:
                 self.cargar_cuentas()
-
-        except PermisoDenegadoError:
-            MessageBox.warning(
-                self,
-                "Sin permiso",
-                "No tienes permiso para ver el detalle del cliente.",
-            )
         except Exception as e:
-            logger.exception(f"Fallo al cargar el detalle del cliente {id_cliente}: {e}")
+            logger.exception("Fallo al abrir el detalle del cliente: %s", e)
             MessageBox.critical(self, "Error", f"No se pudo cargar el detalle del cliente: {str(e)}")
         finally:
             session.close()
@@ -1889,110 +1921,32 @@ class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
     # ── Exportación ───────────────────────────────────────────────────────
 
     def _exportar_excel(self) -> None:
-        """Exporta la tabla actual a un archivo Excel."""
-        filas = self._obtener_filas_para_exportar()
-        if not filas:
-            MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
-            return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar a Excel", "cuentas_por_cobrar.xlsx", "Excel (*.xlsx)")
-        if not ruta:
-            return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = [
-                "Cliente",
-                "Saldo Pendiente",
-                "Días",
-                "Fecha Factura",
-                "Estado",
-            ]
-            exportar_excel(
-                ruta,
-                encabezados,
-                filas,
-                titulo="Cuentas por Cobrar",
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar a Excel")
-            MessageBox.critical(self, "Error", "No se pudo exportar a Excel.")
+        """Exporta TODOS los clientes con los filtros actuales (no solo la pagina visible) a Excel."""
+        self._exportar("excel", "cuentas_por_cobrar.xlsx", "Exportar a Excel", "Excel (*.xlsx)")
 
     def _exportar_pdf(self) -> None:
-        """Exporta la tabla actual a un archivo PDF."""
-        filas = self._obtener_filas_para_exportar()
-        if not filas:
+        """Exporta TODOS los clientes con los filtros actuales (no solo la pagina visible) a PDF."""
+        self._exportar("pdf", "cuentas_por_cobrar.pdf", "Exportar a PDF", "PDF (*.pdf)")
+
+    def _exportar(self, formato: str, nombre: str, titulo_dialogo: str, filtro_archivo: str) -> None:
+        if self.tabla.rowCount() == 0:
             MessageBox.information(self, "Sin datos", "No hay datos para exportar.")
             return
-
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar a PDF", "cuentas_por_cobrar.pdf", "PDF (*.pdf)")
+        ruta, _ = QFileDialog.getSaveFileName(self, titulo_dialogo, nombre, filtro_archivo)
         if not ruta:
             return
-
-        try:
-            config_empresa = self._obtener_config_empresa()
-            encabezados = [
-                "Cliente",
-                "Saldo Pendiente",
-                "Días",
-                "Fecha Factura",
-                "Estado",
-            ]
-            filtros = self._obtener_filtros_para_exportar()
-            col_widths = [2.5, 1.5, 0.8, 1.2, 1.0]
-            exportar_pdf(
-                ruta,
-                "Cuentas por Cobrar",
-                encabezados,
-                filas,
-                filtros=filtros,
-                col_widths=col_widths,
-                config_empresa=config_empresa,
-            )
-            MessageBox.information(self, "Exportación exitosa", f"El archivo se guardó en:\n{ruta}")
-        except Exception:
-            logger.exception("Fallo al exportar a PDF")
-            MessageBox.critical(self, "Error", "No se pudo exportar a PDF.")
-
-    def _obtener_filas_para_exportar(self) -> list[list]:
-        """Obtiene las filas de la tabla actual para exportación."""
-        filas = []
-        for row in range(self.tabla.rowCount()):
-            fila = []
-            for col in range(1, self.tabla.columnCount()):  # Saltar columna ID (0)
-                item = self.tabla.item(row, col)
-                if item:
-                    # Montos de la pantalla ("$1,234.50", "$-5.00") -> numero, para que Excel los reciba
-                    # como numeros con su signo y no como texto.
-                    fila.append(valor_para_exportar(item.text()))
-                else:
-                    # Para widgets como EstadoBadge
-                    widget = self.tabla.cellWidget(row, col)
-                    if widget:
-                        # EstadoBadge es un QWidget que contiene un QLabel
-                        # Buscamos el QLabel dentro del layout
-                        if hasattr(widget, "layout"):
-                            layout = widget.layout()
-                            if layout:
-                                for i in range(layout.count()):
-                                    layout_item = layout.itemAt(i)
-                                    if layout_item:
-                                        item_widget = layout_item.widget()
-                                        if isinstance(item_widget, QLabel):
-                                            fila.append(item_widget.text())
-                                            break
-                                else:
-                                    fila.append("")
-                            else:
-                                fila.append("")
-                        else:
-                            fila.append("")
-                    else:
-                        fila.append("")
-            filas.append(fila)
-        return filas
+        self._exportar_listado_completo(
+            _tarea_exportar_cuentas_cobrar,
+            ruta,
+            self.btn_exportar,
+            nombre_filas="clientes",
+            formato=formato,
+            id_usuario=self.usuario.id_usuario,
+            estado=self.estado_combo.currentData(),
+            id_vendedor=self.vendedor_combo.currentData(),
+            texto_busqueda=self.buscar_input.text().strip() or None,
+            filtros_pdf=self._obtener_filtros_para_exportar(),
+        )
 
     def _obtener_filtros_para_exportar(self) -> dict[str, str]:
         """Genera un diccionario con los filtros aplicados para el PDF."""
@@ -2004,11 +1958,3 @@ class CuentasPorCobrarPanel(MixinPaginacion, QWidget):
         if self.filtro_vendedor:
             filtros["Vendedor"] = self.vendedor_combo.currentText()
         return filtros
-
-    def _obtener_config_empresa(self) -> ConfiguracionEmpresa | None:
-        """Obtiene la configuración de la empresa para la exportación."""
-        session = self.session_factory()
-        try:
-            return EmpresaService.obtener_datos_documento(session)
-        finally:
-            session.close()
