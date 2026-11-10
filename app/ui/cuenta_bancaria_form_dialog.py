@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
@@ -455,10 +457,16 @@ class CuentaBancariaFormDialog(QDialog):
                 self.saldo_cop_input.set_value(0)
 
     def _precargar_tasa_cambio(self) -> None:
-        """Tasa BCV mas reciente como sugerencia para el calculo del equivalente en USD."""
-        registro = self.session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc()).first()
-        if registro is not None and registro.tasa_dolar_bcv:
-            self.tasa_cambio_input.set_value(registro.tasa_dolar_bcv)
+        """Tasa BCV mas reciente como sugerencia para el calculo del equivalente en USD. Viene precargada
+        del panel (se consulta en el hilo aparte, ver _tarea_form_cuenta); sin `precargado` el dialogo la
+        consulta el mismo, como el resto de sus datos."""
+        if self._precargado is not None:
+            tasa = self._precargado.get("tasa")
+        else:
+            registro = self.session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc()).first()
+            tasa = registro.tasa_dolar_bcv if registro is not None else None
+        if isinstance(tasa, (int, float, Decimal)) and tasa > 0:
+            self.tasa_cambio_input.set_value(tasa)
 
     def _calcular_equivalente_usd(self) -> None:
         """Saldo inicial en Bs / tasa -> equivalente en USD. En una cuenta VES es el saldo en dolares con

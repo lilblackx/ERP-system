@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (  # type: ignore
 )
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import Banco, BancoMovimiento, CuentaBancaria, Usuario
+from app.db.models import Banco, BancoMovimiento, ControlDeTasa, CuentaBancaria, Usuario
 from app.services.cuentas_bancarias import CuentaBancariaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.moneda_cuentas import MONEDAS_CUENTA, etiqueta_moneda, nombre_moneda
@@ -181,7 +181,8 @@ def _tarea_form_cuenta(session, session_factory, id_cuenta: int | None = None) -
     sesion = sesion_para_dialogo(session_factory)
     try:
         bancos = sesion.query(Banco).filter(Banco.estado_banco == "ACTIVO").order_by(Banco.nombre_banco).all()
-        precargado = {"bancos": bancos}
+        tasa = sesion.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc()).first()
+        precargado = {"bancos": bancos, "tasa": tasa.tasa_dolar_bcv if tasa is not None else None}
         cuenta = None
         if id_cuenta is not None:
             cuenta = sesion.query(CuentaBancaria).filter(CuentaBancaria.id_cuenta == id_cuenta).first()

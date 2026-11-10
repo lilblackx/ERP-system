@@ -1,5 +1,5 @@
 """Conciliacion de bancos segun la moneda de la cuenta: una cuenta en USD solo habla de dolares; una en bolivares
-(o pesos), solo de su moneda local. Nada de la otra moneda se muestra ni se pide (ni saldos, ni tasa, ni columnas)."""
+(o pesos), de su moneda local mas el equivalente en dolares calculado por fila (Monto BS / Tasa -> columna Monto $)."""
 
 from decimal import Decimal
 
@@ -121,7 +121,17 @@ def test_cuenta_en_bolivares_solo_muestra_bolivares(qtbot, db_session, escenario
 
     assert _visible(dlg, dlg.saldo_final_bs_input) and not _visible(dlg, dlg.saldo_final_input)
     assert _visible(dlg, dlg.lbl_saldo_final_bs) and not _visible(dlg, dlg.lbl_saldo_final)
-    assert _columnas_visibles(dlg) == ["Fecha", "Tipo", "Monto BS", "Origen", "Referencia", "Descripción"]
+    # Cuenta en Bs: Monto $ (equivalente calculado por fila), Tasa y Monto BS.
+    assert _columnas_visibles(dlg) == [
+        "Fecha",
+        "Tipo",
+        "Monto $",
+        "Tasa",
+        "Monto BS",
+        "Origen",
+        "Referencia",
+        "Descripción",
+    ]
     texto = _texto_resumen(dlg)
     assert "BS 4,000.00" in texto and "$" not in texto
     assert dlg.lbl_saldo_final_bs.text() == "Saldo Final BS:"

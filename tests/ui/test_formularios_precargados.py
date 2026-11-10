@@ -185,6 +185,15 @@ def test_el_formulario_de_cuenta_usa_si_tiene_movimientos_precargado(qtbot):
     assert not dialogo.lbl_aviso_moneda.isHidden()
 
 
+def test_el_formulario_de_cuenta_usa_la_tasa_precargada_sin_consultar(qtbot):
+    dialogo = cbf.CuentaBancariaFormDialog(
+        _sesion_que_prohibe_consultas(), precargado={"bancos": [], "tasa": Decimal("40.50")}
+    )
+    qtbot.addWidget(dialogo)
+
+    assert dialogo.tasa_cambio_input.get_value() == Decimal("40.50")
+
+
 # -- Paneles: piden en un hilo y abren el formulario al llegar ------------------------------------------------------
 
 
@@ -350,20 +359,22 @@ def test_editar_usuario_que_ya_no_existe_avisa(qtbot, monkeypatch, worker_falso)
     sesion.close.assert_called_once()
 
 
-def test_la_tarea_del_formulario_de_cuenta_trae_bancos_cuenta_y_movimientos():
+def test_la_tarea_del_formulario_de_cuenta_trae_bancos_cuenta_movimientos_y_tasa():
     banco = SimpleNamespace(id_banco=1)
     cuenta = SimpleNamespace(id_cuenta=7)
+    tasa = SimpleNamespace(tasa_dolar_bcv=Decimal("40.50"))
     sesion = MagicMock()
     sesion.query.side_effect = lambda modelo: {
         "Banco": MagicMock(**{"filter.return_value.order_by.return_value.all.return_value": [banco]}),
         "CuentaBancaria": MagicMock(**{"filter.return_value.first.return_value": cuenta}),
+        "ControlDeTasa": MagicMock(**{"order_by.return_value.first.return_value": tasa}),
         "id_movimiento": MagicMock(**{"filter.return_value.first.return_value": (1,)}),
     }[getattr(modelo, "__name__", getattr(modelo, "key", "id_movimiento"))]
 
     datos = cb._tarea_form_cuenta(MagicMock(), lambda: sesion, id_cuenta=7)
 
     assert datos["session"] is sesion and datos["cuenta"] is cuenta
-    assert datos["precargado"] == {"bancos": [banco], "tiene_movimientos": True}
+    assert datos["precargado"] == {"bancos": [banco], "tiene_movimientos": True, "tasa": Decimal("40.50")}
 
 
 # -- Detalle de pagos de Cuentas por pagar ----------------------------------------------------------------------------

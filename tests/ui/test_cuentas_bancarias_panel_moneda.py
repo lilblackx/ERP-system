@@ -105,8 +105,9 @@ def test_con_todas_las_monedas_se_ven_las_tres_columnas_de_saldo(panel):
     assert _saldos_visibles(panel) == ["SALDO", "MONTO EN BS", "SALDO COP"]
 
 
-def test_cada_moneda_muestra_solo_su_columna_de_saldo(panel):
-    esperado = {"VES": ["MONTO EN BS"], "USD": ["SALDO"], "COP": ["SALDO COP"]}
+def test_cada_moneda_muestra_sus_columnas_de_saldo(panel):
+    # VES muestra las dos: el saldo en Bs y su equivalente en USD (calculado al crearla, Bs / tasa).
+    esperado = {"VES": ["SALDO", "MONTO EN BS"], "USD": ["SALDO"], "COP": ["SALDO COP"]}
 
     visibles = {}
     for moneda in esperado:
@@ -169,17 +170,19 @@ def test_la_exportacion_respeta_el_filtro_de_moneda(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("moneda", "visible"),
-    [("VES", "MONTO EN BS"), ("USD", "SALDO"), ("COP", "SALDO COP"), (None, None)],
+    ("moneda", "esperado_saldos", "ocultas"),
+    [
+        ("VES", ["SALDO", "MONTO EN BS"], 1),  # solo se oculta SALDO COP
+        ("USD", ["SALDO"], 2),
+        ("COP", ["SALDO COP"], 2),
+        (None, ["SALDO", "MONTO EN BS", "SALDO COP"], 0),
+    ],
 )
-def test_las_columnas_exportadas_coinciden_con_las_visibles(moneda, visible):
+def test_las_columnas_exportadas_coinciden_con_las_visibles(moneda, esperado_saldos, ocultas):
     nombres = [cb.COLS_VISIBLES[i] for i in cb._indices_columnas_visibles(moneda)]
 
-    if visible:
-        assert [n for n in COLUMNAS_DE_SALDO if n in nombres] == [visible]
-        assert len(nombres) == len(cb.COLS_VISIBLES) - 2
-    else:
-        assert nombres == cb.COLS_VISIBLES
+    assert [n for n in COLUMNAS_DE_SALDO if n in nombres] == esperado_saldos
+    assert len(nombres) == len(cb.COLS_VISIBLES) - ocultas
 
 
 # -- Confirmacion al cambiar la moneda de una cuenta con historial ----------------------------------------------
