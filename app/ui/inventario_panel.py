@@ -85,6 +85,13 @@ COLS_VISIBLES = [
     "ESTADO",
 ]
 COL_ID_INTERNO = 0  # oculto
+# Columna extra (indice len(COLS_VISIBLES)) para el modo "Conciliar inventario": siempre vacia, es donde el
+# usuario anota el conteo fisico en la hoja exportada.
+COL_INV_FISICO = len(COLS_VISIBLES)
+# Modo conciliacion: las columnas que se ven en pantalla y en la exportacion (NOMBRE, CATEGORIA, CANTIDAD,
+# CAJAS, A GRANEL + la columna vacia INVENTARIO FISICO).
+_COLUMNAS_CONCILIACION = ["NOMBRE", "CATEGORÍA", "CANTIDAD", "CAJAS", "A GRANEL", "INVENTARIO FÍSICO"]
+_INDICES_CONCILIACION = [2, 3, 4, 5, 6]  # posiciones en la fila completa de COLS_VISIBLES
 POR_PAGINA = 25
 # Mismo horizonte que ProductoService.obtener_alertas_stock(dias_vencimiento=30) --
 # mantener sincronizado si ese default cambia.
@@ -136,21 +143,29 @@ def _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usua
 
 
 def _tarea_exportar_productos_excel(
-    session, ruta: str, texto, id_categoria, solo_con_stock, id_usuario
+    session, ruta: str, texto, id_categoria, solo_con_stock, id_usuario, conciliar=False
 ) -> tuple[str, int]:
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el catalogo
     completo de inventario a un archivo (openpyxl) es lo bastante lento como para
     congelar la ventana si se hace en el hilo de GUI."""
     filas = _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario)
-    exportar_excel(ruta, COLS_VISIBLES, filas)
+    if conciliar:
+        filas = [[fila[i] for i in _INDICES_CONCILIACION] + [""] for fila in filas]
+        exportar_excel(ruta, _COLUMNAS_CONCILIACION, filas, titulo="Conciliación de Inventario")
+    else:
+        exportar_excel(ruta, COLS_VISIBLES, filas)
     return ruta, len(filas)
 
 
 def _tarea_exportar_productos_pdf(
-    session, ruta: str, texto, id_categoria, solo_con_stock, id_usuario
+    session, ruta: str, texto, id_categoria, solo_con_stock, id_usuario, conciliar=False
 ) -> tuple[str, int]:
     filas = _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario)
-    exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
+    if conciliar:
+        filas = [[fila[i] for i in _INDICES_CONCILIACION] + [""] for fila in filas]
+        exportar_pdf(ruta, "Conciliación de Inventario", _COLUMNAS_CONCILIACION, filas)
+    else:
+        exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
     return ruta, len(filas)
 
 
@@ -311,10 +326,17 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
         self.solo_stock_check = QCheckBox("Solo con stock")
         self.solo_stock_check.toggled.connect(self._buscar_desde_inicio)
 
+        # Modo "Conciliar inventario": la tabla y las exportaciones quedan solo con las columnas del conteo
+        # fisico (Nombre, Categoria, Cantidad, Cajas, A Granel + Inventario Fisico vacia).
+        self.conciliar_check = QCheckBox("Conciliar inventario")
+        self.conciliar_check.setToolTip("Muestra y exporta solo las columnas del conteo físico")
+        self.conciliar_check.toggled.connect(self._alternar_modo_conciliacion)
+
         self.btn_filtrar = BotonFiltros(
             [
                 ("Categoría", self.categoria_filtro_combo),
                 ("", self.solo_stock_check),
+                ("", self.conciliar_check),
             ]
         )
 
@@ -350,8 +372,8 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
         return w
 
     def _make_table(self) -> QTableWidget:
-        self.tabla = QTableWidget(0, len(COLS_VISIBLES))
-        self.tabla.setHorizontalHeaderLabels(COLS_VISIBLES)
+        self.tabla = QTableWidget(0, len(COLS_VISIBLES) + 1)  # +1: columna INVENTARIO FÍSICO del modo conciliación
+        self.tabla.setHorizontalHeaderLabels(COLS_VISIBLES + ["INVENTARIO FÍSICO"])
         alinear_encabezados(
             self.tabla,
             {
@@ -366,6 +388,7 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
                 9: Qt.AlignmentFlag.AlignRight,
                 10: Qt.AlignmentFlag.AlignRight,
                 11: Qt.AlignmentFlag.AlignCenter,
+                COL_INV_FISICO: Qt.AlignmentFlag.AlignLeft,
             },
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -382,8 +405,18 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.setColumnHidden(COL_ID_INTERNO, True)
+        self.tabla.setColumnHidden(COL_INV_FISICO, True)  # solo visible en modo conciliación
         self.tabla.verticalHeader().setDefaultSectionSize(48)
         return self.tabla
+
+    def _alternar_modo_conciliacion(self) -> None:
+        """En modo conciliación la tabla muestra solo las columnas del conteo físico."""
+        conciliar = self.conciliar_check.isChecked()
+        visibles = {2, 3, 4, 5, 6} if conciliar else set(range(1, len(COLS_VISIBLES)))
+        for col in range(len(COLS_VISIBLES)):
+            self.tabla.setColumnHidden(col, col not in visibles)
+        self.tabla.setColumnHidden(COL_ID_INTERNO, True)
+        self.tabla.setColumnHidden(COL_INV_FISICO, not conciliar)
 
     def _make_footer(self) -> QWidget:
         w = QWidget()
@@ -590,6 +623,9 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
         self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} producto{'s' if total != 1 else ''}")
+        # Reafirmar las columnas visibles: si "Limpiar filtros" destildo el checkbox con las senales
+        # bloqueadas, la proxima carga igual deja la tabla en el modo correcto.
+        self._alternar_modo_conciliacion()
 
     def _fila_seleccionada_id(self) -> int | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -800,6 +836,7 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
             "id_categoria": self.categoria_filtro_combo.currentData(),
             "solo_con_stock": self.solo_stock_check.isChecked(),
             "id_usuario": self.usuario.id_usuario,
+            "conciliar": self.conciliar_check.isChecked(),
         }
 
     def exportar_excel_productos(self) -> None:
@@ -807,7 +844,8 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
             return
         # R-09: se pide el destino ANTES de generar el archivo -- se escribe directo ahi,
         # nunca a un temporal.
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", "inventario.xlsx", "Excel (*.xlsx)")
+        nombre = "inventario_fisico" if self.conciliar_check.isChecked() else "inventario"
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", f"{nombre}.xlsx", "Excel (*.xlsx)")
         if not ruta:
             return
 
@@ -825,7 +863,8 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
     def exportar_pdf_productos(self) -> None:
         if getattr(self, "_worker_export", None) is not None and self._worker_export.isRunning():
             return
-        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", "inventario.pdf", "PDF (*.pdf)")
+        nombre = "inventario_fisico" if self.conciliar_check.isChecked() else "inventario"
+        ruta, _ = QFileDialog.getSaveFileName(self, "Exportar inventario", f"{nombre}.pdf", "PDF (*.pdf)")
         if not ruta:
             return
 

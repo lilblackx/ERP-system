@@ -1514,9 +1514,18 @@ def _tarea_exportar_cuentas_cobrar(
         por_pagina=POR_PAGINA_EXPORTACION,
     )
     filas = filas_exportacion_cuentas_cobrar(resultado["items"])
+    fila_totales = _fila_totales_cuentas_cobrar(filas)
     config_empresa = EmpresaService.obtener_datos_documento(session)
     if formato == "excel":
-        exportar_excel(ruta, ENCABEZADOS_EXPORTACION, filas, titulo="Cuentas por Cobrar", config_empresa=config_empresa)
+        exportar_excel(
+            ruta,
+            ENCABEZADOS_EXPORTACION,
+            filas,
+            titulo="Cuentas por Cobrar",
+            config_empresa=config_empresa,
+            total_row=fila_totales,
+            total_label="TOTALES",
+        )
     else:
         exportar_pdf(
             ruta,
@@ -1526,8 +1535,22 @@ def _tarea_exportar_cuentas_cobrar(
             filtros=filtros_pdf,
             col_widths=ANCHOS_PDF_EXPORTACION,
             config_empresa=config_empresa,
+            total_row=fila_totales,
+            total_label="TOTALES",
         )
     return ruta, len(filas)
+
+
+def _fila_totales_cuentas_cobrar(filas: list[list]) -> list:
+    """Fila de totales del reporte: suma las columnas de montos (Saldo Pendiente,
+    Saldo a Favor y Saldo Vencido). Las demas columnas quedan vacias."""
+    fila = [None] * len(ENCABEZADOS_EXPORTACION)
+    for columna in (1, 2, 3):
+        fila[columna] = sum(
+            (fila_dato[columna] for fila_dato in filas if isinstance(fila_dato[columna], (int, float, Decimal))),
+            Decimal("0.00"),
+        )
+    return fila
 
 
 class CuentasPorCobrarPanel(CargaAsincronaMixin, ExportacionCompletaMixin, MixinPaginacion, QWidget):

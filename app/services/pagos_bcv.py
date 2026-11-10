@@ -384,6 +384,7 @@ class PagoBCVService:
         por_pagina: int = 20,
         id_usuario: int | None = None,
         busqueda: str | None = None,
+        id_vendedor: int | None = None,
     ) -> dict:
         """Lista cuentas por cobrar BCV agrupadas por cliente con saldo pendiente acumulado."""
         require_permiso(session, id_usuario, "pagos", "ver")
@@ -416,6 +417,8 @@ class PagoBCVService:
         # Filtros
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
+        if id_vendedor:
+            query = query.filter(Cliente.vendedor_cliente == id_vendedor)
         if busqueda:
             query = query.filter(contiene(session, Cliente.nombre_razon_social, patron_contiene(busqueda)))
 

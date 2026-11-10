@@ -1,4 +1,5 @@
 import datetime
+from decimal import Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import QDate, QSize, Qt
@@ -183,6 +184,8 @@ class ConciliacionBancosDialog(QDialog):
         self.saldo_final_bs_input = NumericLineEdit(NumericFieldType.AMOUNT, allow_negative=True, decimals=2)
         self.saldo_final_bs_input.setMinimumHeight(32)  # Altura mínima en lugar de fija
         self.saldo_final_bs_input.valueChanged.connect(self._calcular_conciliacion)
+        self.saldo_final_bs_input.valueChanged.connect(self._actualizar_equivalente_usd)
+        self.saldo_final_input.valueChanged.connect(self._actualizar_equivalente_usd)
         for widget in (
             self.lbl_saldo_final,
             self.saldo_final_input,
@@ -209,6 +212,38 @@ class ConciliacionBancosDialog(QDialog):
         estado_layout.addWidget(self.lbl_estado_texto)
         estado_layout.addStretch()
         resumen_layout.addWidget(self.lbl_estado, 1, 2)
+
+        # Tasa y equivalente en USD del saldo final del banco: solo para cuentas que no son en dolares
+        # (VES/COP). La tasa se puede editar; el equivalente (saldo final / tasa) es solo vista.
+        self.tasa_equiv_widget = QWidget()
+        tasa_equiv_layout = QHBoxLayout(self.tasa_equiv_widget)
+        tasa_equiv_layout.setContentsMargins(0, 0, 0, 0)
+        tasa_equiv_layout.setSpacing(10)
+
+        estilo_tasa = f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};"
+        self.lbl_tasa_conciliacion = QLabel("Tasa (BS/USD):")
+        self.lbl_tasa_conciliacion.setStyleSheet(estilo_tasa)
+        self.tasa_conciliacion_input = NumericLineEdit(NumericFieldType.RATE)
+        self.tasa_conciliacion_input.setMinimumHeight(32)
+        self.tasa_conciliacion_input.setMaximumWidth(140)
+        self.tasa_conciliacion_input.valueChanged.connect(self._actualizar_equivalente_usd)
+
+        self.lbl_equiv_usd = QLabel("Equiv. USD (solo vista):")
+        self.lbl_equiv_usd.setStyleSheet(estilo_tasa)
+        self.equiv_usd_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
+        self.equiv_usd_input.setMinimumHeight(32)
+        self.equiv_usd_input.setMaximumWidth(160)
+        self.equiv_usd_input.setReadOnly(True)
+        self.equiv_usd_input.setStyleSheet("background-color: #F1F5F9;")
+
+        tasa_equiv_layout.addWidget(self.lbl_tasa_conciliacion)
+        tasa_equiv_layout.addWidget(self.tasa_conciliacion_input)
+        tasa_equiv_layout.addSpacing(16)
+        tasa_equiv_layout.addWidget(self.lbl_equiv_usd)
+        tasa_equiv_layout.addWidget(self.equiv_usd_input)
+        tasa_equiv_layout.addStretch()
+        resumen_layout.addWidget(self.tasa_equiv_widget, 2, 0, 1, 3)
+        self.tasa_equiv_widget.setVisible(False)
 
         layout.addWidget(resumen_card)
 
@@ -357,16 +392,44 @@ class ConciliacionBancosDialog(QDialog):
         self.lbl_saldo_final_bs.setVisible(not es_usd)
         self.saldo_final_bs_input.setVisible(not es_usd)
         self.lbl_saldo_final_bs.setText(f"Saldo Final {etiqueta}:")
-        # Columnas de la tabla: Monto ($) solo en USD, Monto en la moneda local solo en las demas; la tasa nunca.
-        self.table.setColumnHidden(COL_MONTO_USD, not es_usd)
-        self.table.setColumnHidden(COL_TASA, True)
+        # Columnas de la tabla: Monto $ siempre visible (en cuentas que no son USD es el equivalente
+        # calculado Monto BS / Tasa de cada fila); Tasa y Monto en la moneda local solo en las demas.
+        self.table.setColumnHidden(COL_MONTO_USD, False)
+        self.table.setColumnHidden(COL_TASA, es_usd)
         self.table.setColumnHidden(COL_MONTO_LOCAL, es_usd)
         encabezado = self.table.horizontalHeaderItem(COL_MONTO_LOCAL)
         if encabezado is not None:
             encabezado.setText(f"Monto {etiqueta}")
-        # Con una sola columna de monto visible hay espacio para que el encabezado y la cifra entren completos.
+        encabezado_usd = self.table.horizontalHeaderItem(COL_MONTO_USD)
+        if encabezado_usd is not None:
+            encabezado_usd.setText("Monto" if es_usd else "Monto $")
+        # Con las columnas de monto visibles hay espacio para que el encabezado y la cifra entren completos.
         self.table.setColumnWidth(COL_MONTO_USD, 110)
+        self.table.setColumnWidth(COL_TASA, 80)
         self.table.setColumnWidth(COL_MONTO_LOCAL, 130)
+        # Tasa y equivalente en USD: solo cuando la cuenta no es en dolares.
+        self.tasa_equiv_widget.setVisible(not es_usd)
+        if not es_usd:
+            self.lbl_tasa_conciliacion.setText(f"Tasa ({etiqueta}/USD):")
+            self._precargar_tasa_conciliacion()
+        self._actualizar_equivalente_usd()
+
+    def _precargar_tasa_conciliacion(self) -> None:
+        """Tasa del dia (BCV o COP segun la moneda de la cuenta) como sugerencia para el equivalente en USD."""
+        tasa = self._tasa_sugerida()
+        if tasa > 0:
+            self.tasa_conciliacion_input.set_value(tasa)
+
+    def _actualizar_equivalente_usd(self) -> None:
+        """Saldo final del banco (en la moneda de la cuenta) / tasa -> equivalente en USD. Solo vista."""
+        tasa = self.tasa_conciliacion_input.get_value()
+        saldo = Decimal(str(self._saldo_final_manual()))
+        if tasa is None or tasa <= 0 or saldo == 0:
+            self.equiv_usd_input.set_value(None)
+        else:
+            self.equiv_usd_input.set_value(saldo / tasa)
+        # set_value() reaplica el estilo base del widget
+        self.equiv_usd_input.setStyleSheet("background-color: #F1F5F9;")
 
     def _on_fecha_cambiada(self):
         """Maneja el cambio de fecha."""
@@ -452,7 +515,12 @@ class ConciliacionBancosDialog(QDialog):
 
         # Una cuenta en USD registra el monto en dolares y nada mas; una en bolivares (o pesos) registra el monto en
         # su moneda con la tasa del dia (precargada), de donde sale el equivalente en dolares que lleva el saldo.
-        tasa_actual = 0.0 if self._es_usd else self._tasa_sugerida()
+        # La tasa precargada es la del campo Tasa del resumen si el usuario la escribio; si no, la del dia.
+        if self._es_usd:
+            tasa_actual = 0.0
+        else:
+            tasa_resumen = self.tasa_conciliacion_input.get_value()
+            tasa_actual = float(tasa_resumen) if tasa_resumen else self._tasa_sugerida()
         dialog = MovimientoManualDialog(tipo, parent=self, tasa_inicial=tasa_actual, moneda=self._moneda)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -571,8 +639,15 @@ class ConciliacionBancosDialog(QDialog):
                 tipo_item.setForeground(Qt.GlobalColor.red)
             self.table.setItem(row, 1, tipo_item)
 
-            # Monto (columna de dolares: solo se ve en una cuenta en USD)
-            item_monto = QTableWidgetItem(f"${movimiento['monto']:,.2f}")
+            # Monto $: en una cuenta USD es el monto directo; en las demas es el equivalente calculado de
+            # la fila (Monto BS / Tasa), solo lectura.
+            if self._es_usd:
+                monto_usd = movimiento["monto"]
+            elif movimiento["tasa"] and movimiento["tasa"] > 0 and movimiento["monto_bs"]:
+                monto_usd = movimiento["monto_bs"] / movimiento["tasa"]
+            else:
+                monto_usd = movimiento["monto"]
+            item_monto = QTableWidgetItem(f"${monto_usd:,.2f}")
             item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, COL_MONTO_USD, item_monto)
 

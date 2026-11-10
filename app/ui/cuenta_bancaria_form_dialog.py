@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import Banco, BancoMovimiento, CuentaBancaria
+from app.db.models import Banco, BancoMovimiento, ControlDeTasa, CuentaBancaria
 from app.services.moneda_cuentas import MONEDAS_CUENTA, etiqueta_moneda
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
@@ -148,6 +148,7 @@ class CuentaBancariaFormDialog(QDialog):
 
         self._build_ui()
         self._cargar_bancos()
+        self._precargar_tasa_cambio()
 
         if cuenta:
             self._precargar(cuenta)
@@ -306,10 +307,49 @@ class CuentaBancariaFormDialog(QDialog):
         col_cop.addWidget(self.lbl_saldo_cop)
         col_cop.addWidget(self.saldo_cop_input)
 
+        self.saldo_bs_input.valueChanged.connect(self._calcular_equivalente_usd)
+
         saldos_layout.addWidget(self.saldo_usd_widget, stretch=1)
         saldos_layout.addWidget(self.saldo_bs_widget, stretch=1)
         saldos_layout.addWidget(self.saldo_cop_widget, stretch=1)
         grid.addWidget(self.saldos_widget, 7, 0, 1, 2)
+
+        # Tasa y equivalente en USD del saldo inicial en bolivares: el equivalente (Bs / tasa) es el saldo
+        # en dolares con que nace la cuenta (ver get_data). Se muestra cuando la moneda es VES.
+        self.conversion_widget = QWidget()
+        conv_layout = QHBoxLayout(self.conversion_widget)
+        conv_layout.setContentsMargins(0, 0, 0, 0)
+        conv_layout.setSpacing(24)
+
+        self.tasa_widget = QWidget()
+        col_tasa = QVBoxLayout(self.tasa_widget)
+        col_tasa.setContentsMargins(0, 0, 0, 0)
+        col_tasa.setSpacing(6)
+        self.lbl_tasa_cambio = QLabel("Tasa de Cambio (Bs/USD)")
+        self.lbl_tasa_cambio.setProperty("class", "FormLabel")
+        self.tasa_cambio_input = NumericLineEdit(NumericFieldType.RATE)
+        self.tasa_cambio_input.setFixedHeight(36)
+        self.tasa_cambio_input.valueChanged.connect(self._calcular_equivalente_usd)
+        col_tasa.addWidget(self.lbl_tasa_cambio)
+        col_tasa.addWidget(self.tasa_cambio_input)
+
+        self.equivalente_widget = QWidget()
+        col_equiv = QVBoxLayout(self.equivalente_widget)
+        col_equiv.setContentsMargins(0, 0, 0, 0)
+        col_equiv.setSpacing(6)
+        self.lbl_equivalente = QLabel("Equivalente USD (se guarda como saldo):")
+        self.lbl_equivalente.setProperty("class", "FormLabel")
+        self.equivalente_usd_input = NumericLineEdit(NumericFieldType.AMOUNT, prefix="$ ")
+        self.equivalente_usd_input.setFixedHeight(36)
+        self.equivalente_usd_input.setReadOnly(True)
+        self.equivalente_usd_input.setStyleSheet("background-color: #F1F5F9;")
+        col_equiv.addWidget(self.lbl_equivalente)
+        col_equiv.addWidget(self.equivalente_usd_input)
+
+        conv_layout.addWidget(self.tasa_widget, stretch=1)
+        conv_layout.addWidget(self.equivalente_widget, stretch=1)
+        grid.addWidget(self.conversion_widget, 12, 0, 1, 2)
+
         self.moneda_combo.currentIndexChanged.connect(self._aplicar_moneda_a_los_saldos)
         self._aplicar_moneda_a_los_saldos()
 
@@ -404,6 +444,8 @@ class CuentaBancariaFormDialog(QDialog):
         }
         for widget, mostrar in visibles.items():
             widget.setVisible(mostrar)
+        self.conversion_widget.setVisible(moneda == "VES")
+        self._calcular_equivalente_usd()
         if self.cuenta is None:
             if moneda != "USD":
                 self.saldo_input.set_value(0)
@@ -411,6 +453,24 @@ class CuentaBancariaFormDialog(QDialog):
                 self.saldo_bs_input.set_value(0)
             if moneda != "COP":
                 self.saldo_cop_input.set_value(0)
+
+    def _precargar_tasa_cambio(self) -> None:
+        """Tasa BCV mas reciente como sugerencia para el calculo del equivalente en USD."""
+        registro = self.session.query(ControlDeTasa).order_by(ControlDeTasa.fecha_tasa.desc()).first()
+        if registro is not None and registro.tasa_dolar_bcv:
+            self.tasa_cambio_input.set_value(registro.tasa_dolar_bcv)
+
+    def _calcular_equivalente_usd(self) -> None:
+        """Saldo inicial en Bs / tasa -> equivalente en USD. En una cuenta VES es el saldo en dolares con
+        que nace la cuenta (ver get_data)."""
+        saldo_bs = self.saldo_bs_input.get_value()
+        tasa = self.tasa_cambio_input.get_value()
+        if saldo_bs is None or tasa is None or tasa <= 0:
+            self.equivalente_usd_input.set_value(None)
+        else:
+            self.equivalente_usd_input.set_value(saldo_bs / tasa)
+        # set_value() reaplica el estilo base del widget
+        self.equivalente_usd_input.setStyleSheet("background-color: #F1F5F9;")
 
     def _precargar(self, cuenta: CuentaBancaria):
         self.numero_input.setText(cuenta.numero_cuenta or "")
@@ -511,4 +571,7 @@ class CuentaBancariaFormDialog(QDialog):
             datos["saldo_total_banco"] = self.saldo_input.get_value()
             datos["saldo_total_banco_bs"] = self.saldo_bs_input.get_value()
             datos["saldo_total_banco_cop"] = self.saldo_cop_input.get_value()
+            # Cuenta en Bs: el saldo en dolares es el equivalente calculado (Bs / tasa), no un campo aparte.
+            if self.moneda_combo.currentData() == "VES":
+                datos["saldo_total_banco"] = self.equivalente_usd_input.get_value() or self.saldo_input.get_value()
         return datos

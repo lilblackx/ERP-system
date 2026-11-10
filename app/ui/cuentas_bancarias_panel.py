@@ -84,10 +84,11 @@ COLORES_ESTADO_CUENTA = {
 }
 
 
-# Columnas de saldo que no aplican a la moneda filtrada: una cuenta en bolivares no tiene saldo en USD que mostrar y
-# una en dolares no tiene monto en Bs. Con "Todas las monedas" (o COP) se ven las dos.
+# Columnas de saldo que no aplican a la moneda filtrada: una cuenta en dolares no tiene monto en Bs y una en
+# pesos no tiene ni saldo en USD ni monto en Bs. Las cuentas en bolivares si muestran las dos: el saldo en Bs y
+# su equivalente en USD (calculado al crearla, Bs / tasa). Con "Todas las monedas" (o COP) se ven las dos.
 _COLUMNAS_OCULTAS_POR_MONEDA = {
-    "VES": {"SALDO", "SALDO COP"},
+    "VES": {"SALDO COP"},
     "USD": {"MONTO EN BS", "SALDO COP"},
     "COP": {"SALDO", "MONTO EN BS"},
 }

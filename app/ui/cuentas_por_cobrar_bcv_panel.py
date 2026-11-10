@@ -1501,6 +1501,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         self.id_usuario = usuario.id_usuario
         self.texto_busqueda = ""
         self._estado_filtro = None
+        self.filtro_vendedor = None
         self._tasa_bcv = None
         self._cuentas_cargadas = []
         self._total_pendiente = Decimal("0.00")
@@ -1508,6 +1509,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         self._total_registros = 0
         self.setObjectName("ContentArea")
         self._setup_ui()
+        self._cargar_vendedores()
         QTimer.singleShot(100, self.cargar_cuentas)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -1589,7 +1591,11 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
-        self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo)])
+        self.vendedor_combo = QComboBox()
+        self.vendedor_combo.addItem("Todos los vendedores")
+        self.vendedor_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
+
+        self.btn_filtrar = BotonFiltros([("Estado", self.estado_combo), ("Vendedor", self.vendedor_combo)])
 
         self.btn_exportar = BotonExportar(
             on_excel=self._exportar_excel_cuentas_bcv,
@@ -1701,6 +1707,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
             sincrono=sincrono,
             id_usuario=self.id_usuario,
             estado=self._estado_filtro,
+            id_vendedor=self.vendedor_combo.currentData(),
             pagina=self.pagina_actual,
             por_pagina=POR_PAGINA,
             busqueda=self.texto_busqueda or None,
@@ -1775,6 +1782,24 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         self.paginacion.actualizar_desde(resultado)
 
         logger.info(f"Mostrando {len(items)} clientes agrupados de {total} total, página {pagina}")
+
+    def _cargar_vendedores(self) -> None:
+        """Carga la lista de vendedores en el combo de filtro."""
+        session = self.session_factory()
+        try:
+            from app.db.models import Vendedor
+
+            vendedores = session.query(Vendedor).order_by(Vendedor.nombre_vendedor).all()
+            self.vendedor_combo.blockSignals(True)
+            self.vendedor_combo.clear()
+            self.vendedor_combo.addItem("Todos los vendedores")
+            for vendedor in vendedores:
+                self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
+            self.vendedor_combo.blockSignals(False)
+        except Exception:
+            logger.exception("Error al cargar vendedores")
+        finally:
+            session.close()
 
     def _on_filtro_cambiado(self) -> None:
         self._estado_filtro = self.estado_combo.currentData()
@@ -1863,6 +1888,26 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         item = self._cuentas_cargadas[fila_actual]
         self._mostrar_cuentas_cliente(item)
 
+    def _filtros_exportacion_cuentas_bcv(self) -> dict:
+        """Estado y vendedor activos, para el encabezado del reporte exportado."""
+        filtros = {}
+        if self._estado_filtro:
+            filtros["Estado"] = next(
+                (etiqueta for etiqueta, valor in ESTADOS_FILTRO if valor == self._estado_filtro),
+                self._estado_filtro,
+            )
+        if self.vendedor_combo.currentData():
+            filtros["Vendedor"] = self.vendedor_combo.currentText()
+        return filtros
+
+    @staticmethod
+    def _fila_totales_cuentas_bcv(items: list, cantidad_columnas: int) -> list:
+        """Fila de totales del reporte: suma Saldo Pendiente, Saldo a Favor y Saldo Vencido BCV."""
+        fila = [""] * cantidad_columnas
+        for columna, atributo in ((1, "saldo_pendiente"), (2, "saldo_favor"), (3, "saldo_vencido_bcv")):
+            fila[columna] = float(sum(_as_decimal(getattr(item, atributo, Decimal("0.00"))) for item in items))
+        return fila
+
     def _exportar_excel_cuentas_bcv(self) -> None:
         try:
             session = self.session_factory()
@@ -1871,6 +1916,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                     lambda: PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
                         session=session,
                         estado=self._estado_filtro,
+                        id_vendedor=self.vendedor_combo.currentData(),
                         pagina=1,
                         por_pagina=10000,  # Exportar todo
                         id_usuario=self.id_usuario,
@@ -1911,6 +1957,9 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                         encabezados,
                         filas,
                         titulo="Cuentas por Cobrar BCV (Agrupadas por Cliente)",
+                        filtros=self._filtros_exportacion_cuentas_bcv(),
+                        total_row=self._fila_totales_cuentas_bcv(items, len(encabezados)),
+                        total_label="TOTALES",
                     )
             finally:
                 session.close()
@@ -1926,6 +1975,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                     lambda: PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
                         session=session,
                         estado=self._estado_filtro,
+                        id_vendedor=self.vendedor_combo.currentData(),
                         pagina=1,
                         por_pagina=10000,  # Exportar todo
                         id_usuario=self.id_usuario,
@@ -1966,6 +2016,9 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                         "Cuentas por Cobrar BCV (Agrupadas por Cliente)",
                         encabezados,
                         filas,
+                        filtros=self._filtros_exportacion_cuentas_bcv(),
+                        total_row=self._fila_totales_cuentas_bcv(items, len(encabezados)),
+                        total_label="TOTALES",
                     )
             finally:
                 session.close()
