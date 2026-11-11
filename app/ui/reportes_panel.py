@@ -44,11 +44,13 @@ from app.db.models import (
     Usuario,
     Vendedor,
 )
+from app.services.alcance_vendedor import vendedor_propio
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.paginacion import paginar_lista
 from app.services.reportes import POR_PAGINA_REPORTE, ReporteService
 from app.ui.exportacion_completa import ExportacionCompletaMixin
+from app.ui.filtros_catalogo import fijar_vendedor_propio
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.paginacion import ControlPaginacion
@@ -230,6 +232,23 @@ REPORTES_PAGINADOS = REPORTES_PAGINADOS_EN_SQL | frozenset(
         REPORTE_ESTADO_CTA_CLIENTE,
         REPORTE_CLIENTES_MOROSOS,
         REPORTE_ESTADO_CTA_PROVEEDOR,
+    }
+)
+# Reportes que un usuario VENDEDOR puede abrir: los que el servicio acota a lo suyo (ver app/services/
+# alcance_vendedor.py). El resto (compras, bancos, caja, inventario valorizado...) es del negocio entero.
+REPORTES_DE_VENDEDOR = frozenset(
+    {
+        REPORTE_AGING_CXC,
+        REPORTE_AGING_CXC_BCV,
+        REPORTE_LIBRO_VENTAS,
+        REPORTE_VENTAS_PERIODO,
+        REPORTE_ACTIVACION_CLIENTES,
+        REPORTE_VENTAS_PRODUCTOS_CLIENTES,
+        REPORTE_PRODUCTOS_VENDIDOS,
+        REPORTE_CLIENTES_MOROSOS,
+        REPORTE_COBROS_PERIODO,
+        REPORTE_COMISIONES_VENDEDOR,
+        REPORTE_COMISIONES_PAGADAS_PENDIENTES,
     }
 )
 
@@ -633,25 +652,29 @@ def _tarea_paginada(session, tarea, pagina, por_pagina, **filtros):
     }
 
 
-def _tarea_libro_ventas(session, id_usuario, fecha_desde, fecha_hasta, id_cliente, pagina=None, por_pagina=None):
+def _tarea_libro_ventas(
+    session, id_usuario, fecha_desde, fecha_hasta, id_cliente, pagina=None, por_pagina=None, id_vendedor=None
+):
     return ReporteService.libro_ventas(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         id_cliente=id_cliente,
+        id_vendedor=id_vendedor,
         pagina=pagina,
         por_pagina=por_pagina or POR_PAGINA_REPORTE,
     )
 
 
-def _tarea_ventas_periodo(session, id_usuario, fecha_desde, fecha_hasta, agrupacion):
+def _tarea_ventas_periodo(session, id_usuario, fecha_desde, fecha_hasta, agrupacion, id_vendedor=None):
     return ReporteService.ventas_por_periodo(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         agrupacion=agrupacion,
+        id_vendedor=id_vendedor,
     )
 
 
@@ -694,13 +717,14 @@ def _tarea_activacion_clientes(session, id_usuario, fecha_desde, fecha_hasta, id
     )
 
 
-def _tarea_productos_vendidos(session, id_usuario, fecha_desde, fecha_hasta, orden):
+def _tarea_productos_vendidos(session, id_usuario, fecha_desde, fecha_hasta, orden, id_vendedor=None):
     return ReporteService.productos_mas_vendidos(
         session,
         id_usuario=id_usuario,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         orden=orden,
+        id_vendedor=id_vendedor,
     )
 
 
@@ -842,7 +866,9 @@ def _tarea_estado_cuenta_cliente(session, id_usuario, id_cliente, fecha_desde, f
     )
 
 
-def _tarea_cobros_periodo(session, id_usuario, fecha_desde, fecha_hasta, id_cliente, pagina=None, por_pagina=None):
+def _tarea_cobros_periodo(
+    session, id_usuario, fecha_desde, fecha_hasta, id_cliente, pagina=None, por_pagina=None, id_vendedor=None
+):
     return ReporteService.cobros_del_periodo(
         session,
         id_usuario=id_usuario,
@@ -851,11 +877,14 @@ def _tarea_cobros_periodo(session, id_usuario, fecha_desde, fecha_hasta, id_clie
         id_cliente=id_cliente,
         pagina=pagina,
         por_pagina=por_pagina or POR_PAGINA_REPORTE,
+        id_vendedor=id_vendedor,
     )
 
 
-def _tarea_clientes_morosos(session, id_usuario, fecha_corte):
-    return ReporteService.clientes_morosos(session, id_usuario=id_usuario, fecha_corte=fecha_corte)
+def _tarea_clientes_morosos(session, id_usuario, fecha_corte, id_vendedor=None):
+    return ReporteService.clientes_morosos(
+        session, id_usuario=id_usuario, fecha_corte=fecha_corte, id_vendedor=id_vendedor
+    )
 
 
 def _tarea_cxc_otras(session, id_usuario, id_cliente, estado, pagina=None, por_pagina=None):
@@ -999,23 +1028,29 @@ def _tarea_productos_proximos_vencer(session, id_usuario, dias_horizonte, id_cat
     )
 
 
-def _tarea_catalogos_filtros(session) -> dict:
+def _tarea_catalogos_filtros(session, id_usuario: int | None = None) -> dict:
     """Corre en un hilo aparte: los catalogos de los combos de filtros, como tuplas simples (id, texto) y sin
-    entidades ORM. Antes se cargaban 8 listas completas en el hilo de la ventana al abrir el modulo."""
+    entidades ORM. Antes se cargaban 8 listas completas en el hilo de la ventana al abrir el modulo. Para un usuario
+    vendedor solo van SUS clientes y nada de lo que no es suyo (proveedores, cajas, cajeros, cuentas bancarias): ver
+    app/services/alcance_vendedor.py."""
+    id_vendedor = vendedor_propio(session, id_usuario)
+    clientes = session.query(Cliente.id_cliente, Cliente.nombre_razon_social).filter(Cliente.estado_cliente == "ACTIVO")
+    if id_vendedor is not None:
+        clientes = clientes.filter(Cliente.vendedor_cliente == id_vendedor)
+    ajeno = id_vendedor is not None  # lo del negocio entero no es de un vendedor
     return {
-        "clientes": [
-            (r.id_cliente, r.nombre_razon_social)
-            for r in session.query(Cliente.id_cliente, Cliente.nombre_razon_social)
-            .filter(Cliente.estado_cliente == "ACTIVO")
-            .order_by(Cliente.nombre_razon_social)
-        ],
-        "proveedores": [
+        "clientes": [(r.id_cliente, r.nombre_razon_social) for r in clientes.order_by(Cliente.nombre_razon_social)],
+        "proveedores": []
+        if ajeno
+        else [
             (r.id_proveedor, r.nombre_razon_social)
             for r in session.query(Proveedor.id_proveedor, Proveedor.nombre_razon_social)
             .filter(Proveedor.estado_proveedor == "ACTIVO")
             .order_by(Proveedor.nombre_razon_social)
         ],
-        "cajas": [
+        "cajas": []
+        if ajeno
+        else [
             (r.id_caja, r.nombre_caja or f"Caja {r.id_caja}")
             for r in session.query(Caja.id_caja, Caja.nombre_caja).order_by(Caja.nombre_caja)
         ],
@@ -1023,7 +1058,9 @@ def _tarea_catalogos_filtros(session) -> dict:
             (r.id_vendedor, r.nombre_vendedor)
             for r in session.query(Vendedor.id_vendedor, Vendedor.nombre_vendedor).order_by(Vendedor.nombre_vendedor)
         ],
-        "cajeros": [
+        "cajeros": []
+        if ajeno
+        else [
             (r.id_usuario, r.nombre_usuario)
             for r in session.query(Usuario.id_usuario, Usuario.nombre_usuario)
             .filter(Usuario.estado == "ACTIVO")
@@ -1039,7 +1076,9 @@ def _tarea_catalogos_filtros(session) -> dict:
             (r.id_categoria, r.nombre)
             for r in session.query(Categoria.id_categoria, Categoria.nombre).order_by(Categoria.nombre)
         ],
-        "cuentas": [
+        "cuentas": []
+        if ajeno
+        else [
             (r.id_cuenta, f"{r.nombre_banco or 'N/A'} - {r.numero_cuenta}")
             for r in session.query(CuentaBancaria.id_cuenta, Banco.nombre_banco, CuentaBancaria.numero_cuenta)
             .outerjoin(Banco, Banco.id_banco == CuentaBancaria.id_banco)
@@ -1121,6 +1160,11 @@ _GRUPOS_CATALOGO: tuple[tuple[str, str | None, tuple[str, ...]], ...] = (
             "vendedor_combo_aging",
             "vendedor_combo_bcv",
             "vendedor_combo_vpc",
+            "vendedor_combo_lv",
+            "vendedor_combo_vp",
+            "vendedor_combo_pv",
+            "vendedor_combo_mor",
+            "vendedor_combo_cbp",
         ),
     ),
     ("cajeros", "Todos los cajeros", ("usuario_combo_cierre",)),
@@ -1292,6 +1336,10 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         self.tipo_combo.addItem("Comisiones por Vendedor/Período", REPORTE_COMISIONES_VENDEDOR)
         self.tipo_combo.addItem("Comisiones Pagadas vs. Pendientes", REPORTE_COMISIONES_PAGADAS_PENDIENTES)
         self.tipo_combo.addItem("Productos Próximos a Vencer", REPORTE_PRODUCTOS_PROXIMOS_VENCER)
+        if getattr(self.usuario, "id_vendedor_usuario", None) is not None:
+            for indice in reversed(range(self.tipo_combo.count())):
+                if self.tipo_combo.itemData(indice) not in REPORTES_DE_VENDEDOR:
+                    self.tipo_combo.removeItem(indice)
         self.tipo_combo.currentIndexChanged.connect(self._on_tipo_cambiado)
 
         # Selector NORMAL (no editable), igual que el resto de combos de la app. Antes era editable con un QCompleter
@@ -1565,6 +1613,11 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         h.addWidget(self.fecha_hasta_lv_input)
         h.addWidget(lbl_cliente)
         h.addWidget(self.cliente_combo_lv)
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(LABEL_QSS)
+        self.vendedor_combo_lv = _crear_combo(ancho=200)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_lv)
         return w
 
     def _make_filtros_ventas_periodo(self) -> QWidget:
@@ -1594,6 +1647,11 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         h.addWidget(self.fecha_hasta_vp_input)
         h.addWidget(lbl_agrup)
         h.addWidget(self.agrupacion_combo)
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(LABEL_QSS)
+        self.vendedor_combo_vp = _crear_combo(ancho=200)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_vp)
         return w
 
     def _make_filtros_ventas_cliente(self) -> QWidget:
@@ -1750,6 +1808,11 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         h.addWidget(self.fecha_hasta_pv_input)
         h.addWidget(lbl_orden)
         h.addWidget(self.orden_productos_combo)
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(LABEL_QSS)
+        self.vendedor_combo_pv = _crear_combo(ancho=200)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_pv)
         return w
 
     def _make_filtros_facturas_anuladas(self) -> QWidget:
@@ -2179,6 +2242,11 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         h.addWidget(self.fecha_hasta_cbp_input)
         h.addWidget(lbl_cliente)
         h.addWidget(self.cliente_combo_cbp)
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(LABEL_QSS)
+        self.vendedor_combo_cbp = _crear_combo(ancho=200)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_cbp)
         return w
 
     def _make_filtros_clientes_morosos(self) -> QWidget:
@@ -2194,6 +2262,11 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
 
         h.addWidget(lbl_corte)
         h.addWidget(self.fecha_corte_morosos_input)
+        lbl_vendedor = QLabel("Vendedor:")
+        lbl_vendedor.setStyleSheet(LABEL_QSS)
+        self.vendedor_combo_mor = _crear_combo(ancho=200)
+        h.addWidget(lbl_vendedor)
+        h.addWidget(self.vendedor_combo_mor)
         return w
 
     def _make_filtros_cxc_otras(self) -> QWidget:
@@ -2588,7 +2661,9 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
 
     def _cargar_catalogos(self) -> None:
         """Pide en un hilo aparte los catalogos de los combos de filtros; los llena al llegar."""
-        self._worker_catalogos = QueryWorker(self.session_factory, _tarea_catalogos_filtros)
+        self._worker_catalogos = QueryWorker(
+            self.session_factory, _tarea_catalogos_filtros, id_usuario=self.usuario.id_usuario
+        )
         self._worker_catalogos.resultado.connect(self._llenar_catalogos)
         self._worker_catalogos.error.connect(self._error_catalogos)
         self._worker_catalogos.start()
@@ -2620,6 +2695,8 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                     modelo = self._modelos_combo[i] = _modelo_combo(datos[clave], primero)
                 combo.setModel(modelo)
                 combo.setCurrentIndex(0 if modelo.rowCount() else -1)
+                if clave == "vendedores":
+                    fijar_vendedor_propio(combo, self.usuario)
                 self._combos_con_modelo.add(id(combo))
 
     def closeEvent(self, event) -> None:
@@ -2734,6 +2811,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                     "fecha_desde": fecha_desde,
                     "fecha_hasta": fecha_hasta,
                     "id_cliente": self.cliente_combo_lv.currentData(),
+                    "id_vendedor": self.vendedor_combo_lv.currentData(),
                 },
             )
         elif modo == REPORTE_VENTAS_PERIODO:
@@ -2753,6 +2831,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 fecha_desde=fecha_desde,
                 fecha_hasta=fecha_hasta,
                 agrupacion=self.agrupacion_combo.currentData(),
+                id_vendedor=self.vendedor_combo_vp.currentData(),
             )
         elif modo == REPORTE_VENTAS_CLIENTE:
             fecha_desde = self.fecha_desde_vc_input.date().toPython()
@@ -2860,6 +2939,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 fecha_desde=fecha_desde,
                 fecha_hasta=fecha_hasta,
                 orden=self.orden_productos_combo.currentData(),
+                id_vendedor=self.vendedor_combo_pv.currentData(),
             )
         elif modo == REPORTE_FACTURAS_ANULADAS:
             fecha_desde = self.fecha_desde_fa_input.date().toPython()
@@ -3177,6 +3257,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                     "fecha_desde": fecha_desde,
                     "fecha_hasta": fecha_hasta,
                     "id_cliente": self.cliente_combo_cbp.currentData(),
+                    "id_vendedor": self.vendedor_combo_cbp.currentData(),
                 },
             )
         elif modo == REPORTE_CLIENTES_MOROSOS:
@@ -3185,6 +3266,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 {
                     "id_usuario": self.usuario.id_usuario,
                     "fecha_corte": self.fecha_corte_morosos_input.date().toPython(),
+                    "id_vendedor": self.vendedor_combo_mor.currentData(),
                 },
             )
         elif modo == REPORTE_CXC_OTRAS:
@@ -5824,6 +5906,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
                 "Cliente": self._texto_filtro(self.cliente_combo_lv),
+                "Vendedor": self._texto_filtro(self.vendedor_combo_lv),
                 "Facturas": str(resultado["cantidad_facturas"]),
                 "Anuladas": str(resultado["cantidad_anuladas"]),
                 "Exento": f"${float(resultado['total_exento']):,.2f}",
@@ -5843,6 +5926,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
                 "Agrupación": "Día" if resultado["agrupacion"] == "dia" else "Mes",
+                "Vendedor": self._texto_filtro(self.vendedor_combo_vp),
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
             return "Ventas por Período", filtros, [1.0, 1.0, 1.0]
@@ -5899,6 +5983,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
                 "Orden": ("Más vendidos" if resultado["orden"] == "desc" else "Menos vendidos"),
+                "Vendedor": self._texto_filtro(self.vendedor_combo_pv),
                 "Total general": f"${float(resultado['total_general']):,.2f}",
             }
             return "Productos Más/Menos Vendidos", filtros, [2.0, 1.0, 1.0, 1.2]
@@ -6098,6 +6183,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 "Desde": resultado["fecha_desde"].strftime("%d/%m/%Y"),
                 "Hasta": resultado["fecha_hasta"].strftime("%d/%m/%Y"),
                 "Cliente": self._texto_filtro(self.cliente_combo_cbp),
+                "Vendedor": self._texto_filtro(self.vendedor_combo_cbp),
                 "Total": f"${float(resultado['total_general']):,.2f}",
             }
             return "Cobros del Período", filtros, [1.0, 1.6, 1.1, 0.8, 1.0, 0.7, 1.0]
@@ -6105,6 +6191,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         if self._ultimo_modo == REPORTE_CLIENTES_MOROSOS:
             filtros = {
                 "Corte": resultado["fecha_corte"].strftime("%d/%m/%Y"),
+                "Vendedor": self._texto_filtro(self.vendedor_combo_mor),
                 "Total vencido": f"${float(resultado['total_general']):,.2f}",
             }
             return "Clientes Morosos", filtros, [2.0, 1.2, 1.2, 1.2]

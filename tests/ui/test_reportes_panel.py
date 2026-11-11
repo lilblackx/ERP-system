@@ -637,6 +637,7 @@ def test_productos_vendidos_muestra_bultos_y_unidades_en_columnas_separadas(pane
 
 
 def test_productos_vendidos_exporta_las_cuatro_columnas_y_el_pdf_tiene_cuatro_anchos(panel):
+    panel._asegurar_pagina(rp.REPORTE_PRODUCTOS_VENDIDOS)  # el encabezado del PDF lee el combo de vendedor
     panel._ultimo_modo = rp.REPORTE_PRODUCTOS_VENDIDOS
     panel._ultimo_resultado = _resultado_vendidos()
 
@@ -940,6 +941,7 @@ def test_exportar_un_reporte_no_paginado_usa_el_resultado_en_pantalla_sin_volver
     monkeypatch.setattr(ec, "QueryWorker", _WorkerRegistrado)
     monkeypatch.setattr(ec, "ocupar_boton", lambda *a, **k: None)
     monkeypatch.setattr(rp.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: ("/tmp/v.xlsx", "")))
+    panel._asegurar_pagina(rp.REPORTE_PRODUCTOS_VENDIDOS)
     panel._ultimo_modo = rp.REPORTE_PRODUCTOS_VENDIDOS
     panel._ultimo_resultado = _resultado_vendidos()
 

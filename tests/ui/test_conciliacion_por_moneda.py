@@ -262,3 +262,134 @@ def test_un_manual_pendiente_suma_en_la_moneda_de_la_cuenta(qtbot, db_session, e
     # al cambiar de cuenta se descartan los manuales sin guardar: eran de otra cuenta y de otra moneda
     assert dlg._movimientos_manuales == []
     assert dlg.lbl_total_salidas.text() == "Total Salidas: $0.00"
+
+
+# -- Tasa del resumen: lo que el usuario escribe no se pisa al cambiar de cuenta ------------------------------------
+
+
+def _editar_tasa(dlg, valor):
+    """Lo que hace el usuario al escribir: set_value() solo refleja el valor; valueChanged se emite al editar a mano."""
+    dlg.tasa_conciliacion_input.set_value(Decimal(valor))
+    dlg.tasa_conciliacion_input.valueChanged.emit(dlg.tasa_conciliacion_input.get_value())
+
+
+def _tasa_del_dia(db_session, admin, bcv="40.00", cop="4000.00"):
+    from app.db.models import ControlDeTasa
+
+    db_session.add(ControlDeTasa(tasa_dolar_bcv=Decimal(bcv), tasa_cop=Decimal(cop), creado_por=admin.id_usuario))
+    db_session.commit()
+
+
+def test_una_cuenta_en_bolivares_precarga_la_tasa_bcv_del_dia(qtbot, db_session, escenario):
+    admin, _usd, ves = escenario
+    _tasa_del_dia(db_session, admin)
+
+    dlg = _dialogo(qtbot, db_session, admin, ves)
+
+    assert dlg.tasa_conciliacion_input.get_value() == Decimal("40.00")
+    assert not dlg.tasa_equiv_widget.isHidden()
+
+
+def test_una_cuenta_en_dolares_no_muestra_tasa_ni_equivalente(qtbot, db_session, escenario):
+    admin, usd, _ves = escenario
+    _tasa_del_dia(db_session, admin)
+
+    dlg = _dialogo(qtbot, db_session, admin, usd)
+
+    assert dlg.tasa_equiv_widget.isHidden()
+
+
+def test_la_tasa_escrita_por_el_usuario_sobrevive_al_cambio_de_cuenta_de_la_misma_moneda(qtbot, db_session, escenario):
+    admin, usd, ves = escenario
+    otra_ves = crear_cuenta_bancaria(db_session, moneda="VES")
+    _tasa_del_dia(db_session, admin)
+    dlg = _dialogo(qtbot, db_session, admin, ves)
+    _editar_tasa(dlg, "45.50")
+
+    dlg.cuenta_combo.setCurrentIndex(dlg.cuenta_combo.findData(usd.id_cuenta))  # pasa por una cuenta en dolares
+    dlg.cuenta_combo.setCurrentIndex(dlg.cuenta_combo.findData(otra_ves.id_cuenta))
+
+    assert dlg.tasa_conciliacion_input.get_value() == Decimal("45.50")  # no vuelve a la del dia (40.00)
+
+
+def test_sin_editar_la_tasa_se_sigue_precargando_la_del_dia(qtbot, db_session, escenario):
+    admin, usd, ves = escenario
+    _tasa_del_dia(db_session, admin)
+    dlg = _dialogo(qtbot, db_session, admin, ves)
+    dlg.tasa_conciliacion_input.set_value(Decimal("1.00"))  # set_value no cuenta como edicion del usuario
+
+    dlg.cuenta_combo.setCurrentIndex(dlg.cuenta_combo.findData(usd.id_cuenta))
+    dlg.cuenta_combo.setCurrentIndex(dlg.cuenta_combo.findData(ves.id_cuenta))
+
+    assert dlg.tasa_conciliacion_input.get_value() == Decimal("40.00")
+
+
+def test_la_tasa_editada_es_por_moneda_una_cuenta_en_pesos_usa_la_tasa_cop(qtbot, db_session, escenario):
+    admin, _usd, ves = escenario
+    cop = crear_cuenta_bancaria(db_session, moneda="COP")
+    _tasa_del_dia(db_session, admin, bcv="40.00", cop="4000.00")
+    dlg = _dialogo(qtbot, db_session, admin, ves)
+    _editar_tasa(dlg, "45.50")  # una tasa en bolivares
+
+    dlg.cuenta_combo.setCurrentIndex(dlg.cuenta_combo.findData(cop.id_cuenta))
+    assert dlg.tasa_conciliacion_input.get_value() == Decimal("4000.00")  # no le sirve la de bolivares
+    assert dlg.lbl_tasa_conciliacion.text() == "Tasa (COP/USD):"
+
+    dlg.cuenta_combo.setCurrentIndex(dlg.cuenta_combo.findData(ves.id_cuenta))
+    assert dlg.tasa_conciliacion_input.get_value() == Decimal("45.50")  # la de bolivares sigue recordada
+
+
+def test_el_equivalente_en_dolares_es_el_saldo_final_entre_la_tasa(qtbot, db_session, escenario):
+    admin, _usd, ves = escenario
+    _tasa_del_dia(db_session, admin)
+    dlg = _dialogo(qtbot, db_session, admin, ves)
+
+    dlg.saldo_final_bs_input.set_value(Decimal("4000.00"))
+    dlg._actualizar_equivalente_usd()
+    assert dlg.equiv_usd_input.get_value() == Decimal("100.00")  # 4 000 Bs / 40
+
+    _editar_tasa(dlg, "50.00")
+    assert dlg.equiv_usd_input.get_value() == Decimal("80.00")  # 4 000 Bs / 50
+
+
+def test_sin_saldo_o_sin_tasa_el_equivalente_queda_vacio(qtbot, db_session, escenario):
+    admin, _usd, ves = escenario
+    dlg = _dialogo(qtbot, db_session, admin, ves)  # no hay tasa registrada
+    dlg.saldo_final_bs_input.set_value(Decimal("4000.00"))
+
+    dlg._actualizar_equivalente_usd()
+
+    assert dlg.equiv_usd_input.get_value() in (None, Decimal("0"))
+
+
+def test_la_tabla_muestra_el_equivalente_en_dolares_de_cada_movimiento_de_una_cuenta_en_bolivares(
+    qtbot, db_session, escenario
+):
+    admin, _usd, ves = escenario  # el movimiento de la cuenta VES es de Bs 4 000 a tasa 40
+
+    dlg = _dialogo(qtbot, db_session, admin, ves)
+
+    assert dlg.table.item(0, cb.COL_MONTO_USD).text() == "$100.00"
+    assert dlg.table.item(0, cb.COL_MONTO_LOCAL).text() == "4,000.00"
+    assert dlg.table.item(0, cb.COL_TASA).text() == "40.00"
+
+
+def test_el_movimiento_manual_arranca_con_la_tasa_del_resumen(qtbot, db_session, escenario, monkeypatch):
+    admin, _usd, ves = escenario
+    _tasa_del_dia(db_session, admin)
+    dlg = _dialogo(qtbot, db_session, admin, ves)
+    _editar_tasa(dlg, "47.00")
+    capturado = {}
+
+    class _Falso:
+        def __init__(self, tipo, parent=None, tasa_inicial=0.0, moneda="VES"):
+            capturado["tasa"] = tasa_inicial
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(cb, "MovimientoManualDialog", _Falso)
+
+    dlg._on_agregar_entrada()
+
+    assert capturado["tasa"] == 47.0

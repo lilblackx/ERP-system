@@ -58,6 +58,9 @@ class ConciliacionBancosDialog(QDialog):
         # _aplicar_modo_moneda). Sin cuentas se muestra el lado en dolares.
         self._monedas: dict[int, str] = {}
         self._moneda = MONEDA_USD
+        # Tasa que el usuario escribio en el resumen, por moneda de la cuenta: cambiar de cuenta no la pisa con la
+        # del dia (una tasa en Bs no sirve para una cuenta en pesos, por eso es una por moneda).
+        self._tasas_editadas: dict[str, float] = {}
 
         self.setWindowTitle("Conciliación de Bancos")
         self.setStyleSheet(TABLE_QSS)
@@ -226,6 +229,7 @@ class ConciliacionBancosDialog(QDialog):
         self.tasa_conciliacion_input = NumericLineEdit(NumericFieldType.RATE)
         self.tasa_conciliacion_input.setMinimumHeight(32)
         self.tasa_conciliacion_input.setMaximumWidth(140)
+        self.tasa_conciliacion_input.valueChanged.connect(self._guardar_tasa_editada)
         self.tasa_conciliacion_input.valueChanged.connect(self._actualizar_equivalente_usd)
 
         self.lbl_equiv_usd = QLabel("Equiv. USD (solo vista):")
@@ -415,10 +419,17 @@ class ConciliacionBancosDialog(QDialog):
         self._actualizar_equivalente_usd()
 
     def _precargar_tasa_conciliacion(self) -> None:
-        """Tasa del dia (BCV o COP segun la moneda de la cuenta) como sugerencia para el equivalente en USD."""
-        tasa = self._tasa_sugerida()
+        """Tasa para el equivalente en USD: la que el usuario escribio para esta moneda si la hay; si no, la del dia
+        (BCV o COP segun la moneda de la cuenta)."""
+        tasa = self._tasas_editadas.get(self._moneda) or self._tasa_sugerida()
         if tasa > 0:
             self.tasa_conciliacion_input.set_value(tasa)
+
+    def _guardar_tasa_editada(self) -> None:
+        """El usuario cambio la tasa a mano: se recuerda para esta moneda (ver `_tasas_editadas`)."""
+        valor = self.tasa_conciliacion_input.get_value()
+        if valor is not None and valor > 0:
+            self._tasas_editadas[self._moneda] = float(valor)
 
     def _actualizar_equivalente_usd(self) -> None:
         """Saldo final del banco (en la moneda de la cuenta) / tasa -> equivalente en USD. Solo vista."""

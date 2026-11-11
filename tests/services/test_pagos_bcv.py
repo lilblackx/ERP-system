@@ -498,3 +498,85 @@ def test_abono_general_bcv_sin_tasa_sigue_siendo_obligatorio_con_transferencia(d
             id_cuenta_bancaria=cuenta.id_cuenta,
             id_usuario=admin.id_usuario,
         )
+
+
+# ── Filtro por vendedor del listado agrupado de CxC BCV ───────────────────────────────────────────────────────
+
+
+def _clientes_de_dos_vendedores_con_deuda_bcv(db_session, admin):
+    vendedor_a = crear_vendedor(db_session, nombre_vendedor="Vendedor A")
+    vendedor_b = crear_vendedor(db_session, nombre_vendedor="Vendedor B")
+    cliente_a = crear_cliente(
+        db_session,
+        limite_credito=Decimal("100000.00"),
+        vendedor_cliente=vendedor_a.id_vendedor,
+        nombre_razon_social="Cliente A",
+    )
+    cliente_b = crear_cliente(
+        db_session,
+        limite_credito=Decimal("100000.00"),
+        vendedor_cliente=vendedor_b.id_vendedor,
+        nombre_razon_social="Cliente B",
+    )
+    _emitir_credito_bcv(db_session, admin, cliente=cliente_a, precio="100.00")
+    _emitir_credito_bcv(db_session, admin, cliente=cliente_b, precio="50.00")
+    return vendedor_a, vendedor_b, cliente_a, cliente_b
+
+
+def test_listado_bcv_agrupado_filtra_por_el_vendedor_del_cliente(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor_a, vendedor_b, cliente_a, cliente_b = _clientes_de_dos_vendedores_con_deuda_bcv(db_session, admin)
+
+    de_a = PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+        db_session, id_usuario=admin.id_usuario, id_vendedor=vendedor_a.id_vendedor
+    )
+    de_b = PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+        db_session, id_usuario=admin.id_usuario, id_vendedor=vendedor_b.id_vendedor
+    )
+    todos = PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(db_session, id_usuario=admin.id_usuario)
+
+    assert [i.id_cliente for i in de_a["items"]] == [cliente_a.id_cliente] and de_a["total"] == 1
+    assert [i.id_cliente for i in de_b["items"]] == [cliente_b.id_cliente]
+    assert {i.id_cliente for i in todos["items"]} == {cliente_a.id_cliente, cliente_b.id_cliente}
+
+
+def test_listado_bcv_agrupado_sin_vendedor_o_con_vendedor_cero_no_filtra(db_session):
+    admin = crear_usuario_admin(db_session)
+    _clientes_de_dos_vendedores_con_deuda_bcv(db_session, admin)
+
+    sin_filtro = PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+        db_session, id_usuario=admin.id_usuario, id_vendedor=None
+    )
+    cero = PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+        db_session, id_usuario=admin.id_usuario, id_vendedor=0
+    )
+
+    assert sin_filtro["total"] == cero["total"] == 2  # el "Todos los vendedores" del combo manda None
+
+
+def test_listado_bcv_agrupado_vendedor_sin_clientes_con_deuda_queda_vacio(db_session):
+    admin = crear_usuario_admin(db_session)
+    _clientes_de_dos_vendedores_con_deuda_bcv(db_session, admin)
+    otro = crear_vendedor(db_session, nombre_vendedor="Sin cartera")
+
+    resultado = PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+        db_session, id_usuario=admin.id_usuario, id_vendedor=otro.id_vendedor
+    )
+
+    assert resultado["items"] == [] and resultado["total"] == 0
+
+
+def test_listado_bcv_agrupado_combina_vendedor_busqueda_y_totales(db_session):
+    admin = crear_usuario_admin(db_session)
+    vendedor_a, _vb, cliente_a, _cb = _clientes_de_dos_vendedores_con_deuda_bcv(db_session, admin)
+
+    acierta = PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+        db_session, id_usuario=admin.id_usuario, id_vendedor=vendedor_a.id_vendedor, busqueda="Cliente A"
+    )
+    no_acierta = PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+        db_session, id_usuario=admin.id_usuario, id_vendedor=vendedor_a.id_vendedor, busqueda="Cliente B"
+    )
+
+    assert [i.id_cliente for i in acierta["items"]] == [cliente_a.id_cliente]
+    assert acierta["items"][0].saldo_pendiente > 0
+    assert no_acierta["items"] == []

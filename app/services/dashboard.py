@@ -1,17 +1,19 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     Caja,
+    Cliente,
     CuentaPorCobrar,
     CuentaPorCobrarBCV,
     CuentaPorPagar,
     FacturaVenta,
     Inventario,
 )
+from app.services.alcance_vendedor import vendedor_propio
 from app.services.permisos import require_permiso
 
 CUENTA_ABIERTA = ("pendiente", "parcial", "vencida")
@@ -26,18 +28,21 @@ class DashboardService:
     @staticmethod
     def get_panel_general_data(session: Session, dias_vencimiento: int = 30, id_usuario: int | None = None) -> dict:
         require_permiso(session, id_usuario, "dashboard", "ver")
+        # Un usuario vendedor ve el panel de lo suyo: sus ventas, la cartera de sus clientes y sus facturas; no los
+        # pagos a proveedores ni las cajas del negocio (ver alcance_vendedor.py).
+        id_vendedor = vendedor_propio(session, id_usuario)
         hoy = date.today()
         ayer = hoy - timedelta(days=1)
         limite_vencimiento = hoy + timedelta(days=dias_vencimiento)
 
         return {
-            "ventas_hoy": DashboardService._kpi_ventas_hoy(session, hoy, ayer),
-            "por_cobrar": DashboardService._kpi_por_cobrar(session, hoy),
-            "por_pagar": DashboardService._kpi_por_pagar(session, hoy),
+            "ventas_hoy": DashboardService._kpi_ventas_hoy(session, hoy, ayer, id_vendedor),
+            "por_cobrar": DashboardService._kpi_por_cobrar(session, hoy, id_vendedor),
+            "por_pagar": DashboardService._kpi_por_pagar(session, hoy, id_vendedor),
             "productos_alerta": DashboardService._kpi_productos_alerta(session, limite_vencimiento),
-            "grafico_semanal": DashboardService._grafico_semanal(session, hoy),
-            "cajas_activas": DashboardService._cajas_activas(session, hoy),
-            "facturas_recientes": DashboardService._facturas_recientes(session),
+            "grafico_semanal": DashboardService._grafico_semanal(session, hoy, id_vendedor),
+            "cajas_activas": [] if id_vendedor is not None else DashboardService._cajas_activas(session, hoy),
+            "facturas_recientes": DashboardService._facturas_recientes(session, id_vendedor=id_vendedor),
             "inventario_alerta": DashboardService._inventario_alerta(session, limite_vencimiento),
         }
 
@@ -63,22 +68,21 @@ class DashboardService:
         )
 
     @staticmethod
-    def _total_ventas_del_dia(session: Session, dia: date) -> Decimal:
+    def _total_ventas_del_dia(session: Session, dia: date, id_vendedor: int | None = None) -> Decimal:
         inicio, fin = _rango_dia(dia)
-        return (
-            session.query(func.coalesce(func.sum(FacturaVenta.total_venta), 0))
-            .filter(
-                FacturaVenta.fecha_emision >= inicio,
-                FacturaVenta.fecha_emision < fin,
-                FacturaVenta.estado_factura != "ANULADA",
-            )
-            .scalar()
+        consulta = session.query(func.coalesce(func.sum(FacturaVenta.total_venta), 0)).filter(
+            FacturaVenta.fecha_emision >= inicio,
+            FacturaVenta.fecha_emision < fin,
+            FacturaVenta.estado_factura != "ANULADA",
         )
+        if id_vendedor is not None:
+            consulta = consulta.filter(FacturaVenta.id_vendedor == id_vendedor)
+        return consulta.scalar()
 
     @staticmethod
-    def _kpi_ventas_hoy(session: Session, hoy: date, ayer: date) -> dict:
-        total_hoy = DashboardService._total_ventas_del_dia(session, hoy)
-        total_ayer = DashboardService._total_ventas_del_dia(session, ayer)
+    def _kpi_ventas_hoy(session: Session, hoy: date, ayer: date, id_vendedor: int | None = None) -> dict:
+        total_hoy = DashboardService._total_ventas_del_dia(session, hoy, id_vendedor)
+        total_ayer = DashboardService._total_ventas_del_dia(session, ayer, id_vendedor)
 
         if total_ayer:
             porcentaje_vs_ayer = float((total_hoy - total_ayer) / total_ayer * 100)
@@ -90,18 +94,29 @@ class DashboardService:
         return {"total": total_hoy, "porcentaje_vs_ayer": round(porcentaje_vs_ayer, 2)}
 
     @staticmethod
-    def _kpi_por_cobrar(session: Session, hoy: date) -> dict:
+    def _cartera_del_vendedor(modelo, id_vendedor: int | None):
+        """Condicion "la cuenta es de un cliente de este vendedor" (sin filtro si no hay vendedor)."""
+        if id_vendedor is None:
+            return True
+        clientes = select(Cliente.id_cliente).where(Cliente.vendedor_cliente == id_vendedor)
+        return modelo.id_factura.in_(
+            select(FacturaVenta.id_factura).where(FacturaVenta.id_cliente_factura.in_(clientes))
+        )
+
+    @staticmethod
+    def _kpi_por_cobrar(session: Session, hoy: date, id_vendedor: int | None = None) -> dict:
+        propias = DashboardService._cartera_del_vendedor
         # Sumar saldos de cuentas por cobrar normales
         saldo_normal = (
             session.query(func.coalesce(func.sum(CuentaPorCobrar.saldo_pendiente), 0))
-            .filter(CuentaPorCobrar.estado.in_(CUENTA_ABIERTA))
+            .filter(CuentaPorCobrar.estado.in_(CUENTA_ABIERTA), propias(CuentaPorCobrar, id_vendedor))
             .scalar()
         )
 
         # Sumar saldos de cuentas por cobrar BCV
         saldo_bcv = (
             session.query(func.coalesce(func.sum(CuentaPorCobrarBCV.saldo_pendiente), 0))
-            .filter(CuentaPorCobrarBCV.estado.in_(CUENTA_ABIERTA))
+            .filter(CuentaPorCobrarBCV.estado.in_(CUENTA_ABIERTA), propias(CuentaPorCobrarBCV, id_vendedor))
             .scalar()
         )
 
@@ -113,6 +128,7 @@ class DashboardService:
             .filter(
                 CuentaPorCobrar.estado.in_(CUENTA_ABIERTA),
                 CuentaPorCobrar.fecha_vencimiento < hoy,
+                propias(CuentaPorCobrar, id_vendedor),
             )
             .scalar()
         )
@@ -123,6 +139,7 @@ class DashboardService:
             .filter(
                 CuentaPorCobrarBCV.estado.in_(CUENTA_ABIERTA),
                 CuentaPorCobrarBCV.fecha_vencimiento < hoy,
+                propias(CuentaPorCobrarBCV, id_vendedor),
             )
             .scalar()
         )
@@ -132,7 +149,9 @@ class DashboardService:
         return {"saldo_total": saldo_total, "facturas_vencidas": total_vencidas}
 
     @staticmethod
-    def _kpi_por_pagar(session: Session, hoy: date) -> dict:
+    def _kpi_por_pagar(session: Session, hoy: date, id_vendedor: int | None = None) -> dict:
+        if id_vendedor is not None:  # lo que el negocio debe a sus proveedores no es de un vendedor
+            return {"saldo_total": Decimal("0.00"), "compras_vencidas": 0}
         saldo_total = (
             session.query(func.coalesce(func.sum(CuentaPorPagar.saldo_pendiente), 0))
             .filter(CuentaPorPagar.estado.in_(CUENTA_ABIERTA))
@@ -164,12 +183,12 @@ class DashboardService:
         )
 
     @staticmethod
-    def _grafico_semanal(session: Session, hoy: date) -> list[dict]:
+    def _grafico_semanal(session: Session, hoy: date, id_vendedor: int | None = None) -> list[dict]:
         dias = [hoy - timedelta(days=offset) for offset in range(6, -1, -1)]
         return [
             {
                 "fecha": dia,
-                "monto": DashboardService._total_ventas_del_dia(session, dia),
+                "monto": DashboardService._total_ventas_del_dia(session, dia, id_vendedor),
             }
             for dia in dias
         ]
@@ -200,14 +219,11 @@ class DashboardService:
         ]
 
     @staticmethod
-    def _facturas_recientes(session: Session, limite: int = 5) -> list[dict]:
-        facturas = (
-            session.query(FacturaVenta)
-            .options(joinedload(FacturaVenta.cliente))
-            .order_by(FacturaVenta.fecha_emision.desc())
-            .limit(limite)
-            .all()
-        )
+    def _facturas_recientes(session: Session, limite: int = 5, id_vendedor: int | None = None) -> list[dict]:
+        consulta = session.query(FacturaVenta).options(joinedload(FacturaVenta.cliente))
+        if id_vendedor is not None:
+            consulta = consulta.filter(FacturaVenta.id_vendedor == id_vendedor)
+        facturas = consulta.order_by(FacturaVenta.fecha_emision.desc()).limit(limite).all()
         return [
             {
                 "numero_factura": factura.numero_factura,

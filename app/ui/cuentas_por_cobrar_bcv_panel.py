@@ -45,6 +45,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
 from app.ui.conversion_bolivares import ConversionBolivaresMixin
+from app.ui.filtros_catalogo import llenar_combo_vendedores, tarea_vendedores_para_filtro
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
@@ -1787,22 +1788,17 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         logger.info(f"Mostrando {len(items)} clientes agrupados de {total} total, página {pagina}")
 
     def _cargar_vendedores(self) -> None:
-        """Carga la lista de vendedores en el combo de filtro."""
-        session = self.session_factory()
-        try:
-            from app.db.models import Vendedor
+        """Pide en un hilo aparte la lista de vendedores del combo de filtro (la ventana no espera a la base)."""
+        self.cargar_async(
+            "vendedores",
+            tarea_vendedores_para_filtro,
+            self._llenar_vendedores,
+            texto_error="No se pudo cargar la lista de vendedores.",
+            silencioso=True,
+        )
 
-            vendedores = session.query(Vendedor).order_by(Vendedor.nombre_vendedor).all()
-            self.vendedor_combo.blockSignals(True)
-            self.vendedor_combo.clear()
-            self.vendedor_combo.addItem("Todos los vendedores")
-            for vendedor in vendedores:
-                self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
-            self.vendedor_combo.blockSignals(False)
-        except Exception:
-            logger.exception("Error al cargar vendedores")
-        finally:
-            session.close()
+    def _llenar_vendedores(self, vendedores: list) -> None:
+        llenar_combo_vendedores(self.vendedor_combo, vendedores, self.usuario)
 
     def _on_filtro_cambiado(self) -> None:
         self._estado_filtro = self.estado_combo.currentData()

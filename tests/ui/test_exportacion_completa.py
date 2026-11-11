@@ -318,3 +318,127 @@ def test_el_mixin_ignora_un_segundo_clic_mientras_exporta(monkeypatch):
     panel._exportar_listado_completo(lambda session, ruta: lanzadas.append(ruta), "a.xlsx", object())
 
     assert lanzadas == []
+
+
+# ── Fila de TOTALES y filtro de vendedor en las exportaciones de Cuentas por Cobrar ──────────────────────────────
+
+
+def test_cxc_la_fila_de_totales_suma_saldo_pendiente_favor_y_vencido():
+    filas = cxc.filas_exportacion_cuentas_cobrar([_cliente_data(1), _cliente_data(2)])
+
+    totales = cxc._fila_totales_cuentas_cobrar(filas)
+
+    assert totales[0] is None and totales[4:] == [None, None, None]  # solo suma las tres columnas de montos
+    assert totales[1:4] == [Decimal("31.50"), Decimal("0.00"), Decimal("2.50")]  # 10.50 + 21.00 | 0 | 1.25 + 1.25
+
+
+def test_cxc_la_fila_de_totales_ignora_celdas_que_no_son_numeros():
+    filas = [
+        ["A", Decimal("5.00"), "n/a", Decimal("1.00"), "1", "x", "y"],
+        ["B", Decimal("2.50"), 4, None, "1", "x", "y"],
+    ]
+
+    assert cxc._fila_totales_cuentas_cobrar(filas)[1:4] == [Decimal("7.50"), Decimal("4"), Decimal("1.00")]
+
+
+@pytest.mark.parametrize("formato", ["excel", "pdf"])
+def test_cxc_la_exportacion_agrega_la_fila_de_totales(monkeypatch, tmp_path, formato):
+    monkeypatch.setattr(
+        cxc.PagoService,
+        "listar_cuentas_por_cobrar_por_cliente",
+        _PedidoRegistrado([_cliente_data(1), _cliente_data(2)]),
+    )
+    monkeypatch.setattr(cxc.EmpresaService, "obtener_datos_documento", lambda session: None)
+    recibido = {}
+    monkeypatch.setattr(cxc, "exportar_excel", lambda *a, **k: recibido.update(k))
+    monkeypatch.setattr(cxc, "exportar_pdf", lambda *a, **k: recibido.update(k))
+
+    cxc._tarea_exportar_cuentas_cobrar(
+        MagicMock(),
+        ruta=str(tmp_path / "x"),
+        formato=formato,
+        id_usuario=1,
+        estado=None,
+        id_vendedor=None,
+        texto_busqueda=None,
+        filtros_pdf={},
+    )
+
+    assert recibido["total_label"] == "TOTALES"
+    assert recibido["total_row"][1:4] == [Decimal("31.50"), Decimal("0.00"), Decimal("2.50")]
+
+
+def test_cxc_el_excel_trae_los_totales_en_la_ultima_fila(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        cxc.PagoService,
+        "listar_cuentas_por_cobrar_por_cliente",
+        _PedidoRegistrado([_cliente_data(1), _cliente_data(2)]),
+    )
+    monkeypatch.setattr(cxc.EmpresaService, "obtener_datos_documento", lambda session: None)
+    ruta = str(tmp_path / "cxc.xlsx")
+
+    cxc._tarea_exportar_cuentas_cobrar(
+        MagicMock(),
+        ruta=ruta,
+        formato="excel",
+        id_usuario=1,
+        estado=None,
+        id_vendedor=None,
+        texto_busqueda=None,
+        filtros_pdf={},
+    )
+
+    ultima = [f for f in _filas_del_archivo(ruta) if any(c is not None for c in f)][-1]
+    assert ultima[0] == "TOTALES" and ultima[1:4] == [31.5, 0, 2.5]
+
+
+# ── CxC BCV: totales y filtros del encabezado ──
+
+
+def _item_bcv(pendiente, favor, vencido):
+    return SimpleNamespace(saldo_pendiente=pendiente, saldo_favor=favor, saldo_vencido_bcv=vencido)
+
+
+def test_bcv_la_fila_de_totales_suma_las_tres_columnas_de_saldo():
+    from app.ui import cuentas_por_cobrar_bcv_panel as bcv
+
+    items = [
+        _item_bcv(Decimal("10.00"), Decimal("1.00"), Decimal("4.00")),
+        _item_bcv(Decimal("5.50"), Decimal("0"), Decimal("0")),
+    ]
+
+    fila = bcv.CuentasPorCobrarBCVPanel._fila_totales_cuentas_bcv(items, 6)
+
+    assert fila == ["", 15.5, 1.0, 4.0, "", ""]  # el resto de las columnas queda vacio
+
+
+def test_bcv_la_fila_de_totales_sin_clientes_es_cero():
+    from app.ui import cuentas_por_cobrar_bcv_panel as bcv
+
+    assert bcv.CuentasPorCobrarBCVPanel._fila_totales_cuentas_bcv([], 4) == ["", 0.0, 0.0, 0.0]
+
+
+def _panel_bcv(qtbot, monkeypatch):
+    from app.ui import cuentas_por_cobrar_bcv_panel as bcv
+
+    monkeypatch.setattr(bcv.CuentasPorCobrarBCVPanel, "cargar_cuentas", lambda self, *a, **k: None)
+    panel = bcv.CuentasPorCobrarBCVPanel(MagicMock(), SimpleNamespace(id_usuario=1))
+    qtbot.addWidget(panel)
+    panel._llenar_vendedores([(3, "Ana Vendedora")])
+    return panel
+
+
+def test_bcv_los_filtros_del_encabezado_dicen_estado_y_vendedor_solo_si_hay(qtbot, monkeypatch):
+    from app.ui import cuentas_por_cobrar_bcv_panel as bcv
+
+    panel = _panel_bcv(qtbot, monkeypatch)
+    assert panel._filtros_exportacion_cuentas_bcv() == {}
+
+    panel.estado_combo.setCurrentIndex(panel.estado_combo.findData("vencida"))  # como lo elige el usuario
+    panel.vendedor_combo.setCurrentIndex(panel.vendedor_combo.findData(3))
+    filtros = panel._filtros_exportacion_cuentas_bcv()
+
+    assert filtros == {
+        "Estado": next(etiqueta for etiqueta, valor in bcv.ESTADOS_FILTRO if valor == "vencida"),  # la etiqueta legible
+        "Vendedor": "Ana Vendedora",
+    }

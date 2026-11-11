@@ -24,6 +24,7 @@ from app.db.models import (
     ProductoPrecio,
     Vendedor,
 )
+from app.services.alcance_vendedor import vendedor_efectivo
 from app.services.auditoria import AuditoriaService
 from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.busqueda_sql import escapar_like as _escapar_like
@@ -38,7 +39,7 @@ from app.services.notas_credito import NotaCreditoService
 from app.services.paginacion import paginar
 from app.services.pagos import PagoService
 from app.services.pagos_bcv import PagoBCVService
-from app.services.permisos import require_permiso
+from app.services.permisos import PermisoDenegadoError, require_permiso
 from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
 
@@ -1162,8 +1163,11 @@ class VentaService:
         pagina: int = 1,
         por_pagina: int = 20,
         id_usuario: int | None = None,
+        id_vendedor: int | None = None,
     ) -> dict:
         require_permiso(session, id_usuario, "ventas", "ver")
+        # Un usuario vendedor solo ve las facturas que emitio el, pida lo que pida la pantalla.
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)
         # joinedload(vendedor): FacturacionPanel muestra el vendedor en el listado
         # (hallazgo #12 de la auditoria de facturacion) -- sin esto cada fila dispara su
         # propio SELECT lazy al acceder a factura.vendedor.nombre_vendedor (N+1).
@@ -1174,6 +1178,8 @@ class VentaService:
             query = query.filter(FacturaVenta.fecha_emision <= fecha_hasta)
         if id_cliente:
             query = query.filter(FacturaVenta.id_cliente_factura == id_cliente)
+        if id_vendedor:
+            query = query.filter(FacturaVenta.id_vendedor == id_vendedor)
         if condicion_pago:
             query = query.filter(FacturaVenta.condicion_pago == condicion_pago)
         if numero_factura:
@@ -1333,6 +1339,10 @@ class VentaService:
         )
         if factura is None:
             raise ValueError("Factura no encontrada")
+        propio = vendedor_efectivo(session, id_usuario)
+        if propio is not None and factura.id_vendedor != propio:
+            # Un usuario vendedor solo abre sus propias facturas (ver alcance_vendedor.py).
+            raise PermisoDenegadoError("Esta factura es de otro vendedor.")
 
         cxc = session.query(CuentaPorCobrar).filter(CuentaPorCobrar.id_factura == id_factura).first()
         cxc_bcv = (

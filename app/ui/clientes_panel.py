@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import CategoriaCliente, Cliente, Usuario, Vendedor
+from app.db.models import Cliente, Usuario
 from app.services.clientes import (
     cambiar_estado_cliente,
     create_cliente,
@@ -39,6 +39,11 @@ from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.permisos import PermisoDenegadoError
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.cliente_form_dialog import ClienteFormDialog
+from app.ui.filtros_catalogo import (
+    llenar_combo_vendedores,
+    tarea_categorias_cliente_para_filtro,
+    tarea_vendedores_para_filtro,
+)
 from app.ui.historial_cliente_window import HistorialClienteWindow
 from app.ui.message_box import MessageBox
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
@@ -187,8 +192,37 @@ class ClientesPanel(MixinPermisos, MixinPaginacion, QWidget):
         self._workers_carga: set[QueryWorker] = set()
         self.setObjectName("ContentArea")
         self._setup_ui()
+        self._cargar_catalogos()
         # Carga inicial diferida para no bloquear el arranque
         QTimer.singleShot(100, self.cargar_clientes)
+
+    def _cargar_catalogos(self) -> None:
+        """Pide en un hilo aparte las listas de los combos de filtro (vendedores y categorias): la ventana no espera a
+        la base al abrirse."""
+        for tarea, al_llegar in (
+            (tarea_vendedores_para_filtro, self._llenar_vendedores),
+            (tarea_categorias_cliente_para_filtro, self._llenar_categorias),
+        ):
+            worker = QueryWorker(self.session_factory, tarea)
+            worker.silencioso = True
+            worker.resultado.connect(al_llegar)
+            worker.finished.connect(lambda w=worker: self._workers_carga.discard(w))
+            self._workers_carga.add(worker)  # referencia viva mientras corre (ver workers.py)
+            worker.start()
+
+    def _llenar_categorias(self, categorias: list) -> None:
+        elegida = self.categoria_combo.currentData()
+        self.categoria_combo.blockSignals(True)
+        self.categoria_combo.clear()
+        self.categoria_combo.addItem("Todas las categorías")
+        for id_categoria, nombre in categorias:
+            self.categoria_combo.addItem(nombre, id_categoria)
+        if elegida is not None:
+            self.categoria_combo.setCurrentIndex(max(self.categoria_combo.findData(elegida), 0))
+        self.categoria_combo.blockSignals(False)
+
+    def _llenar_vendedores(self, vendedores: list) -> None:
+        llenar_combo_vendedores(self.vendedor_combo, vendedores, self.usuario)
 
     def showEvent(self, event: QShowEvent) -> None:
         # MainWindow cachea el panel y lo reutiliza via QStackedWidget -- sin
@@ -266,30 +300,14 @@ class ClientesPanel(MixinPermisos, MixinPaginacion, QWidget):
         for etiqueta, valor in ESTADOS_FILTRO:
             self.estado_combo.addItem(etiqueta, valor)
         self.estado_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
-
-        # Filtro de vendedor
+        # Filtro de vendedor (la lista llega en un hilo aparte, ver _cargar_vendedores)
         self.vendedor_combo = QComboBox()
         self.vendedor_combo.addItem("Todos los vendedores")
-        session = self.session_factory()
-        try:
-            vendedores = (
-                session.query(Vendedor).filter(Vendedor.estado_vendedor == "ACTIVO").order_by(Vendedor.nombre_vendedor)
-            )
-            for vendedor in vendedores:
-                self.vendedor_combo.addItem(vendedor.nombre_vendedor, vendedor.id_vendedor)
-        finally:
-            session.close()
         self.vendedor_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         # Filtro de categoría
         self.categoria_combo = QComboBox()
-        self.categoria_combo.addItem("Todas las categorías")
-        session = self.session_factory()
-        try:
-            for categoria in session.query(CategoriaCliente).order_by(CategoriaCliente.nombre):
-                self.categoria_combo.addItem(categoria.nombre, categoria.id_categoria_cliente)
-        finally:
-            session.close()
+        self.categoria_combo.addItem("Todas las categorías")  # el resto llega en un hilo aparte (_cargar_catalogos)
         self.categoria_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         self.btn_filtrar = BotonFiltros(

@@ -31,6 +31,7 @@ from app.db.models import (
     Usuario,
     Vendedor,
 )
+from app.services.alcance_vendedor import vendedor_propio
 from app.services.busqueda_sql import contiene
 from app.services.busqueda_sql import escapar_like as _escapar_like
 from app.services.tesoreria import _enmascarar_numero_cuenta
@@ -207,6 +208,13 @@ class BusquedaGlobalService:
         )
         # Los permisos se resuelven una vez para toda la busqueda (antes eran tres consultas por cada tipo).
         puede = UsuarioService.permisos_del_usuario(session, id_usuario)
+        # Un usuario vendedor solo encuentra sus clientes, sus facturas y la cartera de sus clientes.
+        alcance = vendedor_propio(session, id_usuario)
+        con_alcance = (
+            BusquedaGlobalService._clientes,
+            BusquedaGlobalService._facturas,
+            BusquedaGlobalService._cuentas_por_cobrar,
+        )
         resultados: list[ResultadoBusqueda] = BusquedaGlobalService._acciones(session, puede, texto)
         for recurso, buscador, minimo in buscadores:
             if len(texto) < minimo:
@@ -214,7 +222,10 @@ class BusquedaGlobalService:
             if not puede(recurso, "ver"):
                 continue
             try:
-                resultados.extend(buscador(session, like, limite_por_tipo))
+                if buscador in con_alcance:
+                    resultados.extend(buscador(session, like, limite_por_tipo, id_vendedor=alcance))
+                else:
+                    resultados.extend(buscador(session, like, limite_por_tipo))
             except Exception:
                 # Un tipo que falle no debe vaciar los demas resultados.
                 logger.exception("Fallo la busqueda global de '%s'", recurso)
@@ -239,18 +250,15 @@ class BusquedaGlobalService:
         return encontradas
 
     @staticmethod
-    def _clientes(session: Session, like: str, limite: int) -> list[ResultadoBusqueda]:
-        filas = (
-            session.query(Cliente)
-            .filter(
-                contiene(session, Cliente.nombre_razon_social, like)
-                | contiene(session, Cliente.identificacion_cliente, like)
-                | contiene(session, Cliente.codigo_cliente, like)
-            )
-            .order_by(Cliente.nombre_razon_social)
-            .limit(limite)
-            .all()
+    def _clientes(session: Session, like: str, limite: int, id_vendedor: int | None = None) -> list[ResultadoBusqueda]:
+        consulta = session.query(Cliente).filter(
+            contiene(session, Cliente.nombre_razon_social, like)
+            | contiene(session, Cliente.identificacion_cliente, like)
+            | contiene(session, Cliente.codigo_cliente, like)
         )
+        if id_vendedor is not None:
+            consulta = consulta.filter(Cliente.vendedor_cliente == id_vendedor)
+        filas = consulta.order_by(Cliente.nombre_razon_social).limit(limite).all()
         return [
             ResultadoBusqueda(
                 TIPO_CLIENTE,
@@ -303,17 +311,14 @@ class BusquedaGlobalService:
         ]
 
     @staticmethod
-    def _facturas(session: Session, like: str, limite: int) -> list[ResultadoBusqueda]:
+    def _facturas(session: Session, like: str, limite: int, id_vendedor: int | None = None) -> list[ResultadoBusqueda]:
         # Primero los ids por el indice del numero de factura (angosto): con pocas coincidencias, buscar directo
         # ordenando por fecha recorria las 120 000 facturas con una consulta de clave por fila (170 ms; asi ~25 ms).
         # Las facturas se numeran en orden, asi que las mas recientes son las de id mayor.
-        ids = [
-            fila[0]
-            for fila in session.query(FacturaVenta.id_factura)
-            .filter(contiene(session, FacturaVenta.numero_factura, like))
-            .order_by(FacturaVenta.id_factura.desc())
-            .limit(limite)
-        ]
+        buscadas = session.query(FacturaVenta.id_factura).filter(contiene(session, FacturaVenta.numero_factura, like))
+        if id_vendedor is not None:
+            buscadas = buscadas.filter(FacturaVenta.id_vendedor == id_vendedor)
+        ids = [fila[0] for fila in buscadas.order_by(FacturaVenta.id_factura.desc()).limit(limite)]
         if not ids:
             return []
         filas = (
@@ -384,8 +389,10 @@ class BusquedaGlobalService:
         ]
 
     @staticmethod
-    def _cuentas_por_cobrar(session: Session, like: str, limite: int) -> list[ResultadoBusqueda]:
-        filas = (
+    def _cuentas_por_cobrar(
+        session: Session, like: str, limite: int, id_vendedor: int | None = None
+    ) -> list[ResultadoBusqueda]:
+        consulta = (
             session.query(CuentaPorCobrar)
             .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente))
             .join(FacturaVenta, CuentaPorCobrar.id_factura == FacturaVenta.id_factura)
@@ -395,10 +402,10 @@ class BusquedaGlobalService:
                 contiene(session, FacturaVenta.numero_factura, like)
                 | contiene(session, Cliente.nombre_razon_social, like),
             )
-            .order_by(CuentaPorCobrar.fecha_vencimiento)
-            .limit(limite)
-            .all()
         )
+        if id_vendedor is not None:
+            consulta = consulta.filter(Cliente.vendedor_cliente == id_vendedor)
+        filas = consulta.order_by(CuentaPorCobrar.fecha_vencimiento).limit(limite).all()
         resultados = []
         for c in filas:
             cliente = c.factura.cliente.nombre_razon_social if c.factura and c.factura.cliente else "—"

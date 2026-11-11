@@ -46,6 +46,7 @@ from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_detalle_dialog import FacturaDetalleDialog, tarea_cargar_factura
 from app.ui.factura_form_dialog import FacturaFormDialog
 from app.ui.factura_pdf import imprimir_factura
+from app.ui.filtros_catalogo import llenar_combo_vendedores, tarea_vendedores_para_filtro
 from app.ui.message_box import MessageBox
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.permisos_ui import MixinPermisos
@@ -121,6 +122,7 @@ def _filas_facturas_query(
     estado: str | None,
     condicion_pago: str | None,
     id_usuario: int | None,
+    id_vendedor: int | None = None,
 ) -> list[list]:
     # Paginado en chunks (en vez de por_pagina=1_000_000 de una sola vez): reduce el
     # pico de memoria -- cada página se convierte a listas simples y se descarta el
@@ -135,6 +137,7 @@ def _filas_facturas_query(
             texto_busqueda=texto_busqueda,
             estado=estado,
             condicion_pago=condicion_pago,
+            id_vendedor=id_vendedor,
             pagina=pagina,
             por_pagina=TAMANO_PAGINA,
             id_usuario=id_usuario,
@@ -169,11 +172,12 @@ def _tarea_exportar_facturas_excel(
     estado: str | None,
     condicion_pago: str | None,
     id_usuario: int | None,
+    id_vendedor: int | None = None,
 ) -> tuple[str, int]:
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar potencialmente
     miles de facturas a un archivo (openpyxl) es lo bastante lento como para congelar
     la ventana si se hace en el hilo de GUI."""
-    filas = _filas_facturas_query(session, texto_busqueda, estado, condicion_pago, id_usuario)
+    filas = _filas_facturas_query(session, texto_busqueda, estado, condicion_pago, id_usuario, id_vendedor)
     exportar_excel(ruta, COLS_VISIBLES, filas)
     return ruta, len(filas)
 
@@ -185,8 +189,9 @@ def _tarea_exportar_facturas_pdf(
     estado: str | None,
     condicion_pago: str | None,
     id_usuario: int | None,
+    id_vendedor: int | None = None,
 ) -> tuple[str, int]:
-    filas = _filas_facturas_query(session, texto_busqueda, estado, condicion_pago, id_usuario)
+    filas = _filas_facturas_query(session, texto_busqueda, estado, condicion_pago, id_usuario, id_vendedor)
     exportar_pdf(ruta, "Facturas de Venta", COLS_VISIBLES, filas)
     return ruta, len(filas)
 
@@ -249,12 +254,26 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
         self._workers_carga: set[QueryWorker] = set()
         self.setObjectName("ContentArea")
         self._setup_ui()
+        self._cargar_vendedores()
         QTimer.singleShot(100, self.cargar_facturas)
         # Facturas emitidas/anuladas/cobradas en otras estaciones y estado de caja, sin
         # salir y volver a entrar al modulo (ver app/ui/auto_refresco.py).
         self._auto_refresco = AutoRefresco(
             self, self._refresco_periodico, lambda: self.tabla, COL_ID_INTERNO, asincrono=True
         )
+
+    def _cargar_vendedores(self) -> None:
+        """Pide en un hilo aparte la lista de vendedores del combo de filtro (la ventana no espera a la base)."""
+        self.cargar_async(
+            "vendedores",
+            tarea_vendedores_para_filtro,
+            self._llenar_vendedores,
+            texto_error="No se pudo cargar la lista de vendedores.",
+            silencioso=True,
+        )
+
+    def _llenar_vendedores(self, vendedores: list) -> None:
+        llenar_combo_vendedores(self.vendedor_combo, vendedores, self.usuario)
 
     def _refresco_periodico(self, al_terminar: Callable[[], None]) -> None:
         # En un hilo aparte (listado y estado de la caja): la ventana no se detiene mientras la base responde.
@@ -365,11 +384,15 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
         for etiqueta, valor in CONDICIONES_FILTRO:
             self.condicion_combo.addItem(etiqueta, valor)
         self.condicion_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
+        self.vendedor_combo = QComboBox()
+        self.vendedor_combo.addItem("Todos los vendedores")
+        self.vendedor_combo.currentIndexChanged.connect(self._buscar_desde_inicio)
 
         self.btn_filtrar = BotonFiltros(
             [
                 ("Estado", self.estado_combo),
                 ("Condición de pago", self.condicion_combo),
+                ("Vendedor", self.vendedor_combo),
             ]
         )
 
@@ -469,6 +492,7 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
             "texto_busqueda": self.buscar_input.text().strip() or None,
             "estado": self.estado_combo.currentData(),
             "condicion_pago": self.condicion_combo.currentData(),
+            "id_vendedor": self.vendedor_combo.currentData(),
             "pagina": self.pagina_actual,
             "por_pagina": POR_PAGINA,
             "id_usuario": self.usuario.id_usuario,
@@ -841,6 +865,7 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
             "texto_busqueda": self.buscar_input.text().strip() or None,
             "estado": self.estado_combo.currentData(),
             "condicion_pago": self.condicion_combo.currentData(),
+            "id_vendedor": self.vendedor_combo.currentData(),
             "id_usuario": self.usuario.id_usuario,
         }
 

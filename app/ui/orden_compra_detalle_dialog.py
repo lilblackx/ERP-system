@@ -287,7 +287,6 @@ class OrdenCompraDetalleDialog(QDialog):
             item_total = QTableWidgetItem(f"${total:,.2f}")
             item_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             tabla.setItem(fila, 4, item_total)
-
         return tabla
 
     def _make_footer(self) -> QHBoxLayout:

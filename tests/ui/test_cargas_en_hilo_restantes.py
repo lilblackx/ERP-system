@@ -428,8 +428,14 @@ def test_el_detalle_bcv_se_consulta_en_un_hilo_y_abre_el_dialogo_al_llegar(qtbot
     assert abiertos == []  # todavia no llego
 
     sesion = MagicMock()
+    # El panel ya pidio otras cargas al abrirse (la lista de vendedores): el id de la del detalle no es el 1.
+    id_carga = panel._estado_carga()["cargas"]["detalle_cliente"]["id"]
     panel._recibir_carga(
-        {"id_carga": 1, "clave": "detalle_cliente", "resultado": {"session": sesion, "cuentas": ["c"], "cliente": "cl"}}
+        {
+            "id_carga": id_carga,
+            "clave": "detalle_cliente",
+            "resultado": {"session": sesion, "cuentas": ["c"], "cliente": "cl"},
+        }
     )
 
     assert abiertos == [("cl", ["c"])]

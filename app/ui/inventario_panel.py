@@ -475,7 +475,6 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
                 self.categoria_filtro_combo.addItem(categoria.nombre, categoria.id_categoria)
             idx = self.categoria_filtro_combo.findData(actual)
             self.categoria_filtro_combo.setCurrentIndex(idx if idx >= 0 else 0)
-            self.categoria_filtro_combo.blockSignals(False)
         except Exception:
             logger.exception("Fallo al cargar categorías para el filtro de inventario")
         finally:

@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Cliente, Vendedor
+from app.services.alcance_vendedor import vendedor_efectivo
 from app.services.auditoria import AuditoriaService
 from app.services.busqueda_sql import contiene
 from app.services.busqueda_sql import escapar_like as _escapar_like
@@ -73,6 +74,8 @@ def list_clientes(
     `por_pagina=LIMITE_CATALOGO` y leen `resultado["items"]`, mismo patron que
     ProductoService.buscar()."""
     require_permiso(session, id_usuario, "clientes", "ver")
+    # Un usuario vendedor solo ve los clientes que tiene asignados, pida lo que pida la pantalla.
+    id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)
     query = session.query(Cliente).options(joinedload(Cliente.vendedor), joinedload(Cliente.categoria))
     if texto_busqueda:
         # Barra de busqueda unica del listado (ClientesPanel): matchea CUALQUIERA de los

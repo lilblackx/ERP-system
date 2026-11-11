@@ -15,6 +15,7 @@ from app.db.models import (
     FacturaVenta,
     PagoCobroBCV,
 )
+from app.services.alcance_vendedor import vendedor_efectivo
 from app.services.auditoria import AuditoriaService
 from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.db_utils import (
@@ -388,6 +389,7 @@ class PagoBCVService:
     ) -> dict:
         """Lista cuentas por cobrar BCV agrupadas por cliente con saldo pendiente acumulado."""
         require_permiso(session, id_usuario, "pagos", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve su cartera
         hoy = date.today()
 
         # Query base con joins

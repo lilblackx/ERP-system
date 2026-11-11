@@ -30,7 +30,7 @@ import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from sqlalchemy import Date, case, cast, exists, func, literal, literal_column, or_
+from sqlalchemy import Date, case, cast, exists, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
@@ -66,6 +66,7 @@ from app.db.models import (
     Ruta,
     Vendedor,
 )
+from app.services.alcance_vendedor import exigir_sin_alcance, vendedor_efectivo
 from app.services.otros_movimientos import ESTADOS_CXC_OTRO
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
@@ -73,6 +74,16 @@ from app.services.tesoreria import TIPOS_MOVIMIENTO_CAJA
 from app.utils.decimal_utils import to_decimal
 
 logger = logging.getLogger(__name__)
+
+
+def _clientes_del_vendedor(id_vendedor: int | None):
+    """Condicion "la factura es de un cliente asignado a este vendedor" (sin filtro si no se pide vendedor), para las
+    consultas que ya tienen unida FacturaVenta."""
+    if not id_vendedor:
+        return True
+    return FacturaVenta.id_cliente_factura.in_(
+        select(Cliente.id_cliente).where(Cliente.vendedor_cliente == id_vendedor)
+    )
 
 
 def _pagina_o_todo(query, pagina, por_pagina, *orden):
@@ -239,6 +250,7 @@ class ReporteService:
         agrupadas en los rangos estandar de cobranza (vigente, 1-30, 31-60, 61-90, 90+)
         segun dias transcurridos desde fecha_vencimiento hasta fecha_corte."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if orden not in _ORDEN_AGING_CXC:
             raise ValueError(f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXC)}")
         fecha_corte = fecha_corte or date.today()
@@ -308,6 +320,7 @@ class ReporteService:
         agrupadas en los rangos estandar de cobranza (vigente, 1-30, 31-60, 61-90, 90+)
         segun dias transcurridos desde fecha_vencimiento hasta fecha_corte."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if orden not in _ORDEN_AGING_CXC_BCV:
             raise ValueError(f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXC_BCV)}")
         fecha_corte = fecha_corte or date.today()
@@ -374,6 +387,7 @@ class ReporteService:
         mismo criterio que aging_cuentas_por_cobrar pero del lado de lo que la empresa le
         debe a sus proveedores."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if orden not in _ORDEN_AGING_CXP:
             raise ValueError(f"orden invalido: {orden!r}, debe ser uno de {sorted(_ORDEN_AGING_CXP)}")
         fecha_corte = fecha_corte or date.today()
@@ -431,6 +445,7 @@ class ReporteService:
         id_cliente: int | None = None,
         pagina: int | None = None,
         por_pagina: int = POR_PAGINA_REPORTE,
+        id_vendedor: int | None = None,
     ) -> dict:
         """Libro de Ventas para el IVA (base del formato exigido por el SENIAT): detalle
         de facturas emitidas en el rango, con base imponible, monto exento y monto de IVA
@@ -444,6 +459,7 @@ class ReporteService:
         pagina de `por_pagina` filas (es lo que muestra la pantalla; ver `paginacion` en el resultado). Los totales
         son siempre los de todo el filtro: se suman en la base y no dependen de la pagina."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -452,6 +468,8 @@ class ReporteService:
         filtros = [FacturaVenta.fecha_emision >= desde_dt, FacturaVenta.fecha_emision <= hasta_dt]
         if id_cliente:
             filtros.append(FacturaVenta.id_cliente_factura == id_cliente)
+        if id_vendedor:
+            filtros.append(FacturaVenta.id_vendedor == id_vendedor)
         query = (
             session.query(FacturaVenta)
             .options(joinedload(FacturaVenta.cliente), joinedload(FacturaVenta.tasa))
@@ -508,6 +526,12 @@ class ReporteService:
         )
         if id_cliente:
             nc_query = nc_query.filter(NotaCreditoCliente.id_cliente == id_cliente)
+        if id_vendedor:
+            nc_query = nc_query.filter(
+                NotaCreditoCliente.id_cliente.in_(
+                    session.query(Cliente.id_cliente).filter(Cliente.vendedor_cliente == id_vendedor)
+                )
+            )
         notas_credito = nc_query.order_by(NotaCreditoCliente.fecha_creacion).all()
 
         filas_nc = [
@@ -591,11 +615,13 @@ class ReporteService:
         fecha_desde: date,
         fecha_hasta: date,
         agrupacion: str = "dia",
+        id_vendedor: int | None = None,
     ) -> dict:
         """Total facturado (base - descuento + IVA) y cantidad de facturas por dia o por
         mes, excluyendo ANULADA. Agregado en Python (no SQL) sobre un rango acotado, mismo
         criterio que el resto de los reportes de este modulo."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if agrupacion not in ("dia", "mes"):
             raise ValueError("agrupacion invalida, debe ser 'dia' o 'mes'")
         if fecha_desde > fecha_hasta:
@@ -605,11 +631,13 @@ class ReporteService:
 
         # Se agrupa y suma en la base de datos (una fila por dia o mes), no en Python sobre cada factura.
         clave_sql = _periodo_sql(FacturaVenta.fecha_emision, agrupacion)
+        filtro_vendedor = FacturaVenta.id_vendedor == id_vendedor if id_vendedor else True
         agrupado = (
             session.query(clave_sql, func.count(FacturaVenta.id_factura), func.sum(_TOTAL_FACTURA_SQL))
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .filter(filtro_vendedor)
             .group_by(clave_sql)
             .order_by(clave_sql)
             .all()
@@ -632,6 +660,7 @@ class ReporteService:
         """Ranking de clientes por monto facturado (base - descuento + IVA) en el rango,
         excluyendo ANULADA."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -668,6 +697,7 @@ class ReporteService:
         """Ranking de vendedores por monto facturado (base - descuento + IVA) en el
         rango, excluyendo ANULADA."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -715,6 +745,7 @@ class ReporteService:
         Una factura cuyo vendedor no tiene ruta asignada (o sin vendedor, caso legacy) cae
         en el grupo 'Sin ruta' en vez de perderse del reporte."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -766,6 +797,7 @@ class ReporteService:
         para ver solo las ventas realizadas por un vendedor específico, y por producto
         para ver solo las ventas de un producto específico."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -868,6 +900,7 @@ class ReporteService:
         meta configurada (None) el cliente aparece en el reporte pero sin
         efectividad_pct -- no hay contra que comparar."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -940,12 +973,14 @@ class ReporteService:
         fecha_desde: date,
         fecha_hasta: date,
         orden: str = "desc",
+        id_vendedor: int | None = None,
     ) -> dict:
         """Ranking de productos por monto vendido (cantidad x precio_unitario de cada
         linea) en el rango, excluyendo facturas ANULADA. orden='asc' para ver los menos
         vendidos en vez de los mas vendidos -- mismo reporte, mismo criterio, un solo
         parametro de orden en vez de dos reportes separados."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if orden not in ("asc", "desc"):
             raise ValueError("orden invalido, debe ser 'asc' o 'desc'")
         if fecha_desde > fecha_hasta:
@@ -971,6 +1006,7 @@ class ReporteService:
             .filter(FacturaVenta.estado_factura != "ANULADA")
             .filter(FacturaVenta.fecha_emision >= desde_dt)
             .filter(FacturaVenta.fecha_emision <= hasta_dt)
+            .filter(FacturaVenta.id_vendedor == id_vendedor if id_vendedor else True)
             .group_by(Inventario.id_producto, Inventario.nombre_producto)
             .order_by(total_sql.desc() if orden == "desc" else total_sql.asc(), Inventario.id_producto)
             .all()
@@ -1004,6 +1040,7 @@ class ReporteService:
         con fecha_vencimiento definida y que vencen dentro del horizonte especificado.
         """
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if dias_horizonte <= 0:
             raise ValueError("dias_horizonte debe ser mayor a 0")
 
@@ -1057,6 +1094,7 @@ class ReporteService:
         original haya quedado guardado -- mostrar un total aca seria inventar un dato que el sistema no
         conserva."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1126,6 +1164,7 @@ class ReporteService:
         resumen que libro_ventas() ya muestra como un solo chip agregado. Con `pagina=None` devuelve todas las filas
         (la exportacion); con `pagina`, solo esa (ver `paginacion`). El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1176,6 +1215,7 @@ class ReporteService:
     ) -> dict:
         """Comparativo de ventas de contado vs. credito en el rango, excluyendo ANULADA."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1232,6 +1272,7 @@ class ReporteService:
         no guarda un costo historico por linea de venta, asi que el margen de una venta
         vieja es una aproximacion si el costo del producto cambio desde entonces."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1305,6 +1346,7 @@ class ReporteService:
         Compra no tiene desglose de IVA (a diferencia de FacturaVenta) asi que el total
         es directamente total_compra."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if agrupacion not in ("dia", "mes"):
             raise ValueError("agrupacion invalida, debe ser 'dia' o 'mes'")
         if fecha_desde > fecha_hasta:
@@ -1340,6 +1382,7 @@ class ReporteService:
     def compras_por_proveedor(session: Session, id_usuario: int | None, fecha_desde: date, fecha_hasta: date) -> dict:
         """Ranking de proveedores por monto comprado en el rango, excluyendo ANULADA."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1383,6 +1426,7 @@ class ReporteService:
         linea) en el rango, excluyendo compras ANULADA. orden='asc' para ver los que
         menos se compran."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if orden not in ("asc", "desc"):
             raise ValueError("orden invalido, debe ser 'asc' o 'desc'")
         if fecha_desde > fecha_hasta:
@@ -1423,6 +1467,7 @@ class ReporteService:
         proveedores y todavia no ha llegado. Es una foto al presente (como los aging de
         CxC/CxP), no un reporte por rango de fechas."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         hoy = date.today()
 
         query = (
@@ -1467,6 +1512,7 @@ class ReporteService:
         cantidad_oc pero quedan fuera de a_tiempo/tardias -- no hay con que compararlas.
         """
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1537,6 +1583,7 @@ class ReporteService:
         motivo, cantidad y el proveedor/OC de origen (via nota_recepcion). Con `pagina=None` devuelve todas las filas
         (la exportacion); con `pagina`, solo esa. Los totales son siempre los de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1604,6 +1651,7 @@ class ReporteService:
         el docstring de NotaCreditoProveedor en models.py. Con `pagina=None` devuelve todas las filas (la exportacion);
         con `pagina`, solo esa. El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1655,6 +1703,7 @@ class ReporteService:
         sobrantes. Si la caja sigue abierta (fecha_cierre NULL), saldo_cierre/diferencia
         quedan en None y se cuentan los movimientos desde la apertura hasta ahora."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         caja = session.get(Caja, id_caja)
         if caja is None:
             raise ValueError("Caja no encontrada")
@@ -1725,6 +1774,7 @@ class ReporteService:
         detalle se borran (revirtiendo el stock via trigger), asi que simplemente dejan de
         aparecer aca."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         producto = session.get(Inventario, id_producto)
         if producto is None:
             raise ValueError("Producto no encontrado")
@@ -1830,6 +1880,7 @@ class ReporteService:
         stock real (cantidad_caja fue deliberadamente descartada del flujo, ver
         producto_form_dialog.py)."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         query = (
             session.query(Inventario)
             .options(joinedload(Inventario.categoria))
@@ -1869,6 +1920,7 @@ class ReporteService:
         de migrations/0037), no 'minimo es cero unidades' -- esos productos se excluyen.
         """
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         query = (
             session.query(Inventario)
             .options(joinedload(Inventario.categoria))
@@ -1906,6 +1958,7 @@ class ReporteService:
         (en cualquier fecha). Todo se resuelve en la base con tres consultas, sin importar cuantos
         productos haya: la exclusion es un NOT EXISTS y las ultimas fechas un GROUP BY."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -1984,6 +2037,7 @@ class ReporteService:
         de cada cambio (accion=CAMBIO_PRECIO, modulo=INVENTARIO). Mismo patron que
         facturas_anuladas() para leer Auditoria.detalle."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         producto = session.get(Inventario, id_producto)
         if producto is None:
             raise ValueError("Producto no encontrado")
@@ -2069,6 +2123,7 @@ class ReporteService:
         fecha_desde/hasta muestra todo el historial (saldo_inicial=0); con rango, los movimientos previos
         a fecha_desde se pliegan en saldo_inicial, mismo criterio que kardex_producto."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         cliente = session.get(Cliente, id_cliente)
         if cliente is None:
             raise ValueError("Cliente no encontrado")
@@ -2228,6 +2283,7 @@ class ReporteService:
         id_cliente: int | None = None,
         pagina: int | None = None,
         por_pagina: int = POR_PAGINA_REPORTE,
+        id_vendedor: int | None = None,
     ) -> dict:
         """Cobros (pagos aplicados a cuentas por cobrar) del rango, de la cartera normal y de la BCV
         (cada fila dice de cual viene en `cartera`), en orden cronologico. Con `pagina=None` devuelve todas las filas
@@ -2235,6 +2291,7 @@ class ReporteService:
         carteras (solo id y fecha) y despues se cargan unicamente esos pagos. Los totales son siempre los de todo el
         filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -2247,6 +2304,8 @@ class ReporteService:
             consulta = consulta.filter(pago.fecha_pago >= desde_dt, pago.fecha_pago <= hasta_dt)
             if id_cliente is not None:
                 consulta = consulta.filter(FacturaVenta.id_cliente_factura == id_cliente)
+            if id_vendedor:
+                consulta = consulta.filter(_clientes_del_vendedor(id_vendedor))
             return consulta
 
         carteras = (
@@ -2338,19 +2397,26 @@ class ReporteService:
         }
 
     @staticmethod
-    def clientes_morosos(session: Session, id_usuario: int | None, fecha_corte: date | None = None) -> dict:
+    def clientes_morosos(
+        session: Session,
+        id_usuario: int | None,
+        fecha_corte: date | None = None,
+        id_vendedor: int | None = None,
+    ) -> dict:
         """Agrupa por cliente las cuentas por cobrar abiertas y VENCIDAS, de la cartera normal y de la BCV
         (mismo universo que los aging excluyendo el bucket 'vigente'), agregando saldo total vencido y
         antiguedad maxima por cliente en vez de por bucket. Con un corte pasado se reconstruye el saldo
         que tenia cada cuenta a esa fecha (ver _cuentas_al_corte)."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         fecha_corte = fecha_corte or date.today()
 
         cuentas = _cuentas_al_corte(
             session,
             session.query(CuentaPorCobrar)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
-            .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente)),
+            .options(joinedload(CuentaPorCobrar.factura).joinedload(FacturaVenta.cliente))
+            .filter(_clientes_del_vendedor(id_vendedor)),
             CuentaPorCobrar,
             PagoCobro,
             PagoCobro.id_cuenta_por_cobrar,
@@ -2363,7 +2429,8 @@ class ReporteService:
             session,
             session.query(CuentaPorCobrarBCV)
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
-            .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente)),
+            .options(joinedload(CuentaPorCobrarBCV.factura).joinedload(FacturaVenta.cliente))
+            .filter(_clientes_del_vendedor(id_vendedor)),
             CuentaPorCobrarBCV,
             PagoCobroBCV,
             PagoCobroBCV.id_cuenta_por_cobrar,
@@ -2415,6 +2482,7 @@ class ReporteService:
         """Cuentas por cobrar "otras". Con `pagina=None` devuelve todas las filas (la exportacion); con `pagina`, solo
         esa (ver `paginacion`). El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if estado is not None and estado not in ESTADOS_CXC_OTRO:
             raise ValueError(f"estado invalido: {estado!r}, debe ser uno de {ESTADOS_CXC_OTRO}")
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
@@ -2472,6 +2540,7 @@ class ReporteService:
         """Movimientos de caja del rango. Con `pagina=None` devuelve todas las filas (lo que usa la exportacion); con
         `pagina`, solo esa pagina (ver `paginacion`). Los totales son siempre los de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         if tipo_movimiento is not None and tipo_movimiento not in TIPOS_MOVIMIENTO_CAJA:
@@ -2560,6 +2629,7 @@ class ReporteService:
         fila propia de la tabla Caja), sin necesidad de filtrar por fecha dentro del
         agregado."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -2632,6 +2702,7 @@ class ReporteService:
         trg_banco_movimientos_saldo (schema_sqlserver.sql:1273), no una suposicion propia.
         """
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if agrupacion not in ("dia", "mes"):
             raise ValueError("agrupacion debe ser 'dia' o 'mes'")
         if fecha_desde > fecha_hasta:
@@ -2714,6 +2785,7 @@ class ReporteService:
         proveedor: cargos (compras a credito) y abonos (pagos aplicados) en orden
         cronologico con saldo corrido."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         proveedor = session.get(Proveedor, id_proveedor)
         if proveedor is None:
             raise ValueError("Proveedor no encontrado")
@@ -2810,6 +2882,7 @@ class ReporteService:
         """Pagos a proveedores del rango. Con `pagina=None` devuelve todas las filas (la exportacion); con `pagina`,
         solo esa (ver `paginacion`). Los totales son siempre los de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -2872,6 +2945,7 @@ class ReporteService:
         """Cuentas por pagar que vencen en el horizonte. Con `pagina=None` devuelve todas las filas (la exportacion);
         con `pagina`, solo esa (ver `paginacion`). El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if dias_horizonte < 0:
             raise ValueError("dias_horizonte no puede ser negativo")
         hoy = date.today()
@@ -2938,6 +3012,7 @@ class ReporteService:
         alla se resume por cuenta con totales pendiente vs conciliado. Con `pagina=None` devuelve todas las filas (la
         exportacion); con `pagina`, solo esa (ver `paginacion`). El total es siempre el de todo el filtro."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if estado is not None and estado not in ESTADOS_CXP_OTRO:
             raise ValueError(f"estado invalido: {estado!r}, debe ser uno de {ESTADOS_CXP_OTRO}")
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
@@ -3007,6 +3082,7 @@ class ReporteService:
         El saldo inicial y el saldo corrido se calculan en la base (suma anterior al rango y suma acumulada con una
         funcion de ventana): ya no se trae a Python todo el historial de la cuenta."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         cuenta = session.get(CuentaBancaria, id_cuenta_bancaria)
         if cuenta is None:
             raise ValueError("Cuenta bancaria no encontrada")
@@ -3092,6 +3168,7 @@ class ReporteService:
         partida -- 'parcial' cuenta como pendiente (saldo_pendiente ya refleja lo que
         falta conciliar de esa partida)."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
@@ -3145,6 +3222,7 @@ class ReporteService:
         el permiso 'bancos'/'ver' propio -- este reporte, como los otros 20, gatea solo
         con 'reportes'/'ver'."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         cuentas = (
             session.query(CuentaBancaria)
             .options(joinedload(CuentaBancaria.banco))
@@ -3189,6 +3267,7 @@ class ReporteService:
         'mis comisiones' de un vendedor (ComisionService.listar_mis_comisiones(),
         app/services/comisiones.py)."""
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
         desde_dt = datetime.combine(fecha_desde, time.min)
@@ -3242,6 +3321,7 @@ class ReporteService:
         id_vendedor: int | None = None,
     ) -> dict:
         require_permiso(session, id_usuario, "reportes", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve lo suyo
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 

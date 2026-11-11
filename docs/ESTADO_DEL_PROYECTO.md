@@ -1558,6 +1558,53 @@ de servicio.
   perdiendo la cuenta seleccionada y el scroll. Ahora usa `AutoRefresco(asincrono=True)` como Facturacion, Inventario y
   Compras: carga en un hilo, solo si el panel se ve y no hay un dialogo abierto, y vuelve a seleccionar la cuenta por
   id con la tabla ya repoblada.
+- **Blindaje contra conexion perdida** (2026-11-10): un cobro fallaba con el SQL crudo en pantalla (`TCP Provider: Se ha
+  forzado la interrupcion de una conexion existente por el host remoto (10054)` / `Communication link failure`).
+  Causa: el dialogo mantiene su sesion (y una conexion del pool) abierta mientras el usuario lo ve; si la red, un
+  firewall o el servidor cierran esa conexion inactiva, la primera consulta del siguiente clic falla. `pool_pre_ping` y
+  `pool_recycle` solo protegen las conexiones que se sacan del pool, no las que una sesion ya tiene en su poder.
+  Tres capas, todas probadas en `tests/test_conexion_perdida.py` (incluye matar la conexion de verdad con `KILL`):
+  1. `SesionResiliente` (`app/db/session.py`, la sesion de `SessionLocal`): si una LECTURA falla por conexion perdida y
+     la transaccion no tiene nada que perder (ninguna escritura enviada -- un `SET`, INSERT/UPDATE o flush la marcan --
+     ni cambios pendientes en la sesion), hace rollback (descarta la conexion muerta) y repite UNA vez con una conexion
+     nueva, que `pool_pre_ping` prueba. Cubre dialogos, paneles, busquedas y cargas en hilo sin tocar cada pantalla.
+  2. `reintentar_en_deadlock(func, session=...)` (`app/services/db_utils.py`) repite la operacion completa una vez si se
+     perdio la conexion (rollback de `session` antes); sin `session` no repite. Los 9 sitios que lo usan (cobros y
+     abonos de CxC, CxC BCV y CxP, emitir factura) ya pasan `session=`. `es_conexion_perdida()` reconoce el corte por
+     `connection_invalidated`, SQLSTATE 08xxx y los textos del driver. Una conexion cortada pierde la transaccion
+     entera en el servidor, asi que repetir no deja nada a medias.
+  3. Mensajes legibles: `MessageBox` (warning y critical) pasa todo texto por `depurar_mensaje_error()`, que reemplaza
+     un error de base de datos crudo (huellas: `pyodbc`, `[SQL:`, `ODBC Driver`, `sqlalche.me`...) por "No se pudo X. Se
+     perdio la conexion con el servidor..." (o "sistema ocupado" para deadlock/bloqueo, o un mensaje generico), y deja
+     el original en el log. Es la red de seguridad de la interfaz: ~75 avisos se arman con `f"...{str(e)}"`. El arranque
+     (`_error_de_arranque`) tampoco muestra el driver cuando el servidor esta inaccesible.
+  Limites: una escritura fuera de `reintentar_en_deadlock` que pierde la conexion a mitad de camino sigue fallando (con
+  mensaje legible); la sesion no repite lecturas despues de un `SET LOCK_TIMEOUT` porque ese ajuste se perderia con la
+  conexion. Otras causas posibles del corte (no del codigo): firewall/VPN que cierra conexiones inactivas, o que WSL
+  apague la distro de SQL Server cuando no hay sesion abierta (ver `keep_wsl_running.bat`).
+- **Filtro por vendedor y alcance del usuario vendedor** (2026-11-10): antes solo Clientes, CxC, CxC BCV, Comisiones y
+  unos reportes filtraban por vendedor, y un usuario con rol VENDEDOR (`Usuario.id_vendedor_usuario`) veia TODO el
+  negocio (el vinculo solo preseleccionaba el vendedor al facturar). Ahora:
+  - **Filtro nuevo**: Facturacion (combo "Vendedor", `VentaService.listar_facturas(id_vendedor=)` y la exportacion) y los
+    reportes Libro de ventas, Ventas por periodo, Productos mas vendidos (por el vendedor de la factura), Clientes
+    morosos y Cobros del periodo (por el vendedor asignado al cliente, como CxC). Los combos de vendedor de CxC, CxC BCV,
+    Clientes y Facturacion se llenan en un hilo aparte (`app/ui/filtros_catalogo.py`; Clientes tambien sus categorias).
+  - **Alcance** (`app/services/alcance_vendedor.py`): `vendedor_efectivo(session, id_usuario, id_vendedor)` devuelve el
+    vendedor propio del usuario e IGNORA el que pida la pantalla; se aplica en el servicio, no solo en la pantalla.
+    Dos criterios: por FACTURA (las que emitio: facturas, libro de ventas, ventas por periodo, productos vendidos,
+    `obtener_factura` da `PermisoDenegadoError` con la de otro) y por CLIENTE (los que tiene asignados: clientes, CxC,
+    CxC BCV, morosos, cobros, aging, ventas por producto y cliente, activacion, comisiones). Una factura que emitio el
+    vendedor A a un cliente de B es de A como factura y de B como cartera. El Panel de inicio (`DashboardService`) cuenta
+    solo sus ventas, la cartera de sus clientes y sus facturas recientes; sin pagos a proveedores ni cajas. La busqueda
+    global solo encuentra sus clientes, facturas y cuentas por cobrar.
+  - **Pantallas**: el combo de vendedor queda fijo en el y deshabilitado (`fijar_vendedor_propio`); en Reportes solo ve
+    los de `REPORTES_DE_VENDEDOR` (los acotados a lo suyo) y los catalogos de sus combos solo traen sus clientes (nada de
+    proveedores, cajas, cajeros ni cuentas bancarias). Los 34 reportes del negocio entero (compras, bancos, caja,
+    inventario valorizado, estados de cuenta, ventas por cliente/ruta...) llaman a `exigir_sin_alcance` y niegan al
+    usuario vendedor aunque se llame al servicio directo.
+  - Sin vendedor vinculado (ADMIN, CAJERO) nada cambia: eligen el filtro libremente. Limites: el detalle de un cliente,
+    su historial y su estado de cuenta se abren desde listados ya acotados pero no verifican el vendedor por id; el
+    modulo de Inventario sigue igual (catalogo compartido).
 - **Limites de rendimiento resueltos** (2026-11-08):
   - Reportes abre en ~60-100 ms (antes 1,3-2,7 s). Las paginas de filtros ya no se crean las 45 al construir el
     panel: `_filtros_fabricas` (modo -> metodo `_make_filtros_*`) y `_asegurar_pagina(modo)` crea la pagina la primera

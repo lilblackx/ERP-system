@@ -17,6 +17,7 @@ from app.db.models import (
     PagoProveedor,
     Proveedor,
 )
+from app.services.alcance_vendedor import vendedor_efectivo
 from app.services.auditoria import AuditoriaService
 from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.db_utils import (
@@ -794,6 +795,7 @@ class PagoService:
         También incluye clientes que solo tienen saldo a favor (notas de crédito disponibles).
         """
         require_permiso(session, id_usuario, "pagos", "ver")
+        id_vendedor = vendedor_efectivo(session, id_usuario, id_vendedor)  # un vendedor solo ve su cartera
         hoy = date.today()
 
         # Query base para obtener todas las cuentas relevantes. Solo credito: las facturas de
