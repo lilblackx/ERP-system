@@ -113,7 +113,13 @@ class AuditoriaService:
                 | Auditoria.id_usuario.in_(usuarios_que_coinciden)
             )
 
-        return paginar(query, pagina, por_pagina, Auditoria.fecha_evento.desc(), Auditoria.id_auditoria.desc())
+        return paginar(
+            query.options(joinedload(Auditoria.usuario)),
+            pagina,
+            por_pagina,
+            Auditoria.fecha_evento.desc(),
+            Auditoria.id_auditoria.desc(),
+        )
 
     @staticmethod
     def consultar_auditoria_producto(

@@ -151,3 +151,20 @@ def test_eliminar_categoria_con_productos_falla(db_session):
         CategoriaService.eliminar(db_session, categoria.id_categoria, id_usuario=admin.id_usuario)
 
     assert CategoriaService.obtener(db_session, categoria.id_categoria, id_usuario=admin.id_usuario) is not None
+
+
+def test_el_filtro_de_categorias_solo_exige_ver_inventario(db_session):
+    """Un CAJERO o VENDEDOR ve el catalogo de productos sin tener 'categorias'/'ver': su filtro de categoria no debe
+    quedar vacio (antes fallaba en cada apertura del modulo y dejaba un error en el log)."""
+    from tests.factories import asignar_permiso, crear_permiso, crear_rol, crear_usuario
+
+    rol = crear_rol(db_session, nombre="SOLO_INVENTARIO")
+    asignar_permiso(db_session, rol, crear_permiso(db_session, recurso="inventario", accion="ver"))
+    usuario = crear_usuario(db_session, id_rol=rol.id_rol)
+    categoria = crear_categoria(db_session, nombre="Bebidas")
+
+    assert CategoriaService.listar_para_filtro(db_session, usuario.id_usuario) == [(categoria.id_categoria, "Bebidas")]
+    with pytest.raises(PermisoDenegadoError):
+        CategoriaService.listar(db_session, id_usuario=usuario.id_usuario)
+    with pytest.raises(PermisoDenegadoError):
+        CategoriaService.listar_para_filtro(db_session, crear_usuario(db_session).id_usuario)

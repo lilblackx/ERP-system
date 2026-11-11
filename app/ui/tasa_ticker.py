@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from app.db.models import Usuario
+from app.services.permisos import PermisoDenegadoError
 from app.services.tasas import TasaService
 from app.ui.styles import (
     COLOR_BORDER,
@@ -27,7 +28,10 @@ logger = logging.getLogger(__name__)
 
 
 def _tarea_tasa_actual(session, id_usuario):
-    return TasaService.obtener_tasa_actual(session, id_usuario=id_usuario)
+    try:
+        return TasaService.obtener_tasa_actual(session, id_usuario=id_usuario)
+    except PermisoDenegadoError:
+        return None  # un rol sin 'tasas'/'ver' (VENDEDOR) no ve el indicador: no es un error que registrar
 
 
 def _formato_hace(minutos: int) -> str:

@@ -13,6 +13,15 @@ class CategoriaService:
         return session.query(Categoria).order_by(Categoria.nombre).all()
 
     @staticmethod
+    def listar_para_filtro(session: Session, id_usuario: int | None = None) -> list[tuple[int, str]]:
+        """(id, nombre) de las categorias para el filtro del catalogo de productos. Exige 'inventario'/'ver', no
+        'categorias'/'ver': quien puede ver los productos (CAJERO, VENDEDOR) ya ve la categoria de cada uno, y sin
+        esto su filtro quedaba vacio y cada apertura dejaba un error en el log."""
+        require_permiso(session, id_usuario, "inventario", "ver")
+        filas = session.query(Categoria.id_categoria, Categoria.nombre).order_by(Categoria.nombre).all()
+        return [(id_categoria, nombre) for id_categoria, nombre in filas]
+
+    @staticmethod
     def listar_con_conteo(session: Session, id_usuario: int | None = None) -> list[dict]:
         require_permiso(session, id_usuario, "categorias", "ver")
         filas = (

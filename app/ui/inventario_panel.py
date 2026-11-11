@@ -473,13 +473,16 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
             self.categoria_filtro_combo.blockSignals(True)
             self.categoria_filtro_combo.clear()
             self.categoria_filtro_combo.addItem("Todas las categorías")
-            for categoria in CategoriaService.listar(session, id_usuario=self.usuario.id_usuario):
-                self.categoria_filtro_combo.addItem(categoria.nombre, categoria.id_categoria)
+            for id_categoria, nombre in CategoriaService.listar_para_filtro(
+                session, id_usuario=self.usuario.id_usuario
+            ):
+                self.categoria_filtro_combo.addItem(nombre, id_categoria)
             idx = self.categoria_filtro_combo.findData(actual)
             self.categoria_filtro_combo.setCurrentIndex(idx if idx >= 0 else 0)
         except Exception:
             logger.exception("Fallo al cargar categorías para el filtro de inventario")
         finally:
+            self.categoria_filtro_combo.blockSignals(False)  # tambien si fallo: el combo no debe quedar mudo
             session.close()
 
     def cargar_productos(
