@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -48,6 +47,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_fondo_panel,
     aplicar_sombra,
+    dar_ancho_a_texto,
     estilizar_tarjeta,
 )
 from app.ui.tasa_registro_dialog import TasaRegistroDialog
@@ -271,7 +271,7 @@ class TasasPanel(MixinPermisos, QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.tabla)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(45)

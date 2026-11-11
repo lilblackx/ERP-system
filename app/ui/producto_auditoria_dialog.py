@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -45,6 +44,7 @@ from app.ui.styles import (
     TABLE_QSS,
     alinear_encabezados,
     aplicar_sombra,
+    dar_ancho_a_texto,
     estilizar_campo_fecha,
 )
 
@@ -258,11 +258,7 @@ class ProductoAuditoriaDialog(MixinPaginacion, QDialog):
         self.table.doubleClicked.connect(self._ver_detalle)  # el detalle completo, en su propia ventana
         self._resultados: list = []
 
-        encabezado = self.table.horizontalHeader()
-        for columna in range(len(COLUMNAS)):
-            encabezado.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
-        encabezado.setSectionResizeMode(COL_DETALLE, QHeaderView.ResizeMode.Stretch)  # absorbe el ancho que sobra
-        encabezado.setStretchLastSection(False)
+        dar_ancho_a_texto(self.table, COL_DETALLE)  # absorbe el ancho que sobra
 
         alinear_encabezados(
             self.table,

@@ -50,6 +50,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_fondo_panel,
     aplicar_sombra,
+    dar_ancho_a_texto,
     estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
@@ -330,7 +331,7 @@ class CuentasBancariasPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion,
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.table)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.table)

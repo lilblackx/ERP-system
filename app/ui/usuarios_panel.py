@@ -53,6 +53,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_fondo_panel,
     aplicar_sombra,
+    dar_ancho_a_texto,
     estilizar_tarjeta,
 )
 from app.ui.usuario_form_dialog import UsuarioFormDialog
@@ -225,7 +226,7 @@ class UsuariosPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.tabla)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(4, 110)

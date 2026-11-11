@@ -74,6 +74,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_fondo_panel,
     aplicar_sombra,
+    dar_ancho_a_texto,
     estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
@@ -485,7 +486,7 @@ class DetalleComisionFacturaDialog(QDialog):
         tabla.setShowGrid(False)
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(tabla)
         tabla.setStyleSheet(TABLE_QSS)
         alinear_encabezados(
             tabla,
@@ -723,7 +724,7 @@ class ComisionesPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.doubleClicked.connect(self.ver_detalle_factura)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.tabla)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)

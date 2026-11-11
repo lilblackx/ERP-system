@@ -63,6 +63,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_fondo_panel,
     aplicar_sombra,
+    dar_ancho_a_texto,
     estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
@@ -398,8 +399,9 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        # El nombre absorbe el ancho que sobra; el resto se ajusta a su contenido (con Stretch en todas, el nombre
+        # quedaba en 1/12 del ancho y se cortaba).
+        dar_ancho_a_texto(self.tabla, omitir=(11,))
         self.tabla.horizontalHeader().setSectionResizeMode(11, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(11, 110)
         self.tabla.setStyleSheet(TABLE_QSS)
@@ -551,6 +553,7 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
             # antes la unica senal era el contador agregado del encabezado ("N con
             # alerta"), sin decir CUAL producto ni por que (stock bajo vs. por vencer).
             item_nombre = QTableWidgetItem(p.nombre_producto or "")
+            item_nombre.setToolTip(p.nombre_producto or "")
             motivos = []
             cantidad_minima = Decimal(str(p.cantidad_minima)) if p.cantidad_minima is not None else Decimal("0")
             if cantidad_minima > 0 and p.cantidad_unidad is not None and p.cantidad_unidad < cantidad_minima:
@@ -559,7 +562,7 @@ class InventarioPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWidg
                 motivos.append(f"Vence el {p.fecha_vencimiento.strftime('%d/%m/%Y')}")
             if motivos:
                 item_nombre.setIcon(qta.icon("fa5s.exclamation-triangle", color=COLOR_WARNING))
-                item_nombre.setToolTip(" · ".join(motivos))
+                item_nombre.setToolTip(" · ".join([p.nombre_producto or "", *motivos]))
             self.tabla.setItem(fila, 2, item_nombre)
 
             self.tabla.setItem(fila, 3, QTableWidgetItem(p.categoria.nombre if p.categoria else ""))

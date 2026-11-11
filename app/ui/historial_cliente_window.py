@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
     QTableWidget,
@@ -66,6 +65,7 @@ from app.ui.styles import (
     TABLE_QSS,
     alinear_encabezados,
     aplicar_sombra,
+    dar_ancho_a_texto,
 )
 from app.ui.workers import QueryWorker
 
@@ -407,10 +407,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.doubleClicked.connect(self.ver_detalle_factura)
         # Todas se ajustan a su contenido salvo Observaciones, que absorbe el ancho que sobra.
-        encabezado = self.tabla.horizontalHeader()
-        for columna in range(len(COLS_HISTORIAL)):
-            encabezado.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
-        encabezado.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.tabla, 7)
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
         self.tabla.verticalHeader().setDefaultSectionSize(45)

@@ -50,6 +50,7 @@ from app.ui.styles import (
     TABLE_QSS,
     alinear_encabezados,
     aplicar_sombra,
+    dar_ancho_a_texto,
 )
 from app.utils.impresora_local import obtener_impresora_local
 
@@ -266,7 +267,7 @@ class CajaCierreDialog(QDialog):
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.tabla)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)

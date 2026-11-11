@@ -36,6 +36,7 @@ from app.ui.styles import (
     COLOR_TEXT_MEDIUM,
     TABLE_QSS,
     alinear_encabezados,
+    dar_ancho_a_texto,
 )
 
 # Columnas de la tabla de movimientos del dia.
@@ -312,7 +313,7 @@ class ConciliacionBancosDialog(QDialog):
         )
         self.table.setMinimumHeight(280)  # Altura mínima aumentada
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        dar_ancho_a_texto(self.table)
         # Usar tamaños mínimos y permitir estiramiento en lugar de anchos fijos
         self.table.horizontalHeader().setMinimumSectionSize(60)
         self.table.setColumnWidth(0, 100)

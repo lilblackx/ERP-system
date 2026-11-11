@@ -252,6 +252,20 @@ layout.setSpacing(8)
 
 ## 5. Tablas
 
+**Ancho de columnas (obligatorio).** Nunca repartir el ancho por igual (`Stretch` en todas las columnas): corta
+nombres y descripciones con "..." aunque sobre espacio. Toda tabla usa el componente compartido:
+
+- `TablaDatos([...columnas], alineaciones={...})` (`app/ui/tabla_datos.py`): tabla de solo lectura con el estilo común
+  y el ancho dinámico ya incluido; o
+- `dar_ancho_a_texto(tabla)` (`app/ui/styles.py`) en un `QTableWidget` que necesita algo propio (editable, con
+  selector de filas...).
+
+Ambos usan `app/ui/columnas.py`: cada columna mide su contenido, el ancho que sobra va a las de texto (las numéricas, a
+la derecha, no crecen), si no cabe se recortan primero las columnas de texto secundarias y al final la principal (la
+primera con contenido largo), y lo que quede cortado se lee completo en el tooltip. `filas_a_texto=True` hace que el
+texto largo baje de línea en vez de cortarse (diálogos de detalle). Las columnas con modo `Fixed` (EstadoBadge, botones)
+y las ocultas no se tocan. `tests/ui/test_tablas_dinamicas.py` falla si una tabla nueva usa el reparto igual.
+
 `TABLE_QSS` (en `styles.py`) es el único estilo de tabla de la app. Setup estándar,
 copiado tal cual en todos los paneles con listado:
 

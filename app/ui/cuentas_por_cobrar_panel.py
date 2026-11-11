@@ -93,6 +93,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_fondo_panel,
     aplicar_sombra,
+    dar_ancho_a_texto,
     estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar, BotonFiltros
@@ -1191,7 +1192,7 @@ class DetalleClienteDialog(MixinPermisos, MixinPaginacion, QDialog):
         tabla.setShowGrid(False)
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(tabla)
         tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
@@ -1706,7 +1707,7 @@ class CuentasPorCobrarPanel(CargaAsincronaMixin, ExportacionCompletaMixin, Mixin
         tabla.setShowGrid(False)
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(tabla)
         tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)

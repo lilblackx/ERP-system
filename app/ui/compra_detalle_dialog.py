@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
     QTableWidget,
@@ -35,6 +34,8 @@ from app.ui.styles import (
     TABLE_QSS,
     alinear_encabezados,
     aplicar_sombra,
+    dar_ancho_a_texto,
+    item_con_tooltip,
 )
 
 logger = logging.getLogger(__name__)
@@ -197,7 +198,7 @@ class CompraDetalleDialog(QDialog):
         tabla.setShowGrid(False)
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(tabla, 0, filas_a_texto=True)
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
         tabla.verticalHeader().setDefaultSectionSize(40)
@@ -223,7 +224,7 @@ class CompraDetalleDialog(QDialog):
 
         for fila, detalle in enumerate(detalles):
             producto = detalle.producto if detalle.producto else None
-            self.tabla.setItem(fila, 0, QTableWidgetItem(producto.nombre_producto if producto else ""))
+            self.tabla.setItem(fila, 0, item_con_tooltip(producto.nombre_producto if producto else ""))
 
             item_cantidad = QTableWidgetItem(f"{float(detalle.cantidad_producto):,.2f}")
             item_cantidad.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

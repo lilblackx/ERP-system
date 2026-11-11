@@ -16,8 +16,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QTableWidget,
+    QTableWidgetItem,
     QWidget,
 )
+
+from app.ui.columnas import ajustar_columnas
 
 # Flecha de QComboBox/QDateEdit compartida por toda la app (GLOBAL_QSS y los dialogos con
 # stylesheet propio que no heredan de MainWindow). El truco CSS de "triangulo con bordes"
@@ -800,6 +803,35 @@ def alinear_encabezados(tabla: QTableWidget, alineaciones: dict[int, Qt.Alignmen
         item = tabla.horizontalHeaderItem(columna)
         if item is not None:
             item.setTextAlignment(int(alineacion | Qt.AlignmentFlag.AlignVCenter))
+
+
+def dar_ancho_a_texto(
+    tabla: QTableWidget,
+    columnas_texto: int | tuple[int, ...] | None = None,
+    *,
+    omitir: tuple[int, ...] = (),
+    filas_a_texto: bool = False,
+) -> None:
+    """Ancho dinamico de las columnas de `tabla` (ver app/ui/columnas.py): cada columna mide su contenido y el ancho que
+    sobra va a las columnas de texto, asi un nombre largo no se corta mientras haya espacio. `columnas_texto` fija
+    cuales son (por defecto, las que no son numericas); `omitir` deja columnas con su ancho fijo."""
+    if isinstance(columnas_texto, int):
+        columnas_texto = (columnas_texto,)
+    ajustar_columnas(tabla, columnas_texto, omitir, filas_a_texto)
+
+
+def ajustar_filas_a_texto(tabla: QTableWidget) -> None:
+    """Una descripcion larga baja de linea dentro de su celda en vez de cortarse: la fila crece a su contenido. Llamar
+    DESPUES de poblar la tabla (el alto se mide con el texto ya puesto)."""
+    tabla.setWordWrap(True)
+    tabla.resizeRowsToContents()
+
+
+def item_con_tooltip(texto: str, tooltip: str | None = None) -> QTableWidgetItem:
+    """Item de texto cuyo tooltip muestra el texto completo (la celda lo corta con "..." si no cabe)."""
+    item = QTableWidgetItem(texto)
+    item.setToolTip(tooltip or texto)
+    return item
 
 
 # Ancho de una columna que muestra un EstadoBadge ("Pendiente", "Parcial", ...). El badge es un

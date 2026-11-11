@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPlainTextEdit,
     QPushButton,
@@ -45,6 +44,7 @@ from app.ui.styles import (
     TABLE_QSS,
     alinear_encabezados,
     aplicar_sombra,
+    dar_ancho_a_texto,
 )
 
 # Claves del `detalle` que son la lista de cambios (antes/despues): se muestran en la tabla "Cambios", no entre los
@@ -267,9 +267,7 @@ class DetalleAuditoriaDialog(QDialog):
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         tabla.verticalHeader().setVisible(False)
         tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        for col in range(1, len(columnas)):
-            tabla.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(tabla, tuple(range(1, len(columnas))), filas_a_texto=True)
         # El encabezado se alinea igual que sus celdas.
         alinear_encabezados(tabla, {i: Qt.AlignmentFlag.AlignLeft for i in range(len(columnas))})
         for fila, valores in enumerate(filas):

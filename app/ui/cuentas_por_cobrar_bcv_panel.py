@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -79,6 +78,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_fondo_panel,
     aplicar_sombra,
+    dar_ancho_a_texto,
     estilizar_tarjeta,
     fijar_columna_estado,
 )
@@ -616,7 +616,7 @@ class SeleccionarCuentaBCVDialog(QDialog):
         self.tabla.setAlternatingRowColors(True)
         self.tabla.setShowGrid(False)
         self.tabla.verticalHeader().setVisible(False)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.tabla)
         # Encabezados alineados como sus celdas (texto a la izquierda); antes quedaban centrados sobre ellas.
         alinear_encabezados(self.tabla, {i: Qt.AlignmentFlag.AlignLeft for i in range(len(headers))})
         self.tabla.setStyleSheet(TABLE_QSS)
@@ -1251,13 +1251,7 @@ class DetalleCuentasBCVDialog(MixinPermisos, QDialog):
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # Ajustar columnas para que los datos sean visibles
-        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID (oculto)
-        tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Factura
-        tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Porcentaje BCV
-        tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Saldo Pendiente
-        tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Días
-        tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Fecha Factura
-        tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Estado
+        dar_ancho_a_texto(tabla, 1)  # el nombre toma el ancho que sobra; el resto se ajusta a su contenido
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
         tabla.setColumnHidden(0, True)
@@ -1649,14 +1643,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # Ajustar columnas para que los datos sean visibles
-        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID Cliente (oculto)
-        tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # CLIENTE
-        tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # SALDO PENDIENTE
-        tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # SALDO A FAVOR
-        tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # SALDO VENCIDO BCV
-        tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # DÍAS
-        tabla.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # FECHA FACTURA
-        tabla.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)  # ESTADO
+        dar_ancho_a_texto(tabla, 1)  # el nombre toma el ancho que sobra; el resto se ajusta a su contenido
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
         tabla.setColumnHidden(0, True)
@@ -1726,6 +1713,13 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         self.lbl_total.setText(f"{self._total_registros} clientes con saldo pendiente")
         self.lbl_saldo_total.setText(f"${float(self._total_pendiente):,.2f}")
 
+    @staticmethod
+    def _item_numerico(texto: str, alineacion: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignRight) -> QTableWidgetItem:
+        """Celda alineada como su encabezado (importes a la derecha, dias y fecha al centro)."""
+        item = QTableWidgetItem(texto)
+        item.setTextAlignment(int(alineacion | Qt.AlignmentFlag.AlignVCenter))
+        return item
+
     def _mostrar_datos(self, resultado: dict) -> None:
         self.tabla.setRowCount(0)
         items = resultado.get("items", [])
@@ -1749,7 +1743,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
             if self._tasa_bcv:
                 tasa_bcv = float(self._tasa_bcv) if not isinstance(self._tasa_bcv, float) else self._tasa_bcv
                 saldo_text = f"${float(saldo):,.2f} / Bs {float(saldo * Decimal(str(tasa_bcv))):,.2f}"
-            self.tabla.setItem(fila, 2, QTableWidgetItem(saldo_text))
+            self.tabla.setItem(fila, 2, self._item_numerico(saldo_text))
 
             # SALDO A FAVOR (acumulado)
             saldo_favor = _as_decimal(item.saldo_favor)
@@ -1757,7 +1751,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
             if self._tasa_bcv:
                 tasa_bcv = float(self._tasa_bcv) if not isinstance(self._tasa_bcv, float) else self._tasa_bcv
                 saldo_favor_text = f"${float(saldo_favor):,.2f} / Bs {float(saldo_favor * Decimal(str(tasa_bcv))):,.2f}"
-            self.tabla.setItem(fila, 3, QTableWidgetItem(saldo_favor_text))
+            self.tabla.setItem(fila, 3, self._item_numerico(saldo_favor_text))
 
             # SALDO VENCIDO BCV (acumulado de facturas vencidas)
             saldo_vencido = _as_decimal(getattr(item, "saldo_vencido_bcv", Decimal("0.00")))
@@ -1767,15 +1761,15 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                 saldo_vencido_text = (
                     f"${float(saldo_vencido):,.2f} / Bs {float(saldo_vencido * Decimal(str(tasa_bcv))):,.2f}"
                 )
-            self.tabla.setItem(fila, 4, QTableWidgetItem(saldo_vencido_text))
+            self.tabla.setItem(fila, 4, self._item_numerico(saldo_vencido_text))
 
             # DÍAS (días de crédito)
             dias_text = str(item.dias_credito) if item.dias_credito is not None else "N/A"
-            self.tabla.setItem(fila, 5, QTableWidgetItem(dias_text))
+            self.tabla.setItem(fila, 5, self._item_numerico(dias_text, Qt.AlignmentFlag.AlignCenter))
 
             # FECHA FACTURA (fecha de emisión más antigua)
             fecha_factura_text = item.fecha_emision.strftime("%d/%m/%Y") if item.fecha_emision else "N/A"
-            self.tabla.setItem(fila, 6, QTableWidgetItem(fecha_factura_text))
+            self.tabla.setItem(fila, 6, self._item_numerico(fecha_factura_text, Qt.AlignmentFlag.AlignCenter))
 
             # ESTADO
             estado = getattr(item, "estado_visual", item.estado)

@@ -82,6 +82,7 @@ from app.ui.styles import (
     ComboBoxSinScroll,
     alinear_encabezados,
     aplicar_sombra,
+    dar_ancho_a_texto,
 )
 from app.ui.workers import QueryWorker
 from app.utils.caja_local import cajas_de_esta_estacion
@@ -738,7 +739,7 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self.tabla_pagos.setShowGrid(False)
         self.tabla_pagos.verticalHeader().setVisible(False)
         self.tabla_pagos.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla_pagos.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.tabla_pagos)
         self.tabla_pagos.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla_pagos.setColumnWidth(4, 70)
         self.tabla_pagos.setStyleSheet(TABLE_QSS)
@@ -1071,7 +1072,7 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self.tabla_items.setShowGrid(False)
         self.tabla_items.verticalHeader().setVisible(False)
         self.tabla_items.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tabla_items.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(self.tabla_items)
         self.tabla_items.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla_items.setColumnWidth(4, 70)
         self.tabla_items.setStyleSheet(TABLE_QSS)

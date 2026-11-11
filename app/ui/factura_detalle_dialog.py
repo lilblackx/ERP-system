@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
     QTableWidget,
@@ -51,6 +50,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_sombra,
     color_con_alpha,
+    dar_ancho_a_texto,
 )
 from app.utils.impresora_local import obtener_impresora_local
 
@@ -365,7 +365,7 @@ class FacturaDetalleDialog(MixinPermisos, QDialog):
             tabla.setShowGrid(False)
             tabla.verticalHeader().setVisible(False)
             tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            dar_ancho_a_texto(tabla)
             tabla.setStyleSheet(TABLE_QSS)
             aplicar_sombra(tabla)
             for fila, pago in enumerate(self.pagos):
@@ -484,7 +484,7 @@ class FacturaDetalleDialog(MixinPermisos, QDialog):
         tabla.setShowGrid(False)
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(tabla, 0, filas_a_texto=True)
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
 
@@ -495,8 +495,8 @@ class FacturaDetalleDialog(MixinPermisos, QDialog):
             subtotal = cantidad * precio
 
             item_nombre = QTableWidgetItem(nombre)
-            if detalle.observaciones_item:
-                item_nombre.setToolTip(detalle.observaciones_item)
+            observaciones = detalle.observaciones_item
+            item_nombre.setToolTip(nombre + (" — " + observaciones if observaciones else ""))
             tabla.setItem(fila, 0, item_nombre)
             item_cant = QTableWidgetItem(f"{cantidad:,.2f}")
             item_cant.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

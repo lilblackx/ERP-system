@@ -25,6 +25,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     TABLE_QSS,
     alinear_encabezados,
+    dar_ancho_a_texto,
 )
 
 POR_PAGINA = 50
@@ -113,7 +114,6 @@ class MovimientosCuentaDialog(QDialog):
         self.table.setFixedHeight(450)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setColumnWidth(0, 140)
         self.table.setColumnWidth(1, 80)
         self.table.setColumnWidth(2, 100)
@@ -123,6 +123,8 @@ class MovimientosCuentaDialog(QDialog):
         self.table.setColumnWidth(6, 120)
         self.table.setColumnWidth(7, 150)
         self.table.setColumnWidth(8, 100)
+        # La descripcion absorbe el ancho que sobra (con 150 px fijos se cortaba)
+        dar_ancho_a_texto(self.table, 7)
         alinear_encabezados(
             self.table,
             {
@@ -247,7 +249,10 @@ class MovimientosCuentaDialog(QDialog):
             self.table.setItem(row, 6, QTableWidgetItem(movimiento.referencia_movimiento or "N/A"))
 
             # Descripción
-            self.table.setItem(row, 7, QTableWidgetItem(movimiento.descripcion_movimiento or "N/A"))
+            descripcion = movimiento.descripcion_movimiento or "N/A"
+            item_descripcion = QTableWidgetItem(descripcion)
+            item_descripcion.setToolTip(descripcion)
+            self.table.setItem(row, 7, item_descripcion)
 
             # Usuario
             nombre_usuario = movimiento.creador.nombre if movimiento.creador else "N/A"

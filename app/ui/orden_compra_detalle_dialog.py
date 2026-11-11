@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
     QTableWidget,
@@ -40,6 +39,7 @@ from app.ui.styles import (
     alinear_encabezados,
     aplicar_sombra,
     color_con_alpha,
+    dar_ancho_a_texto,
 )
 
 DIALOG_STYLE = f"""
@@ -262,7 +262,7 @@ class OrdenCompraDetalleDialog(QDialog):
         tabla.setShowGrid(False)
         tabla.verticalHeader().setVisible(False)
         tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dar_ancho_a_texto(tabla, 0, filas_a_texto=True)
         tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(tabla)
 
@@ -274,6 +274,7 @@ class OrdenCompraDetalleDialog(QDialog):
             total = cantidad_solicitada * precio
 
             item_nombre = QTableWidgetItem(nombre)
+            item_nombre.setToolTip(nombre)
             tabla.setItem(fila, 0, item_nombre)
             item_cant_sol = QTableWidgetItem(f"{cantidad_solicitada:,.2f}")
             item_cant_sol.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
