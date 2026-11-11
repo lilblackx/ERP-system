@@ -199,7 +199,7 @@ def test_validar_y_aceptar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     )
     monkeypatch.setattr(
         "app.ui.cuentas_por_cobrar_panel.reintentar_en_deadlock",
-        lambda fn: fn(),
+        lambda fn, **_kw: fn(),
     )
 
     dialogo._validar_y_aceptar()
@@ -216,7 +216,7 @@ def _capturar_cobro(monkeypatch):
         return MagicMock()
 
     monkeypatch.setattr("app.ui.cuentas_por_cobrar_panel.PagoService.registrar_pago_cobro", fake_registrar)
-    monkeypatch.setattr("app.ui.cuentas_por_cobrar_panel.reintentar_en_deadlock", lambda fn: fn())
+    monkeypatch.setattr("app.ui.cuentas_por_cobrar_panel.reintentar_en_deadlock", lambda fn, **_kw: fn())
     return llamada
 
 

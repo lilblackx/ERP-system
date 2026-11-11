@@ -557,7 +557,8 @@ class PagoCobroDialog(ConversionBolivaresMixin, QDialog):
                     id_tasa=id_tasa,
                     referencia=self.referencia_input.text().strip() or None,
                     id_usuario=self.id_usuario,
-                )
+                ),
+                session=self.session,
             )
         except ValueError as exc:
             self.session.rollback()
@@ -981,7 +982,8 @@ class AbonoGeneralDialog(ConversionBolivaresMixin, QDialog):
                     moneda_pago=moneda_pago_por_tasa(self.tasa_combo.currentText()) if tipo_origen == "banco" else None,
                     referencia=self.referencia_input.text().strip() or None,
                     id_usuario=self.id_usuario,
-                )
+                ),
+                session=self.session,
             )
 
             # Mostrar resumen del abono

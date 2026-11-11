@@ -517,7 +517,8 @@ class PagoProveedorDialog(QDialog):
                     id_usuario=self.id_usuario,
                     monto_bolivares=monto_bolivares,
                     tasa_cambio=tasa_cambio,
-                )
+                ),
+                session=self.session,
             )
         except ValueError as exc:
             self.session.rollback()

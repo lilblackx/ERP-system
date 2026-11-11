@@ -16,6 +16,9 @@ directo en vez de usar los estaticos, para forzar `textFormat=PlainText` en un d
 que puede traer texto libre del usuario (mitigacion de HTML/link-spoofing) -- ese sitio
 sigue usando `QMessageBox` nativo a proposito, no se migra a esta clase."""
 
+import logging
+import re
+
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
@@ -28,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.services.db_utils import mensaje_de_texto_bd
 from app.ui.styles import (
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -48,6 +52,30 @@ from app.ui.styles import (
     color_con_alpha,
 )
 from app.ui.toast import Toast, es_confirmacion_de_exito
+
+logger = logging.getLogger(__name__)
+
+# Donde empieza el error crudo dentro de un aviso ("No se pudo registrar el cobro: (pyodbc.OperationalError) ...").
+_INICIO_ERROR_CRUDO = re.compile(
+    r"[:\s]*\(?\s*(pyodbc|sqlalchemy)[.\w]*|\s*\[SQL:|\s*\(\s*'[0-9A-Z]{5}'", re.IGNORECASE
+)
+
+
+def depurar_mensaje_error(texto: str) -> str:
+    """Un aviso de error nunca debe mostrar el SQL ni el texto del driver (ver `mensaje_de_texto_bd`): se conserva lo
+    que el aviso decia antes del error crudo ("No se pudo registrar el cobro") y se agrega el motivo en palabras. El
+    texto original queda en el log."""
+    mensaje = mensaje_de_texto_bd(texto)
+    if mensaje is None:
+        return texto
+    logger.error("Error de base de datos mostrado al usuario como mensaje legible: %s", texto)
+    coincidencia = _INICIO_ERROR_CRUDO.search(texto)
+    prefijo = texto[: coincidencia.start()].strip(" :\n") if coincidencia else ""
+    prefijo = (
+        re.sub(r"\s*Error\s*$", "", prefijo).strip().rstrip(".")
+    )  # el "Error" que quedaba colgando antes del texto
+    return f"{prefijo}. {mensaje}" if prefijo else mensaje
+
 
 # icono + color semantico por tipo -- "information" en esta app siempre se usa para
 # confirmar una operacion ya completada ("Exportación completa", "Cliente creado"), never
@@ -116,6 +144,8 @@ class MessageBox(QDialog):
         super().__init__(parent)
         self._aceptado = False
         config = _CONFIGURACION[tipo]
+        if tipo in ("warning", "critical"):
+            texto = depurar_mensaje_error(texto)
 
         self.setWindowTitle(titulo)
         self.setStyleSheet(DIALOG_STYLE)

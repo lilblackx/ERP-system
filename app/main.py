@@ -39,6 +39,12 @@ from app.db.migrar import verificar_migraciones_al_dia
 from app.db.session import engine
 from app.logging_config import setup_logging
 from app.rutas import ARCHIVO_CONFIG, ARCHIVO_ICONO, DIR_LOGS
+from app.services.db_utils import (
+    MENSAJE_CONEXION_PERDIDA,
+    es_conexion_perdida,
+    mensaje_de_error_bd,
+    mensaje_de_texto_bd,
+)
 from app.services.licencia import (
     LicenciaService,
     LicenciaSoloLecturaError,
@@ -80,6 +86,12 @@ def _error_de_arranque(exc: Exception) -> None:
     logging.getLogger(__name__).critical("No se pudo iniciar la aplicacion", exc_info=exc)
     app = QApplication.instance() or QApplication(sys.argv)
     detalle = str(exc).strip() or exc.__class__.__name__
+    # Un fallo de la base (servidor apagado o inaccesible) no debe enseñar el SQL ni el texto del driver: queda en
+    # el log.
+    if es_conexion_perdida(exc) or mensaje_de_texto_bd(detalle) == MENSAJE_CONEXION_PERDIDA:
+        detalle = "No se pudo conectar con la base de datos. Verifique que el servidor esté encendido y accesible."
+    else:
+        detalle = mensaje_de_error_bd(exc) or mensaje_de_texto_bd(detalle) or detalle
     QMessageBox.critical(
         None,
         "No se pudo iniciar",

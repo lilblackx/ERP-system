@@ -84,7 +84,7 @@ def test_validar_y_aceptar_pasa_decimal_al_servicio(qtbot, monkeypatch):
     )
     monkeypatch.setattr(
         "app.ui.cuentas_por_pagar_panel.reintentar_en_deadlock",
-        lambda fn: fn(),
+        lambda fn, **_kw: fn(),
     )
 
     dialogo._validar_y_aceptar()

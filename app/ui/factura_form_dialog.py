@@ -105,7 +105,9 @@ def _tarea_emitir_factura(session: Session, id_usuario: int | None, **datos) -> 
     _on_resultado_emitir_factura). Cualquier OTRA excepcion (conexion perdida, bug) si se
     deja propagar: QueryWorker.run() ya la loguea y la reporta via la señal `error`."""
     try:
-        factura = reintentar_en_deadlock(lambda: VentaService.emitir_factura(session, id_usuario=id_usuario, **datos))
+        factura = reintentar_en_deadlock(
+            lambda: VentaService.emitir_factura(session, id_usuario=id_usuario, **datos), session=session
+        )
     except ValueError as exc:
         return {
             "ok": False,

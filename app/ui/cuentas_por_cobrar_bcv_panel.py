@@ -558,7 +558,8 @@ class PagoCobroBCVDialog(ConversionBolivaresMixin, QDialog):
                         id_tasa=id_tasa,
                         referencia=referencia,
                         id_usuario=self.id_usuario,
-                    )
+                    ),
+                    session=session,
                 )
                 self.pago_creado = True
                 MessageBox.information(self, "Cobro registrado", "El cobro BCV se registró correctamente.")
@@ -1114,7 +1115,8 @@ class AbonoGeneralBCVDialog(ConversionBolivaresMixin, QDialog):
                         else None,
                         referencia=self.referencia_input.text().strip() or None,
                         id_usuario=self.id_usuario,
-                    )
+                    ),
+                    session=session,
                 )
                 MessageBox.information(
                     self,
@@ -1432,7 +1434,8 @@ def _tarea_cargar_cuentas_bcv(session, id_usuario: int, **filtros) -> dict:
     resultado = reintentar_en_deadlock(
         lambda: PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
             session=session, id_usuario=id_usuario, **filtros
-        )
+        ),
+        session=session,
     )
     subquery = (
         session.query(
@@ -1920,7 +1923,8 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                         pagina=1,
                         por_pagina=10000,  # Exportar todo
                         id_usuario=self.id_usuario,
-                    )
+                    ),
+                    session=session,
                 )
                 items = resultado.get("items", [])
                 encabezados = [
@@ -1979,7 +1983,8 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                         pagina=1,
                         por_pagina=10000,  # Exportar todo
                         id_usuario=self.id_usuario,
-                    )
+                    ),
+                    session=session,
                 )
                 items = resultado.get("items", [])
                 encabezados = [
