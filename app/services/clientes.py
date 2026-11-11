@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models import Cliente, Vendedor
 from app.services.alcance_vendedor import vendedor_efectivo
 from app.services.auditoria import AuditoriaService
-from app.services.busqueda_sql import contiene
+from app.services.busqueda_sql import contiene, rif_completo
 from app.services.busqueda_sql import escapar_like as _escapar_like
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
@@ -93,6 +93,7 @@ def list_clientes(
                         Cliente.id_legal,
                         Cliente.codigo_cliente,
                         Cliente.identificacion_cliente,
+                        rif_completo(Cliente.id_legal, Cliente.identificacion_cliente),
                         Cliente.email,
                         Cliente.telefono,
                     )

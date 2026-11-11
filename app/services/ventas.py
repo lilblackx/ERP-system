@@ -686,6 +686,11 @@ class VentaService:
             ajuste_cxc = monto_iva - monto_descuento
             if cxc is not None and ajuste_cxc != 0:
                 cxc.saldo_pendiente += ajuste_cxc
+                # Se envia YA a la base: mas abajo, al aplicar los pagos de contado, la cuenta se relee
+                # (session.refresh) y un ajuste aun sin enviar se descartaba. El cobro quedaba registrado sin el
+                # IVA, el IVA entraba a la caja como "excedente (vuelto pendiente)" y la nota de credito de una
+                # anulacion devolvia menos de lo que el cliente pago.
+                session.flush()
 
         # --- Cuenta por Cobrar BCV: si se especificó un porcentaje BCV O hay artículos BCV,
         # crear cuenta separada con el monto total de la factura. La cuenta por cobrar

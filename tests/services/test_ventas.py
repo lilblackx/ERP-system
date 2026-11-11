@@ -2898,3 +2898,56 @@ def test_la_busqueda_de_facturas_trata_el_guion_bajo_y_el_porcentaje_como_texto(
 
     assert [f.id_factura for f in con_guion["items"]] == [f1.id_factura]
     assert con_porcentaje["total"] == 0
+
+
+def test_factura_de_contado_con_iva_registra_el_cobro_completo_y_la_nota_de_credito_lo_devuelve(db_session):
+    """El ajuste del IVA sobre la cuenta por cobrar se perdia antes de aplicar el pago de contado (un refresh lo
+    descartaba): el cobro quedaba registrado SIN el IVA, el IVA entraba a la caja como "excedente (vuelto pendiente)"
+    y, al anular, la nota de credito salia por menos de lo que el cliente pago."""
+    from sqlalchemy import text
+
+    from app.db.models import NotaCreditoCliente
+
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "100.00")
+    cliente = crear_cliente(db_session)
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+    pagos = pago_contado(db_session, monto_moneda_origen=Decimal("116.00"))
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pagos,
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+    )
+
+    cuenta = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    cobrado = db_session.execute(
+        text("SELECT SUM(monto) FROM pagos_cobros WHERE id_cuenta_por_cobrar = :c"), {"c": cuenta.id_cuenta_por_cobrar}
+    ).scalar()
+    movimientos = db_session.execute(
+        text("SELECT descripcion_movimiento, monto_movimiento FROM caja_movimientos WHERE id_caja = :c"),
+        {"c": pagos[0]["id_caja"]},
+    ).all()
+    assert cobrado == Decimal("116.00")  # el cobro incluye el IVA
+    assert (cuenta.estado, cuenta.saldo_pendiente) == ("pagada", Decimal("0.00"))
+    assert factura.monto_vuelto == Decimal("0.00")
+    assert [m for _, m in movimientos] == [Decimal("116.00")]  # una sola entrada: nada de "excedente"
+
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Prueba")
+    nota = db_session.query(NotaCreditoCliente).filter_by(id_factura_origen=factura.id_factura).one()
+    assert nota.monto == Decimal("116.00")  # se devuelve lo que el cliente pago, IVA incluido

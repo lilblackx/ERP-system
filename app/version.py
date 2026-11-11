@@ -16,4 +16,4 @@ Criterio para escribir las novedades (DISCRETAS, y las pruebas lo hacen cumplir)
   * Cada cambio puede declarar "modulos" (claves del sidebar) para que solo lo vean los roles que usan ese modulo.
 """
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"

@@ -11,7 +11,7 @@ Antes cada servicio armaba el suyo (`ilike(f"%{texto}%")`) y salian dos problema
     devolvia todo. `patron_contiene()` los escapa.
 """
 
-from sqlalchemy import text
+from sqlalchemy import case, func, text
 from sqlalchemy.orm import Session
 
 _ESCAPE = "\\"
@@ -49,3 +49,14 @@ def contiene(session: Session, columna, patron: str):
     if _busqueda_insensible_a_mayusculas(session):
         return columna.like(patron, escape=_ESCAPE)
     return columna.ilike(patron, escape=_ESCAPE)
+
+
+def rif_completo(columna_letra, columna_numero):
+    """Expresion SQL del RIF/cedula como se ve en pantalla ("J-12345678-9"): la letra y el numero se guardan en
+    columnas separadas, y sin esto buscar el RIF tal como se lee (o copiado de una factura) no encontraba nada; solo
+    funcionaba escribir el numero sin la letra."""
+    return func.concat(
+        func.coalesce(columna_letra, ""),
+        case((columna_letra.isnot(None), "-"), else_=""),
+        func.coalesce(columna_numero, ""),
+    )

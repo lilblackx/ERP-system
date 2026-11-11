@@ -15,13 +15,16 @@ from app.utils.rif import formatear_rif
 _PRIMARY = COLOR_PRIMARY
 _MUTED = COLOR_TEXT_MUTED
 _BORDER = COLOR_BORDER
-_TD = f'style="padding:5pt 6pt;border-bottom:1pt solid {_BORDER};"'
-_TD_R = f'style="padding:5pt 6pt;border-bottom:1pt solid {_BORDER};text-align:right;"'
-_TH = f'style="padding:5pt 6pt;text-align:left;color:#FFFFFF;background-color:{_PRIMARY};"'
-_TH_R = f'style="padding:5pt 6pt;text-align:right;color:#FFFFFF;background-color:{_PRIMARY};"'
-_INFO_LBL = f'style="padding:3pt 6pt;text-align:right;color:{_MUTED};font-size:9pt;white-space:nowrap;"'
-_INFO_VAL = 'style="padding:3pt 6pt;text-align:right;font-weight:bold;font-size:9pt;"'
+_TD = f'style="border-bottom:1pt solid {_BORDER};"'
+_TD_R = f'style="border-bottom:1pt solid {_BORDER};text-align:right;"'
+_TH = f'style="text-align:left;color:#FFFFFF;background-color:{_PRIMARY};"'
+_TH_R = f'style="text-align:right;color:#FFFFFF;background-color:{_PRIMARY};"'
+_INFO_LBL = f'style="text-align:right;color:{_MUTED};font-size:9pt;white-space:nowrap;"'
+_INFO_VAL = 'style="text-align:right;font-weight:bold;font-size:9pt;"'
 _MB = "margin-bottom:4pt;"
+_FILA_ALTERNA = "#F1F5F9"
+# El relleno de las celdas va en el atributo `cellpadding` de cada <table>, no en un `padding` CSS por celda:
+# QTextDocument dejaba ese `padding` en cero y el corte salia con todo el texto pegado.
 
 
 def _esc(valor) -> str:
@@ -39,12 +42,15 @@ def _logo_img_tag(logotipo: bytes | None) -> str:
     return f'<img src="data:image/png;base64,{b64}" width="70" />'
 
 
-def _fila_movimiento(mov: CajaMovimiento) -> str:
+def _fila_movimiento(mov: CajaMovimiento, indice: int = 0) -> str:
     es_entrada = mov.tipo_movimiento == "entrada"
+    # Fila alterna sombreada: QTextDocument no dibuja el borde inferior de una celda, y sin separacion visual las
+    # filas se leian pegadas.
+    fondo = f' bgcolor="{_FILA_ALTERNA}"' if indice % 2 else ""
     tipo = "Entrada" if es_entrada else "Salida"
     color = "green" if es_entrada else "red"
     return (
-        f"<tr><td {_TD}>{mov.fecha_registro.strftime('%d/%m/%Y %H:%M')}</td>"
+        f"<tr{fondo}><td {_TD}>{mov.fecha_registro.strftime('%d/%m/%Y %H:%M')}</td>"
         f"<td {_TD}><span style='color:{color};font-weight:bold;'>{tipo}</span></td>"
         f"<td {_TD}>{_esc(mov.descripcion_movimiento or '')}</td>"
         f"<td {_TD_R}>{_money(mov.monto_movimiento or 0)}</td></tr>"
@@ -76,12 +82,12 @@ def _armar_html(
     )
 
     # Filas de movimientos
-    filas_movimientos = "".join(_fila_movimiento(mov) for mov in movimientos)
+    filas_movimientos = "".join(_fila_movimiento(mov, i) for i, mov in enumerate(movimientos))
 
     # Observaciones
     observaciones_html = ""
     if observaciones:
-        observaciones_html = f"<p style='color:{_MUTED};'><b>Observaciones:</b> {_esc(observaciones)}</p>"
+        observaciones_html = f"<br/><p style='color:{_MUTED};'><b>Observaciones:</b> {_esc(observaciones)}</p>"
 
     encabezado_empresa = (
         f'<div style="font-size:13pt;font-weight:bold;color:{_PRIMARY};{_MB}">'
@@ -107,9 +113,9 @@ def _armar_html(
 
     # Fila de saldo neto
     saldo_neto_row = (
-        f'<tr><td style="padding:8pt 6pt;text-align:right;font-weight:bold;border-top:2pt solid {_PRIMARY};">'
+        f'<tr><td style="text-align:right;font-weight:bold;border-top:2pt solid {_PRIMARY};">'
         f"Saldo Neto:</td>"
-        f'<td style="padding:8pt 6pt 8pt 16pt;text-align:right;font-weight:bold;font-size:14pt;color:{_PRIMARY};'
+        f'<td style="text-align:right;font-weight:bold;font-size:14pt;color:{_PRIMARY};'
         f'border-top:2pt solid {_PRIMARY};">{_money(saldo_neto)}</td></tr>'
     )
 
@@ -123,15 +129,16 @@ def _armar_html(
                 </tr></table>
             </td>
             <td width="38%" style="vertical-align:top;">
-                <table width="100%" style="border-collapse:collapse;border:1pt solid {_BORDER};">
+                <table width="100%" cellpadding="3" cellspacing="0">
                     <tr><td colspan="2" style="background-color:{_PRIMARY};color:#FFFFFF;text-align:center;
-                        font-size:12pt;font-weight:bold;padding:5pt;">CORTE DE CAJA</td></tr>
+                        font-size:12pt;font-weight:bold;">CORTE DE CAJA</td></tr>
                     {caja_info_rows}
                 </table>
             </td>
         </tr></table>
 
-        <table width="100%" style="border-collapse:collapse;margin-top:10pt;">
+        <br/>
+        <table width="100%" cellpadding="6" cellspacing="0">
             <tr>
                 <th {_TH}>Fecha</th>
                 <th {_TH}>Tipo</th>
@@ -141,7 +148,8 @@ def _armar_html(
             {filas_movimientos}
         </table>
 
-        <table width="100%" style="border-collapse:collapse;margin-top:10pt;">
+        <br/>
+        <table width="100%" cellpadding="4" cellspacing="0">
             {totales_rows}
             {saldo_neto_row}
         </table>
@@ -177,7 +185,7 @@ def _documento(
 
 def _configurar_pagina(impresora: QPrinter) -> None:
     impresora.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
-    impresora.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter)
+    impresora.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Unit.Millimeter)
 
 
 def generar_pdf_corte_caja(

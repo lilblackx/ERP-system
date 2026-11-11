@@ -1,6 +1,31 @@
 {
   "entregas": [
     {
+      "version": "1.1.1",
+      "fecha": "2026-11-10",
+      "titulo": "Filtro por vendedor y tablas más legibles",
+      "cambios": [
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "Facturación, reportes de ventas y cobranza se pueden filtrar por vendedor.",
+          "modulos": [
+            "facturacion",
+            "reportes"
+          ]
+        },
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "Las tablas ajustan sus columnas al contenido: los nombres largos ya no se cortan."
+        },
+        {
+          "tipo": "general",
+          "texto": "Mejoras de estabilidad y funcionamiento."
+        }
+      ]
+    },
+    {
       "version": "1.1.0",
       "fecha": "2026-11-06",
       "titulo": "Códigos de cliente automáticos y más detalle en auditoría",
@@ -9,30 +34,44 @@
           "tipo": "nuevo",
           "destacado": true,
           "texto": "Cada estación tiene su propia impresora. Se elige en Configuración > Empresa.",
-          "modulos": ["config_empresa", "facturacion", "cajas"]
+          "modulos": [
+            "config_empresa",
+            "facturacion",
+            "cajas"
+          ]
         },
         {
           "tipo": "nuevo",
           "destacado": true,
           "texto": "Los clientes tienen código automático (CLI-000123). Los existentes se renumeraron.",
-          "modulos": ["clientes"]
+          "modulos": [
+            "clientes"
+          ]
         },
         {
           "tipo": "nuevo",
           "destacado": true,
           "texto": "Historial del cliente más claro: los abonos se muestran con el selector «Ver».",
-          "modulos": ["clientes", "cuentas_por_cobrar"]
+          "modulos": [
+            "clientes",
+            "cuentas_por_cobrar"
+          ]
         },
         {
           "tipo": "nuevo",
           "destacado": true,
           "texto": "Auditoría: abre un registro (doble clic) para ver el detalle completo del cambio.",
-          "modulos": ["auditoria", "inventario"]
+          "modulos": [
+            "auditoria",
+            "inventario"
+          ]
         },
         {
           "tipo": "mejorado",
           "texto": "Cuentas por cobrar: el selector «Ver» alterna entre facturas pendientes y todas.",
-          "modulos": ["cuentas_por_cobrar"]
+          "modulos": [
+            "cuentas_por_cobrar"
+          ]
         },
         {
           "tipo": "general",

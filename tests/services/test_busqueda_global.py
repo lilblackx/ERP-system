@@ -360,3 +360,21 @@ def test_las_facturas_encontradas_salen_de_la_mas_reciente_a_la_mas_antigua(db_s
 
     assert [r.titulo for r in resultados] == sorted(numeros, reverse=True)[: len(resultados)]
     assert len(resultados) >= 1
+
+
+def test_el_rif_completo_como_se_ve_en_pantalla_encuentra_al_cliente_y_al_proveedor(db_session):
+    """La letra y el numero del RIF se guardan en columnas separadas: buscar "J-40707122-0" (como se lee en la tabla o
+    en una factura) no encontraba nada; solo funcionaba escribir el numero sin la letra."""
+    from app.services.clientes import list_clientes
+    from tests.factories import crear_cliente, crear_proveedor, crear_usuario_admin
+
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, id_legal="J", identificacion_cliente="40707122-0", nombre_razon_social="Carnes")
+    crear_cliente(db_session, id_legal="V", identificacion_cliente="40707122-0X", nombre_razon_social="Otro")
+    crear_proveedor(db_session, id_legal="J", identificacion_proveedor="50447062-7")
+
+    en_panel = list_clientes(db_session, texto_busqueda="J-40707122-0", id_usuario=admin.id_usuario)
+    assert [c.id_cliente for c in en_panel["items"]] == [cliente.id_cliente]
+    globales = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "j-40707122")
+    assert [r.tipo for r in globales] == ["Cliente"]
+    assert [r.tipo for r in BusquedaGlobalService.buscar(db_session, admin.id_usuario, "J-50447062-7")] == ["Proveedor"]

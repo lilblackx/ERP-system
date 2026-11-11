@@ -32,7 +32,7 @@ from app.db.models import (
     Vendedor,
 )
 from app.services.alcance_vendedor import vendedor_propio
-from app.services.busqueda_sql import contiene
+from app.services.busqueda_sql import contiene, rif_completo
 from app.services.busqueda_sql import escapar_like as _escapar_like
 from app.services.tesoreria import _enmascarar_numero_cuenta
 from app.services.usuarios import UsuarioService
@@ -254,6 +254,7 @@ class BusquedaGlobalService:
         consulta = session.query(Cliente).filter(
             contiene(session, Cliente.nombre_razon_social, like)
             | contiene(session, Cliente.identificacion_cliente, like)
+            | contiene(session, rif_completo(Cliente.id_legal, Cliente.identificacion_cliente), like)
             | contiene(session, Cliente.codigo_cliente, like)
         )
         if id_vendedor is not None:
@@ -293,6 +294,7 @@ class BusquedaGlobalService:
             .filter(
                 contiene(session, Proveedor.nombre_razon_social, like)
                 | contiene(session, Proveedor.identificacion_proveedor, like)
+                | contiene(session, rif_completo(Proveedor.id_legal, Proveedor.identificacion_proveedor), like)
                 | contiene(session, Proveedor.codigo_proveedor, like)
             )
             .order_by(Proveedor.nombre_razon_social)
