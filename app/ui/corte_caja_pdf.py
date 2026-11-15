@@ -185,6 +185,8 @@ def _documento(
 
 def _configurar_pagina(impresora: QPrinter) -> None:
     impresora.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
+    # 0 a proposito: QTextDocument.print_ ya deja ~22 mm libres a cada lado (medido sobre el PDF generado), mas que la
+    # zona no imprimible de cualquier impresora; un margen extra encogia el contenido hasta ~30 mm por lado.
     impresora.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Unit.Millimeter)
 
 

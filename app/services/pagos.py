@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, contains_eager, joinedload
 
 from app.db.models import (
@@ -19,7 +19,7 @@ from app.db.models import (
 )
 from app.services.alcance_vendedor import vendedor_efectivo
 from app.services.auditoria import AuditoriaService
-from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.busqueda_sql import contiene, contiene_rif, patron_contiene
 from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
@@ -391,17 +391,12 @@ class PagoService:
             # La busqueda se resuelve ANTES de paginar: filtrar las filas ya paginadas dejaba el total y las
             # paginas inconsistentes y solo encontraba coincidencias de la pagina actual.
             like = patron_contiene(texto_busqueda)
-            rif_completo = func.concat(
-                func.coalesce(Proveedor.id_legal, ""),
-                case((Proveedor.id_legal.isnot(None), "-"), else_=""),
-                func.coalesce(Proveedor.identificacion_proveedor, ""),
-            )
             query = query.join(Proveedor, Proveedor.id_proveedor == Compra.id_proveedor).filter(
                 or_(
                     contiene(session, Proveedor.nombre_razon_social, like),
                     contiene(session, Proveedor.identificacion_proveedor, like),
                     contiene(session, Proveedor.id_legal, like),
-                    contiene(session, rif_completo, like),
+                    contiene_rif(session, Proveedor.id_legal, Proveedor.identificacion_proveedor, like),
                 )
             )
 
@@ -862,14 +857,7 @@ class PagoService:
                 id_cliente_key = cliente.id_cliente
 
                 if id_cliente_key not in clientes_deuda:
-                    # Manejo seguro del campo saldo_favor (puede no existir si no se ejecutó la migración)
-                    saldo_favor = Decimal("0.00")
-                    try:
-                        saldo_favor = getattr(cuenta, "saldo_favor", Decimal("0.00"))
-                        if saldo_favor is None:
-                            saldo_favor = Decimal("0.00")
-                    except Exception:
-                        saldo_favor = Decimal("0.00")
+                    saldo_favor = cuenta.saldo_favor or Decimal("0.00")
 
                     clientes_deuda[id_cliente_key] = {
                         "id_cliente": id_cliente_key,
@@ -894,19 +882,9 @@ class PagoService:
                     clientes_deuda[id_cliente_key]["saldo_vencido"] += cuenta.saldo_pendiente
 
                 # Actualizar saldo_favor con el valor más alto encontrado (por si hay inconsistencias)
-                try:
-                    cuenta_saldo_favor = getattr(cuenta, "saldo_favor", Decimal("0.00"))
-                    if cuenta_saldo_favor is None:
-                        cuenta_saldo_favor = Decimal("0.00")
-
-                    saldo_favor_actual = clientes_deuda[id_cliente_key]["saldo_favor"]
-                    if saldo_favor_actual is None:
-                        saldo_favor_actual = Decimal("0.00")
-
-                    if cuenta_saldo_favor and cuenta_saldo_favor > saldo_favor_actual:
-                        clientes_deuda[id_cliente_key]["saldo_favor"] = cuenta_saldo_favor
-                except Exception:
-                    pass
+                cuenta_saldo_favor = cuenta.saldo_favor or Decimal("0.00")
+                if cuenta_saldo_favor > clientes_deuda[id_cliente_key]["saldo_favor"]:
+                    clientes_deuda[id_cliente_key]["saldo_favor"] = cuenta_saldo_favor
 
                 # Calcular fecha de vencimiento más antigua
                 if cuenta.fecha_vencimiento:

@@ -33,7 +33,14 @@ from app.config import (
 from app.db.migrar import aplicar_migraciones
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema_sqlserver.sql"
-TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test")
+# Con pytest-xdist cada worker (gw0, gw1, ...) usa SU propia base: comparten el servidor pero no las tablas, asi que
+# los tests de un worker no borran los datos de otro. Las bases se crean la primera vez y se reutilizan despues.
+_WORKER_XDIST = os.getenv("PYTEST_XDIST_WORKER")
+if _WORKER_XDIST:
+    # Varios workers abren ventanas a la vez: con la plataforma real se pelean el foco (y fallan tests como los de
+    # `hasFocus`). Sin pantalla real cada proceso tiene su propio foco.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test") + (f"_{_WORKER_XDIST}" if _WORKER_XDIST else "")
 
 # Orden de borrado. No basta con "hijas antes que padres": trg_factura_total_del /
 # trg_compra_total_del recalculan total_venta/total_compra al borrar una linea de
@@ -44,7 +51,7 @@ TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test")
 # Ademas, el schema tiene un ciclo real de FKs (usuarios.id_vendedor_usuario ->
 # vendedores, vendedores.creado_por -> usuarios) que ningun orden lineal resuelve;
 # por eso el fixture db_session deshabilita todas las FK (NOCHECK CONSTRAINT ALL)
-# antes de borrar y las reactiva (WITH CHECK CHECK CONSTRAINT ALL) despues.
+# antes de borrar y las reactiva (CHECK CONSTRAINT ALL) despues.
 TABLES_DELETE_ORDER = [
     "cola_correos",
     "clave_cifrado_servidor",
@@ -126,6 +133,10 @@ def _ensure_test_database_exists() -> None:
             TEST_DB_NAME,
             TEST_DB_NAME,
         )
+        # Solo es una base de pruebas: no hace falta esperar el vaciado del log en cada commit ni conservarlo para
+        # recuperacion. Los servicios hacen muchos commits pequenos, y con esto cada uno deja de esperar al disco.
+        cursor.execute(f"ALTER DATABASE [{TEST_DB_NAME}] SET DELAYED_DURABILITY = FORCED")
+        cursor.execute(f"ALTER DATABASE [{TEST_DB_NAME}] SET RECOVERY SIMPLE")
     finally:
         conn.close()
 
@@ -173,13 +184,48 @@ def test_engine():
     engine.dispose()
 
 
+_TABLAS_A_LIMPIAR = frozenset(TABLES_DELETE_ORDER)
+_DESHABILITAR_FK = ";".join(f"ALTER TABLE dbo.{t} NOCHECK CONSTRAINT ALL" for t in TABLES_DELETE_ORDER)
+# Sin "WITH CHECK": con las tablas recien vaciadas no hay nada que revalidar, y revalidar cada FK en cada test
+# costaba ~0.6 s. Las FK quedan activas para todo INSERT/UPDATE posterior (solo cambia su marca "no confiable").
+_REACTIVAR_FK = ";".join(f"ALTER TABLE dbo.{t} CHECK CONSTRAINT ALL" for t in TABLES_DELETE_ORDER)
+_TABLAS_CON_FILAS = text(
+    "SELECT t.name FROM sys.tables t "
+    "JOIN sys.dm_db_partition_stats p ON p.object_id = t.object_id AND p.index_id IN (0, 1) "
+    "WHERE SCHEMA_NAME(t.schema_id) = 'dbo' GROUP BY t.name HAVING SUM(p.row_count) > 0"
+)
+_PASADAS_MAXIMAS = 3
+
+
+def _tablas_sucias(connection) -> list[str]:
+    """Tablas de TABLES_DELETE_ORDER con filas, en ese mismo orden."""
+    con_filas = set(connection.execute(_TABLAS_CON_FILAS).scalars()) & _TABLAS_A_LIMPIAR
+    return [t for t in TABLES_DELETE_ORDER if t in con_filas]
+
+
+def _vaciar_base(connection) -> None:
+    """Deja vacias las tablas de TABLES_DELETE_ORDER tocando solo las que tienen filas: un test suele usar ~15 de las
+    50, y cada DELETE (con sus triggers) cuesta ~8 ms. Un trigger puede repoblar una tabla ya revisada, asi que se
+    vuelve a mirar hasta que no quede ninguna con datos."""
+    sucias = _tablas_sucias(connection)
+    if not sucias:
+        return
+    connection.execute(text(_DESHABILITAR_FK))
+    for _ in range(_PASADAS_MAXIMAS):
+        for tabla in sucias:
+            connection.execute(text(f"DELETE FROM dbo.{tabla}"))
+        sucias = _tablas_sucias(connection)
+        if not sucias:
+            break
+    connection.execute(text(_REACTIVAR_FK))
+    if sucias:
+        raise RuntimeError(f"La limpieza de la base de pruebas dejo filas en: {', '.join(sucias)}")
+
+
 @pytest.fixture()
 def db_session(test_engine):
     with test_engine.connect() as connection:
-        connection.execute(text("EXEC sp_msforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL'"))
-        for tabla in TABLES_DELETE_ORDER:
-            connection.execute(text(f"DELETE FROM dbo.{tabla}"))
-        connection.execute(text("EXEC sp_msforeachtable 'ALTER TABLE ? WITH CHECK CHECK CONSTRAINT ALL'"))
+        _vaciar_base(connection)
         connection.commit()
 
     session_factory = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
@@ -192,3 +238,10 @@ def db_session(test_engine):
         except Exception:
             pass
         session.close()
+
+
+def pytest_collection_modifyitems(items):
+    """Marca con `db` los tests que usan la base real: `pytest -m "not db"` corre solo los que no la tocan (rapido)."""
+    for item in items:
+        if "db_session" in item.fixturenames:
+            item.add_marker(pytest.mark.db)

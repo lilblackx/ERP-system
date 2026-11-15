@@ -285,6 +285,40 @@ def test_factura_de_contado_con_bcv_ingresa_el_dinero_a_la_caja(db_session):
     assert entradas[0].monto_movimiento == pago.monto
 
 
+def test_venta_de_contado_con_articulo_bcv_sin_porcentaje_ingresa_el_dinero_una_sola_vez(db_session):
+    """Con un articulo BCV (sin porcentaje) los pagos se aplican a la cuenta BCV. El bloque de contado de la cuenta
+    original no debe volver a registrar ese mismo dinero como "excedente (vuelto pendiente)"."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100, articulo_bcv=True)
+    crear_precio_producto(db_session, producto, "100.00")
+    cliente = crear_cliente(db_session)
+    caja = _caja_abierta(db_session, admin)
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        pagos=[
+            {
+                "metodo_pago": "efectivo",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("100.00"),
+                "id_caja": caja.id_caja,
+            }
+        ],
+    )
+
+    cuenta = db_session.query(CuentaPorCobrarBCV).filter_by(id_factura=factura.id_factura).one()
+    entradas = db_session.query(CajaMovimiento).filter_by(id_caja=caja.id_caja, tipo_movimiento="entrada").all()
+    assert cuenta.estado == "pagada"
+    assert [m.monto_movimiento for m in entradas] == [Decimal("100.00")]
+    assert not any("Excedente" in (m.descripcion_movimiento or "") for m in entradas)
+
+
 # ── Historial del cliente ───────────────────────────────────────────────────
 
 

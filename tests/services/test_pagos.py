@@ -1445,3 +1445,32 @@ def test_abono_general_por_zelle_con_tasa_cero_o_negativa_se_rechaza(db_session)
                 id_cuenta_bancaria=cuenta.id_cuenta,
                 id_usuario=admin.id_usuario,
             )
+
+
+def test_cartera_por_cliente_muestra_el_mayor_saldo_a_favor_de_sus_cuentas(db_session):
+    from app.db.models import CuentaPorCobrar
+
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "10.00")
+    cliente = crear_cliente(db_session, limite_credito=Decimal("1000.00"))
+    for _ in range(2):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "10.00"}],
+        )
+    cuentas = db_session.query(CuentaPorCobrar).order_by(CuentaPorCobrar.id_cuenta_por_cobrar).all()
+    cuentas[0].saldo_favor = Decimal("3.00")
+    cuentas[1].saldo_favor = Decimal("7.50")
+    db_session.commit()
+
+    filas = PagoService.listar_cuentas_por_cobrar_por_cliente(db_session, id_usuario=admin.id_usuario)["items"]
+
+    fila = next(f for f in filas if f["id_cliente"] == cliente.id_cliente)
+    assert fila["saldo_total"] == Decimal("20.00")
+    assert fila["saldo_favor"] == Decimal("7.50")
