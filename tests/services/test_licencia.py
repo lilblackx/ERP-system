@@ -650,3 +650,34 @@ def test_sql_server_guardar_y_leer_las_marcas_de_tiempo(almacen_db):
 
 def test_sql_server_hora_servidor_es_utc_y_cercana_a_la_real(almacen_db):
     assert abs(almacen_db.hora_servidor() - time.time()) < 300
+
+
+def test_instalar_el_gate_en_motores_nuevos_siempre_lo_instala_aunque_python_reutilice_ids(servidor):
+    """Antes se recordaban los motores por `id()`: al liberarse un motor, el siguiente podia recibir el mismo id y
+    quedar sin el hook (el test del bloqueo fallaba al azar con "DID NOT RAISE")."""
+    from sqlalchemy import event
+
+    for _ in range(300):
+        motor = create_engine("sqlite://")
+        licencia.instalar_gate(motor)
+        assert event.contains(motor, "before_cursor_execute", licencia._hook_antes_de_ejecutar)
+        del motor
+
+
+def test_instalar_el_gate_dos_veces_en_el_mismo_motor_no_duplica_el_hook(servidor):
+    motor = create_engine("sqlite://")
+
+    licencia.instalar_gate(motor)
+    licencia.instalar_gate(motor)
+
+    with motor.begin() as conexion:
+        conexion.execute(text("CREATE TABLE factura_venta (id INTEGER, total INTEGER)"))
+    avisos = []
+    licencia.registrar_aviso_bloqueo(avisos.append)
+    try:
+        with pytest.raises(LicenciaSoloLecturaError):
+            with motor.begin() as conexion:
+                conexion.execute(text("INSERT INTO factura_venta VALUES (1, 10)"))
+    finally:
+        licencia.registrar_aviso_bloqueo(None)
+    assert len(avisos) == 1  # un solo aviso: el hook no quedo enganchado dos veces

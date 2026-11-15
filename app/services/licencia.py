@@ -830,7 +830,6 @@ class LicenciaService:
 
 # ── Gate de solo lectura ────────────────────────────────────────────────────
 
-_gate_instalado_en: set[int] = set()
 _aviso_bloqueo = None  # callable(EstadoLicencia) | None, lo registra la UI
 
 
@@ -857,8 +856,11 @@ def _hook_antes_de_ejecutar(conn, cursor, statement, parameters, context, execut
 
 
 def instalar_gate(motor) -> None:
-    """Engancha el chequeo de licencia al motor SQLAlchemy dado. Idempotente."""
-    if id(motor) in _gate_instalado_en:
+    """Engancha el chequeo de licencia al motor SQLAlchemy dado. Idempotente.
+
+    Se pregunta al propio motor si ya tiene el hook: antes se guardaba `id(motor)` en un conjunto, pero Python reutiliza
+    el id de un objeto ya liberado, asi que un motor nuevo podia quedar "ya instalado" sin tener el hook (y dejaba
+    escribir sin licencia)."""
+    if event.contains(motor, "before_cursor_execute", _hook_antes_de_ejecutar):
         return
     event.listen(motor, "before_cursor_execute", _hook_antes_de_ejecutar)
-    _gate_instalado_en.add(id(motor))
