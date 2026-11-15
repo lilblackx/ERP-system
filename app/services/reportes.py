@@ -211,7 +211,8 @@ def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "") -> lis
     (la asignacion FIFO), pero para el cliente el abono es UN solo movimiento de
     dinero: las filas que comparten fecha, metodo, referencia, origen y usuario se
     muestran como un solo evento con el monto total. Un pago individual siempre
-    forma su propio grupo (su fecha_pago es unica)."""
+    forma su propio grupo (su fecha_pago es unica). Los abonos anteriores a que todos
+    los pagos del abono compartieran fecha no se agrupan (cada pago tiene la suya)."""
     grupos: dict[tuple, list] = {}
     for pago in pagos:
         clave = (
@@ -227,10 +228,12 @@ def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "") -> lis
     eventos = []
     for grupo in grupos.values():
         primero = grupo[0]
-        if len(grupo) == 1:
-            referencia = primero.referencia or primero.cuenta_por_cobrar.factura.numero_factura + sufijo_factura
-        else:
+        # "Abono general" solo si el grupo reparte el dinero entre varias facturas. Varias lineas de pago de UNA misma
+        # factura (p. ej. dos efectivos de una venta de contado) siguen mostrando el numero de esa factura.
+        if len({p.cuenta_por_cobrar.id_factura for p in grupo}) > 1:
             referencia = primero.referencia or etiqueta_abono
+        else:
+            referencia = primero.referencia or primero.cuenta_por_cobrar.factura.numero_factura + sufijo_factura
         eventos.append(
             {
                 "fecha": primero.fecha_pago,

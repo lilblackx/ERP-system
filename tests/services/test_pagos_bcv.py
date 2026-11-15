@@ -206,6 +206,30 @@ def test_abono_general_bcv_registra_un_pago_por_factura_y_el_ingreso_total(db_se
     assert banco.saldo_total_banco == abono
 
 
+def test_abono_general_bcv_usa_la_misma_fecha_en_todos_los_pagos(db_session):
+    """El estado de cuenta reconoce un abono por la fecha compartida de sus pagos: si cada pago tuviera la suya, el
+    abono saldria como varios pagos sueltos."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    _, cuenta1, _ = _emitir_credito_bcv(db_session, admin, cliente=cliente, precio="100.00")
+    _emitir_credito_bcv(db_session, admin, cliente=cliente, precio="100.00")
+    banco = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"))
+
+    PagoBCVService.aplicar_abono_general_cliente_bcv(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=cuenta1.saldo_pendiente + Decimal("20.00"),
+        tasa_cambio=Decimal("40.00"),
+        metodo_pago="transferencia",
+        id_cuenta_bancaria=banco.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    pagos = db_session.query(PagoCobroBCV).all()
+    assert len(pagos) == 2
+    assert len({p.fecha_pago for p in pagos}) == 1
+
+
 def test_abono_general_bcv_sobreabono_tambien_ingresa_el_excedente(db_session):
     admin = crear_usuario_admin(db_session)
     _, cuenta, cliente = _emitir_credito_bcv(db_session, admin)

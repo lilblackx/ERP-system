@@ -2160,6 +2160,88 @@ def test_estado_cuenta_cliente_descripcion_de_transferencia(db_session):
     assert pagos[0]["descripcion"] == "Bs. 45,000.00 - 900.00 - Banesco"
 
 
+def test_estado_cuenta_cliente_abono_general_bcv_sale_como_un_solo_pago(db_session):
+    """Igual que el abono general normal: un pago BCV por factura en la base, UN solo movimiento en el estado de
+    cuenta, con el rotulo "Abono general BCV"."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "100.00")
+    for _ in range(2):
+        VentaService.emitir_factura(
+            db_session,
+            id_cliente=cliente.id_cliente,
+            id_usuario=admin.id_usuario,
+            id_vendedor=vendedor.id_vendedor,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+            porcentaje_bcv=Decimal("10"),
+        )
+    primera = db_session.query(CuentaPorCobrarBCV).order_by(CuentaPorCobrarBCV.id_cuenta_por_cobrar).first()
+    abono = primera.saldo_pendiente + Decimal("20.00")  # desborda la primera factura: se reparte entre las dos
+
+    PagoBCVService.aplicar_abono_general_cliente_bcv(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=abono,
+        tasa_cambio=Decimal("40.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    assert db_session.query(PagoCobroBCV).count() == 2
+    pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
+    assert len(pagos) == 1
+    assert pagos[0]["abono"] == abono
+    assert pagos[0]["referencia"] == "Abono general BCV"
+    assert pagos[0]["descripcion"] == "Efectivo"
+
+
+def test_estado_cuenta_cliente_dos_lineas_de_pago_de_una_factura_no_son_abono_general(db_session):
+    """Dos efectivos de la misma venta de contado comparten fecha y metodo, pero son UNA factura: se suman en un
+    movimiento y conservan el numero de factura (no se rotulan "Abono general")."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "100.00")
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    linea = {
+        "metodo_pago": "efectivo",
+        "moneda": "USD",
+        "monto_moneda_origen": Decimal("50.00"),
+        "id_caja": caja.id_caja,
+    }
+
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=[dict(linea), dict(linea)],
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
+    assert len(pagos) == 1
+    assert pagos[0]["abono"] == Decimal("100.00")
+    assert pagos[0]["referencia"] == factura.numero_factura
+
+
 # --- cobros_del_periodo ---------------------------------------------------------------
 
 
@@ -3333,7 +3415,7 @@ def test_libro_ventas_informa_la_cantidad_de_facturas(db_session):
 
 # --- auditoria de reportes (2026-11): corte historico, BCV, kardex, libro de ventas ---------------------
 
-from app.db.models import ControlDeTasa, CuentaPorCobrarBCV, FacturaVenta  # noqa: E402
+from app.db.models import ControlDeTasa, CuentaPorCobrarBCV, FacturaVenta, PagoCobroBCV  # noqa: E402
 from app.services.notas_credito import NotaCreditoService  # noqa: E402
 from app.services.pagos_bcv import PagoBCVService  # noqa: E402
 
