@@ -673,7 +673,8 @@ class VentaService:
 
         # Si hay porcentaje BCV o artículos BCV, la cuenta por cobrar original debe tener saldo 0
         # (solo la cuenta BCV maneja el monto total)
-        if (porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0) or hay_articulo_bcv:
+        usa_cuenta_bcv = (porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0) or hay_articulo_bcv
+        if usa_cuenta_bcv:
             # La cuenta por cobrar original debe tener saldo 0
             if cxc is not None:
                 cxc.saldo_pendiente = Decimal("0.00")
@@ -686,11 +687,13 @@ class VentaService:
             ajuste_cxc = monto_iva - monto_descuento
             if cxc is not None and ajuste_cxc != 0:
                 cxc.saldo_pendiente += ajuste_cxc
-                # Se envia YA a la base: mas abajo, al aplicar los pagos de contado, la cuenta se relee
-                # (session.refresh) y un ajuste aun sin enviar se descartaba. El cobro quedaba registrado sin el
-                # IVA, el IVA entraba a la caja como "excedente (vuelto pendiente)" y la nota de credito de una
-                # anulacion devolvia menos de lo que el cliente pago.
-                session.flush()
+
+        # Se envia YA a la base (ambas ramas): mas abajo, al aplicar los pagos de contado, la cuenta se relee
+        # (session.refresh) y un ajuste aun sin enviar se descartaba. El cobro quedaba registrado sin el IVA, el IVA
+        # entraba a la caja como "excedente (vuelto pendiente)" y la nota de credito de una anulacion devolvia menos
+        # de lo que el cliente pago.
+        if cxc is not None:
+            session.flush()
 
         # --- Cuenta por Cobrar BCV: si se especificó un porcentaje BCV O hay artículos BCV,
         # crear cuenta separada con el monto total de la factura. La cuenta por cobrar
@@ -805,8 +808,8 @@ class VentaService:
         # Si hay porcentaje BCV, los pagos se aplican a la cuenta BCV (que tiene el monto total)
         # y la cuenta original tiene saldo 0.
         if condicion_pago == "contado":
-            if porcentaje_bcv is not None and Decimal(str(porcentaje_bcv)) > 0:
-                # Con porcentaje BCV, los pagos ya se aplicaron a la cuenta BCV arriba
+            if usa_cuenta_bcv:
+                # Con porcentaje o articulos BCV, los pagos ya se aplicaron a la cuenta BCV arriba
                 # La cuenta original tiene saldo 0, no recibe pagos
                 # Los excedentes ya se manejan en el bloque de pagos BCV arriba
                 pass
