@@ -498,6 +498,51 @@ class FacturaDetalle(Base):
     producto = relationship("Inventario")
 
 
+class Pedido(Base):
+    """Pedido tomado por un vendedor (migrations/0100). No mueve stock ni abre cuentas: aparta unidades
+    (ver `app/services/reservas_stock.py`) hasta que se factura, rechaza, anula o vence."""
+
+    __tablename__ = "pedidos"
+
+    id_pedido: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Lo asigna SQL Server (SEQUENCE en el DEFAULT): se lee de vuelta con un refresh tras el commit.
+    numero_pedido: Mapped[str] = mapped_column(String(20), unique=True, server_default=FetchedValue())
+    id_cliente: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id_cliente"), nullable=False)
+    id_vendedor: Mapped[int] = mapped_column(BigInteger, ForeignKey("vendedores.id_vendedor"), nullable=False)
+    condicion_pago: Mapped[str] = mapped_column(String(10), nullable=False)
+    estado: Mapped[str] = mapped_column(String(20), server_default="ENVIADO")
+    observaciones: Mapped[str | None] = mapped_column(String(255))
+    motivo: Mapped[str | None] = mapped_column(String(255))  # por que se rechazo o se anulo
+    id_cliente_local: Mapped[str | None] = mapped_column(String(64))
+    fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    fecha_vencimiento_reserva: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    id_usuario_creador: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    id_usuario_revisor: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    fecha_revision: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    id_factura: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("factura_venta.id_factura"))
+    fecha_modificacion: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    cliente = relationship("Cliente")
+    vendedor = relationship("Vendedor")
+    detalles = relationship("PedidoDetalle", back_populates="pedido", order_by="PedidoDetalle.id_pedido_detalle")
+
+
+class PedidoDetalle(Base):
+    __tablename__ = "pedido_detalle"
+
+    id_pedido_detalle: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_pedido: Mapped[int] = mapped_column(BigInteger, ForeignKey("pedidos.id_pedido"), nullable=False)
+    id_producto: Mapped[int] = mapped_column(BigInteger, ForeignKey("inventario.id_producto"), nullable=False)
+    descripcion: Mapped[str | None] = mapped_column(String(255))
+    cantidad: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    tipo_venta: Mapped[str] = mapped_column(String(10), nullable=False)
+    unidades_reservadas: Mapped[decimal.Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    precio_unitario: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+
+    pedido = relationship("Pedido", back_populates="detalles")
+    producto = relationship("Inventario")
+
+
 class ComisionFactura(Base):
     # implicit_returning=False: esta tabla tiene trigger de auditoria (migrations/0092) y SQL Server
     # no admite OUTPUT sin INTO sobre una tabla con triggers (error 334).

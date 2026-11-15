@@ -40,7 +40,12 @@ if _WORKER_XDIST:
     # Varios workers abren ventanas a la vez: con la plataforma real se pelean el foco (y fallan tests como los de
     # `hasFocus`). Sin pantalla real cada proceso tiene su propio foco.
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test") + (f"_{_WORKER_XDIST}" if _WORKER_XDIST else "")
+# SOLO EN LA RAMA feature/app-movil-pedidos: base de pruebas PROPIA ("..._pedidos"), distinta de la de main
+# ("distribuidora_dj_test"). La migracion 0100 y sus tablas nunca llegan a una base que main tambien use (main no
+# vacia `pedidos`, y una fila suelta rompe su DELETE FROM clientes). Al mergear a main, volver al nombre original.
+TEST_DB_NAME = os.getenv("TEST_DB_NAME", "distribuidora_dj_test_pedidos") + (
+    f"_{_WORKER_XDIST}" if _WORKER_XDIST else ""
+)
 
 # Orden de borrado. No basta con "hijas antes que padres": trg_factura_total_del /
 # trg_compra_total_del recalculan total_venta/total_compra al borrar una linea de
@@ -77,6 +82,8 @@ TABLES_DELETE_ORDER = [
     "compra_oc_enmienda",
     "compra_oc_detalle",
     "compra_oc",
+    "pedido_detalle",
+    "pedidos",
     "factura_detalle",
     "compra_detalle",
     "cuentas_por_cobrar_bcv",
