@@ -149,11 +149,23 @@ class _PopupAnclado(QWidget):
     (se cierra sola al perder el foco/Escape, igual que un QComboBox o QMenu) y
     posicionada debajo-izquierda del boton que la abre."""
 
+    # Espacio libre alrededor de la tarjeta para su sombra suave (aplicar_sombra). La ventana es translucida: sin este
+    # margen la sombra se recortaria en el borde de la ventana.
+    MARGEN_SOMBRA = 14
+
     def __init__(self, parent=None):
-        super().__init__(parent, Qt.WindowType.Popup)
+        # Una ventana Popup con la tarjeta de esquinas redondeadas necesita fondo translucido; si no, las esquinas se
+        # ven negras. NoDropShadowWindowHint: Windows le dibuja a todo Popup una sombra rectangular propia que, con
+        # fondo translucido, se veria como un borde duro fuera de la tarjeta (mismo caso que notificaciones_panel).
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setStyleSheet(POPUP_STYLE)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        margen = self.MARGEN_SOMBRA
+        outer.setContentsMargins(margen, margen - 8, margen, margen)
         self.card = QWidget()
         self.card.setObjectName("PopupCard")
         aplicar_sombra(self.card)
@@ -167,9 +179,10 @@ class _PopupAnclado(QWidget):
             disponible = pantalla.availableGeometry()
             margen = 8
             x_max = disponible.right() - ancho - margen
-            x = min(punto.x(), x_max) if x_max >= disponible.left() else disponible.left() + margen
-            punto.setX(x)
-        self.move(punto.x(), punto.y() + 4)
+            # la tarjeta (no la ventana, que lleva el margen de la sombra) queda alineada con el boton
+            x = min(punto.x() - self.MARGEN_SOMBRA, x_max) if x_max >= disponible.left() else disponible.left() + margen
+            punto.setX(x + self.MARGEN_SOMBRA)
+        self.move(punto.x() - self.MARGEN_SOMBRA, punto.y() + 4 - (self.MARGEN_SOMBRA - 8))
         self.show()
 
 
