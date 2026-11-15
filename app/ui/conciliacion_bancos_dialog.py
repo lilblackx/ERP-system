@@ -4,7 +4,6 @@ from decimal import Decimal
 import qtawesome as qta
 from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtWidgets import (
-    QCalendarWidget,
     QComboBox,
     QDialog,
     QGridLayout,
@@ -23,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Banco, BancoMovimiento, ControlDeTasa, CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
 from app.services.moneda_cuentas import MONEDA_BS, MONEDA_COP, MONEDA_USD
+from app.ui.calendario import CalendarioApp
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
@@ -125,8 +125,7 @@ class ConciliacionBancosDialog(QDialog):
         calendar_layout.setSpacing(3)
         lbl_fecha = QLabel("Fecha de Conciliación:")
         lbl_fecha.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {COLOR_TEXT_DARK};")
-        self.calendar = QCalendarWidget()
-        self.calendar.setGridVisible(True)
+        self.calendar = CalendarioApp()
         self.calendar.setSelectedDate(self._fecha_conciliacion)
         self.calendar.selectionChanged.connect(self._on_fecha_cambiada)
         self.calendar.setMinimumSize(220, 180)  # Tamaño mínimo en lugar de fijo

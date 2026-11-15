@@ -58,6 +58,7 @@ from app.services.permisos import PermisoDenegadoError
 from app.services.proveedores import ProveedorService
 from app.services.usuarios import UsuarioService
 from app.ui.auto_refresco import AutoRefresco
+from app.ui.calendario import preparar_campo_fecha
 from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.compra_detalle_dialog import CompraDetalleDialog
 from app.ui.exportacion_completa import POR_PAGINA_EXPORTACION, ExportacionCompletaMixin
@@ -73,7 +74,6 @@ from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_PRIMARY_QSS,
     BUTTON_SECONDARY_QSS,
-    COLOR_BLUE_LIGHT,
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -181,13 +181,6 @@ QComboBox::down-arrow, QDateEdit::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QComboBox QAbstractItemView {{
-    background-color: {COLOR_WHITE};
-    border: 1px solid {COLOR_BORDER};
-    selection-background-color: {COLOR_BLUE_LIGHT};
-    selection-color: {COLOR_TEXT_DARK};
-    padding: 4px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -351,7 +344,7 @@ class OrdenCompraFormDialog(QDialog):
         lbl_fecha = QLabel("Fecha Estimada de Entrega")
         lbl_fecha.setProperty("class", "FormLabel")
         self.fecha_entrega_input = QDateEdit()
-        self.fecha_entrega_input.setCalendarPopup(True)
+        preparar_campo_fecha(self.fecha_entrega_input)
         self.fecha_entrega_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_entrega_input.setMinimumDate(QDate.currentDate())
         self.fecha_entrega_input.setDate(QDate.currentDate().addDays(7))
@@ -798,7 +791,7 @@ class EnmiendaOCDialog(QDialog):
         self.lbl_fecha = QLabel("Nueva Fecha de Entrega")
         self.lbl_fecha.setProperty("class", "FormLabel")
         self.fecha_nueva_input = QDateEdit()
-        self.fecha_nueva_input.setCalendarPopup(True)
+        preparar_campo_fecha(self.fecha_nueva_input)
         self.fecha_nueva_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_nueva_input.setMinimumDate(QDate.currentDate())
         self.fecha_nueva_input.setDate(QDate.currentDate().addDays(7))

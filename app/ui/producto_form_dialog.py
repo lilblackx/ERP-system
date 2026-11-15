@@ -27,13 +27,13 @@ from app.db.models import Inventario
 from app.services.categorias import CategoriaService
 from app.services.inventario import PrecioService
 from app.services.permisos import PermisoDenegadoError
+from app.ui.calendario import preparar_campo_fecha
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.permisos_ui import MixinPermisos
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
-    COLOR_BLUE_LIGHT,
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -109,13 +109,6 @@ QComboBox::down-arrow, QDateEdit::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QComboBox QAbstractItemView {{
-    background-color: {COLOR_WHITE};
-    border: 1px solid {COLOR_BORDER};
-    selection-background-color: {COLOR_BLUE_LIGHT};
-    selection-color: {COLOR_TEXT_DARK};
-    padding: 4px;
 }}
 QCheckBox {{
     font-size: 12px;
@@ -343,7 +336,7 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         grid.addWidget(self.tiene_vencimiento_check, 6, 0, 1, 2)
 
         self.vencimiento_input = QDateEdit()
-        self.vencimiento_input.setCalendarPopup(True)
+        preparar_campo_fecha(self.vencimiento_input)
         self.vencimiento_input.setDisplayFormat("dd/MM/yyyy")
         self.vencimiento_input.setDate(QDate.currentDate().addDays(30))
         self.vencimiento_input.setFixedHeight(32)

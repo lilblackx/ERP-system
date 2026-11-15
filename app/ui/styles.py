@@ -40,6 +40,9 @@ ICON_CHEVRON_DOWN_URL = str(ICON_CHEVRON_DOWN_PATH).replace("\\", "/")
 # Mismo criterio para los botones up/down de QSpinBox/QDoubleSpinBox -- su chrome nativo
 # (flechitas triangulares apiladas con separador) es el mismo tipo de "no combina" que la
 # flecha del combobox, reportado por el usuario, 2026-08-27.
+# Icono de calendario del campo de fecha: lo distingue de un combo (que lleva el chevron) y de un texto suelto.
+ICON_CALENDAR_PATH = _ICON_CACHE_DIR / "calendar.png"
+ICON_CALENDAR_URL = str(ICON_CALENDAR_PATH).replace("\\", "/")
 ICON_CHEVRON_UP_PATH = _ICON_CACHE_DIR / "chevron_up.png"
 ICON_CHEVRON_UP_URL = str(ICON_CHEVRON_UP_PATH).replace("\\", "/")
 # Tilde de QCheckBox::indicator:checked -- mismo motivo que los chevron de arriba. Sin
@@ -76,6 +79,8 @@ def generar_iconos_qss() -> None:
         qta.icon("fa5s.chevron-down", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(str(ICON_CHEVRON_DOWN_PATH))
     if not ICON_CHEVRON_UP_PATH.exists():
         qta.icon("fa5s.chevron-up", color=COLOR_TEXT_MUTED).pixmap(12, 12).save(str(ICON_CHEVRON_UP_PATH))
+    if not ICON_CALENDAR_PATH.exists():
+        qta.icon("fa5s.calendar-alt", color=COLOR_TEXT_MUTED).pixmap(14, 14).save(str(ICON_CALENDAR_PATH))
     if not ICON_CHECK_PATH.exists():
         qta.icon("fa5s.check", color="#FFFFFF").pixmap(12, 12).save(str(ICON_CHECK_PATH))
 
@@ -246,15 +251,6 @@ QComboBox::down-arrow {{
     height: 12px;
     margin-right: 8px;
 }}
-QComboBox QAbstractItemView {{
-    background-color: {COLOR_CARD_BG};
-    border: 1px solid {COLOR_BORDER};
-    border-radius: 6px;
-    padding: 4px;
-    outline: none;
-    selection-background-color: {COLOR_TABLE_SELECTED};
-    selection-color: {COLOR_TEXT_DARK};
-}}
 QSpinBox, QDoubleSpinBox {{
     background-color: {COLOR_CARD_BG};
     border: 1px solid {COLOR_BORDER};
@@ -359,13 +355,13 @@ def estilizar_tarjeta(widget, padding: int = 4, radio: int = 8) -> None:
 
 
 # Lista emergente de un QCompleter (autocompletado de un campo de texto). Es una ventana propia que no hereda el fondo
-# de ningun contenedor: sin estilo salia con fondo OSCURO y texto oscuro (ilegible). Se aplica a su popup.
+# de ningun contenedor: sin estilo salia con fondo OSCURO y texto oscuro (ilegible). Se aplica a su popup. Sin esquinas
+# redondeadas a proposito: la lista ES la ventana emergente y con el borde redondeado las esquinas se veian negras.
 POPUP_COMPLETER_QSS = f"""
 QListView {{
     background-color: {COLOR_CARD_BG};
     color: {COLOR_TEXT_DARK};
     border: 1px solid {COLOR_BORDER};
-    border-radius: 6px;
     padding: 4px;
     outline: none;
     selection-background-color: {COLOR_TABLE_SELECTED};
@@ -416,8 +412,9 @@ QPushButton#BtnSecondary:hover {{
 }}
 """
 
-# Campo de fecha con el mismo aspecto que QLineEdit/QComboBox (fondo blanco, borde, radio 6). Distinto de FECHA_QSS de
-# reportes_panel, que es un campo sin borde pensado para vivir dentro de una barra de herramientas.
+# Campo de fecha de TODA la app, con el mismo aspecto que QLineEdit/QComboBox (fondo blanco, borde, radio 6) y un
+# icono de calendario en lugar del chevron. Antes las barras de filtros usaban un campo sin borde que no se
+# distinguia de un texto suelto.
 CAMPO_FECHA_QSS = f"""
 QDateEdit {{
     background-color: {COLOR_CARD_BG};
@@ -441,62 +438,24 @@ QDateEdit::drop-down {{
     background: transparent;
 }}
 QDateEdit::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 12px;
-    height: 12px;
+    image: url({ICON_CALENDAR_URL});
+    width: 14px;
+    height: 14px;
 }}
-"""
-
-CALENDARIO_QSS = f"""
-QCalendarWidget {{
-    background-color: {COLOR_CARD_BG};
-    border: 1px solid {COLOR_BORDER};
-    border-radius: 8px;
-    font-family: '{FONT_FAMILY}', Arial, sans-serif;
-}}
-QCalendarWidget QWidget#qt_calendar_navigationbar {{
-    background-color: {COLOR_PRIMARY};
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-}}
-QCalendarWidget QToolButton {{
-    color: {COLOR_WHITE};
-    background-color: transparent;
-    border: none;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 13px;
-    font-weight: 600;
-}}
-QCalendarWidget QToolButton:hover {{
-    background-color: {COLOR_PRIMARY_LIGHT};
-}}
-QCalendarWidget QToolButton::menu-indicator {{
-    image: none;
-}}
-QCalendarWidget QMenu {{
-    background-color: {COLOR_CARD_BG};
-    border: 1px solid {COLOR_BORDER};
-    color: {COLOR_TEXT_DARK};
-}}
-QCalendarWidget QAbstractItemView:enabled {{
-    background-color: {COLOR_CARD_BG};
-    color: {COLOR_TEXT_DARK};
-    selection-background-color: {COLOR_PRIMARY};
-    selection-color: {COLOR_WHITE};
-    outline: none;
-}}
-QCalendarWidget QAbstractItemView:disabled {{
+QDateEdit:disabled {{
+    background-color: {COLOR_CONTENT_BG};
     color: {COLOR_TEXT_LIGHT};
 }}
 """
 
 
 def estilizar_campo_fecha(date_edit) -> None:
-    """Campo de fecha estandar: borde y radio como el resto de campos, y calendario con el estilo corporativo."""
-    date_edit.setStyleSheet(CAMPO_FECHA_QSS)
-    date_edit.setCalendarPopup(True)
-    date_edit.calendarWidget().setStyleSheet(CALENDARIO_QSS)
+    """Campo de fecha estandar de la app (borde, icono de calendario, calendario propio): ver calendario.py. El filtro
+    de la aplicacion lo aplica solo a cualquier QDateEdit con calendario; esta funcion queda para quien quiera
+    dejarlo listo antes de que se muestre."""
+    from app.ui.calendario import preparar_campo_fecha  # import local: calendario.py importa las constantes de aqui
+
+    preparar_campo_fecha(date_edit)
 
 
 SIDEBAR_QSS = f"""

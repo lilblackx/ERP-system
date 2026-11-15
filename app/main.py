@@ -52,6 +52,7 @@ from app.services.licencia import (
     registrar_aviso_bloqueo,
 )
 from app.ui.animaciones import FiltroFundidoDialogos
+from app.ui.estilo_selectores import instalar_estilo_selectores
 from app.ui.geo_http import esperar_workers_pendientes
 from app.ui.licencia_aviso import AvisoLicencia
 from app.ui.login_window import LoginWindow
@@ -137,6 +138,8 @@ def main():
     # nivel QApplication garantiza que cualquier tooltip de la app -- LoginWindow incluida,
     # que ni siquiera es hija de MainWindow -- se vea consistente.
     app.setStyleSheet(GLOBAL_QSS)
+    # Desplegables y campos de fecha: aspecto unico de la app, aplicado al pulirse cada uno (ver estilo_selectores.py).
+    instalar_estilo_selectores(app)
     # El QSS de arriba (regla `QToolTip {...}`) no alcanza por si solo en Windows 11: el
     # estilo nativo "windows11" de Qt6 no respeta background-color/color en el tooltip via
     # stylesheet (reportado por el usuario, 2026-09-08 -- seguia ilegible incluso despues

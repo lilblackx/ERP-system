@@ -17,7 +17,7 @@ from typing import cast
 
 import qtawesome as qta
 from PySide6.QtCore import QDate, Qt, QTimer
-from PySide6.QtGui import QColor, QShowEvent, QTextCharFormat
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -44,24 +44,17 @@ from app.ui.message_box import MessageBox
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.styles import (
     BUTTON_SECONDARY_QSS,
-    COLOR_BORDER,
-    COLOR_CARD_BG,
-    COLOR_FIELD_BG,
-    COLOR_PRIMARY,
-    COLOR_PRIMARY_LIGHT,
     COLOR_TABLE_HEADER,
     COLOR_TEXT_DARK,
     COLOR_TEXT_LIGHT,
     COLOR_TEXT_MUTED,
-    COLOR_WHITE,
-    FONT_FAMILY,
-    ICON_CHEVRON_DOWN_URL,
     SEARCH_QSS,
     TABLE_QSS,
     alinear_encabezados,
     aplicar_fondo_panel,
     aplicar_sombra,
     dar_ancho_a_texto,
+    estilizar_campo_fecha,
     estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonFiltros
@@ -213,126 +206,9 @@ def _formatear_detalle(detalle_crudo: str | None) -> list[str]:
     return lineas
 
 
-# QDateEdit no hereda GLOBAL_QSS de forma confiable cuando se usa suelto en un toolbar
-# (a diferencia de un QComboBox metido en el popup de BotonFiltros, que si hereda el QSS
-# del propio popup) -- mismo motivo por el que los dialogos con stylesheet propio
-# (DIALOG_STYLE en varios *_dialog.py) redefinen esta misma regla en vez de confiar en la
-# cascada. Se aplica explicitamente via .setStyleSheet() sobre cada QDateEdit.
-#
-# Borde de 1px solido (igual a SEARCH_QSS/DIALOG_STYLE) se veia demasiado marcado en un
-# campo angosto de solo fecha -- y hasta con "border: 1px solid transparent" (reserva el
-# espacio pero no deberia pintarse) seguia notandose un contorno (hallazgo del usuario,
-# 2026-08-28, segunda vuelta). Sin borde en ningun estado: transparente en reposo, relleno
-# tipo "chip" (COLOR_FIELD_BG) solo en hover/focus como unica señal visual -- ninguna linea.
-FECHA_QSS = f"""
-QDateEdit {{
-    background-color: transparent;
-    border: none;
-    border-radius: 6px;
-    padding: 5px 8px;
-    font-size: 13px;
-    color: {COLOR_TEXT_DARK};
-    min-height: 20px;
-}}
-QDateEdit:hover, QDateEdit:focus {{
-    background-color: {COLOR_FIELD_BG};
-}}
-QDateEdit::drop-down {{
-    border: none;
-    width: 22px;
-}}
-QDateEdit::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 12px;
-    height: 12px;
-    margin-right: 6px;
-}}
-"""
-
-# El popup del calendario (QCalendarWidget) es una ventana propia (Qt.WindowType.Popup)
-# igual que _PopupAnclado en toolbar_popups.py -- tampoco hereda GLOBAL_QSS, asi que sin
-# esto se ve con el chrome nativo de Windows (fondo blanco liso, sabado/domingo en rojo,
-# barra de navegacion gris) en vez de la paleta de la app.
-CALENDARIO_QSS = f"""
-QCalendarWidget {{
-    background-color: {COLOR_CARD_BG};
-    border: 1px solid {COLOR_BORDER};
-    border-radius: 8px;
-    font-family: '{FONT_FAMILY}', Arial, sans-serif;
-}}
-QCalendarWidget QWidget#qt_calendar_navigationbar {{
-    background-color: {COLOR_PRIMARY};
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-}}
-QCalendarWidget QToolButton {{
-    color: {COLOR_WHITE};
-    background-color: transparent;
-    border: none;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 13px;
-    font-weight: 600;
-}}
-QCalendarWidget QToolButton:hover {{
-    background-color: {COLOR_PRIMARY_LIGHT};
-}}
-QCalendarWidget QToolButton::menu-indicator {{
-    image: none;
-}}
-QCalendarWidget QMenu {{
-    background-color: {COLOR_CARD_BG};
-    border: 1px solid {COLOR_BORDER};
-    color: {COLOR_TEXT_DARK};
-}}
-QCalendarWidget QSpinBox {{
-    background-color: {COLOR_CARD_BG};
-    color: {COLOR_TEXT_DARK};
-    border: 1px solid {COLOR_BORDER};
-    border-radius: 4px;
-    padding: 2px 4px;
-}}
-QCalendarWidget QAbstractItemView:enabled {{
-    background-color: {COLOR_CARD_BG};
-    color: {COLOR_TEXT_DARK};
-    selection-background-color: {COLOR_PRIMARY};
-    selection-color: {COLOR_WHITE};
-    outline: none;
-}}
-QCalendarWidget QAbstractItemView:disabled {{
-    color: {COLOR_TEXT_LIGHT};
-}}
-"""
-
-
 def _estilizar_fecha(date_edit: QDateEdit) -> None:
-    """Aplica FECHA_QSS al campo y CALENDARIO_QSS a su popup, y normaliza el color de
-    sabado/domingo (Qt los pinta en rojo/azul por defecto via setWeekdayTextFormat,
-    QSS no lo sobreescribe porque el modelo del calendario fija su propio ForegroundRole)
-    para que no desentonen con la paleta gris/azul del resto de la app.
-
-    Nota: se probo setReadOnly(True) para bloquear el tecleo de digitos (hallazgo del
-    usuario, 2026-08-28) pero en QDateTimeEdit/QDateEdit el modo solo-lectura tambien
-    desactiva el boton del calendario -- no solo el tecleo -- asi que quedaba imposible
-    abrirlo con el mouse. Se revierte: el campo queda editable por teclado igual que el
-    resto de los QDateEdit de la app (compras.py, producto_form_dialog.py,
-    factura_form_dialog.py, ninguno usa read-only), a cambio de mantener el calendario
-    funcional."""
-    date_edit.setStyleSheet(FECHA_QSS)
-    calendario = date_edit.calendarWidget()
-    calendario.setStyleSheet(CALENDARIO_QSS)
-    formato = QTextCharFormat()
-    formato.setForeground(QColor(COLOR_TEXT_DARK))
-    for dia in (
-        Qt.DayOfWeek.Monday,
-        Qt.DayOfWeek.Tuesday,
-        Qt.DayOfWeek.Wednesday,
-        Qt.DayOfWeek.Thursday,
-        Qt.DayOfWeek.Friday,
-        Qt.DayOfWeek.Saturday,
-        Qt.DayOfWeek.Sunday,
-    ):
-        calendario.setWeekdayTextFormat(dia, formato)
+    """Campo de fecha de la barra de filtros: el campo estandar de la app (con borde e icono de calendario)."""
+    estilizar_campo_fecha(date_edit)
 
 
 def _resumir_detalle(detalle: str | None) -> str:
@@ -479,7 +355,6 @@ class AuditoriaPanel(MixinPaginacion, QWidget):
         lbl_desde = QLabel("Desde:")
         lbl_desde.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.fecha_desde_input = QDateEdit()
-        self.fecha_desde_input.setCalendarPopup(True)
         self.fecha_desde_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_desde_input.setDate(QDate.currentDate().addDays(-30))
         self.fecha_desde_input.setFixedHeight(32)
@@ -489,7 +364,6 @@ class AuditoriaPanel(MixinPaginacion, QWidget):
         lbl_hasta = QLabel("Hasta:")
         lbl_hasta.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.fecha_hasta_input = QDateEdit()
-        self.fecha_hasta_input.setCalendarPopup(True)
         self.fecha_hasta_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_hasta_input.setDate(QDate.currentDate())
         self.fecha_hasta_input.setFixedHeight(32)

@@ -48,6 +48,7 @@ from app.services.vendedores import VendedorService
 from app.services.ventas import VentaService
 from app.ui.animaciones import destello, destello_fila, liberar_boton, ocupar_boton
 from app.ui.autorizacion_dialog import AutorizacionDialog
+from app.ui.calendario import preparar_campo_fecha
 from app.ui.carga_asincrona import CargaAsincronaMixin
 from app.ui.cliente_form_dialog import ClienteFormDialog
 from app.ui.message_box import MessageBox
@@ -56,7 +57,6 @@ from app.ui.pago_linea_dialog import METODOS_PAGO, MONEDAS, PagoLineaDialog
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
-    COLOR_BLUE_LIGHT,
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -201,13 +201,6 @@ QComboBox::down-arrow, QDateEdit::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QComboBox QAbstractItemView {{
-    background-color: {COLOR_WHITE};
-    border: 1px solid {COLOR_BORDER};
-    selection-background-color: {COLOR_BLUE_LIGHT};
-    selection-color: {COLOR_TEXT_DARK};
-    padding: 4px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
@@ -622,7 +615,7 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         lbl_vencimiento = QLabel("Fecha de Vencimiento")
         lbl_vencimiento.setProperty("class", "FormLabel")
         self.vencimiento_input = QDateEdit()
-        self.vencimiento_input.setCalendarPopup(True)
+        preparar_campo_fecha(self.vencimiento_input)
         self.vencimiento_input.setDisplayFormat("dd/MM/yyyy")
         self.vencimiento_input.setMinimumDate(QDate.currentDate())
         self.vencimiento_input.setDate(QDate.currentDate().addDays(30))

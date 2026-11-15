@@ -21,7 +21,6 @@ from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
-    COLOR_BLUE_LIGHT,
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
@@ -92,13 +91,6 @@ QComboBox::down-arrow {{
     width: 12px;
     height: 12px;
     margin-right: 6px;
-}}
-QComboBox QAbstractItemView {{
-    background-color: {COLOR_WHITE};
-    border: 1px solid {COLOR_BORDER};
-    selection-background-color: {COLOR_BLUE_LIGHT};
-    selection-color: {COLOR_TEXT_DARK};
-    padding: 4px;
 }}
 QPushButton#BtnPrimary {{
     background-color: {COLOR_PRIMARY};
