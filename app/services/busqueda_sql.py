@@ -11,11 +11,12 @@ Antes cada servicio armaba el suyo (`ilike(f"%{texto}%")`) y salian dos problema
     devolvia todo. `patron_contiene()` los escapa.
 """
 
-from sqlalchemy import case, func, text
+from sqlalchemy import false, func, text
 from sqlalchemy.orm import Session
 
 _ESCAPE = "\\"
 _COLACION_INSENSIBLE: dict[int, bool] = {}
+_SEPARADORES_RIF = ("-", ".", " ")
 
 
 def escapar_like(texto: str) -> str:
@@ -51,12 +52,17 @@ def contiene(session: Session, columna, patron: str):
     return columna.ilike(patron, escape=_ESCAPE)
 
 
-def rif_completo(columna_letra, columna_numero):
-    """Expresion SQL del RIF/cedula como se ve en pantalla ("J-12345678-9"): la letra y el numero se guardan en
-    columnas separadas, y sin esto buscar el RIF tal como se lee (o copiado de una factura) no encontraba nada; solo
-    funcionaba escribir el numero sin la letra."""
-    return func.concat(
-        func.coalesce(columna_letra, ""),
-        case((columna_letra.isnot(None), "-"), else_=""),
-        func.coalesce(columna_numero, ""),
-    )
+def contiene_rif(session: Session, columna_letra, columna_numero, patron: str):
+    """Condicion "el RIF/cedula guardado coincide con `patron`". La letra y el numero se guardan en columnas separadas
+    y la pantalla los muestra normalizados ("J-07000750-8"), asi que se comparan sin guiones, puntos ni espacios en
+    ambos lados: "J-07000750-8", "j07000750-8" y "J 07.000.750-8" encuentran al mismo registro aunque este guardado
+    como "J" + "070007508". `patron` ya viene armado y escapado (ver `patron_contiene`)."""
+    compacto = patron
+    for separador in _SEPARADORES_RIF:
+        compacto = compacto.replace(separador, "")
+    if compacto.strip("%") == "":
+        return false()  # solo separadores: no hay nada que buscar en el RIF
+    rif = func.concat(func.coalesce(columna_letra, ""), func.coalesce(columna_numero, ""))
+    for separador in _SEPARADORES_RIF:
+        rif = func.replace(rif, separador, "")
+    return contiene(session, rif, compacto)

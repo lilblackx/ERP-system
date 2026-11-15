@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, contains_eager, joinedload
 
 from app.db.models import (
@@ -19,7 +19,7 @@ from app.db.models import (
 )
 from app.services.alcance_vendedor import vendedor_efectivo
 from app.services.auditoria import AuditoriaService
-from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.busqueda_sql import contiene, contiene_rif, patron_contiene
 from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
@@ -391,17 +391,12 @@ class PagoService:
             # La busqueda se resuelve ANTES de paginar: filtrar las filas ya paginadas dejaba el total y las
             # paginas inconsistentes y solo encontraba coincidencias de la pagina actual.
             like = patron_contiene(texto_busqueda)
-            rif_completo = func.concat(
-                func.coalesce(Proveedor.id_legal, ""),
-                case((Proveedor.id_legal.isnot(None), "-"), else_=""),
-                func.coalesce(Proveedor.identificacion_proveedor, ""),
-            )
             query = query.join(Proveedor, Proveedor.id_proveedor == Compra.id_proveedor).filter(
                 or_(
                     contiene(session, Proveedor.nombre_razon_social, like),
                     contiene(session, Proveedor.identificacion_proveedor, like),
                     contiene(session, Proveedor.id_legal, like),
-                    contiene(session, rif_completo, like),
+                    contiene_rif(session, Proveedor.id_legal, Proveedor.identificacion_proveedor, like),
                 )
             )
 

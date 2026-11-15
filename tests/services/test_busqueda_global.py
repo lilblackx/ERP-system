@@ -378,3 +378,71 @@ def test_el_rif_completo_como_se_ve_en_pantalla_encuentra_al_cliente_y_al_provee
     globales = BusquedaGlobalService.buscar(db_session, admin.id_usuario, "j-40707122")
     assert [r.tipo for r in globales] == ["Cliente"]
     assert [r.tipo for r in BusquedaGlobalService.buscar(db_session, admin.id_usuario, "J-50447062-7")] == ["Proveedor"]
+
+
+def test_el_rif_se_encuentra_aunque_se_guarde_sin_guion_o_se_escriba_con_otro_formato(db_session):
+    """La pantalla muestra "J-07000750-8" pero la base puede tener "J" + "070007508": comparar sin separadores."""
+    from app.services.clientes import list_clientes
+    from tests.factories import crear_cliente, crear_usuario_admin
+
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, id_legal="J", identificacion_cliente="070007508", nombre_razon_social="Frio")
+    crear_cliente(db_session, id_legal="V", identificacion_cliente="12345678", nombre_razon_social="Otro")
+
+    for escrito in ("J-07000750-8", "j070007508", "J 07.000.750-8", "J-070007508"):
+        encontrados = list_clientes(db_session, texto_busqueda=escrito, id_usuario=admin.id_usuario)
+        assert [c.id_cliente for c in encontrados["items"]] == [cliente.id_cliente], escrito
+        globales = BusquedaGlobalService.buscar(db_session, admin.id_usuario, escrito)
+        assert [r.tipo for r in globales] == ["Cliente"], escrito
+
+
+def test_un_id_legal_vacio_no_arma_un_rif_con_guion_de_mas(db_session):
+    from app.services.clientes import list_clientes
+    from tests.factories import crear_cliente, crear_usuario_admin
+
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, id_legal="", identificacion_cliente="99887766", nombre_razon_social="Sin letra")
+
+    encontrados = list_clientes(db_session, texto_busqueda="99887766", id_usuario=admin.id_usuario)
+    assert [c.id_cliente for c in encontrados["items"]] == [cliente.id_cliente]
+    # solo separadores: la condicion del RIF no debe reventar (los otros campos si pueden coincidir con "-")
+    list_clientes(db_session, texto_busqueda=" - . ", id_usuario=admin.id_usuario)
+
+
+def test_el_listado_de_proveedores_encuentra_el_rif_completo(db_session):
+    from app.services.proveedores import ProveedorService
+    from tests.factories import crear_proveedor, crear_usuario_admin
+
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session, id_legal="J", identificacion_proveedor="50447062-7")
+    crear_proveedor(db_session, id_legal="G", identificacion_proveedor="20000000-1")
+
+    listado = ProveedorService.listar(db_session, texto_busqueda="j-50447062-7", id_usuario=admin.id_usuario)
+
+    assert [p.id_proveedor for p in listado["items"]] == [proveedor.id_proveedor]
+
+
+def test_las_cuentas_por_pagar_se_buscan_por_el_rif_completo_del_proveedor(db_session):
+    from datetime import date, timedelta
+
+    from app.services.compras import CompraService
+    from app.services.pagos import PagoService
+    from tests.factories import crear_producto, crear_proveedor, crear_usuario_admin
+
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=1000, id_legal="J", identificacion_proveedor="050447062")
+    otro = crear_proveedor(db_session, limite_credito=1000, id_legal="G", identificacion_proveedor="20000000-1")
+    producto = crear_producto(db_session)
+    for prov in (proveedor, otro):
+        CompraService.registrar_compra(
+            db_session,
+            id_proveedor=prov.id_proveedor,
+            id_usuario=admin.id_usuario,
+            condicion_pago="credito",
+            items=[{"id_producto": producto.id_producto, "cantidad": 1, "costo_unitario": "10.00"}],
+            fecha_vencimiento=date.today() + timedelta(days=30),
+        )
+
+    for escrito in ("J-05044706-2", "j050447062"):
+        cuentas = PagoService.listar_cuentas_por_pagar(db_session, id_usuario=admin.id_usuario, texto_busqueda=escrito)
+        assert [c.compra.id_proveedor for c in cuentas["items"]] == [proveedor.id_proveedor], escrito
