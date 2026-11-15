@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QCoreApplication, QSettings, QTimer
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from app.ui import animaciones, carga_asincrona, notificaciones_leidas, permisos_ui
 from app.utils import caja_local, impresora_local, novedades_local
@@ -140,6 +140,13 @@ def _limpiar_eventos_qt(qtbot):
     """Limpia eventos pendientes de Qt despues de cada test para evitar memory corruption
     en CI headless (GH Actions)."""
     yield
+    # Un widget que sobrevive a su test (qtbot.addWidget solo lo cierra) conserva sus QTimer: el
+    # debounce de busqueda del formulario de factura (setText -> 300 ms) dispararia dentro del test
+    # SIGUIENTE, ya sin los parches de este (worker, MessageBox) y abriria un aviso modal real, cuyo
+    # bucle anidado destruye objetos C++ y termina en segfault. Se paran antes de procesar eventos.
+    for widget in QApplication.allWidgets():
+        for timer in widget.findChildren(QTimer):
+            timer.stop()
     # Procesa todos los eventos pendientes múltiples veces
     for _ in range(3):
         QCoreApplication.processEvents()
