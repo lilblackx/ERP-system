@@ -27,6 +27,7 @@ esas columnas.
 
 import json
 import logging
+from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -44,6 +45,7 @@ from app.db.models import (
     Compra,
     CompraDetalle,
     CompraOC,
+    ConciliacionPartida,
     ControlDeTasa,
     CuentaBancaria,
     CuentaPorCobrar,
@@ -100,6 +102,7 @@ POR_PAGINA_REPORTE = 100
 
 # Tamano maximo de un IN (...): SQL Server rechaza consultas con mas de ~2100 parametros.
 _TAMANO_LOTE_IN = 1000
+_DESCRIPCION_FACTURA_ANULADA = "Factura anulada: el importe es lo que se habia cobrado"
 
 ESTADOS_CXC_ABIERTOS = ("pendiente", "parcial", "vencida")
 ESTADOS_CXP_ABIERTOS = ("pendiente", "parcial", "vencida")
@@ -151,20 +154,43 @@ def _bucket_aging(dias_vencido: int) -> str:
 
 
 def _aplicaciones_nc_cliente(
-    session: Session, desde: datetime | None = None, hasta: datetime | None = None
+    session: Session,
+    desde: datetime | None = None,
+    hasta: datetime | None = None,
+    ids_factura: Iterable[int] | None = None,
 ) -> list[dict]:
     """Aplicaciones de notas de credito de cliente a facturas (NotaCreditoService.aplicar_nota_credito_cliente).
     No hay una tabla propia: esa operacion solo baja el saldo de la cuenta por cobrar y deja constancia en
-    Auditoria (accion APLICACION_NOTA_CREDITO_CLIENTE, con factura destino y monto), asi que de ahi se leen."""
-    query = session.query(Auditoria).filter(
+    Auditoria (accion APLICACION_NOTA_CREDITO_CLIENTE, con factura destino y monto), asi que de ahi se leen.
+
+    Con `ids_factura` solo se traen las dirigidas a esas facturas: el filtro va en la base (JSON_VALUE sobre el
+    detalle) y no en Python, porque sin el se leian y parseaban las de todos los clientes en cada consulta."""
+    consulta = session.query(Auditoria).filter(
         Auditoria.accion == "APLICACION_NOTA_CREDITO_CLIENTE", Auditoria.modulo == "NOTAS_CREDITO"
     )
     if desde is not None:
-        query = query.filter(Auditoria.fecha_evento >= desde)
+        consulta = consulta.filter(Auditoria.fecha_evento >= desde)
     if hasta is not None:
-        query = query.filter(Auditoria.fecha_evento <= hasta)
+        consulta = consulta.filter(Auditoria.fecha_evento <= hasta)
+
+    if ids_factura is None:
+        eventos = consulta.order_by(Auditoria.fecha_evento).all()
+    else:
+        # ISJSON primero: JSON_VALUE revienta con un detalle que no es JSON, y una fila asi no debe romper el reporte.
+        factura_destino = case(
+            (func.isjson(Auditoria.detalle) == 1, func.json_value(Auditoria.detalle, "$.id_factura_destino")),
+            else_=None,
+        )
+        ids = sorted({str(i) for i in ids_factura})
+        eventos = []
+        for inicio in range(
+            0, len(ids), _TAMANO_LOTE_IN
+        ):  # por lotes: SQL Server limita los parametros de una consulta
+            eventos.extend(consulta.filter(factura_destino.in_(ids[inicio : inicio + _TAMANO_LOTE_IN])).all())
+        eventos.sort(key=lambda e: e.fecha_evento)
+
     aplicaciones = []
-    for evento in query.order_by(Auditoria.fecha_evento).all():
+    for evento in eventos:
         try:
             detalle = json.loads(evento.detalle) if evento.detalle else {}
             aplicaciones.append(
@@ -2181,6 +2207,8 @@ class ReporteService:
         id_cliente: int,
         fecha_desde: date | None = None,
         fecha_hasta: date | None = None,
+        incluir_contado: bool = True,
+        incluir_anuladas: bool = True,
     ) -> dict:
         """Estado de cuenta de un cliente: cargos (facturas a credito, normales y BCV) y abonos (pagos
         aplicados y notas de credito aplicadas) en orden cronologico con saldo corrido. El cargo original
@@ -2188,7 +2216,10 @@ class ReporteService:
         aplicadas (la cuenta por cobrar no guarda el monto original, solo el saldo que va quedando). Las
         facturas con cuenta BCV cargan su monto por la cuenta BCV: su cuenta normal queda en cero. Sin
         fecha_desde/hasta muestra todo el historial (saldo_inicial=0); con rango, los movimientos previos
-        a fecha_desde se pliegan en saldo_inicial, mismo criterio que kardex_producto."""
+        a fecha_desde se pliegan en saldo_inicial, mismo criterio que kardex_producto. Una venta de contado
+        sale como factura y pago por el mismo monto (neto cero): con `incluir_contado=False` no aparece ni una
+        ni otro, y los saldos no cambian. Una factura anulada sale marcada (su cargo es lo que ya se habia
+        cobrado, con los pagos al lado, neto cero): con `incluir_anuladas=False` no salen ni ella ni sus pagos."""
         require_permiso(session, id_usuario, "reportes", "ver")
         exigir_sin_alcance(session, id_usuario)  # del negocio entero: no es para un vendedor
         cliente = session.get(Cliente, id_cliente)
@@ -2197,21 +2228,32 @@ class ReporteService:
         if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
             raise ValueError("fecha_desde no puede ser posterior a fecha_hasta")
 
+        def del_cliente(consulta):
+            """Las facturas del cliente (la consulta ya une FacturaVenta), sin las de contado ni las anuladas si no se
+            piden."""
+            consulta = consulta.filter(FacturaVenta.id_cliente_factura == id_cliente)
+            if not incluir_contado:
+                consulta = consulta.filter(FacturaVenta.condicion_pago != "contado")
+            if not incluir_anuladas:
+                consulta = consulta.filter(FacturaVenta.estado_factura != "ANULADA")
+            return consulta
+
         cuentas = (
-            session.query(CuentaPorCobrar)
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+            del_cliente(
+                session.query(CuentaPorCobrar).join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+            )
             .options(joinedload(CuentaPorCobrar.factura))
-            .filter(FacturaVenta.id_cliente_factura == id_cliente)
             .all()
         )
         pagos = (
-            session.query(PagoCobro)
-            .join(
-                CuentaPorCobrar,
-                CuentaPorCobrar.id_cuenta_por_cobrar == PagoCobro.id_cuenta_por_cobrar,
+            del_cliente(
+                session.query(PagoCobro)
+                .join(
+                    CuentaPorCobrar,
+                    CuentaPorCobrar.id_cuenta_por_cobrar == PagoCobro.id_cuenta_por_cobrar,
+                )
+                .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
             )
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
-            .filter(FacturaVenta.id_cliente_factura == id_cliente)
             .options(
                 joinedload(PagoCobro.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura),
                 joinedload(PagoCobro.cuenta_bancaria).joinedload(CuentaBancaria.banco),
@@ -2219,29 +2261,48 @@ class ReporteService:
             .all()
         )
         cuentas_bcv = (
-            session.query(CuentaPorCobrarBCV)
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            del_cliente(
+                session.query(CuentaPorCobrarBCV).join(
+                    FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura
+                )
+            )
             .options(joinedload(CuentaPorCobrarBCV.factura))
-            .filter(FacturaVenta.id_cliente_factura == id_cliente)
-            .filter(CuentaPorCobrarBCV.estado != "anulada")
             .all()
         )
         pagos_bcv = (
-            session.query(PagoCobroBCV)
-            .join(
-                CuentaPorCobrarBCV,
-                CuentaPorCobrarBCV.id_cuenta_por_cobrar == PagoCobroBCV.id_cuenta_por_cobrar,
+            del_cliente(
+                session.query(PagoCobroBCV)
+                .join(
+                    CuentaPorCobrarBCV,
+                    CuentaPorCobrarBCV.id_cuenta_por_cobrar == PagoCobroBCV.id_cuenta_por_cobrar,
+                )
+                .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
             )
-            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
-            .filter(FacturaVenta.id_cliente_factura == id_cliente)
             .options(
                 joinedload(PagoCobroBCV.cuenta_por_cobrar).joinedload(CuentaPorCobrarBCV.factura),
                 joinedload(PagoCobroBCV.cuenta_bancaria).joinedload(CuentaBancaria.banco),
             )
             .all()
         )
+        # Transferencias sin identificar conciliadas contra una factura del cliente: bajan el saldo de la cuenta sin
+        # ser un pago ni una nota de credito; sin ellas el cargo reconstruido salia por debajo del total de la factura.
+        conciliaciones = (
+            del_cliente(
+                session.query(ConciliacionPartida)
+                .join(
+                    CuentaPorCobrar,
+                    CuentaPorCobrar.id_cuenta_por_cobrar == ConciliacionPartida.id_cuenta_por_cobrar,
+                )
+                .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+            )
+            .options(
+                joinedload(ConciliacionPartida.partida),
+                joinedload(ConciliacionPartida.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura),
+            )
+            .all()
+        )
         ids_facturas_cliente = {c.id_factura for c in cuentas}
-        aplicaciones_nc = [a for a in _aplicaciones_nc_cliente(session) if a["id_factura"] in ids_facturas_cliente]
+        aplicaciones_nc = _aplicaciones_nc_cliente(session, ids_factura=ids_facturas_cliente)
         ids_facturas_bcv = {c.id_factura for c in cuentas_bcv}
 
         # Sumas por cuenta/factura de una sola pasada: recorrer todos los pagos por cada cuenta era cuadratico (un
@@ -2256,6 +2317,11 @@ class ReporteService:
             pagos_bcv_por_cuenta[p.id_cuenta_por_cobrar] = (
                 pagos_bcv_por_cuenta.get(p.id_cuenta_por_cobrar, Decimal("0.00")) + p.monto
             )
+        conciliado_por_cuenta: dict[int, Decimal] = {}
+        for c in conciliaciones:
+            conciliado_por_cuenta[c.id_cuenta_por_cobrar] = (
+                conciliado_por_cuenta.get(c.id_cuenta_por_cobrar, Decimal("0.00")) + c.monto
+            )
         nc_por_factura: dict[int, Decimal] = {}
         for a in aplicaciones_nc:
             nc_por_factura[a["id_factura"]] = nc_por_factura.get(a["id_factura"], Decimal("0.00")) + a["monto"]
@@ -2264,33 +2330,51 @@ class ReporteService:
         for cuenta in cuentas:
             pagos_de_cuenta = pagos_por_cuenta.get(cuenta.id_cuenta_por_cobrar, Decimal("0.00"))
             nc_de_cuenta = nc_por_factura.get(cuenta.id_factura, Decimal("0.00"))
-            cargo = cuenta.saldo_pendiente + pagos_de_cuenta + nc_de_cuenta
+            conciliado_de_cuenta = conciliado_por_cuenta.get(cuenta.id_cuenta_por_cobrar, Decimal("0.00"))
+            cargo = cuenta.saldo_pendiente + pagos_de_cuenta + nc_de_cuenta + conciliado_de_cuenta
             if cargo == 0 and cuenta.id_factura in ids_facturas_bcv:
                 continue  # factura BCV: su cargo va por la cuenta BCV, esta cuenta normal solo esta en cero
+            # Al anular una factura se borran sus lineas y su total queda en cero: lo unico que se conoce de ella es
+            # lo que ya se habia cobrado. Se deja la fila, marcada, para que los pagos tengan a que referirse.
+            anulada = cuenta.factura.estado_factura == "ANULADA"
             eventos.append(
                 {
                     "fecha": cuenta.factura.fecha_emision,
                     "tipo": "Factura",
-                    "referencia": cuenta.factura.numero_factura,
+                    "referencia": cuenta.factura.numero_factura + (" (anulada)" if anulada else ""),
                     "cargo": cargo,
                     "abono": Decimal("0.00"),
-                    "descripcion": "",
+                    "descripcion": _DESCRIPCION_FACTURA_ANULADA if anulada else "",
                 }
             )
         for cuenta in cuentas_bcv:
             pagos_de_cuenta = pagos_bcv_por_cuenta.get(cuenta.id_cuenta_por_cobrar, Decimal("0.00"))
+            anulada = cuenta.estado == "anulada"
             eventos.append(
                 {
                     "fecha": cuenta.factura.fecha_emision,
                     "tipo": "Factura",
-                    "referencia": f"{cuenta.factura.numero_factura} (BCV)",
+                    "referencia": f"{cuenta.factura.numero_factura} (BCV)" + (" (anulada)" if anulada else ""),
                     "cargo": cuenta.saldo_pendiente + pagos_de_cuenta,
                     "abono": Decimal("0.00"),
-                    "descripcion": "",
+                    "descripcion": _DESCRIPCION_FACTURA_ANULADA if anulada else "",
                 }
             )
         eventos.extend(_abonos_cliente(pagos, "Abono general"))
         eventos.extend(_abonos_cliente(pagos_bcv, "Abono general BCV", sufijo_factura=" (BCV)"))
+        for conciliacion in conciliaciones:
+            referencia_bancaria = conciliacion.partida.referencia_bancaria if conciliacion.partida else None
+            eventos.append(
+                {
+                    "fecha": conciliacion.fecha_conciliacion,
+                    "tipo": "Conciliación",
+                    "referencia": conciliacion.cuenta_por_cobrar.factura.numero_factura,
+                    "cargo": Decimal("0.00"),
+                    "abono": conciliacion.monto,
+                    "descripcion": "Transferencia sin identificar"
+                    + (f" - {referencia_bancaria}" if referencia_bancaria else ""),
+                }
+            )
         for aplicacion in aplicaciones_nc:
             eventos.append(
                 {
@@ -2327,6 +2411,8 @@ class ReporteService:
             "cliente": cliente.nombre_razon_social,
             "fecha_desde": fecha_desde,
             "fecha_hasta": fecha_hasta,
+            "incluir_contado": incluir_contado,
+            "incluir_anuladas": incluir_anuladas,
             "saldo_inicial": saldo_inicial,
             "filas": filas,
             "saldo_final": saldo,

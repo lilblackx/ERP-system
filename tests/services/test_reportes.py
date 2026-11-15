@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -5,6 +6,7 @@ import pytest
 from sqlalchemy import text
 
 from app.db.models import (
+    Auditoria,
     BancoMovimiento,
     Caja,
     ComisionFactura,
@@ -19,12 +21,13 @@ from app.services.banco_movimientos import BancoMovimientoService
 from app.services.comisiones import PagoComisionService
 from app.services.compra_oc import CompraOCService
 from app.services.compras import CompraService
+from app.services.empresa import EmpresaService
 from app.services.inventario import PrecioService
 from app.services.nota_recepcion import NotaRecepcionService
 from app.services.otros_movimientos import OtrosMovimientosService
 from app.services.pagos import PagoService
 from app.services.permisos import PermisoDenegadoError
-from app.services.reportes import ReporteService
+from app.services.reportes import ReporteService, _aplicaciones_nc_cliente
 from app.services.tesoreria import CajaService
 from app.services.ventas import VentaService
 from tests.factories import (
@@ -2242,6 +2245,309 @@ def test_estado_cuenta_cliente_dos_lineas_de_pago_de_una_factura_no_son_abono_ge
     assert pagos[0]["referencia"] == factura.numero_factura
 
 
+def _pagar(session, admin, caja, cxc, monto):
+    PagoService.registrar_pago_cobro(
+        session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto=monto,
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+
+def test_estado_cuenta_cliente_con_rango_pliega_lo_anterior_en_el_saldo_inicial(db_session):
+    """Facturas de hace 10 dias ($100) y de hoy ($50), y un pago de $30 de hace 5 dias."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    vieja = _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=30))
+    _factura_a_credito(db_session, admin, cliente, "50.00", date.today() + timedelta(days=30))
+    cxc_vieja = db_session.query(CuentaPorCobrar).filter_by(id_factura=vieja.id_factura).one()
+    _pagar(db_session, admin, caja, cxc_vieja, "30.00")
+    ahora = datetime.now()
+    db_session.query(FacturaVenta).filter_by(id_factura=vieja.id_factura).update(
+        {"fecha_emision": ahora - timedelta(days=10)}
+    )
+    db_session.query(PagoCobro).update({"fecha_pago": ahora - timedelta(days=5)})
+    db_session.commit()
+    hoy = date.today()
+
+    completo = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+    desde_hace_7 = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente, fecha_desde=hoy - timedelta(days=7)
+    )
+    hasta_hace_3 = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente, fecha_hasta=hoy - timedelta(days=3)
+    )
+    solo_el_dia_del_pago = ReporteService.estado_cuenta_cliente(
+        db_session,
+        id_usuario=admin.id_usuario,
+        id_cliente=cliente.id_cliente,
+        fecha_desde=hoy - timedelta(days=5),
+        fecha_hasta=hoy - timedelta(days=5),
+    )
+
+    assert [f["tipo"] for f in completo["filas"]] == ["Factura", "Pago", "Factura"]
+    assert (completo["saldo_inicial"], completo["saldo_final"]) == (Decimal("0.00"), Decimal("120.00"))
+    # lo anterior al rango (la factura de $100) se pliega en el saldo inicial y no sale como fila
+    assert desde_hace_7["saldo_inicial"] == Decimal("100.00")
+    assert [f["tipo"] for f in desde_hace_7["filas"]] == ["Pago", "Factura"]
+    assert desde_hace_7["filas"][0]["saldo"] == Decimal("70.00")
+    assert desde_hace_7["saldo_final"] == Decimal("120.00")
+    # lo posterior al rango no entra, ni en las filas ni en el saldo final
+    assert [f["tipo"] for f in hasta_hace_3["filas"]] == ["Factura", "Pago"]
+    assert hasta_hace_3["saldo_final"] == Decimal("70.00")
+    # los dos extremos del rango son inclusivos: el pago de ese dia entra
+    assert solo_el_dia_del_pago["saldo_inicial"] == Decimal("100.00")
+    assert [f["tipo"] for f in solo_el_dia_del_pago["filas"]] == ["Pago"]
+
+
+def test_estado_cuenta_cliente_factura_anulada_con_pago_se_marca_como_anulada(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    factura = _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    _pagar(db_session, admin, caja, cxc, "30.00")
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Prueba")
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    filas = resultado["filas"]
+    assert [f["tipo"] for f in filas] == ["Factura", "Pago"]
+    assert filas[0]["referencia"] == f"{factura.numero_factura} (anulada)"
+    assert "anulada" in filas[0]["descripcion"].lower()
+    assert resultado["saldo_final"] == Decimal("0.00")
+
+
+def test_estado_cuenta_cliente_factura_conciliada_con_banco_muestra_el_total_y_la_conciliacion(db_session):
+    """Un monto conciliado contra una transferencia sin identificar baja el saldo sin ser un pago ni una nota de
+    credito: el cargo sigue siendo el total de la factura y la conciliacion sale como un movimiento propio."""
+    from tests.services.test_otros_movimientos import _crear_cxc_real, _crear_partida
+
+    admin = crear_usuario_admin(db_session)
+    banco = crear_cuenta_bancaria(db_session)
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
+    cxc, cliente, _ = _crear_cxc_real(db_session, Decimal("100.00"))
+    OtrosMovimientosService.conciliar_partida(
+        db_session,
+        partida.id_cuenta,
+        cliente.id_cliente,
+        cxc.id_cuenta_por_cobrar,
+        monto=Decimal("40.00"),
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    filas = resultado["filas"]
+    assert [(f["tipo"], f["cargo"], f["abono"]) for f in filas] == [
+        ("Factura", Decimal("100.00"), Decimal("0.00")),
+        ("Conciliación", Decimal("0.00"), Decimal("40.00")),
+    ]
+    assert resultado["saldo_final"] == Decimal("60.00")
+
+
+def test_estado_cuenta_cliente_con_iva_el_cargo_es_el_total_de_la_factura(db_session):
+    """El cargo reconstruido coincide con el total de la factura (subtotal - descuento + IVA)."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "100.00")
+    EmpresaService.guardar_configuracion(
+        db_session,
+        rif=None,
+        razon_social=None,
+        direccion=None,
+        telefono=None,
+        iva_activo=True,
+        iva_porcentaje="16.00",
+        modificado_por=admin.id_usuario,
+    )
+    VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        fecha_vencimiento=date.today() + timedelta(days=10),
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    assert [(f["tipo"], f["cargo"]) for f in resultado["filas"]] == [("Factura", Decimal("116.00"))]
+    assert resultado["saldo_final"] == Decimal("116.00")
+
+
+def test_estado_cuenta_cliente_sin_contado_oculta_la_venta_y_su_pago_y_deja_los_saldos(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "40.00")
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    contado = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=[
+            {
+                "metodo_pago": "efectivo",
+                "moneda": "USD",
+                "monto_moneda_origen": Decimal("40.00"),
+                "id_caja": caja.id_caja,
+            }
+        ],
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "40.00"}],
+    )
+    credito = _factura_a_credito(db_session, admin, cliente, "70.00", date.today() + timedelta(days=10))
+
+    con = ReporteService.estado_cuenta_cliente(db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente)
+    sin = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente, incluir_contado=False
+    )
+
+    assert {f["referencia"] for f in con["filas"]} == {contado.numero_factura, credito.numero_factura}
+    assert [(f["tipo"], f["referencia"]) for f in sin["filas"]] == [("Factura", credito.numero_factura)]
+    assert (con["saldo_final"], sin["saldo_final"]) == (Decimal("70.00"), Decimal("70.00"))
+    assert con["incluir_contado"] is True and sin["incluir_contado"] is False
+
+
+def _aplicacion_nc(session, admin, id_factura_destino, monto="5.00", detalle=None):
+    session.add(
+        Auditoria(
+            id_usuario=admin.id_usuario,
+            accion="APLICACION_NOTA_CREDITO_CLIENTE",
+            modulo="NOTAS_CREDITO",
+            detalle=(
+                detalle
+                if detalle is not None
+                else json.dumps(
+                    {"numero_nota_credito": "NC-1", "id_factura_destino": id_factura_destino, "monto": monto}
+                )
+            ),
+            fecha_evento=datetime.now(),
+        )
+    )
+
+
+def test_las_aplicaciones_de_nc_se_filtran_por_factura_en_la_base_y_toleran_detalles_rotos(db_session):
+    admin = crear_usuario_admin(db_session)
+    _aplicacion_nc(db_session, admin, 101)
+    _aplicacion_nc(db_session, admin, 102)
+    _aplicacion_nc(db_session, admin, 1010)  # "1010" no es "101": el filtro compara el id completo
+    _aplicacion_nc(db_session, admin, 0, detalle="esto no es json")
+    _aplicacion_nc(db_session, admin, 0, detalle=json.dumps({"numero_nota_credito": "NC-2"}))  # sin factura destino
+    db_session.commit()
+
+    solo_101 = _aplicaciones_nc_cliente(db_session, ids_factura=[101])
+    varias = _aplicaciones_nc_cliente(db_session, ids_factura=[101, 102])
+
+    assert [a["id_factura"] for a in solo_101] == [101]
+    assert sorted(a["id_factura"] for a in varias) == [101, 102]
+    assert _aplicaciones_nc_cliente(db_session, ids_factura=[]) == []
+    assert _aplicaciones_nc_cliente(db_session, ids_factura=[999]) == []
+
+
+def test_las_aplicaciones_de_nc_se_piden_por_lotes_si_son_muchas_facturas(db_session, monkeypatch):
+    import app.services.reportes as reportes
+
+    monkeypatch.setattr(reportes, "_TAMANO_LOTE_IN", 2)
+    admin = crear_usuario_admin(db_session)
+    for id_factura in (1, 2, 3, 4, 5):
+        _aplicacion_nc(db_session, admin, id_factura)
+    db_session.commit()
+
+    aplicaciones = _aplicaciones_nc_cliente(db_session, ids_factura=[1, 2, 3, 4, 5])
+
+    assert sorted(a["id_factura"] for a in aplicaciones) == [1, 2, 3, 4, 5]  # las de todos los lotes
+
+
+def test_estado_cuenta_cliente_sin_anuladas_oculta_la_factura_anulada_y_sus_pagos_y_deja_los_saldos(db_session):
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    viva = _factura_a_credito(db_session, admin, cliente, "70.00", date.today() + timedelta(days=10))
+    anulada = _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=anulada.id_factura).one()
+    _pagar(db_session, admin, caja, cxc, "30.00")
+    VentaService.anular_factura(db_session, anulada.id_factura, id_usuario=admin.id_usuario, motivo="Prueba")
+
+    con = ReporteService.estado_cuenta_cliente(db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente)
+    sin = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente, incluir_anuladas=False
+    )
+
+    assert {f["referencia"] for f in con["filas"]} == {
+        viva.numero_factura,
+        f"{anulada.numero_factura} (anulada)",
+        anulada.numero_factura,
+    }
+    assert [(f["tipo"], f["referencia"]) for f in sin["filas"]] == [("Factura", viva.numero_factura)]
+    assert (con["saldo_final"], sin["saldo_final"]) == (Decimal("70.00"), Decimal("70.00"))
+    assert con["incluir_anuladas"] is True and sin["incluir_anuladas"] is False
+
+
+def test_estado_cuenta_cliente_factura_bcv_anulada_con_pago_sale_marcada_y_sus_pagos_no_quedan_sueltos(db_session):
+    """Antes la cuenta BCV anulada se omitia pero sus pagos salian: un pago sin factura y el saldo en negativo."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "100.00")
+    factura = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        porcentaje_bcv=Decimal("10"),
+    )
+    cuenta_bcv = db_session.query(CuentaPorCobrarBCV).filter_by(id_factura=factura.id_factura).one()
+    PagoBCVService.registrar_pago_cobro_bcv(
+        db_session,
+        id_cuenta_por_cobrar=cuenta_bcv.id_cuenta_por_cobrar,
+        monto=Decimal("40.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Prueba")
+
+    con = ReporteService.estado_cuenta_cliente(db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente)
+    sin = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente, incluir_anuladas=False
+    )
+
+    assert [(f["tipo"], f["referencia"]) for f in con["filas"]] == [
+        ("Factura", f"{factura.numero_factura} (BCV) (anulada)"),
+        ("Pago", f"{factura.numero_factura} (BCV)"),
+    ]
+    assert con["filas"][0]["cargo"] == con["filas"][1]["abono"] == Decimal("40.00")
+    assert con["saldo_final"] == Decimal("0.00")
+    assert sin["filas"] == [] and sin["saldo_final"] == Decimal("0.00")
+
+
 # --- cobros_del_periodo ---------------------------------------------------------------
 
 
@@ -3415,7 +3721,7 @@ def test_libro_ventas_informa_la_cantidad_de_facturas(db_session):
 
 # --- auditoria de reportes (2026-11): corte historico, BCV, kardex, libro de ventas ---------------------
 
-from app.db.models import ControlDeTasa, CuentaPorCobrarBCV, FacturaVenta, PagoCobroBCV  # noqa: E402
+from app.db.models import ControlDeTasa, CuentaPorCobrarBCV, FacturaVenta, PagoCobro, PagoCobroBCV  # noqa: E402
 from app.services.notas_credito import NotaCreditoService  # noqa: E402
 from app.services.pagos_bcv import PagoBCVService  # noqa: E402
 

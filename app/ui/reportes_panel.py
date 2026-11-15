@@ -13,13 +13,15 @@ completo en un hilo (ExportacionCompletaMixin); los que agrupan devuelven pocas 
 """
 
 import logging
+from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
 import qtawesome as qta
 from PySide6.QtCore import QAbstractListModel, QDate, QModelIndex, Qt, QTimer
-from PySide6.QtGui import QColor, QShowEvent, QTextCharFormat
+from PySide6.QtGui import QFontMetrics, QShowEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QFileDialog,
@@ -55,18 +57,15 @@ from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.paginacion import ControlPaginacion
 from app.ui.styles import (
     BUTTON_PRIMARY_QSS,
-    CALENDARIO_QSS,
     COLOR_BLUE_LIGHTER,
     COLOR_BORDER,
     COLOR_CARD_BG,
     COLOR_DANGER,
-    COLOR_FIELD_BG,
     COLOR_INFO,
     COLOR_INFO_BG,
     COLOR_PRIMARY,
     COLOR_SUCCESS,
     COLOR_TABLE_HEADER,
-    COLOR_TABLE_SELECTED,
     COLOR_TEXT_DARK,
     COLOR_TEXT_MUTED,
     COLOR_WARNING,
@@ -76,6 +75,7 @@ from app.ui.styles import (
     aplicar_fondo_panel,
     aplicar_sombra,
     dar_ancho_a_texto,
+    estilizar_campo_fecha,
     estilizar_tarjeta,
 )
 from app.ui.toolbar_popups import BotonExportar
@@ -454,43 +454,9 @@ ETIQUETAS_BUCKET = {
     "90+": "90+ días",
 }
 
-# QDateEdit no hereda GLOBAL_QSS de forma confiable cuando se usa suelto en un toolbar --
-# mismo motivo/mismo bloque que app/ui/auditoria_panel.py (cada panel con un QDateEdit
-# suelto redefine esta regla en vez de confiar en la cascada, ver el comentario extenso
-# alla).
-FECHA_QSS = f"""
-QDateEdit {{
-    background-color: transparent;
-    border: none;
-    border-radius: 6px;
-    padding: 5px 8px;
-    font-size: 13px;
-    color: {COLOR_TEXT_DARK};
-    min-height: 20px;
-}}
-QDateEdit:hover, QDateEdit:focus {{
-    background-color: {COLOR_FIELD_BG};
-}}
-QDateEdit::drop-down {{
-    border: none;
-    width: 22px;
-}}
-QDateEdit::down-arrow {{
-    image: url({ICON_CHEVRON_DOWN_URL});
-    width: 12px;
-    height: 12px;
-    margin-right: 6px;
-}}
-"""
-
-# Mismo problema que FECHA_QSS de aca abajo, pero para QComboBox: heredar GLOBAL_QSS
-# (fijado en MainWindow, no en QApplication) se vuelve fragil en cuanto un ancestro
-# intermedio tiene su propio setStyleSheet() -- el combo en si se ve bien pero su POPUP
-# (una ventana top-level aparte) cae al tema nativo, oscuro e ilegible (hallazgo del
-# usuario, 2026-08-31, con el QStackedWidget que se uso primero para filtros_container).
-# Mismo patron ya usado en config_empresa_panel.py (impresora_combo): copiar el bloque
-# QComboBox de GLOBAL_QSS local en vez de confiar en la cascada, agregando ademas la
-# regla de QAbstractItemView (el popup) que ese caso no necesitaba pero este si.
+# El combo no hereda GLOBAL_QSS de forma confiable en un toolbar (un ancestro intermedio con su propio setStyleSheet()
+# corta la cascada), asi que el campo lleva su propia copia del bloque QComboBox de GLOBAL_QSS. La LISTA del desplegable
+# (ventana emergente aparte) no se estiliza aqui: la da el filtro de la aplicacion (ver estilo_selectores.py).
 COMBO_QSS = f"""
 QComboBox {{
     background-color: {COLOR_CARD_BG};
@@ -519,15 +485,6 @@ QComboBox::down-arrow {{
     height: 12px;
     margin-right: 8px;
 }}
-QComboBox QAbstractItemView {{
-    background-color: {COLOR_CARD_BG};
-    border: 1px solid {COLOR_BORDER};
-    border-radius: 6px;
-    padding: 4px;
-    outline: none;
-    selection-background-color: {COLOR_TABLE_SELECTED};
-    selection-color: {COLOR_TEXT_DARK};
-}}
 """
 
 
@@ -539,7 +496,6 @@ LABEL_QSS = f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; f
 
 def _crear_fecha_edit(dias_atras: int = 0, ancho: int = 120) -> QDateEdit:
     fecha = QDateEdit()
-    fecha.setCalendarPopup(True)
     fecha.setDisplayFormat("dd/MM/yyyy")
     fecha.setDate(QDate.currentDate().addDays(-dias_atras))
     fecha.setFixedHeight(32)
@@ -557,21 +513,8 @@ def _crear_combo(ancho: int | None = None) -> QComboBox:
 
 
 def _estilizar_fecha(date_edit: QDateEdit) -> None:
-    date_edit.setStyleSheet(FECHA_QSS)
-    calendario = date_edit.calendarWidget()
-    calendario.setStyleSheet(CALENDARIO_QSS)
-    formato = QTextCharFormat()
-    formato.setForeground(QColor(COLOR_TEXT_DARK))
-    for dia in (
-        Qt.DayOfWeek.Monday,
-        Qt.DayOfWeek.Tuesday,
-        Qt.DayOfWeek.Wednesday,
-        Qt.DayOfWeek.Thursday,
-        Qt.DayOfWeek.Friday,
-        Qt.DayOfWeek.Saturday,
-        Qt.DayOfWeek.Sunday,
-    ):
-        calendario.setWeekdayTextFormat(dia, formato)
+    """Campo de fecha de la barra de filtros: el campo estandar de la app (con borde e icono de calendario)."""
+    estilizar_campo_fecha(date_edit)
 
 
 def _tarea_exportar_reporte(
@@ -865,13 +808,17 @@ def _tarea_historico_precios(session, id_usuario, id_producto):
     return ReporteService.historico_precios(session, id_usuario=id_usuario, id_producto=id_producto)
 
 
-def _tarea_estado_cuenta_cliente(session, id_usuario, id_cliente, fecha_desde, fecha_hasta):
+def _tarea_estado_cuenta_cliente(
+    session, id_usuario, id_cliente, fecha_desde, fecha_hasta, incluir_contado=True, incluir_anuladas=True
+):
     return ReporteService.estado_cuenta_cliente(
         session,
         id_usuario=id_usuario,
         id_cliente=id_cliente,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
+        incluir_contado=incluir_contado,
+        incluir_anuladas=incluir_anuladas,
     )
 
 
@@ -1298,6 +1245,13 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
 
         lbl_reporte = QLabel("Reporte:")
         lbl_reporte.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
+        # Columna de etiquetas: "Reporte:" y la primera etiqueta de cada pagina de filtros miden lo mismo (el de la mas
+        # larga de las comunes), para que el primer campo de cada fila quede justo debajo del combo "Reporte".
+        fuente_etiqueta = lbl_reporte.font()
+        fuente_etiqueta.setBold(True)
+        self._ancho_etiqueta_filtros = QFontMetrics(fuente_etiqueta).horizontalAdvance("Proveedor:") + 4
+        lbl_reporte.setMinimumWidth(self._ancho_etiqueta_filtros)
+        self._espaciado_fila_tipo = h.spacing()
         self.tipo_combo = QComboBox()
         self.tipo_combo.setStyleSheet(COMBO_QSS)
         self.tipo_combo.addItem("Antigüedad de Saldos (CxC)", REPORTE_AGING_CXC)
@@ -1457,7 +1411,6 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         lbl_corte = QLabel("Corte:")
         lbl_corte.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.fecha_corte_input = QDateEdit()
-        self.fecha_corte_input.setCalendarPopup(True)
         self.fecha_corte_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_corte_input.setDate(QDate.currentDate())
         self.fecha_corte_input.setFixedHeight(32)
@@ -1505,7 +1458,6 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         lbl_corte = QLabel("Corte:")
         lbl_corte.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.fecha_corte_cxp_input = QDateEdit()
-        self.fecha_corte_cxp_input.setCalendarPopup(True)
         self.fecha_corte_cxp_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_corte_cxp_input.setDate(QDate.currentDate())
         self.fecha_corte_cxp_input.setFixedHeight(32)
@@ -1545,7 +1497,6 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         lbl_corte = QLabel("Corte:")
         lbl_corte.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.fecha_corte_bcv_input = QDateEdit()
-        self.fecha_corte_bcv_input.setCalendarPopup(True)
         self.fecha_corte_bcv_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_corte_bcv_input.setDate(QDate.currentDate())
         self.fecha_corte_bcv_input.setFixedHeight(32)
@@ -1593,7 +1544,6 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         lbl_desde = QLabel("Desde:")
         lbl_desde.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.fecha_desde_lv_input = QDateEdit()
-        self.fecha_desde_lv_input.setCalendarPopup(True)
         self.fecha_desde_lv_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_desde_lv_input.setDate(QDate.currentDate().addDays(-30))
         self.fecha_desde_lv_input.setFixedHeight(32)
@@ -1603,7 +1553,6 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         lbl_hasta = QLabel("Hasta:")
         lbl_hasta.setStyleSheet(f"border: none; background: transparent; color: {COLOR_TEXT_DARK}; font-weight: 600;")
         self.fecha_hasta_lv_input = QDateEdit()
-        self.fecha_hasta_lv_input.setCalendarPopup(True)
         self.fecha_hasta_lv_input.setDisplayFormat("dd/MM/yyyy")
         self.fecha_hasta_lv_input.setDate(QDate.currentDate())
         self.fecha_hasta_lv_input.setFixedHeight(32)
@@ -2218,12 +2167,24 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         lbl_hasta.setStyleSheet(LABEL_QSS)
         self.fecha_hasta_ecc_input = _crear_fecha_edit()
 
+        # Una venta de contado sale como factura y pago por el mismo monto: sin ella el estado queda mas corto y los
+        # saldos son los mismos.
+        self.incluir_contado_ecc = QCheckBox("Incluir ventas de contado")
+        self.incluir_contado_ecc.setChecked(True)
+        self.incluir_contado_ecc.setStyleSheet(LABEL_QSS)
+        # Una factura anulada sale marcada y con sus pagos al lado (neto cero): sin ella el estado queda mas corto.
+        self.incluir_anuladas_ecc = QCheckBox("Incluir facturas anuladas")
+        self.incluir_anuladas_ecc.setChecked(True)
+        self.incluir_anuladas_ecc.setStyleSheet(LABEL_QSS)
+
         h.addWidget(lbl_cliente)
         h.addWidget(self.cliente_combo_ecc)
         h.addWidget(lbl_desde)
         h.addWidget(self.fecha_desde_ecc_input)
         h.addWidget(lbl_hasta)
         h.addWidget(self.fecha_hasta_ecc_input)
+        h.addWidget(self.incluir_contado_ecc)
+        h.addWidget(self.incluir_anuladas_ecc)
         return w
 
     def _make_filtros_cobros_periodo(self) -> QWidget:
@@ -2723,12 +2684,24 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         self.paginacion.reiniciar()
         self.pie_paginacion.setVisible(modo in REPORTES_PAGINADOS)
 
+    def _alinear_primer_control(self, pagina: QWidget) -> None:
+        """Deja el primer control de la fila de filtros justo debajo del combo "Reporte". Cada pagina empieza con una
+        etiqueta de otro ancho ("Cliente:", "Corte:"...), asi que sin esto el primer campo quedaba corrido unos
+        pixeles respecto al combo de arriba. La etiqueta recibe el ancho de la columna (mas la diferencia de espaciado
+        entre las dos filas) como minimo: una mas larga, como "Horizonte (dias):", no se recorta, solo queda sin
+        alinear."""
+        layout = pagina.layout()
+        primero = layout.itemAt(0).widget() if layout is not None and layout.count() else None
+        if isinstance(primero, QLabel):
+            primero.setMinimumWidth(self._ancho_etiqueta_filtros + self._espaciado_fila_tipo - layout.spacing())
+
     def _asegurar_pagina(self, modo: str) -> QWidget:
         """Pagina de filtros del reporte `modo`; la construye la primera vez que se pide."""
         pagina = self._filtros_paginas.get(modo)
         if pagina is None:
             pagina = self._filtros_fabricas[modo]()
             pagina.setVisible(False)
+            self._alinear_primer_control(pagina)
             self._filtros_layout.addWidget(pagina)
             self._filtros_paginas[modo] = pagina
             self._aplicar_catalogos()
@@ -3247,6 +3220,8 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                     "id_cliente": id_cliente,
                     "fecha_desde": fecha_desde,
                     "fecha_hasta": fecha_hasta,
+                    "incluir_contado": self.incluir_contado_ecc.isChecked(),
+                    "incluir_anuladas": self.incluir_anuladas_ecc.isChecked(),
                 },
             )
         elif modo == REPORTE_COBROS_PERIODO:
@@ -5854,11 +5829,14 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
     def _total_para_exportar(self):
         """Fila final de totales del reporte exportado (None si el reporte no lleva).
 
-        El estado de cuenta del cliente cierra con el saldo pendiente (el saldo corrido del ultimo
-        movimiento): va en la columna Saldo con la etiqueta en Referencia, y los exportadores la
-        pintan con el mismo fondo azul de la fila de totales."""
+        El estado de cuenta del cliente cierra con el saldo corrido del ultimo movimiento: va en la columna
+        Saldo con la etiqueta en Referencia, y los exportadores la pintan con el mismo fondo azul de la fila de
+        totales. Es el saldo pendiente solo si el rango llega a hoy; con un "Hasta" pasado es el saldo a esa fecha."""
         if self._ultimo_modo == REPORTE_ESTADO_CTA_CLIENTE:
-            return ["", "", "", "Saldo Pendiente", "", "", float(self._ultimo_resultado["saldo_final"])]
+            resultado = self._ultimo_resultado
+            hasta = resultado.get("fecha_hasta")
+            etiqueta = f"Saldo al {hasta.strftime('%d/%m/%Y')}" if hasta and hasta < date.today() else "Saldo Pendiente"
+            return ["", "", "", etiqueta, "", "", float(resultado["saldo_final"])]
         return None
 
     def _secciones_para_exportar(self) -> list[dict] | None:
@@ -6193,6 +6171,8 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 "Hasta": (resultado["fecha_hasta"].strftime("%d/%m/%Y") if resultado["fecha_hasta"] else "N/A"),
                 "Saldo inicial": f"${float(resultado['saldo_inicial']):,.2f}",
                 "Saldo final": f"${float(resultado['saldo_final']):,.2f}",
+                "Ventas de contado": None if resultado.get("incluir_contado", True) else "No incluidas",
+                "Facturas anuladas": None if resultado.get("incluir_anuladas", True) else "No incluidas",
             }
             return (
                 "Estado de Cuenta por Cliente",

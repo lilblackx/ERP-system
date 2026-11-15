@@ -1173,3 +1173,145 @@ def test_la_tarea_de_exportacion_de_un_reporte_no_paginado_no_consulta_nada(tmp_
     )
 
     assert ruta_devuelta == ruta and cantidad >= 1 and (tmp_path / "vendidos.pdf").stat().st_size > 500
+
+
+def _resultado_estado_cuenta(**extra):
+    resultado = {
+        "id_cliente": 1,
+        "cliente": "Ana",
+        "fecha_desde": date(2026, 10, 1),
+        "fecha_hasta": date.today(),
+        "incluir_contado": True,
+        "saldo_inicial": Decimal("0.00"),
+        "filas": [],
+        "saldo_final": Decimal("75.50"),
+    }
+    resultado.update(extra)
+    return resultado
+
+
+def test_el_total_del_estado_de_cuenta_es_saldo_pendiente_si_el_rango_llega_a_hoy(panel):
+    panel._ultimo_modo = rp.REPORTE_ESTADO_CTA_CLIENTE
+    panel._ultimo_resultado = _resultado_estado_cuenta(fecha_hasta=date.today())
+
+    assert panel._total_para_exportar() == ["", "", "", "Saldo Pendiente", "", "", 75.5]
+
+
+def test_el_total_del_estado_de_cuenta_con_un_hasta_pasado_dice_el_saldo_a_esa_fecha(panel):
+    panel._ultimo_modo = rp.REPORTE_ESTADO_CTA_CLIENTE
+    panel._ultimo_resultado = _resultado_estado_cuenta(fecha_hasta=date(2026, 10, 31))
+
+    assert panel._total_para_exportar()[3] == "Saldo al 31/10/2026"
+
+
+def test_el_estado_de_cuenta_pide_incluir_las_ventas_de_contado_salvo_que_se_desmarque(
+    panel_con_generar_real, monkeypatch
+):
+    panel = panel_con_generar_real
+    _WorkerRegistrado.creados = []
+    monkeypatch.setattr(rp, "QueryWorker", _WorkerRegistrado)
+    panel.tipo_combo.setCurrentIndex(panel.tipo_combo.findData(rp.REPORTE_ESTADO_CTA_CLIENTE))
+    panel._llenar_catalogos(_catalogos())
+    panel.cliente_combo_ecc.setCurrentIndex(1)
+    panel._ultimo_modo = rp.REPORTE_ESTADO_CTA_CLIENTE
+    assert panel.incluir_contado_ecc.isChecked()  # por defecto se ven todas las ventas
+
+    panel._generar()
+    _tarea, filtros_con = panel._consulta_pendiente
+    panel.incluir_contado_ecc.setChecked(False)
+    panel._generar()
+    _tarea, filtros_sin = panel._consulta_pendiente
+
+    assert filtros_con["incluir_contado"] is True
+    assert filtros_sin["incluir_contado"] is False
+
+
+def test_la_tarea_del_estado_de_cuenta_pasa_incluir_contado_al_servicio(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(rp.ReporteService, "estado_cuenta_cliente", lambda *a, **k: llamadas.append(k))
+
+    rp._tarea_estado_cuenta_cliente(MagicMock(), 1, 5, date(2026, 10, 1), date(2026, 10, 31), incluir_contado=False)
+
+    assert llamadas[0]["incluir_contado"] is False
+
+
+def test_el_pdf_del_estado_de_cuenta_avisa_cuando_no_incluye_las_ventas_de_contado(panel):
+    panel._ultimo_modo = rp.REPORTE_ESTADO_CTA_CLIENTE
+
+    panel._ultimo_resultado = _resultado_estado_cuenta(incluir_contado=False)
+    _titulo, filtros, _anchos = panel._info_pdf()
+    assert filtros["Ventas de contado"] == "No incluidas"
+
+    panel._ultimo_resultado = _resultado_estado_cuenta(incluir_contado=True)
+    _titulo, filtros, _anchos = panel._info_pdf()
+    assert filtros["Ventas de contado"] is None  # el exportador omite lo vacio
+
+
+@pytest.mark.parametrize(
+    "modo",
+    [
+        rp.REPORTE_ESTADO_CTA_CLIENTE,  # "Cliente:" mas corta que "Reporte:"
+        rp.REPORTE_KARDEX,  # "Producto:", mas larga
+        rp.REPORTE_VALORIZACION,  # "Categoria:", mas larga
+        rp.REPORTE_COBROS_PERIODO,  # "Desde:"
+        rp.REPORTE_AGING_CXC,  # "Corte:"
+    ],
+)
+def test_el_primer_campo_de_los_filtros_queda_justo_debajo_del_combo_de_reporte(panel, qtbot, modo):
+    panel.resize(1400, 600)
+    panel.show()
+    qtbot.waitExposed(panel)
+
+    panel.tipo_combo.setCurrentIndex(panel.tipo_combo.findData(modo))
+    qtbot.wait(50)
+
+    pagina = panel._filtros_paginas[modo]
+    controles = [pagina.layout().itemAt(i).widget() for i in range(pagina.layout().count())]
+    primer_campo = next(w for w in controles if w is not None and not isinstance(w, QLabel))
+    x_campo = primer_campo.mapTo(panel, primer_campo.rect().topLeft()).x()
+    x_combo = panel.tipo_combo.mapTo(panel, panel.tipo_combo.rect().topLeft()).x()
+    assert abs(x_campo - x_combo) <= 1
+
+
+def test_el_estado_de_cuenta_pide_incluir_las_facturas_anuladas_salvo_que_se_desmarque(
+    panel_con_generar_real, monkeypatch
+):
+    panel = panel_con_generar_real
+    _WorkerRegistrado.creados = []
+    monkeypatch.setattr(rp, "QueryWorker", _WorkerRegistrado)
+    panel.tipo_combo.setCurrentIndex(panel.tipo_combo.findData(rp.REPORTE_ESTADO_CTA_CLIENTE))
+    panel._llenar_catalogos(_catalogos())
+    panel.cliente_combo_ecc.setCurrentIndex(1)
+    panel._ultimo_modo = rp.REPORTE_ESTADO_CTA_CLIENTE
+    assert panel.incluir_anuladas_ecc.isChecked()  # por defecto se ven todas, marcadas
+
+    panel._generar()
+    _tarea, filtros_con = panel._consulta_pendiente
+    panel.incluir_anuladas_ecc.setChecked(False)
+    panel._generar()
+    _tarea, filtros_sin = panel._consulta_pendiente
+
+    assert filtros_con["incluir_anuladas"] is True
+    assert filtros_sin["incluir_anuladas"] is False
+    assert filtros_sin["incluir_contado"] is True  # los dos checks son independientes
+
+
+def test_la_tarea_del_estado_de_cuenta_pasa_incluir_anuladas_al_servicio(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(rp.ReporteService, "estado_cuenta_cliente", lambda *a, **k: llamadas.append(k))
+
+    rp._tarea_estado_cuenta_cliente(MagicMock(), 1, 5, date(2026, 10, 1), date(2026, 10, 31), incluir_anuladas=False)
+
+    assert llamadas[0]["incluir_anuladas"] is False
+
+
+def test_el_pdf_del_estado_de_cuenta_avisa_cuando_no_incluye_las_facturas_anuladas(panel):
+    panel._ultimo_modo = rp.REPORTE_ESTADO_CTA_CLIENTE
+
+    panel._ultimo_resultado = _resultado_estado_cuenta(incluir_anuladas=False)
+    _titulo, filtros, _anchos = panel._info_pdf()
+    assert filtros["Facturas anuladas"] == "No incluidas"
+
+    panel._ultimo_resultado = _resultado_estado_cuenta(incluir_anuladas=True)
+    _titulo, filtros, _anchos = panel._info_pdf()
+    assert filtros["Facturas anuladas"] is None
