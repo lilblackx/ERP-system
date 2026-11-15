@@ -224,18 +224,24 @@ def sesion_resiliente(test_engine):
 
 def _matar_la_conexion_de(sesion, test_engine):
     """Cierra desde el servidor la conexion que tiene la sesion (como lo hace un firewall o un reinicio)."""
-    spid = sesion.execute(text("SELECT @@SPID")).scalar()
+    spid, conexion = sesion.execute(
+        text("SELECT @@SPID, (SELECT connection_id FROM sys.dm_exec_connections WHERE session_id = @@SPID)")
+    ).one()
     with test_engine.connect() as admin:
         admin.execution_options(isolation_level="AUTOCOMMIT").execute(text(f"KILL {int(spid)}"))
-    return spid
+    return conexion
 
 
 def test_una_lectura_se_repite_sola_si_la_conexion_de_la_sesion_murio(sesion_resiliente, test_engine, db_session):
-    spid_viejo = _matar_la_conexion_de(sesion_resiliente, test_engine)
+    conexion_vieja = _matar_la_conexion_de(sesion_resiliente, test_engine)
 
-    resultado = sesion_resiliente.execute(text("SELECT @@SPID")).scalar()  # el "siguiente clic" del dialogo
+    # el "siguiente clic" del dialogo. Se compara el id de CONEXION, no el SPID: SQL Server reutiliza los SPID libres y
+    # la conexion nueva podia recibir el mismo numero (el test fallaba al azar).
+    conexion_nueva = sesion_resiliente.execute(
+        text("SELECT connection_id FROM sys.dm_exec_connections WHERE session_id = @@SPID")
+    ).scalar()
 
-    assert resultado != spid_viejo  # la repeticion fue por una conexion nueva
+    assert conexion_nueva != conexion_vieja  # la repeticion fue por una conexion nueva
 
 
 def test_get_y_query_tambien_se_recuperan(sesion_resiliente, test_engine, db_session):

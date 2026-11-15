@@ -127,10 +127,16 @@ Tests (necesitan el contenedor de SQL Server arriba -- `docker compose up -d` de
 completo la primera vez que corren):
 
 ```bash
-pytest                                          # suite completa
+pytest -n 6 --dist loadfile                     # suite completa en paralelo (~6 min)
+pytest                                          # suite completa en serie (lenta)    
+pytest -m "not db"                              # solo los tests que no tocan la base
 pytest tests/services/test_ventas.py            # un archivo
 pytest tests/services/test_ventas.py::test_xyz  # un test puntual
 ```
+
+En paralelo cada worker usa su propia base (`distribuidora_dj_test_gw0`, `_gw1`, ...): se crean y
+migran la primera vez y se reutilizan despues. `--dist loadfile` mantiene cada archivo en un solo
+worker.
 
 Para que ruff se corra solo antes de cada commit (en vez de enterarse recien cuando falla
 CI despues del push), instalar el hook de pre-commit una vez por clon:
