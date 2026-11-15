@@ -336,7 +336,7 @@ COLS_SIN_MOVIMIENTO = [
     "Último Movimiento",
 ]
 COLS_HISTORICO_PRECIOS = ["Fecha", "Precio Venta", "Margen %", "Usuario"]
-COLS_ESTADO_CTA_CLIENTE = ["Fecha", "Tipo", "Referencia", "Cargo", "Abono", "Saldo"]
+COLS_ESTADO_CTA_CLIENTE = ["Fecha", "Tipo", "Descripción", "Referencia", "Cargo", "Abono", "Saldo"]
 COLS_COBROS_PERIODO = ["Fecha", "Cliente", "Factura", "Cartera", "Método", "Moneda", "Monto"]
 COLS_CLIENTES_MOROSOS = [
     "Cliente",
@@ -588,10 +588,18 @@ def _tarea_exportar_reporte(
     contexto = SimpleNamespace(_ultimo_modo=modo, _ultimo_resultado=resultado)
     _nombre, encabezados, filas = ReportesPanel._filas_para_exportar(contexto)
     secciones = ReportesPanel._secciones_para_exportar(contexto)
+    total_row = ReportesPanel._total_para_exportar(contexto)
     config_empresa = EmpresaService.obtener_datos_documento(session)
     if formato == "excel":
         exportar_excel(
-            ruta, encabezados, filas, titulo=titulo, config_empresa=config_empresa, filtros=filtros, secciones=secciones
+            ruta,
+            encabezados,
+            filas,
+            titulo=titulo,
+            config_empresa=config_empresa,
+            filtros=filtros,
+            secciones=secciones,
+            total_row=total_row,
         )
     else:
         exportar_pdf(
@@ -603,6 +611,7 @@ def _tarea_exportar_reporte(
             col_widths=col_widths,
             config_empresa=config_empresa,
             secciones=secciones,
+            total_row=total_row,
             apaisado=apaisado,
         )
     return ruta, len(filas)
@@ -4624,9 +4633,10 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 0: Qt.AlignmentFlag.AlignLeft,
                 1: Qt.AlignmentFlag.AlignLeft,
                 2: Qt.AlignmentFlag.AlignLeft,
-                3: Qt.AlignmentFlag.AlignRight,
+                3: Qt.AlignmentFlag.AlignLeft,
                 4: Qt.AlignmentFlag.AlignRight,
                 5: Qt.AlignmentFlag.AlignRight,
+                6: Qt.AlignmentFlag.AlignRight,
             },
         )
         filas = resultado["filas"]
@@ -4635,18 +4645,19 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         for row, f in enumerate(filas[: self.tabla.rowCount()]):
             self.tabla.setItem(row, 0, QTableWidgetItem(f["fecha"].strftime("%d/%m/%Y")))
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo"]))
-            self.tabla.setItem(row, 2, QTableWidgetItem(f["referencia"] or "N/A"))
+            self.tabla.setItem(row, 2, QTableWidgetItem(f.get("descripcion") or ""))
+            self.tabla.setItem(row, 3, QTableWidgetItem(f["referencia"] or "N/A"))
             self.tabla.setItem(
                 row,
-                3,
+                4,
                 self._item_num(f"${float(f['cargo']):,.2f}" if f["cargo"] else ""),
             )
             self.tabla.setItem(
                 row,
-                4,
+                5,
                 self._item_num(f"${float(f['abono']):,.2f}" if f["abono"] else ""),
             )
-            self.tabla.setItem(row, 5, self._item_num(f"${float(f['saldo']):,.2f}"))
+            self.tabla.setItem(row, 6, self._item_num(f"${float(f['saldo']):,.2f}"))
 
         self.lbl_total.setText(f"{resultado['cliente']} — {n_filas} movimiento{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
@@ -5610,6 +5621,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 [
                     f["fecha"],
                     f["tipo"],
+                    f.get("descripcion") or "",
                     f["referencia"],
                     float(f["cargo"]),
                     float(f["abono"]),
@@ -5838,6 +5850,16 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
             COLS_COMISIONES_PAGADAS_PENDIENTES,
             filas,
         )
+
+    def _total_para_exportar(self):
+        """Fila final de totales del reporte exportado (None si el reporte no lleva).
+
+        El estado de cuenta del cliente cierra con el saldo pendiente (el saldo corrido del ultimo
+        movimiento): va en la columna Saldo con la etiqueta en Referencia, y los exportadores la
+        pintan con el mismo fondo azul de la fila de totales."""
+        if self._ultimo_modo == REPORTE_ESTADO_CTA_CLIENTE:
+            return ["", "", "", "Saldo Pendiente", "", "", float(self._ultimo_resultado["saldo_final"])]
+        return None
 
     def _secciones_para_exportar(self) -> list[dict] | None:
         """Tablas adicionales que van debajo de la principal en el Excel/PDF: las notas de credito del
@@ -6175,7 +6197,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
             return (
                 "Estado de Cuenta por Cliente",
                 filtros,
-                [1.0, 1.0, 1.5, 1.0, 1.0, 1.0],
+                [1.0, 1.0, 2.2, 1.5, 1.0, 1.0, 1.0],
             )
 
         if self._ultimo_modo == REPORTE_COBROS_PERIODO:

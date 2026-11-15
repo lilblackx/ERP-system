@@ -611,6 +611,9 @@ class PagoBCVService:
         try:
             facturas_actualizadas = []
             monto_restante = monto_a_aplicar
+            # Misma fecha para todos los pagos del abono: es lo que permite al estado de
+            # cuenta reconocer que las filas son UN solo abono y no varios pagos sueltos.
+            fecha_pago_abono = datetime.now()
 
             # Aplicar pagos usando FIFO
             for cuenta in cuentas_pendientes:
@@ -664,6 +667,7 @@ class PagoBCVService:
                     id_caja=id_caja,
                     id_tasa=id_tasa,
                     referencia=referencia,
+                    fecha_pago=fecha_pago_abono,
                     id_usuario=id_usuario,
                 )
 

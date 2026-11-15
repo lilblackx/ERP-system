@@ -180,6 +180,70 @@ def _aplicaciones_nc_cliente(
     return aplicaciones
 
 
+def _descripcion_abono(grupo: list) -> str:
+    """Formato de pago del abono para el estado de cuenta: 'Efectivo' o, para el resto,
+    'Bs. <monto_bs> - <tasa> - <banco>' con las partes que existan (monto en bolivares
+    sumado del grupo, tasa y banco de la cuenta destino)."""
+    primero = grupo[0]
+    if (primero.metodo_pago or "").strip().lower() == "efectivo":
+        return "Efectivo"
+    monto_bs = sum((p.monto_bolivares for p in grupo if p.monto_bolivares is not None), Decimal("0.00"))
+    partes = []
+    if monto_bs:
+        partes.append(f"Bs. {float(monto_bs):,.2f}")
+    if primero.tasa_cambio is not None:
+        partes.append(f"{float(primero.tasa_cambio):,.2f}")
+    cuenta = primero.cuenta_bancaria
+    banco = None
+    if cuenta is not None:
+        banco = cuenta.banco.nombre_banco if cuenta.banco is not None else cuenta.numero_cuenta
+    if banco:
+        partes.append(banco)
+    if partes:
+        return " - ".join(partes)
+    return (primero.metodo_pago or "pago").replace("_", " ").capitalize()
+
+
+def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "") -> list[dict]:
+    """Pagos de un cliente agrupados por abono para el estado de cuenta.
+
+    En la base cada factura afectada por un abono general guarda su propio pago
+    (la asignacion FIFO), pero para el cliente el abono es UN solo movimiento de
+    dinero: las filas que comparten fecha, metodo, referencia, origen y usuario se
+    muestran como un solo evento con el monto total. Un pago individual siempre
+    forma su propio grupo (su fecha_pago es unica)."""
+    grupos: dict[tuple, list] = {}
+    for pago in pagos:
+        clave = (
+            pago.fecha_pago,
+            pago.metodo_pago,
+            pago.referencia,
+            pago.id_cuenta_bancaria,
+            pago.id_caja,
+            pago.creado_por,
+        )
+        grupos.setdefault(clave, []).append(pago)
+
+    eventos = []
+    for grupo in grupos.values():
+        primero = grupo[0]
+        if len(grupo) == 1:
+            referencia = primero.referencia or primero.cuenta_por_cobrar.factura.numero_factura + sufijo_factura
+        else:
+            referencia = primero.referencia or etiqueta_abono
+        eventos.append(
+            {
+                "fecha": primero.fecha_pago,
+                "tipo": "Pago",
+                "referencia": referencia,
+                "cargo": Decimal("0.00"),
+                "abono": sum((p.monto for p in grupo), Decimal("0.00")),
+                "descripcion": _descripcion_abono(grupo),
+            }
+        )
+    return eventos
+
+
 def _cuentas_al_corte(
     session: Session,
     query,
@@ -2145,7 +2209,10 @@ class ReporteService:
             )
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
             .filter(FacturaVenta.id_cliente_factura == id_cliente)
-            .options(joinedload(PagoCobro.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura))
+            .options(
+                joinedload(PagoCobro.cuenta_por_cobrar).joinedload(CuentaPorCobrar.factura),
+                joinedload(PagoCobro.cuenta_bancaria).joinedload(CuentaBancaria.banco),
+            )
             .all()
         )
         cuentas_bcv = (
@@ -2164,7 +2231,10 @@ class ReporteService:
             )
             .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
             .filter(FacturaVenta.id_cliente_factura == id_cliente)
-            .options(joinedload(PagoCobroBCV.cuenta_por_cobrar).joinedload(CuentaPorCobrarBCV.factura))
+            .options(
+                joinedload(PagoCobroBCV.cuenta_por_cobrar).joinedload(CuentaPorCobrarBCV.factura),
+                joinedload(PagoCobroBCV.cuenta_bancaria).joinedload(CuentaBancaria.banco),
+            )
             .all()
         )
         ids_facturas_cliente = {c.id_factura for c in cuentas}
@@ -2201,6 +2271,7 @@ class ReporteService:
                     "referencia": cuenta.factura.numero_factura,
                     "cargo": cargo,
                     "abono": Decimal("0.00"),
+                    "descripcion": "",
                 }
             )
         for cuenta in cuentas_bcv:
@@ -2212,28 +2283,11 @@ class ReporteService:
                     "referencia": f"{cuenta.factura.numero_factura} (BCV)",
                     "cargo": cuenta.saldo_pendiente + pagos_de_cuenta,
                     "abono": Decimal("0.00"),
+                    "descripcion": "",
                 }
             )
-        for pago in pagos:
-            eventos.append(
-                {
-                    "fecha": pago.fecha_pago,
-                    "tipo": "Pago",
-                    "referencia": pago.referencia or pago.cuenta_por_cobrar.factura.numero_factura,
-                    "cargo": Decimal("0.00"),
-                    "abono": pago.monto,
-                }
-            )
-        for pago in pagos_bcv:
-            eventos.append(
-                {
-                    "fecha": pago.fecha_pago,
-                    "tipo": "Pago",
-                    "referencia": pago.referencia or f"{pago.cuenta_por_cobrar.factura.numero_factura} (BCV)",
-                    "cargo": Decimal("0.00"),
-                    "abono": pago.monto,
-                }
-            )
+        eventos.extend(_abonos_cliente(pagos, "Abono general"))
+        eventos.extend(_abonos_cliente(pagos_bcv, "Abono general BCV", sufijo_factura=" (BCV)"))
         for aplicacion in aplicaciones_nc:
             eventos.append(
                 {
@@ -2242,6 +2296,7 @@ class ReporteService:
                     "referencia": aplicacion["numero_nota_credito"],
                     "cargo": Decimal("0.00"),
                     "abono": aplicacion["monto"],
+                    "descripcion": "",
                 }
             )
         eventos.sort(key=lambda e: e["fecha"])

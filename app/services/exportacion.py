@@ -28,7 +28,7 @@ from xml.sax.saxutils import escape
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -242,10 +242,13 @@ def exportar_excel(
             total_row_con_label[0] = total_label
             total_row = total_row_con_label
 
+        relleno_total = PatternFill("solid", fgColor="12459B")
+        fuente_total = Font(bold=True, color="FFFFFF")
         for col_idx, valor in enumerate(total_row, start=1):
             celda = hoja.cell(row=fila_actual, column=col_idx)
             _poner_valor_excel(celda, valor)
-            celda.font = Font(bold=True)
+            celda.font = fuente_total
+            celda.fill = relleno_total
         fila_actual += 1
         cantidad_filas += 1
 

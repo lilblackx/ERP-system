@@ -2099,6 +2099,67 @@ def test_estado_cuenta_cliente_no_mezcla_clientes(db_session):
     assert resultado["filas"][0]["cargo"] == Decimal("40.00")
 
 
+def test_estado_cuenta_cliente_abono_general_sale_como_un_solo_pago(db_session):
+    """El abono general guarda un pago por factura (asignacion FIFO), pero en el
+    estado de cuenta debe verse como UN solo abono con el monto total."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    _factura_a_credito(db_session, admin, cliente, "60.00", date.today() + timedelta(days=10))
+    _factura_a_credito(db_session, admin, cliente, "40.00", date.today() + timedelta(days=10))
+
+    PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("100.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
+    assert len(pagos) == 1
+    assert pagos[0]["abono"] == Decimal("100.00")
+    assert pagos[0]["referencia"] == "Abono general"
+    assert pagos[0]["descripcion"] == "Efectivo"
+    assert resultado["saldo_final"] == Decimal("0.00")
+
+
+def test_estado_cuenta_cliente_descripcion_de_transferencia(db_session):
+    """Una transferencia muestra 'Bs. <monto_bs> - <tasa> - <banco>' en Descripcion."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    banco = crear_banco(db_session, nombre_banco="Banesco")
+    cuenta = crear_cuenta_bancaria(db_session, banco=banco)
+    _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+
+    PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("50.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="transferencia",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
+    assert len(pagos) == 1
+    # $50.00 * 900 = 45.000,00 Bs
+    assert pagos[0]["descripcion"] == "Bs. 45,000.00 - 900.00 - Banesco"
+
+
 # --- cobros_del_periodo ---------------------------------------------------------------
 
 

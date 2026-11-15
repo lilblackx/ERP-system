@@ -590,6 +590,9 @@ class PagoService:
         try:
             facturas_actualizadas = []
             monto_restante = monto_a_aplicar
+            # Misma fecha para todos los pagos del abono: es lo que permite al estado de
+            # cuenta reconocer que las filas son UN solo abono y no varios pagos sueltos.
+            fecha_pago_abono = datetime.now()
 
             # Aplicar pagos usando FIFO
             for cuenta in cuentas_pendientes:
@@ -631,7 +634,7 @@ class PagoService:
                     monto_bolivares=monto_aplicado_bs,
                     tasa_cambio=tasa_cambio.quantize(Decimal("0.01")) if tasa_cambio else None,
                     referencia=referencia,
-                    fecha_pago=datetime.now(),
+                    fecha_pago=fecha_pago_abono,
                     creado_por=id_usuario,
                 )
                 session.add(pago)
