@@ -56,6 +56,9 @@ DESCRIPCION = (
 INTERVALO_SEG = max(60, int(os.getenv("LICENCIA_SERVICIO_INTERVALO_SEG", "600")))
 # Cada cuanto revisa la cola de correos (los codigos de desbloqueo viven 15 min).
 INTERVALO_CORREOS_SEG = max(5, int(os.getenv("CORREOS_SERVICIO_INTERVALO_SEG", "15")))
+# Cada cuanto pasa a VENCIDO los pedidos cuya reserva ya paso. Solo cambia el estado visible: el stock ya se
+# solto solo (ver app/services/reservas_stock.py), asi que no corre prisa.
+INTERVALO_PEDIDOS_SEG = max(60, int(os.getenv("PEDIDOS_SERVICIO_INTERVALO_SEG", "300")))
 
 
 def ciclo() -> EstadoLicencia | None:
@@ -106,6 +109,25 @@ def ciclo_correos() -> dict[str, int] | None:
         return None
 
 
+def ciclo_pedidos() -> int | None:
+    """Una pasada de pedidos: marca VENCIDO los ENVIADOS cuya reserva de 48 h ya paso
+    (`PedidoService.vencer_pendientes`). Devuelve cuantos marco. Nunca lanza."""
+    if config.MODO_INSTALACION != MODO_SERVIDOR:
+        return None
+    try:
+        from app.db.session import SessionLocal
+        from app.services.pedidos import PedidoService
+
+        session = SessionLocal()
+        try:
+            return PedidoService.vencer_pendientes(session)
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("Fallo inesperado venciendo los pedidos")
+        return None
+
+
 try:
     import servicemanager
     import win32event
@@ -144,10 +166,14 @@ if _HAY_PYWIN32:
                 "Servicio iniciado (licencia cada %s s, correos cada %s s)", INTERVALO_SEG, INTERVALO_CORREOS_SEG
             )
             proxima_licencia = 0.0
+            proxima_pedidos = 0.0
             while True:
                 if time.monotonic() >= proxima_licencia:
                     ciclo()
                     proxima_licencia = time.monotonic() + INTERVALO_SEG
+                if time.monotonic() >= proxima_pedidos:
+                    ciclo_pedidos()
+                    proxima_pedidos = time.monotonic() + INTERVALO_PEDIDOS_SEG
                 ciclo_correos()
                 if (
                     win32event.WaitForSingleObject(self._detener, INTERVALO_CORREOS_SEG * 1000)
@@ -183,6 +209,7 @@ def main(argv: list[str]) -> None:
         estado = ciclo()
         print(f"{estado.estado if estado else 'sin cambios'}  ({time.time() - inicio:.1f} s)")
         print(f"correos: {ciclo_correos() or 'sin cambios'}")
+        print(f"pedidos vencidos: {ciclo_pedidos() or 'ninguno'}")
         return
     if orden == "instalar":
         _instalar()

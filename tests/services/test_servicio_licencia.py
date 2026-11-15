@@ -63,3 +63,60 @@ def test_ciclo_ante_un_error_inesperado_no_tumba_el_servicio(como_servidor, monk
 
 def test_intervalo_minimo_de_un_minuto():
     assert servicio_licencia.INTERVALO_SEG >= 60
+
+
+# -- Pedidos vencidos (app/services/pedidos.py) ----------------------------------------------------------------
+
+
+class _SesionFalsa:
+    cerrada = False
+
+    def close(self):
+        self.cerrada = True
+
+
+@pytest.fixture()
+def sesion_falsa(monkeypatch):
+    from app.db import session as modulo_session
+
+    sesion = _SesionFalsa()
+    monkeypatch.setattr(modulo_session, "SessionLocal", lambda: sesion)
+    return sesion
+
+
+def test_ciclo_pedidos_marca_los_vencidos_y_cierra_la_sesion(como_servidor, sesion_falsa, monkeypatch):
+    from app.services.pedidos import PedidoService
+
+    recibidas = []
+    monkeypatch.setattr(PedidoService, "vencer_pendientes", staticmethod(lambda s: recibidas.append(s) or 3))
+
+    assert servicio_licencia.ciclo_pedidos() == 3
+    assert recibidas == [sesion_falsa]
+    assert sesion_falsa.cerrada
+
+
+def test_ciclo_pedidos_no_hace_nada_en_una_estacion(como_servidor, sesion_falsa, monkeypatch):
+    from app.services.pedidos import PedidoService
+
+    monkeypatch.setattr(config, "MODO_INSTALACION", "ESTACION")
+    llamado = []
+    monkeypatch.setattr(PedidoService, "vencer_pendientes", staticmethod(lambda s: llamado.append(1)))
+
+    assert servicio_licencia.ciclo_pedidos() is None
+    assert llamado == []
+
+
+def test_ciclo_pedidos_ante_un_error_no_tumba_el_servicio_y_cierra_la_sesion(como_servidor, sesion_falsa, monkeypatch):
+    from app.services.pedidos import PedidoService
+
+    def roto(sesion):
+        raise RuntimeError("SQL Server caido")
+
+    monkeypatch.setattr(PedidoService, "vencer_pendientes", staticmethod(roto))
+
+    assert servicio_licencia.ciclo_pedidos() is None
+    assert sesion_falsa.cerrada
+
+
+def test_intervalo_de_pedidos_minimo_de_un_minuto():
+    assert servicio_licencia.INTERVALO_PEDIDOS_SEG >= 60

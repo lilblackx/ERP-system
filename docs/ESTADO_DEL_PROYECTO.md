@@ -40,6 +40,7 @@ están implementadas, qué decisiones de diseño se tomaron y qué queda pendien
 | Roles y permisos | `permisos.py` | CRUD de roles, y escritura de la matriz `rol_permisos` (asignar/revocar/reemplazar conjunto completo). El catálogo de permisos (`recurso`+`accion`) se mantiene fijo vía schema/seed, no se crea desde aquí. También expone `require_permiso()`, el punto de entrada de autorización que usan los otros 17 servicios (ver sección 7) |
 | Cuentas por cobrar/pagar "otros" | `otros_movimientos.py` | Préstamos/anticipos a cobrar, y conciliación de transferencias bancarias sin identificar (ver sección 4) |
 | Notas de crédito | `notas_credito.py` | Saldo a favor de cliente/proveedor generado automáticamente al anular una factura/compra con pagos ya aplicados (ver sección 3, "Notas de credito automaticas") |
+| Pedidos de venta | `pedidos.py`, `reservas_stock.py` | **Solo en la rama `feature/app-movil-pedidos` (no está en `main`).** Pedidos que toma un vendedor y que apartan stock hasta que caja los aprueba y factura (ver sección 4, "Pedidos con reserva de stock") |
 | Comisiones de vendedor | `comisiones.py` | Cálculo automático al emitir factura (diferencia entre precio de venta y precio de lista) y pago real por caja/banco (C14 2026-08-23, ver sección 3, "Comisiones de vendedor") |
 | Configuración de empresa | `empresa.py` | Datos fiscales y logotipo (registro singleton) |
 | Auditoría | `auditoria.py` | Bitácora transversal de eventos críticos (ver sección 5) |
@@ -496,6 +497,50 @@ y escribe correo + contraseña: servidor/puerto/TLS salen del catálogo `PROVEED
     (`TrustServerCertificate=yes`); `datos_estaciones.txt` (lo genera el instalador del servidor)
     contiene la clave en claro y **se borra solo a las 24 h** (`app/services/datos_estaciones.py`,
     lo ejecutan el servicio de Windows del servidor y la app abierta en el servidor).
+
+### Pedidos con reserva de stock (migración 0100, rama `feature/app-movil-pedidos`)
+
+Primera fase de una app Android para que los vendedores tomen pedidos. **Está solo en esa rama y no debe
+llegar a `main` hasta decidirlo.** Hecho: tablas, servicio y tests. Pendiente: panel de escritorio para revisar
+pedidos, API HTTPS (FastAPI detrás de Tailscale Serve, solo HTTPS) y la app Flutter.
+
+- **Un pedido no es una factura.** No mueve `inventario.cantidad_unidad`, no abre cuentas por cobrar ni genera
+  comisiones. Estados: `ENVIADO → APROBADO → FACTURADO`, y `RECHAZADO`, `ANULADO`, `VENCIDO`.
+- **La reserva se calcula, no es una columna, un trigger ni una vista** (`reservas_stock.reservado_por_producto`,
+  una sola consulta para todos los productos). Aparta stock un pedido `APROBADO`, o `ENVIADO` mientras
+  `fecha_vencimiento_reserva` (48 h) no haya pasado, con la hora de SQL Server. Así no hay un contador que se
+  desincronice, un pedido vencido suelta su stock solo (sin job), no se tocó ningún trigger de facturación y el
+  criterio vive en un solo lugar.
+- **Disponible = `cantidad_unidad` − reservado.** `crear_pedido` y `aprobar_pedido` bloquean primero todos los
+  productos con `UPDLOCK` (en orden de id, como `emitir_factura`, para no cruzar locks) y recién después leen la
+  reserva: leerla antes dejaría colar otra reserva entre la lectura y la decisión. `crear_pedido` aplica también
+  la regla de stock mínimo y rechaza un bulto de un producto sin unidades por caja (el trigger de
+  `factura_detalle` descontaría 0).
+- **`emitir_factura` respeta la reserva.** Una factura directa ya no puede vender lo que otro pedido tiene
+  apartado. Con `id_pedido=` factura un pedido `APROBADO` del mismo cliente **y del mismo vendedor** (la comisión
+  es del que tomó el pedido), sin que el pedido se bloquee a sí mismo, y lo cierra como `FACTURADO` en el mismo
+  commit (`pedido_facturacion.py`); si la factura falla, el pedido sigue aprobado.
+  `PedidoService.convertir_a_factura` arma esa llamada con las líneas del pedido.
+- **Alcance de VENDEDOR** (mismo criterio que `alcance_vendedor.py`, aplicado en el servicio): crea pedidos solo
+  a su nombre y para clientes que tiene asignados, ve y anula solo los suyos y solo mientras están `ENVIADOS` o
+  `VENCIDOS`.
+- **Entrada no confiable:** cantidad y precio se validan finitos y dentro de lo que cabe en la columna (`NaN`,
+  `Infinity` y `1e400` se rechazan con `ValueError`).
+- **El servicio de Windows marca los vencidos** (`servicio_licencia.ciclo_pedidos`, cada 5 min,
+  `PEDIDOS_SERVICIO_INTERVALO_SEG`): solo pasa a `VENCIDO` el estado visible; el stock ya se había liberado.
+- **Permisos** (`pedidos`): `ver` y `crear` para VENDEDOR; `ver` y `editar` para CAJERO. `editar` significa
+  "revisar" (aprobar, rechazar, anular, facturar): `CK_permisos_accion` solo admite ver/crear/editar/eliminar,
+  mismo mapeo que 0021/0029/0048.
+- **Reenvío seguro:** `id_cliente_local` (lo genera la app) con índice único por vendedor; reenviar el mismo
+  pedido devuelve el existente en vez de duplicarlo ni apartar dos veces.
+- **Aislamiento de `main`:** esta rama usa su propia base de pruebas (`distribuidora_dj_test_pedidos`, ver
+  `tests/conftest.py`). La base de `main` no debe recibir la 0100: `main` no vacía `pedidos` y una fila suelta
+  rompería su limpieza. Al mergear: renumerar la migración al siguiente número libre y devolver el nombre por
+  defecto de la base de pruebas.
+- *No cubierto todavía:* el precio lo manda el cliente y no se compara con el de lista al crear el pedido (lo
+  rechaza `emitir_factura` si es menor, pero uno mayor no lo detiene nadie y la comisión es venta − lista: la API
+  de la Fase 3 debe fijarlo o acotarlo en el servidor); `FacturaFormDialog` y los reportes de stock siguen
+  mostrando el stock real, no el disponible.
 
 ## 5. Auditoría
 
