@@ -333,12 +333,14 @@ def test_el_detalle_de_cxc_se_consulta_en_un_hilo_y_el_dialogo_cierra_la_sesion(
     class _Dialogo:
         se_realizo_cobro = False
 
-        def __init__(self, session, cliente, cuentas, tasa, id_usuario, parent=None):
+        def __init__(self, session, cliente, cuentas, tasa, id_usuario, parent=None, session_factory=None):
             abiertos.append((session, cliente, cuentas))
+            fabricas.append(session_factory)
 
         def exec(self):
             return 0
 
+    fabricas = []
     monkeypatch.setattr(cxc, "DetalleClienteDialog", _Dialogo)
     monkeypatch.setattr(cxc.QTimer, "singleShot", staticmethod(lambda *a, **k: None))
     panel = cxc.CuentasPorCobrarPanel(fabrica, SimpleNamespace(id_usuario=1))
@@ -348,6 +350,7 @@ def test_el_detalle_de_cxc_se_consulta_en_un_hilo_y_el_dialogo_cierra_la_sesion(
     panel._mostrar_detalle_cliente(5)
 
     assert len(abiertos) == 1
+    assert fabricas == [fabrica]  # el dialogo recibe la fabrica de sesiones para cargar el detalle de la factura
     sesion_del_dialogo, cliente, cuentas = abiertos[0]
     assert cliente.nombre_razon_social == "Ana" and cuentas == [cuenta]
     # la sesion con la que se consulto es la que usa el dialogo, y se cierra al salir de el

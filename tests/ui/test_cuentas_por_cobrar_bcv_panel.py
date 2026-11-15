@@ -2,7 +2,7 @@
 (app/ui/cuentas_por_cobrar_bcv_panel.py). Se prueba el armado de la tabla con datos dados,
 sin la carga inicial (QTimer + showEvent consultan la base)."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -59,14 +59,16 @@ def test_tabla_tiene_columna_saldo_vencido_bcv_entre_saldo_a_favor_y_dias(panel)
 
 
 def test_muestra_saldo_vencido_y_mantiene_las_demas_columnas_alineadas(panel):
-    _mostrar(panel, _item())
+    emision = date.today() - timedelta(days=12)
+    _mostrar(panel, _item(fecha_emision=emision))
 
     tabla = panel.tabla
     assert tabla.item(0, 1).text() == "Cliente BCV"
     assert tabla.item(0, 2).text() == "$100.00"
     assert tabla.item(0, 4).text() == "$40.00"
-    assert tabla.item(0, 5).text() == "30"
-    assert tabla.item(0, 6).text() == "01/10/2026"
+    # DIAS son los dias desde la emision (12), no los dias de credito de la cuenta (30)
+    assert tabla.item(0, 5).text() == "12"
+    assert tabla.item(0, 6).text() == emision.strftime("%d/%m/%Y")
     assert tabla.cellWidget(0, 7) is not None
 
 
@@ -168,3 +170,10 @@ def test_titulo_del_abono_general_pasa_a_otra_linea_en_vez_de_cortarse(qtbot, mo
 
     assert len(titulos) == 1
     assert titulos[0].wordWrap()
+
+
+def test_dias_desde_emision_cuenta_desde_la_factura_y_nunca_es_negativo():
+    assert bcv._dias_desde_emision(date.today() - timedelta(days=45)) == "45"
+    assert bcv._dias_desde_emision(date.today()) == "0"
+    assert bcv._dias_desde_emision(date.today() + timedelta(days=3)) == "0"  # fecha futura: no hay dias negativos
+    assert bcv._dias_desde_emision(None) == "N/A"
