@@ -17,3 +17,6 @@ Criterio para escribir las novedades (DISCRETAS, y las pruebas lo hacen cumplir)
 """
 
 VERSION = "1.1.1"
+
+# Pagina de presentacion de la app (landing page). Se abre en el navegador desde la ventana de Novedades.
+URL_SITIO_WEB = "https://nexo-erp-dig.pages.dev/#inicio"

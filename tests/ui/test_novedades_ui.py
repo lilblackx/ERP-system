@@ -7,14 +7,16 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from PySide6.QtWidgets import QLabel
+from PySide6.QtCore import QUrl
+from PySide6.QtWidgets import QLabel, QWidget
 
+import app.ui.novedades_dialog as nd
 from app.novedades import Cambio, Entrega
 from app.ui import main_window as mw
 from app.ui.novedades_dialog import NovedadesDialog
 from app.ui.toast import Toast
 from app.utils import novedades_local
-from app.version import VERSION
+from app.version import URL_SITIO_WEB, VERSION
 
 ENTREGAS = [
     Entrega(
@@ -50,6 +52,43 @@ def test_el_dialogo_muestra_el_texto_tal_cual_sin_interpretar_html(qtbot):
     qtbot.addWidget(dialogo)
 
     assert "<b>Texto con etiquetas</b>" in _textos(dialogo)
+
+
+def test_solo_los_cambios_destacados_se_dibujan_como_tarjeta_con_borde(qtbot):
+    """El borde y el fondo azul son de los cambios marcados con "destacado": true en novedades.json; el resto va como
+    una fila simple (la linea "general" no cuenta: no es un cambio)."""
+    dialogo = NovedadesDialog(ENTREGAS, "t", "s", parent=None)
+    qtbot.addWidget(dialogo)
+
+    nombres = [w.objectName() for w in dialogo.findChildren(QWidget)]
+
+    assert nombres.count("CambioDestacado") == 1  # "Cambio de clientes"
+    assert nombres.count("CambioNormal") == 2  # los otros dos cambios; la linea general va aparte, sin fila
+
+
+def test_el_enlace_al_sitio_web_abre_la_pagina_de_la_app_en_el_navegador(qtbot, monkeypatch):
+    abiertos = []
+    monkeypatch.setattr(nd.QDesktopServices, "openUrl", staticmethod(lambda url: abiertos.append(url) or True))
+    dialogo = NovedadesDialog(ENTREGAS, "t", "s", parent=None)
+    qtbot.addWidget(dialogo)
+
+    dialogo.btn_sitio_web.click()
+
+    assert abiertos == [QUrl("https://nexo-erp-dig.pages.dev/#inicio")]
+    assert dialogo.btn_sitio_web.toolTip() == URL_SITIO_WEB
+
+
+def test_la_url_del_sitio_web_es_https_y_va_a_la_seccion_de_inicio():
+    assert URL_SITIO_WEB.startswith("https://")
+    assert URL_SITIO_WEB.endswith("#inicio")
+
+
+def test_abrir_el_dialogo_no_abre_el_navegador(qtbot, monkeypatch):
+    monkeypatch.setattr(nd.QDesktopServices, "openUrl", staticmethod(lambda url: pytest.fail("solo con un clic")))
+
+    dialogo = NovedadesDialog(ENTREGAS, "t", "s", parent=None)
+    qtbot.addWidget(dialogo)
+    dialogo.show()
 
 
 def test_entendido_cierra_el_dialogo(qtbot):

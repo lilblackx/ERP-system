@@ -7,7 +7,8 @@ puede ver (app/novedades.py), y se puede reabrir desde el pie del menu lateral. 
 from __future__ import annotations
 
 import qtawesome as qta
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -33,6 +34,7 @@ from app.ui.styles import (
     COLOR_TEXT_MUTED,
     DIALOGO_QSS,
 )
+from app.version import URL_SITIO_WEB
 
 # Colores de la etiqueta de cada tipo: (fondo, texto)
 COLORES_TIPO = {
@@ -80,6 +82,19 @@ class NovedadesDialog(QDialog):
         raiz.addWidget(desplazable, stretch=1)
 
         pie = QHBoxLayout()
+        # Enlace a la pagina de la app: se abre en el navegador, por eso solo el clic del usuario lo dispara.
+        self.btn_sitio_web = QPushButton(" Sitio web de Nexo ERP")
+        self.btn_sitio_web.setIcon(qta.icon("fa5s.external-link-alt", color=COLOR_PRIMARY))
+        self.btn_sitio_web.setFlat(True)
+        self.btn_sitio_web.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sitio_web.setToolTip(URL_SITIO_WEB)
+        self.btn_sitio_web.setStyleSheet(
+            f"QPushButton {{ color: {COLOR_PRIMARY}; font-size: 12px; font-weight: 600; border: none;"
+            " background: transparent; padding: 4px 2px; }"
+            "QPushButton:hover { text-decoration: underline; }"
+        )
+        self.btn_sitio_web.clicked.connect(self._abrir_sitio_web)
+        pie.addWidget(self.btn_sitio_web)
         pie.addStretch()
         self.btn_entendido = QPushButton("Entendido")
         self.btn_entendido.setStyleSheet(BUTTON_PRIMARY_QSS)
@@ -88,6 +103,9 @@ class NovedadesDialog(QDialog):
         self.btn_entendido.clicked.connect(self.accept)
         pie.addWidget(self.btn_entendido)
         raiz.addLayout(pie)
+
+    def _abrir_sitio_web(self) -> None:
+        QDesktopServices.openUrl(QUrl(URL_SITIO_WEB))
 
     @staticmethod
     def _encabezado(titulo: str, subtitulo: str) -> QWidget:
