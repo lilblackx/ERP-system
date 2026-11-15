@@ -357,6 +357,17 @@ def test_la_fila_de_totales_no_pinta_de_azul_una_columna_fija(tmp_path):
     assert all(celda.font.color is None or celda.font.color.rgb != "0012459B" for celda in total)
 
 
+def test_la_fila_de_totales_del_excel_va_con_fondo_azul_y_letra_blanca_en_negrita(tmp_path):
+    ruta = tmp_path / "t.xlsx"
+
+    exportar_excel(ruta, ["A", "B"], [["x", 1]], total_row=["Saldo Pendiente", 25.5])
+
+    total = [celda for celda in load_workbook(ruta).active[3]]
+    assert [celda.value for celda in total] == ["Saldo Pendiente", 25.5]
+    assert all(celda.fill.fgColor.rgb == "0012459B" for celda in total)
+    assert all(celda.font.bold and celda.font.color.rgb == "00FFFFFF" for celda in total)
+
+
 def test_excel_ajusta_el_ancho_de_las_columnas_al_contenido(tmp_path):
     ruta = tmp_path / "w.xlsx"
 

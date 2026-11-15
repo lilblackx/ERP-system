@@ -49,7 +49,8 @@ from app.utils.rif import formatear_rif
 
 logger = logging.getLogger(__name__)
 
-_COLOR_PRIMARIO = colors.HexColor("#12459B")
+_HEX_PRIMARIO = "12459B"  # azul corporativo (COLOR_PRIMARY de app/ui/styles.py): openpyxl lo pide sin "#"
+_COLOR_PRIMARIO = colors.HexColor(f"#{_HEX_PRIMARIO}")
 _COLOR_MUTED = colors.HexColor("#64748B")
 
 # Excel/LibreOffice interpretan como formula un TEXTO que empieza con estos caracteres cuando se
@@ -178,7 +179,7 @@ def exportar_excel(
         lineas_empresa = (
             (
                 config_empresa.razon_social_empresa,
-                Font(bold=True, size=13, color="12459B"),
+                Font(bold=True, size=13, color=_HEX_PRIMARIO),
             ),
             (formatear_rif(config_empresa.rif_empresa, "J"), Font(size=10, color="64748B")),
             (config_empresa.direccion_empresa, Font(size=10, color="64748B")),
@@ -242,7 +243,7 @@ def exportar_excel(
             total_row_con_label[0] = total_label
             total_row = total_row_con_label
 
-        relleno_total = PatternFill("solid", fgColor="12459B")
+        relleno_total = PatternFill("solid", fgColor=_HEX_PRIMARIO)
         fuente_total = Font(bold=True, color="FFFFFF")
         for col_idx, valor in enumerate(total_row, start=1):
             celda = hoja.cell(row=fila_actual, column=col_idx)
@@ -254,7 +255,9 @@ def exportar_excel(
 
     for seccion in secciones or ():
         fila_actual += 1  # fila en blanco antes de la seccion
-        hoja.cell(row=fila_actual, column=1, value=seccion["titulo"]).font = Font(bold=True, size=12, color="12459B")
+        hoja.cell(row=fila_actual, column=1, value=seccion["titulo"]).font = Font(
+            bold=True, size=12, color=_HEX_PRIMARIO
+        )
         fila_actual += 1
         for col_idx, encabezado in enumerate(seccion["encabezados"], start=1):
             hoja.cell(row=fila_actual, column=col_idx, value=encabezado).font = Font(bold=True)
@@ -458,7 +461,7 @@ def _tabla_pdf(
     # Estilo de la tabla
     table_style = TableStyle(
         [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#12459B")),  # Header azul
+            ("BACKGROUND", (0, 0), (-1, 0), _COLOR_PRIMARIO),  # Header azul
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
@@ -487,7 +490,7 @@ def _tabla_pdf(
     for i in range(1, len(data)):
         if total_row is not None and i == len(data) - 1:
             # Fila de totales - fondo azul oscuro, texto blanco
-            table_style.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#12459B"))
+            table_style.add("BACKGROUND", (0, i), (-1, i), _COLOR_PRIMARIO)
             table_style.add("TEXTCOLOR", (0, i), (-1, i), colors.white)
             table_style.add("FONTNAME", (0, i), (-1, i), "Helvetica-Bold")
         elif i % 2 == 0:
@@ -574,7 +577,7 @@ def exportar_pdf(
         parent=styles["Heading1"],
         fontSize=16,
         alignment=TA_CENTER,
-        textColor=colors.HexColor("#12459B"),
+        textColor=_COLOR_PRIMARIO,
         spaceAfter=12,
     )
     elements.append(Paragraph(_texto_paragraph(titulo_completo), title_style))
