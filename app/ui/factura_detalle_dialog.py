@@ -24,7 +24,7 @@ from app.services.empresa import EmpresaService
 from app.services.permisos import PermisoDenegadoError
 from app.services.ventas import VentaService
 from app.ui.animaciones import liberar_boton, ocupar_boton
-from app.ui.carga_asincrona import sesion_para_dialogo
+from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
 from app.ui.devolver_nota_credito_dialog import DevolverNotaCreditoDialog
 from app.ui.factura_pdf import generar_pdf_factura, imprimir_factura
 from app.ui.message_box import MessageBox
@@ -627,3 +627,65 @@ class FacturaDetalleDialog(MixinPermisos, QDialog):
         except Exception:
             logger.exception("Fallo al imprimir la factura %s", self.factura.numero_factura)
             MessageBox.critical(self, "Error", "No se pudo imprimir la factura.")
+
+
+class VerFacturaDesdeFilaMixin(CargaAsincronaMixin):
+    """Para un dialogo con una tabla de cuentas: agrega el boton "..." de cada fila que abre el detalle de su
+    factura. El dialogo debe tener `session_factory` e `id_usuario`; la factura se consulta en un hilo aparte."""
+
+    def _boton_ver_factura(self, cuenta) -> QWidget:
+        """Boton "..." de la fila: abre el detalle completo de la factura (cabecera + lineas)."""
+        contenedor = QWidget()
+        layout = QHBoxLayout(contenedor)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn = QPushButton()
+        btn.setIcon(qta.icon("fa5s.ellipsis-h", color=COLOR_TEXT_MUTED))
+        btn.setFixedSize(28, 28)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setToolTip("Ver detalle de la factura")
+        btn.setStyleSheet(
+            f"QPushButton {{ border: none; background: transparent; }}"
+            f"QPushButton:hover {{ background: {COLOR_TABLE_HEADER}; border-radius: 6px; }}"
+        )
+        btn.clicked.connect(lambda _=False, c=cuenta: self._ver_detalle_factura_cuenta(c))
+        layout.addWidget(btn)
+        return contenedor
+
+    def _ver_detalle_factura_cuenta(self, cuenta) -> None:
+        """Carga en un hilo aparte la factura de la cuenta y abre su detalle al llegar."""
+        id_factura = getattr(cuenta, "id_factura", None)
+        if id_factura is None:
+            id_factura = getattr(getattr(cuenta, "factura", None), "id_factura", None)
+        if id_factura is None:
+            return
+        self.cargar_async(
+            "detalle_factura",
+            tarea_cargar_factura,
+            self._abrir_detalle_factura,
+            texto_error="No se pudo cargar el detalle de la factura.",
+            texto_sin_permiso="No tienes permiso para ver el detalle de facturas.",
+            session_factory=self.session_factory,
+            id_factura=id_factura,
+            id_usuario=self.id_usuario,
+        )
+
+    def _abrir_detalle_factura(self, cargado: dict) -> None:
+        session = cargado.get("session")
+        error = cargado.get("error")
+        try:
+            if isinstance(error, PermisoDenegadoError):
+                MessageBox.warning(self, "Sin permiso", "No tienes permiso para ver el detalle de facturas.")
+            elif isinstance(error, ValueError):
+                MessageBox.warning(self, "No se pudo abrir la factura", str(error))
+            elif error is not None:
+                logger.error("Fallo al cargar el detalle de la factura", exc_info=error)
+                MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+            else:
+                FacturaDetalleDialog(cargado["datos"], session, self.id_usuario, parent=self).exec()
+        except Exception:
+            logger.exception("Fallo al abrir el detalle de la factura")
+            MessageBox.critical(self, "Error", "No se pudo cargar el detalle de la factura.")
+        finally:
+            if session is not None:
+                session.close()
