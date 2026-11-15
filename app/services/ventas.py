@@ -33,13 +33,15 @@ from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
     aplicar_lock_timeout,
-    traducir_error_trigger,
+    confirmar_transaccion,
 )
 from app.services.notas_credito import NotaCreditoService
 from app.services.paginacion import paginar
 from app.services.pagos import PagoService
 from app.services.pagos_bcv import PagoBCVService
+from app.services.pedido_facturacion import bloquear_pedido_a_facturar, marcar_pedido_facturado
 from app.services.permisos import PermisoDenegadoError, require_permiso
+from app.services.reservas_stock import reservado_por_producto
 from app.services.tesoreria import BancoService, CajaService
 from app.utils.decimal_utils import to_decimal
 
@@ -196,6 +198,7 @@ class VentaService:
         referencia_vuelto: str | None = None,
         id_autorizador_vuelto: int | None = None,
         porcentaje_bcv: Decimal | int | str | None = None,
+        id_pedido: int | None = None,
     ) -> FacturaVenta:
         require_permiso(session, id_usuario, "ventas", "crear")
         aplicar_lock_timeout(session)
@@ -357,6 +360,12 @@ class VentaService:
                 raise ValueError("Esta factura tiene descuentos y requiere autorizacion de un supervisor")
             require_permiso(session, id_autorizador_descuento, "descuentos", "crear")
 
+        # Factura que sale de un pedido (app movil): se bloquea el pedido ya, antes de tocar stock, para que dos
+        # cajeros no lo conviertan a la vez. Se cierra (FACTURADO) en el mismo commit que la factura.
+        pedido = (
+            bloquear_pedido_a_facturar(session, id_pedido, id_cliente, id_vendedor) if id_pedido is not None else None
+        )
+
         # --- Validar stock disponible por producto (agrupando items repetidos) ---
         cantidades_por_producto: dict[int, dict] = {}  # {id_producto: {"bultos": X, "unidades": Y}}
         for item in items:
@@ -379,27 +388,35 @@ class VentaService:
         # pero los cargaron en distinto orden en el carrito adquiririan los locks en
         # orden cruzado sin esto -> deadlock de SQL Server. Un orden total fijo (el
         # mismo para cualquier transaccion) elimina la posibilidad de cruce.
-        for id_producto, cantidades in sorted(cantidades_por_producto.items()):
-            bultos_requeridos = cantidades["bultos"]
-            unidades_requeridas = cantidades["unidades"]
-
+        productos_bloqueados: dict[int, Inventario | None] = {}
+        for id_producto in sorted(cantidades_por_producto):
             # WITH (UPDLOCK, ROWLOCK): bloquea la fila hasta el commit de esta
             # transaccion para que una segunda factura concurrente sobre el mismo
             # producto espere en vez de leer el mismo stock stale (TOCTOU). session.get()
             # no sirve aca -- with_for_update() de SQLAlchemy es un no-op en el dialecto
             # mssql (no existe "FOR UPDATE" en T-SQL), hace falta el table hint explicito.
-            producto = session.execute(
+            productos_bloqueados[id_producto] = session.execute(
                 select(Inventario)
                 .where(Inventario.id_producto == id_producto)
                 .with_hint(Inventario, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
             ).scalar_one_or_none()
+
+        # Lo que otros pedidos tienen apartado (migrations/0100), en UNA consulta y DESPUES de los locks: crear un
+        # pedido exige el mismo lock de la fila, asi que ninguna reserva nueva se cuela entre esta lectura y la
+        # validacion. El pedido que se esta facturando no cuenta contra si mismo: su reserva es lo que se vende.
+        reservado = reservado_por_producto(session, productos_bloqueados, excluir_pedido=id_pedido)
+
+        for id_producto, cantidades in sorted(cantidades_por_producto.items()):
+            bultos_requeridos = cantidades["bultos"]
+            unidades_requeridas = cantidades["unidades"]
+
+            producto = productos_bloqueados[id_producto]
             if producto is None:
                 raise ValueError(f"Producto {id_producto} no encontrado")
             if producto.estado_producto != "ACTIVO":
                 raise ValueError(f"El producto '{producto.nombre_producto}' esta inactivo")
 
-            # Usar cantidad_unidad como stock total
-            stock_total = producto.cantidad_unidad or Decimal("0")
+            stock_total = (producto.cantidad_unidad or Decimal("0")) - reservado[id_producto]
             unidades_por_caja = producto.cantidad_caja or Decimal("1")
 
             # Validar stock para bultos
@@ -909,21 +926,12 @@ class VentaService:
             factura.autorizado_por_vuelto = id_autorizador_vuelto if metodo_vuelto != "efectivo" else None
             factura.fecha_autorizacion_vuelto = datetime.now() if metodo_vuelto != "efectivo" else None
 
-        try:
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            if _es_deadlock(e):
-                # Se relanza tal cual (no como ValueError) para que el caller pueda
-                # distinguirlo y reintentar la operacion completa -- ver
-                # app.services.db_utils.reintentar_en_deadlock.
-                raise
-            if _es_lock_timeout(e):
-                raise ValueError(
-                    "La operación tardó demasiado esperando acceso a un registro (stock, cliente o caja). "
-                    "Intente de nuevo."
-                ) from e
-            raise ValueError(traducir_error_trigger(e)) from e
+        if pedido is not None:
+            marcar_pedido_facturado(pedido, factura.id_factura, id_usuario)
+
+        # Un deadlock se relanza tal cual para que el caller repita la operacion completa (ver
+        # app.services.db_utils.reintentar_en_deadlock); lo demas sale como ValueError.
+        confirmar_transaccion(session, "un registro (stock, cliente o caja)")
         session.refresh(factura)
 
         logger.info(

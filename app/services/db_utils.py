@@ -219,3 +219,20 @@ def traducir_error_trigger(exc: Exception) -> str:
         if clave in texto:
             return traduccion
     return f"Error en la operación: {str(exc)}"
+
+
+def confirmar_transaccion(session: Session, que_espera: str = "un registro") -> None:
+    """`session.commit()` con los errores de negocio de siempre: un deadlock se relanza tal cual (para que
+    `reintentar_en_deadlock` repita la operacion completa); un timeout de lock se vuelve un mensaje para el usuario
+    ("acceso a {que_espera}") y cualquier otro fallo, tipicamente de un trigger, pasa por `traducir_error_trigger`.
+    Siempre deja la sesion con rollback. Lo usan los servicios nuevos; los commit() con este mismo bloque copiado
+    en otros servicios siguen como estaban."""
+    try:
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        if _es_deadlock(e):
+            raise
+        if _es_lock_timeout(e):
+            raise ValueError(f"La operación tardó demasiado esperando acceso a {que_espera}. Intente de nuevo.") from e
+        raise ValueError(traducir_error_trigger(e)) from e
