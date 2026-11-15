@@ -32,3 +32,8 @@ preferencias_ui.json
 .env.bak
 config.env.bak
 clave_servidor.bin
+
+# Artefactos locales (PDF de prueba, resultados de pytest)
+/FV-*.pdf
+/clientes.pdf
+test_results.log

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from app.db.models import ComisionFactura, Usuario
 from app.services.comisiones import ComisionService, PagoComisionService
@@ -419,8 +420,8 @@ def _agrupar_comisiones_por_factura(comisiones: list[ComisionFactura]) -> list[d
                 clave = factura.id_factura
                 factura_num = factura.numero_factura or ""
                 cliente_nombre = factura.cliente.nombre_razon_social if factura.cliente else "Consumidor final"
-        except Exception:
-            pass
+        except DetachedInstanceError:
+            logger.warning("Comision %s sin factura cargada: se muestra sin numero ni cliente", comision.id_comision)
 
         if clave not in grupos:
             grupos[clave] = {
@@ -503,8 +504,8 @@ class DetalleComisionFacturaDialog(QDialog):
             try:
                 if linea.detalle and linea.detalle.producto:
                     nombre_producto = linea.detalle.producto.nombre_producto or ""
-            except Exception:
-                pass
+            except DetachedInstanceError:
+                logger.warning("Linea de comision %s sin producto cargado: se muestra sin nombre", linea.id_comision)
             cantidad = linea.detalle.cantidad_producto if linea.detalle else None
             tabla.setItem(fila, 0, QTableWidgetItem(nombre_producto))
 

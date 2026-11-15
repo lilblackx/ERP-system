@@ -854,14 +854,7 @@ class PagoService:
                 id_cliente_key = cliente.id_cliente
 
                 if id_cliente_key not in clientes_deuda:
-                    # Manejo seguro del campo saldo_favor (puede no existir si no se ejecutó la migración)
-                    saldo_favor = Decimal("0.00")
-                    try:
-                        saldo_favor = getattr(cuenta, "saldo_favor", Decimal("0.00"))
-                        if saldo_favor is None:
-                            saldo_favor = Decimal("0.00")
-                    except Exception:
-                        saldo_favor = Decimal("0.00")
+                    saldo_favor = cuenta.saldo_favor or Decimal("0.00")
 
                     clientes_deuda[id_cliente_key] = {
                         "id_cliente": id_cliente_key,
@@ -886,19 +879,9 @@ class PagoService:
                     clientes_deuda[id_cliente_key]["saldo_vencido"] += cuenta.saldo_pendiente
 
                 # Actualizar saldo_favor con el valor más alto encontrado (por si hay inconsistencias)
-                try:
-                    cuenta_saldo_favor = getattr(cuenta, "saldo_favor", Decimal("0.00"))
-                    if cuenta_saldo_favor is None:
-                        cuenta_saldo_favor = Decimal("0.00")
-
-                    saldo_favor_actual = clientes_deuda[id_cliente_key]["saldo_favor"]
-                    if saldo_favor_actual is None:
-                        saldo_favor_actual = Decimal("0.00")
-
-                    if cuenta_saldo_favor and cuenta_saldo_favor > saldo_favor_actual:
-                        clientes_deuda[id_cliente_key]["saldo_favor"] = cuenta_saldo_favor
-                except Exception:
-                    pass
+                cuenta_saldo_favor = cuenta.saldo_favor or Decimal("0.00")
+                if cuenta_saldo_favor > clientes_deuda[id_cliente_key]["saldo_favor"]:
+                    clientes_deuda[id_cliente_key]["saldo_favor"] = cuenta_saldo_favor
 
                 # Calcular fecha de vencimiento más antigua
                 if cuenta.fecha_vencimiento:

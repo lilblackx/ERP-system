@@ -675,10 +675,10 @@ class ProductoAuditoriaDialog(MixinPaginacion, QDialog):
 
         try:
             datos = json.loads(detalle)
-            if "nombre_producto" in datos:
-                return datos["nombre_producto"]
-        except (json.JSONDecodeError, Exception):
-            pass
+        except (json.JSONDecodeError, TypeError):
+            datos = None  # no es JSON: se prueba el formato de texto plano mas abajo
+        if isinstance(datos, dict) and "nombre_producto" in datos:
+            return datos["nombre_producto"]
 
         # Para formato texto plano con motivo: "Motivo: ... - Stock: ... | Nombre del producto: XXX"
         if detalle and "Nombre del producto:" in detalle:
@@ -719,7 +719,7 @@ class ProductoAuditoriaDialog(MixinPaginacion, QDialog):
                 producto = self.session.get(Inventario, producto_id)
                 return producto.nombre_producto if producto else None
             except Exception:
-                pass
+                logger.exception("No se pudo leer el producto %s para el detalle de auditoria", producto_id)
 
         return None
 
