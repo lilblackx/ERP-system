@@ -360,7 +360,7 @@ def test_historial_muestra_el_pago_bcv_y_el_saldo_real_de_la_factura(db_session)
     )
     db_session.refresh(cuenta)
 
-    historial = obtener_historial_cliente(db_session, cliente.id_cliente)
+    historial = obtener_historial_cliente(db_session, cliente.id_cliente, admin.id_usuario)
 
     facturas = [h for h in historial if h["tipo_transaccion"] == "factura"]
     pagos = [h for h in historial if h["tipo_transaccion"] == "pago"]

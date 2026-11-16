@@ -497,6 +497,67 @@ y escribe correo + contraseña: servidor/puerto/TLS salen del catálogo `PROVEED
     contiene la clave en claro y **se borra solo a las 24 h** (`app/services/datos_estaciones.py`,
     lo ejecutan el servicio de Windows del servidor y la app abierta en el servidor).
 
+### Notas de crédito aplicadas y historial del cliente (migración 0100, 2026-11-15)
+
+- **Tabla propia para las aplicaciones** (`aplicaciones_nota_credito_cliente`, modelo `AplicacionNotaCreditoCliente`).
+  Aplicar una nota a una factura baja el saldo de la cuenta por cobrar sin crear un pago, y solo dejaba un evento de
+  Auditoría con JSON: el estado de cuenta y el historial tenían que parsearlo y nada garantizaba que existiera. Ahora
+  cada aplicación es una fila (nota, cuenta por cobrar, monto > 0, fecha, quién) con sus claves foráneas, escrita en
+  la **misma transacción** que baja el saldo (`NotaCreditoService.aplicar_nota_credito_cliente`). Auditoría sigue
+  registrando el evento, pero ya no es la fuente. Mismo blindaje que las demás tablas de dinero: el usuario de la app no
+  puede borrar filas (0091) y cada cambio queda en `auditoria_cambios_db` (0092).
+- **La migración vuelca lo histórico** leyendo los eventos de Auditoría, enlazando por `numero_nota_credito` (único) y
+  tomando la cuenta de la factura destino. Un evento que no se puede enlazar (JSON roto, nota o factura inexistente,
+  monto no positivo) se salta: el reporte tampoco lo contaba. Probada con datos viejos en `tests/test_migracion_0100.py`.
+- **El estado de cuenta del reporte es la fuente de la verdad del historial.** `obtener_historial_cliente` calcula el cargo
+  y lo abonado de cada factura igual que `ReporteService.estado_cuenta_cliente`: cargo = saldo de la cuenta + pagos
+  (normales y BCV) + transferencias conciliadas + notas aplicadas. Antes solo restaba pagos, así que aplicar una nota,
+  conciliar una transferencia o anular una factura con pago dejaba la tabla sumando mal (p. ej. terminaba en $160 con su
+  cabecera en $130; con una anulada, en −$60 cuando se debían $40). Ahora la factura más reciente, la cabecera
+  "SALDO PENDIENTE" y el `saldo_final` del reporte coinciden (`tests/services/test_historial_vs_estado_cuenta.py`).
+- **Las notas aplicadas salen como filas "Abono NC"** (`tipo_transaccion = "aplicacion_nota_credito"`): restan del saldo
+  como un pago pero no son dinero cobrado (no cuentan en el total pagado; la vista "Solo pagos" no las muestra). Una
+  factura anulada con pago conserva como cargo lo que ya se había cobrado (neto cero), igual que el reporte.
+- Además, "Aplicar nota de crédito" listaba las facturas pendientes con el saldo **corrido** (acumulado de todas las
+  anteriores) en vez del saldo de cada factura; ahora usa `saldo_factura`.
+- **Lo mismo del lado del proveedor** (migración 0101, `aplicaciones_nota_credito_proveedor`, modelo
+  `AplicacionNotaCreditoProveedor`): tabla propia escrita en la misma transacción que baja el saldo de la cuenta por
+  pagar, con el volcado de los eventos de Auditoría (aquí el evento sí guarda el id de la nota y de la cuenta), el mismo
+  `DENY DELETE` y el mismo trigger de cambios. Dos defectos que esto cierra:
+  - `estado_cuenta_proveedor` reconstruía el cargo como saldo + pagos, sin las notas: una compra de $200 con una nota
+    de $50 salía como cargo de $150 y la nota no aparecía (el saldo final sí cuadraba). Ahora el cargo es $200 y la nota
+    sale como abono ("Nota de crédito", referencia `NC proveedor #id`; la nota de proveedor no tiene número propio).
+  - La antigüedad de cuentas por pagar con fecha de corte pasada no sumaba las notas aplicadas **después** del corte
+    (decía $150 donde a esa fecha se debían $200).
+- **Mismo hueco del lado de cobrar:** la antigüedad de cuentas por cobrar con corte pasado reconstruía los pagos y las
+  notas aplicadas después del corte, pero no las **transferencias conciliadas** (decía $50 donde se debían $80). Ahora
+  `_cuentas_al_corte` recibe `abonos_posteriores_por_cuenta` (conciliaciones en CxC, notas de proveedor en CxP).
+- **Permisos del historial del cliente:** `obtener_historial_cliente`, `obtener_saldo_total_pendiente` y
+  `obtener_saldo_total_positivo` ahora reciben el usuario y exigen `clientes:ver` (lo mismo que hace falta para llegar al
+  botón desde el panel de Clientes); un usuario vendedor solo ve el historial de los clientes que tiene asignados
+  (`Cliente.vendedor_cliente`, no los de otro vendedor ni los sin asignar). Antes cualquier llamada directa lo devolvía
+  sin pedir nada. La ventana pasa el usuario también a la exportación a Excel/PDF.
+
+### Cuentas en dólares sin saldo en bolívares (migración 0102, 2026-11-15)
+
+- **El defecto:** los cobros por Zelle y Binance son en dólares y entran a una cuenta en dólares, pero el diálogo calcula
+  igual el equivalente en Bs (dólares × tasa) y lo manda al movimiento (`banco_movimientos.monto_bolivares`). El trigger
+  de saldos (0098) lo sumaba al `saldo_total_banco_bs` de **toda cuenta que no fuera en pesos**, así que una cuenta en
+  dólares acumulaba un saldo en Bs inventado (un cobro de $10 a tasa 40 le sumaba Bs 400), además de sus dólares.
+- **La regla ahora:** el saldo en Bs es solo de las cuentas `VES`, el de pesos solo de las `COP`, y una cuenta `USD` lleva
+  únicamente `saldo_total_banco` (dólares). El movimiento conserva su equivalente en Bs y su tasa como **referencia**; lo
+  que cambia es que ya no se acumula como saldo. `saldo_total_banco` (dólares) lo suma toda cuenta, sin cambios.
+- **La migración** recrea el trigger con `cb.moneda = 'VES'` para el saldo en Bs y **deja en cero el saldo en Bs de las
+  cuentas en dólares** que ya lo habían acumulado. El formulario de la cuenta nunca permitió cargarles uno (solo muestra
+  el saldo de la moneda elegida), así que todo lo que tenían venía de esos equivalentes. Cada corrección queda en
+  `auditoria_cambios_db` con el valor anterior (`tests/test_migracion_0102.py` lo comprueba). Las cuentas en bolivares y en
+  pesos no se tocan.
+- **Cambio de moneda de una cuenta** (`CuentaBancariaService._reclasificar_saldo_local`): el saldo local pasa a la columna
+  de la nueva moneda; una cuenta que pasa a dólares deja ambos saldos locales en cero (antes, de pesos a dólares los pesos
+  quedaban como bolívares). Su saldo en dólares no cambia.
+- *No cubierto:* el panel de Cuentas Bancarias sigue mostrando las columnas de Bs y COP en todas las cuentas (ahora en
+  0.00 donde no aplican) en vez de ocultarlas o mostrar "—".
+
 ## 5. Auditoría
 
 `auditoria.py` expone `registrar_evento()` (usuario, acción, módulo, detalle en texto o

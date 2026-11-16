@@ -729,3 +729,124 @@ def test_listar_notas_credito_proveedor_sin_usuario_autorizado_falla(db_session)
     proveedor, _, _ = _crear_compra(db_session)
     with pytest.raises(PermisoDenegadoError):
         NotaCreditoService.listar_notas_credito_proveedor(db_session, proveedor.id_proveedor)
+
+
+# --- aplicaciones_nota_credito_cliente (migrations/0100) -----------------------------------
+
+
+def _nota_y_factura_destino(session, monto_nota="50.00", monto_factura="80.00"):
+    cliente, factura_origen, admin = _crear_factura(session)
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura_origen.id_factura,
+        monto=Decimal(monto_nota),
+        motivo="x",
+        id_usuario=admin.id_usuario,
+    )
+    cliente.limite_credito = Decimal("1000.00")
+    session.commit()
+    return nota, _crear_factura_credito(session, cliente, monto=monto_factura), admin
+
+
+def test_aplicar_una_nota_deja_una_fila_con_la_nota_la_cuenta_el_monto_y_quien_la_aplico(db_session):
+    from app.db.models import AplicacionNotaCreditoCliente
+
+    nota, destino, admin = _nota_y_factura_destino(db_session)
+
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session, nota.id_nota_credito, destino.id_factura, Decimal("20.00"), admin.id_usuario
+    )
+
+    (aplicacion,) = db_session.query(AplicacionNotaCreditoCliente).all()
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=destino.id_factura).one()
+    assert aplicacion.id_nota_credito == nota.id_nota_credito
+    assert aplicacion.id_cuenta_por_cobrar == cxc.id_cuenta_por_cobrar
+    assert aplicacion.monto == Decimal("20.00")
+    assert aplicacion.aplicado_por == admin.id_usuario
+    assert aplicacion.fecha_aplicacion is not None
+
+
+def test_dos_aplicaciones_parciales_dejan_dos_filas_que_suman_lo_aplicado(db_session):
+    from app.db.models import AplicacionNotaCreditoCliente
+
+    nota, destino, admin = _nota_y_factura_destino(db_session)
+
+    for monto in ("20.00", "15.00"):
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db_session, nota.id_nota_credito, destino.id_factura, Decimal(monto), admin.id_usuario
+        )
+
+    filas = db_session.query(AplicacionNotaCreditoCliente).order_by(AplicacionNotaCreditoCliente.id_aplicacion).all()
+    assert [f.monto for f in filas] == [Decimal("20.00"), Decimal("15.00")]
+    db_session.refresh(nota)
+    assert nota.monto - nota.saldo_disponible == sum(f.monto for f in filas)  # lo aplicado cuadra con la nota
+
+
+def test_una_aplicacion_rechazada_no_deja_ninguna_fila(db_session):
+    from app.db.models import AplicacionNotaCreditoCliente
+
+    nota, destino, admin = _nota_y_factura_destino(db_session, monto_nota="20.00")
+
+    with pytest.raises(ValueError, match="excede el saldo disponible"):
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db_session, nota.id_nota_credito, destino.id_factura, Decimal("50.00"), admin.id_usuario
+        )
+
+    db_session.rollback()
+    assert db_session.query(AplicacionNotaCreditoCliente).count() == 0
+
+
+def test_si_falla_el_commit_no_queda_la_fila_ni_baja_el_saldo(db_session, monkeypatch):
+    """La fila y la baja de saldos van en la misma transaccion: si el commit falla no queda una sin la otra."""
+    from app.db.models import AplicacionNotaCreditoCliente
+
+    nota, destino, admin = _nota_y_factura_destino(db_session)
+    original = db_session.commit
+
+    def commit_roto():
+        raise RuntimeError("se cayo la conexion")
+
+    monkeypatch.setattr(db_session, "commit", commit_roto)
+    with pytest.raises(RuntimeError):
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db_session, nota.id_nota_credito, destino.id_factura, Decimal("20.00"), admin.id_usuario
+        )
+    monkeypatch.setattr(db_session, "commit", original)
+    db_session.rollback()
+
+    assert db_session.query(AplicacionNotaCreditoCliente).count() == 0
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=destino.id_factura).one()
+    assert cxc.saldo_pendiente == Decimal("80.00")
+
+
+@pytest.mark.parametrize("monto", ["0.00", "-5.00"])
+def test_la_base_rechaza_una_aplicacion_con_monto_no_positivo(db_session, monto):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db.models import AplicacionNotaCreditoCliente
+
+    nota, destino, admin = _nota_y_factura_destino(db_session)
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=destino.id_factura).one()
+
+    db_session.add(
+        AplicacionNotaCreditoCliente(
+            id_nota_credito=nota.id_nota_credito, id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar, monto=Decimal(monto)
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+
+def test_la_base_rechaza_una_aplicacion_a_una_nota_o_cuenta_inexistente(db_session):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db.models import AplicacionNotaCreditoCliente
+
+    db_session.add(
+        AplicacionNotaCreditoCliente(id_nota_credito=999_999, id_cuenta_por_cobrar=999_999, monto=Decimal("5.00"))
+    )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()

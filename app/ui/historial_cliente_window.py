@@ -5,7 +5,6 @@ no combinaba con el resto de dialogos de la app."""
 
 import logging
 from datetime import date, datetime
-from decimal import Decimal
 
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt, QTimer
@@ -143,16 +142,19 @@ ETIQUETAS_TIPO = {
     "pago": "Abono",
     "nota_credito": "Nota Crédito",
     "devolucion_nota_credito": "Devolución NC",
+    "aplicacion_nota_credito": "Abono NC",
 }
 
 # Anchos relativos de las columnas en el PDF (12 columnas: Observaciones es la mas ancha).
 COL_WIDTHS_PDF = [0.9, 1.2, 1.3, 0.9, 0.9, 0.9, 0.5, 2.0, 1.0, 1.0, 1.0, 1.0]
 
 
-def _filas_historial_para_exportar(session, id_cliente: int, vista: str = VISTA_TODOS) -> list[list]:
+def _filas_historial_para_exportar(
+    session, id_cliente: int, id_usuario: int | None, vista: str = VISTA_TODOS
+) -> list[list]:
     """Filas del historial para Excel/PDF, SOLO las de `vista` (la misma que el usuario ve en pantalla).
     Los montos van como Decimal (numeros), no como texto."""
-    historial = filtrar_historial(obtener_historial_cliente(session, id_cliente), vista)
+    historial = filtrar_historial(obtener_historial_cliente(session, id_cliente, id_usuario), vista)
     filas = []
     for item in historial:
         tipo = item["tipo_transaccion"]
@@ -184,7 +186,7 @@ def _filas_historial_para_exportar(session, id_cliente: int, vista: str = VISTA_
                 monto_para_vista(item, vista),
                 item["monto_pagado"] if es_factura else None,
                 item["saldo_factura"] if es_factura else None,
-                None if tipo == "pago" else item["saldo_corrido"],
+                None if tipo in ("pago", "aplicacion_nota_credito") else item["saldo_corrido"],
             ]
         )
     return filas
@@ -195,17 +197,21 @@ def _titulo_excel_historial(cliente_nombre: str | None, vista: str) -> str:
     return "Historial del Cliente" + cliente + " - " + ETIQUETAS_VISTA[vista]
 
 
-def _tarea_exportar_historial_excel(session, ruta: str, id_cliente: int, vista: str, cliente_nombre: str | None) -> str:
+def _tarea_exportar_historial_excel(
+    session, ruta: str, id_cliente: int, id_usuario: int | None, vista: str, cliente_nombre: str | None
+) -> str:
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el historial
     completo del cliente a un archivo (openpyxl) es lo bastante lento como para
     congelar la ventana si se hace en el hilo de GUI."""
-    filas = _filas_historial_para_exportar(session, id_cliente, vista)
+    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista)
     exportar_excel(ruta, COLS_HISTORIAL, filas, titulo=_titulo_excel_historial(cliente_nombre, vista))
     return ruta
 
 
-def _tarea_exportar_historial_pdf(session, ruta: str, id_cliente: int, vista: str, cliente_nombre: str | None) -> str:
-    filas = _filas_historial_para_exportar(session, id_cliente, vista)
+def _tarea_exportar_historial_pdf(
+    session, ruta: str, id_cliente: int, id_usuario: int | None, vista: str, cliente_nombre: str | None
+) -> str:
+    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista)
     exportar_pdf(
         ruta,
         "Historial del Cliente",
@@ -221,9 +227,9 @@ def _tarea_exportar_historial_pdf(session, ruta: str, id_cliente: int, vista: st
 def _tarea_historial_cliente(session, id_cliente: int, id_usuario: int | None) -> dict:
     """Corre en un hilo aparte (ver carga_asincrona.py): historial, saldos y notas de credito del cliente en una sola
     pasada. Sin 'notas_credito'/'ver' simplemente no hay notas (no es un error)."""
-    historial = obtener_historial_cliente(session, id_cliente)
-    saldo_total = obtener_saldo_total_pendiente(session, id_cliente)
-    saldo_positivo = obtener_saldo_total_positivo(session, id_cliente)
+    historial = obtener_historial_cliente(session, id_cliente, id_usuario)
+    saldo_total = obtener_saldo_total_pendiente(session, id_cliente, id_usuario)
+    saldo_positivo = obtener_saldo_total_positivo(session, id_cliente, id_usuario)
     try:
         notas = NotaCreditoService.listar_notas_credito_cliente(session, id_cliente, id_usuario=id_usuario)
     except PermisoDenegadoError:
@@ -557,12 +563,12 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
             {
                 "id_factura": item["id_factura"],
                 "numero_factura": item["numero_factura"],
-                "saldo_pendiente": (item["saldo_corrido"] if item["saldo_corrido"] > 0 else Decimal("0.00")),
+                "saldo_pendiente": item["saldo_factura"],
             }
             for item in historial
             if (
                 item["tipo_transaccion"] == "factura"
-                and item["saldo_corrido"] > 0
+                and item["saldo_factura"] > 0
                 and item["estado_factura"] != "ANULADA"
             )
         ]
@@ -624,7 +630,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
             tipo = item["tipo_transaccion"]
             if tipo == "factura":
                 color = QColor(COLOR_DANGER)
-            elif tipo == "pago":
+            elif tipo in ("pago", "aplicacion_nota_credito"):
                 color = QColor(COLOR_SUCCESS)
             elif tipo == "nota_credito":
                 color = QColor(COLOR_PRIMARY)
@@ -739,7 +745,9 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
             self.tabla.setItem(fila, 10, item_saldo_factura)
 
             # Saldo Corrido (no aplica a un abono suelto)
-            saldo_corrido = "—" if tipo == "pago" else f"${float(item['saldo_corrido']):,.2f}"
+            saldo_corrido = (
+                "—" if tipo in ("pago", "aplicacion_nota_credito") else f"${float(item['saldo_corrido']):,.2f}"
+            )
             item_corrido = QTableWidgetItem(saldo_corrido)
             item_corrido.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if item["saldo_corrido"] > 0:
@@ -770,6 +778,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
                 _tarea_exportar_historial_excel,
                 ruta=ruta,
                 id_cliente=self.id_cliente,
+                id_usuario=self.id_usuario,
                 vista=self._vista,
                 cliente_nombre=self.cliente.nombre_razon_social,
             )
@@ -795,6 +804,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
                 _tarea_exportar_historial_pdf,
                 ruta=ruta,
                 id_cliente=self.id_cliente,
+                id_usuario=self.id_usuario,
                 vista=self._vista,
                 cliente_nombre=self.cliente.nombre_razon_social,
             )
@@ -836,7 +846,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         if not datos:
             logger.warning("Fila seleccionada sin datos de factura (fila %d)", filas[0].row())
             return None
-        if datos["tipo"] in ("factura", "pago") and datos["id_factura"]:
+        if datos["tipo"] in ("factura", "pago", "aplicacion_nota_credito") and datos["id_factura"]:
             return datos["id_factura"]
         MessageBox.information(self, "Selección inválida", "Selecciona una factura o un pago, no una nota de crédito.")
         return None

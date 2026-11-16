@@ -7,6 +7,7 @@ from typing import Literal, TypedDict
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    Cliente,
     ConciliacionPartida,
     CuentaBancaria,
     CuentaPorCobrar,
@@ -16,12 +17,20 @@ from app.db.models import (
     PagoCobro,
     PagoCobroBCV,
 )
+from app.services.alcance_vendedor import vendedor_propio
+from app.services.permisos import PermisoDenegadoError, require_permiso
+from app.services.reportes import _aplicaciones_nc_cliente
 
 
 class HistorialItem(TypedDict):
-    """Representa un item del historial del cliente."""
+    """Representa un item del historial del cliente.
 
-    tipo_transaccion: Literal["factura", "pago", "nota_credito", "devolucion_nota_credito"]
+    Las cifras salen de la misma cuenta que el estado de cuenta del reporte (`ReporteService.estado_cuenta_cliente`),
+    que es la fuente de la verdad: lo cargado y lo abonado de cada factura, y por lo tanto el saldo, son los mismos.
+    `aplicacion_nota_credito` es una nota de credito ya aplicada a una factura: un abono que resta del saldo como un
+    pago, pero que no es dinero cobrado (no cuenta en el total pagado)."""
+
+    tipo_transaccion: Literal["factura", "pago", "nota_credito", "devolucion_nota_credito", "aplicacion_nota_credito"]
     id_cuenta: int | None
     id_factura: int | None
     id_pago: int | None
@@ -38,9 +47,9 @@ class HistorialItem(TypedDict):
     monto_vuelto: Decimal
     metodo_vuelto: str | None
     saldo_corrido: Decimal
-    # Solo en las filas de factura: lo abonado a esa factura (suma de sus abonos) y lo que queda
-    # (monto - abonado, la misma cuenta del saldo corrido). Las demas filas llevan 0: el historial
-    # puede mostrarse SIN las filas de abono y asi se sigue viendo cuanto se pago de cada factura.
+    # Solo en las filas de factura: lo abonado a esa factura (pagos, transferencias conciliadas y notas de credito
+    # aplicadas) y lo que queda (monto - abonado, la misma cuenta del saldo corrido). Las demas filas llevan 0: el
+    # historial puede mostrarse SIN las filas de abono y asi se sigue viendo cuanto se pago de cada factura.
     monto_pagado: Decimal
     saldo_factura: Decimal
 
@@ -82,7 +91,47 @@ def total_pagado(historial: list[HistorialItem]) -> Decimal:
     return sum((-item["monto"] for item in historial if item["tipo_transaccion"] == "pago"), Decimal("0.00"))
 
 
-def obtener_historial_cliente(session: Session, id_cliente: int) -> list[HistorialItem]:
+def _exigir_acceso_al_cliente(session: Session, id_cliente: int, id_usuario: int | None) -> None:
+    """Quien puede ver el historial de un cliente: `clientes:ver` (lo mismo que hace falta para llegar al boton desde
+    el panel de Clientes) y, si es un usuario vendedor, solo el de los clientes que tiene asignados. Se exige AQUI, en
+    el servicio, no solo en la pantalla: el historial trae facturas, pagos y saldos, y antes cualquier llamada directa
+    lo devolvia sin pedir nada (el estado de cuenta del reporte si pide permiso y bloquea a los vendedores)."""
+    require_permiso(session, id_usuario, "clientes", "ver")
+    propio = vendedor_propio(session, id_usuario)
+    if propio is None:
+        return
+    asignado = session.query(Cliente.vendedor_cliente).filter(Cliente.id_cliente == id_cliente).scalar()
+    if asignado != propio:
+        raise PermisoDenegadoError("Ese cliente no esta asignado a tu usuario: solo ves el historial de los tuyos.")
+
+
+def _cargo_de_la_factura(
+    factura: FacturaVenta,
+    cuenta: CuentaPorCobrar | None,
+    cuenta_bcv: CuentaPorCobrarBCV | None,
+    pagos: Decimal,
+    pagos_bcv: Decimal,
+    conciliado: Decimal,
+    nc_aplicado: Decimal,
+) -> Decimal:
+    """Cargo original de la factura, calculado como el estado de cuenta del reporte.
+
+    La cuenta por cobrar no guarda el monto original, solo el saldo que va quedando: el cargo es ese saldo mas todo lo
+    ya abonado (pagos, transferencias conciliadas y notas de credito aplicadas). Asi una factura anulada, que queda con
+    el total en cero al borrarse sus lineas, conserva lo que ya se habia cobrado y su cargo cuadra con sus abonos. Una
+    factura con cuenta BCV carga su monto por esa cuenta y su cuenta normal queda en cero. Sin ninguna cuenta (no
+    deberia ocurrir) se usa el total de la factura."""
+    if cuenta is None and cuenta_bcv is None:
+        return factura.total_venta - (factura.monto_descuento or 0) + (factura.monto_iva or 0)
+    cargo = Decimal("0.00")
+    if cuenta is not None:
+        cargo += cuenta.saldo_pendiente + pagos + conciliado + nc_aplicado
+    if cuenta_bcv is not None:
+        cargo += cuenta_bcv.saldo_pendiente + pagos_bcv
+    return cargo
+
+
+def obtener_historial_cliente(session: Session, id_cliente: int, id_usuario: int | None) -> list[HistorialItem]:
     """
     Obtiene el historial de facturas, pagos y notas de crédito de un cliente.
 
@@ -93,10 +142,12 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
     Args:
         session: Sesión de SQLAlchemy
         id_cliente: ID del cliente
+        id_usuario: quien lo pide: necesita `clientes:ver` y, si es vendedor, el cliente debe ser suyo
 
     Returns:
         Lista de items del historial con transacciones agrupadas por factura
     """
+    _exigir_acceso_al_cliente(session, id_cliente, id_usuario)
     # Obtener facturas del cliente con sus cuentas por cobrar
     facturas = (
         session.query(FacturaVenta)
@@ -157,6 +208,12 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
     for conciliacion in conciliaciones:
         conciliaciones_por_factura.setdefault(conciliacion.cuenta_por_cobrar.id_factura, []).append(conciliacion)
 
+    # Notas de credito YA aplicadas a facturas de este cliente (el estado de cuenta las muestra como abono): aplicar una
+    # nota no crea un pago, solo baja el saldo de la cuenta y deja constancia en Auditoria, de donde se leen.
+    nc_aplicadas_por_factura: dict[int, list[dict]] = {}
+    for aplicacion in _aplicaciones_nc_cliente(session, ids_factura={f.id_factura for f in facturas}):
+        nc_aplicadas_por_factura.setdefault(aplicacion["id_factura"], []).append(aplicacion)
+
     # Obtener notas de crédito disponibles del cliente
     notas_credito = (
         session.query(NotaCreditoCliente)
@@ -205,22 +262,43 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
         .all()
     ):
         cxc_por_factura.setdefault(cuenta.id_factura, cuenta)
+    # Lo mismo con la cuenta BCV de cada factura (la deuda de una factura con porcentaje BCV vive ahi).
+    cxc_bcv_por_factura: dict[int, CuentaPorCobrarBCV] = {}
+    for cuenta_bcv in (
+        session.query(CuentaPorCobrarBCV)
+        .join(FacturaVenta, CuentaPorCobrarBCV.id_factura == FacturaVenta.id_factura)
+        .filter(FacturaVenta.id_cliente_factura == id_cliente)
+        .order_by(CuentaPorCobrarBCV.id_cuenta_por_cobrar)
+        .all()
+    ):
+        cxc_bcv_por_factura.setdefault(cuenta_bcv.id_factura, cuenta_bcv)
 
     for factura in facturas_ordenadas:
         cxc = cxc_por_factura.get(factura.id_factura)
         fecha_emision_str = factura.fecha_emision.strftime("%Y-%m-%d %H:%M") if factura.fecha_emision else ""
         fecha_vencimiento_str = factura.fecha_vencimiento.strftime("%Y-%m-%d") if factura.fecha_vencimiento else None
 
-        # Calcular monto de la factura
-        monto_factura = factura.total_venta - (factura.monto_descuento or 0) + (factura.monto_iva or 0)
+        # Lo cargado y lo abonado salen igual que en el estado de cuenta del reporte (ver _cargo_de_la_factura): el
+        # saldo de la factura es lo que de verdad le queda a su cuenta, con todos sus abonos.
+        pagos_de_factura = pagos_por_factura.get(factura.id_factura, [])
+        pagos_normales = sum((p.monto for p in pagos_de_factura if isinstance(p, PagoCobro)), Decimal("0.00"))
+        pagos_bcv_factura = sum((p.monto for p in pagos_de_factura if isinstance(p, PagoCobroBCV)), Decimal("0.00"))
+        conciliado = sum((c.monto for c in conciliaciones_por_factura.get(factura.id_factura, [])), Decimal("0.00"))
+        notas_aplicadas = nc_aplicadas_por_factura.get(factura.id_factura, [])
+        nc_aplicado = sum((a["monto"] for a in notas_aplicadas), Decimal("0.00"))
 
-        # Calcular pagos aplicados a esta factura
-        pagos_aplicados = Decimal("0.00")
-        if factura.id_factura in pagos_por_factura:
-            for pago in pagos_por_factura[factura.id_factura]:
-                pagos_aplicados += pago.monto
+        monto_factura = _cargo_de_la_factura(
+            factura,
+            cxc,
+            cxc_bcv_por_factura.get(factura.id_factura),
+            pagos_normales,
+            pagos_bcv_factura,
+            conciliado,
+            nc_aplicado,
+        )
+        pagos_aplicados = pagos_normales + pagos_bcv_factura + conciliado + nc_aplicado  # todo lo abonado
 
-        # Calcular saldo corrido para esta factura
+        # Saldo corrido: lo que queda por cobrar de las facturas hasta esta, la mas antigua primero.
         saldo_corrido = saldo_corrido_acumulado + monto_factura - pagos_aplicados
         saldo_corrido_acumulado = saldo_corrido
 
@@ -334,6 +412,32 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
                 }
             )
 
+        # Notas de credito aplicadas a esta factura: abonos que restan del saldo, igual que en el estado de cuenta.
+        for aplicacion in notas_aplicadas:
+            historial.append(
+                {
+                    "tipo_transaccion": "aplicacion_nota_credito",
+                    "id_cuenta": cxc.id_cuenta_por_cobrar if cxc else None,
+                    "id_factura": factura.id_factura,
+                    "id_pago": None,
+                    "id_nota_credito": None,
+                    "numero_factura": aplicacion["numero_nota_credito"] or "",
+                    "fecha": aplicacion["fecha"].strftime("%Y-%m-%d %H:%M") if aplicacion["fecha"] else "",
+                    "fecha_vencimiento": None,
+                    "monto": -aplicacion["monto"],  # Negativo: resta del saldo, como un pago
+                    "estado_factura": None,
+                    "condicion_pago": None,
+                    "dias_credito": None,
+                    "observaciones": f"Aplicada a la factura {factura.numero_factura}",
+                    "metodo_pago": None,
+                    "monto_vuelto": Decimal("0.00"),
+                    "metodo_vuelto": None,
+                    "saldo_corrido": Decimal("0.00"),
+                    "monto_pagado": Decimal("0.00"),
+                    "saldo_factura": Decimal("0.00"),
+                }
+            )
+
     # Invertir el orden del historial para mostrar de más reciente a más antiguo
     historial.reverse()
 
@@ -394,17 +498,19 @@ def obtener_historial_cliente(session: Session, id_cliente: int) -> list[Histori
     return historial
 
 
-def obtener_saldo_total_pendiente(session: Session, id_cliente: int) -> Decimal:
+def obtener_saldo_total_pendiente(session: Session, id_cliente: int, id_usuario: int | None) -> Decimal:
     """
     Calcula el saldo total pendiente de un cliente sumando todas sus cuentas por cobrar.
 
     Args:
         session: Sesión de SQLAlchemy
         id_cliente: ID del cliente
+        id_usuario: quien lo pide (mismo permiso y alcance que `obtener_historial_cliente`)
 
     Returns:
         Saldo total pendiente
     """
+    _exigir_acceso_al_cliente(session, id_cliente, id_usuario)
     # Sumar saldos pendientes de cuentas por cobrar del cliente
     total = (
         session.query(CuentaPorCobrar)
@@ -429,17 +535,19 @@ def obtener_saldo_total_pendiente(session: Session, id_cliente: int) -> Decimal:
     return sum((saldo[0] for saldo in [*total, *total_bcv]), Decimal("0.00"))
 
 
-def obtener_saldo_total_positivo(session: Session, id_cliente: int) -> Decimal:
+def obtener_saldo_total_positivo(session: Session, id_cliente: int, id_usuario: int | None) -> Decimal:
     """
     Calcula el saldo total positivo (a favor) de un cliente sumando sus notas de crédito disponibles.
 
     Args:
         session: Sesión de SQLAlchemy
         id_cliente: ID del cliente
+        id_usuario: quien lo pide (mismo permiso y alcance que `obtener_historial_cliente`)
 
     Returns:
         Saldo total positivo (notas de crédito disponibles)
     """
+    _exigir_acceso_al_cliente(session, id_cliente, id_usuario)
     # Sumar saldos disponibles de notas de crédito del cliente
     total = (
         session.query(NotaCreditoCliente)

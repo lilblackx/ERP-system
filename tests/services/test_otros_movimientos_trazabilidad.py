@@ -242,6 +242,10 @@ def test_conciliar_deja_constancia_y_aparece_como_abono_en_el_historial(db_sessi
 
     registro = db_session.query(ConciliacionPartida).one()
     assert registro.monto == Decimal("30.00") and registro.conciliado_por == admin.id_usuario
-    abonos = [h for h in obtener_historial_cliente(db_session, cliente.id_cliente) if h["tipo_transaccion"] == "pago"]
+    abonos = [
+        h
+        for h in obtener_historial_cliente(db_session, cliente.id_cliente, admin.id_usuario)
+        if h["tipo_transaccion"] == "pago"
+    ]
     assert [a["monto"] for a in abonos] == [Decimal("-30.00")]
     assert "conciliada" in abonos[0]["observaciones"]

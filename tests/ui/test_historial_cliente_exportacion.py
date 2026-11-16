@@ -49,12 +49,12 @@ def _cliente_con_factura_y_abono(db_session, total="100.00", abono="40.00"):
         id_caja=caja.id_caja,
         id_usuario=admin.id_usuario,
     )
-    return cliente
+    return cliente, admin
 
 
 def test_los_abonos_del_historial_se_exportan_a_excel_como_numeros_negativos(db_session, tmp_path):
-    cliente = _cliente_con_factura_y_abono(db_session)
-    filas = _filas_historial_para_exportar(db_session, cliente.id_cliente)
+    cliente, admin = _cliente_con_factura_y_abono(db_session)
+    filas = _filas_historial_para_exportar(db_session, cliente.id_cliente, admin.id_usuario)
     ruta = tmp_path / "historial.xlsx"
 
     exportar_excel(ruta, COLS_HISTORIAL, filas)
@@ -75,9 +75,9 @@ def test_los_abonos_del_historial_se_exportan_a_excel_como_numeros_negativos(db_
 
 
 def test_los_montos_del_historial_son_decimales_no_texto(db_session):
-    cliente = _cliente_con_factura_y_abono(db_session)
+    cliente, admin = _cliente_con_factura_y_abono(db_session)
 
-    filas = _filas_historial_para_exportar(db_session, cliente.id_cliente)
+    filas = _filas_historial_para_exportar(db_session, cliente.id_cliente, admin.id_usuario)
 
     col_monto = COLS_HISTORIAL.index("Monto")
     col_saldo = COLS_HISTORIAL.index("Saldo Corrido")
@@ -89,8 +89,8 @@ def test_los_montos_del_historial_son_decimales_no_texto(db_session):
 
 
 def test_el_historial_con_abonos_se_exporta_a_pdf(db_session, tmp_path):
-    cliente = _cliente_con_factura_y_abono(db_session)
-    filas = _filas_historial_para_exportar(db_session, cliente.id_cliente)
+    cliente, admin = _cliente_con_factura_y_abono(db_session)
+    filas = _filas_historial_para_exportar(db_session, cliente.id_cliente, admin.id_usuario)
     ruta = tmp_path / "historial.pdf"
 
     exportar_pdf(ruta, "Historial del Cliente", COLS_HISTORIAL, filas, cliente_nombre=cliente.nombre_razon_social)

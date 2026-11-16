@@ -275,9 +275,9 @@ def test_el_filtro_de_estado_no_vuelve_a_consultar_la_base(qtbot, monkeypatch, w
 
 
 def test_el_historial_de_cliente_trae_todo_en_una_pasada_y_sin_permiso_de_notas_no_falla(monkeypatch):
-    monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente: ["h"])
-    monkeypatch.setattr(hw, "obtener_saldo_total_pendiente", lambda session, id_cliente: Decimal("10.00"))
-    monkeypatch.setattr(hw, "obtener_saldo_total_positivo", lambda session, id_cliente: Decimal("2.00"))
+    monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente, id_usuario: ["h"])
+    monkeypatch.setattr(hw, "obtener_saldo_total_pendiente", lambda session, id_cliente, id_usuario: Decimal("10.00"))
+    monkeypatch.setattr(hw, "obtener_saldo_total_positivo", lambda session, id_cliente, id_usuario: Decimal("2.00"))
 
     def sin_permiso(*a, **k):
         raise hw.PermisoDenegadoError("notas_credito", "ver")
@@ -298,7 +298,7 @@ def test_el_historial_de_cliente_avisa_si_la_carga_falla_en_vez_de_dejar_la_tabl
     avisos = []
     monkeypatch.setattr(hw.MessageBox, "critical", staticmethod(lambda *a, **k: avisos.append(a[1:])))
 
-    def falla(session, id_cliente):
+    def falla(session, id_cliente, id_usuario):
         raise RuntimeError("sin red")
 
     monkeypatch.setattr(hw, "obtener_historial_cliente", falla)

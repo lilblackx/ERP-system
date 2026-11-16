@@ -74,9 +74,9 @@ HISTORIAL = [
 
 @pytest.fixture
 def ventana(qtbot, monkeypatch):
-    monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente: HISTORIAL)
-    monkeypatch.setattr(hw, "obtener_saldo_total_pendiente", lambda session, id_cliente: Decimal("75.00"))
-    monkeypatch.setattr(hw, "obtener_saldo_total_positivo", lambda session, id_cliente: Decimal("15.00"))
+    monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente, id_usuario: HISTORIAL)
+    monkeypatch.setattr(hw, "obtener_saldo_total_pendiente", lambda session, id_cliente, id_usuario: Decimal("75.00"))
+    monkeypatch.setattr(hw, "obtener_saldo_total_positivo", lambda session, id_cliente, id_usuario: Decimal("15.00"))
     monkeypatch.setattr(hw.NotaCreditoService, "listar_notas_credito_cliente", lambda *a, **k: [])
     cliente = SimpleNamespace(nombre_razon_social="Cliente de Prueba")
     win = HistorialClienteWindow(MagicMock(return_value=MagicMock()), 1, cliente, id_usuario=1)
@@ -168,11 +168,11 @@ def test_en_solo_pagos_el_detalle_abre_la_factura_del_pago(ventana):
 
 @pytest.fixture
 def _sin_bd(monkeypatch):
-    monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente: HISTORIAL)
+    monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente, id_usuario: HISTORIAL)
 
 
 def test_la_exportacion_sigue_la_vista(_sin_bd):
-    tipos = lambda vista: [f[0] for f in _filas_historial_para_exportar(None, 1, vista)]  # noqa: E731
+    tipos = lambda vista: [f[0] for f in _filas_historial_para_exportar(None, 1, 1, vista)]  # noqa: E731
 
     assert tipos(VISTA_FACTURAS) == ["Factura", "Nota Crédito", "Factura"]
     assert tipos(VISTA_PAGOS) == ["Abono", "Abono", "Abono"]
@@ -180,7 +180,7 @@ def test_la_exportacion_sigue_la_vista(_sin_bd):
 
 
 def test_las_filas_exportadas_tienen_una_celda_por_columna_y_tipo_en_la_primera(_sin_bd):
-    filas = _filas_historial_para_exportar(None, 1, VISTA_TODOS)
+    filas = _filas_historial_para_exportar(None, 1, 1, VISTA_TODOS)
 
     assert all(len(f) == len(COLS_HISTORIAL) for f in filas)
     assert COLS_HISTORIAL[0] == "Tipo"
@@ -188,7 +188,7 @@ def test_las_filas_exportadas_tienen_una_celda_por_columna_y_tipo_en_la_primera(
 
 
 def test_en_solo_pagos_los_montos_exportados_son_positivos_y_numericos(_sin_bd):
-    filas = _filas_historial_para_exportar(None, 1, VISTA_PAGOS)
+    filas = _filas_historial_para_exportar(None, 1, 1, VISTA_PAGOS)
 
     montos = [f[COLS_HISTORIAL.index("Monto")] for f in filas]
     assert montos == [Decimal("40.00"), Decimal("25.00"), Decimal("10.00")]
@@ -197,7 +197,7 @@ def test_en_solo_pagos_los_montos_exportados_son_positivos_y_numericos(_sin_bd):
 def test_el_excel_de_facturas_trae_pagado_y_saldo_y_el_titulo_indica_la_vista(_sin_bd, tmp_path):
     ruta = tmp_path / "h.xlsx"
 
-    _tarea_exportar_historial_excel(None, str(ruta), 1, VISTA_FACTURAS, "Cliente de Prueba")
+    _tarea_exportar_historial_excel(None, str(ruta), 1, 1, VISTA_FACTURAS, "Cliente de Prueba")
 
     hoja = load_workbook(ruta).active
     filas = [[c.value for c in fila] for fila in hoja.iter_rows()]

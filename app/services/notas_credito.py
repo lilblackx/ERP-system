@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    AplicacionNotaCreditoCliente,
+    AplicacionNotaCreditoProveedor,
     Caja,
     Cliente,
     Compra,
@@ -207,6 +209,16 @@ class NotaCreditoService:
         cxc.saldo_pendiente -= monto
         cxc.estado = "pagada" if cxc.saldo_pendiente == 0 else "parcial"
 
+        # La constancia de la aplicacion va en la MISMA transaccion que baja los saldos: o quedan las dos cosas o
+        # ninguna. El estado de cuenta y el historial del cliente leen de esta tabla (antes, de un evento de Auditoria).
+        session.add(
+            AplicacionNotaCreditoCliente(
+                id_nota_credito=nota.id_nota_credito,
+                id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+                monto=monto,
+                aplicado_por=id_usuario,
+            )
+        )
         session.commit()
         session.refresh(nota)
 
@@ -522,6 +534,15 @@ class NotaCreditoService:
         cxp.saldo_pendiente -= monto
         cxp.estado = "pagada" if cxp.saldo_pendiente == 0 else "parcial"
 
+        # La constancia va en la MISMA transaccion que baja los saldos (ver aplicar_nota_credito_cliente).
+        session.add(
+            AplicacionNotaCreditoProveedor(
+                id_nota_credito=nota.id_nota_credito,
+                id_cuenta_por_pagar=cxp.id_cuenta,
+                monto=monto,
+                aplicado_por=id_usuario,
+            )
+        )
         session.commit()
         session.refresh(nota)
 

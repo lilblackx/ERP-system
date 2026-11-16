@@ -44,7 +44,7 @@ def test_obtener_historial_cliente_dias_credito_no_cambia_retroactivamente(db_se
     cliente.dias_credito = 60
     db_session.commit()
 
-    historial = obtener_historial_cliente(db_session, cliente.id_cliente)
+    historial = obtener_historial_cliente(db_session, cliente.id_cliente, admin.id_usuario)
     item = next(i for i in historial if i["id_factura"] == factura.id_factura)
 
     assert item["dias_credito"] == 10
@@ -133,7 +133,7 @@ def test_la_factura_del_historial_trae_lo_pagado_y_su_saldo(db_session):
             id_usuario=admin.id_usuario,
         )
 
-    historial = obtener_historial_cliente(db_session, cliente.id_cliente)
+    historial = obtener_historial_cliente(db_session, cliente.id_cliente, admin.id_usuario)
     item = next(i for i in historial if i["tipo_transaccion"] == "factura")
     abonos = [i for i in historial if i["tipo_transaccion"] == "pago"]
 
@@ -176,7 +176,7 @@ def test_el_historial_no_hace_una_consulta_por_factura(db_session):
 
         event.listen(motor, "before_cursor_execute", registrar)
         try:
-            obtener_historial_cliente(db_session, cliente.id_cliente)
+            obtener_historial_cliente(db_session, cliente.id_cliente, admin.id_usuario)
         finally:
             event.remove(motor, "before_cursor_execute", registrar)
         return len(consultas)

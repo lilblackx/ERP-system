@@ -35,6 +35,8 @@ from sqlalchemy import Date, case, cast, exists, func, literal, literal_column, 
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    AplicacionNotaCreditoCliente,
+    AplicacionNotaCreditoProveedor,
     Auditoria,
     BancoMovimiento,
     Caja,
@@ -159,51 +161,92 @@ def _aplicaciones_nc_cliente(
     hasta: datetime | None = None,
     ids_factura: Iterable[int] | None = None,
 ) -> list[dict]:
-    """Aplicaciones de notas de credito de cliente a facturas (NotaCreditoService.aplicar_nota_credito_cliente).
-    No hay una tabla propia: esa operacion solo baja el saldo de la cuenta por cobrar y deja constancia en
-    Auditoria (accion APLICACION_NOTA_CREDITO_CLIENTE, con factura destino y monto), asi que de ahi se leen.
+    """Aplicaciones de notas de credito de cliente a facturas (NotaCreditoService.aplicar_nota_credito_cliente), de la
+    tabla `aplicaciones_nota_credito_cliente` (migrations/0100): esa operacion baja el saldo de la cuenta por cobrar sin
+    crear un pago, y la fila es su constancia, escrita en la misma transaccion. Cada aplicacion trae `fecha`,
+    `numero_nota_credito`, `id_factura` (la destino) y `monto`, de la mas antigua a la mas reciente.
 
-    Con `ids_factura` solo se traen las dirigidas a esas facturas: el filtro va en la base (JSON_VALUE sobre el
-    detalle) y no en Python, porque sin el se leian y parseaban las de todos los clientes en cada consulta."""
-    consulta = session.query(Auditoria).filter(
-        Auditoria.accion == "APLICACION_NOTA_CREDITO_CLIENTE", Auditoria.modulo == "NOTAS_CREDITO"
+    Con `ids_factura` solo se traen las dirigidas a esas facturas, por lotes: SQL Server limita los parametros de una
+    consulta."""
+    consulta = (
+        session.query(
+            AplicacionNotaCreditoCliente.fecha_aplicacion,
+            NotaCreditoCliente.numero_nota_credito,
+            CuentaPorCobrar.id_factura,
+            AplicacionNotaCreditoCliente.monto,
+        )
+        .join(NotaCreditoCliente, NotaCreditoCliente.id_nota_credito == AplicacionNotaCreditoCliente.id_nota_credito)
+        .join(
+            CuentaPorCobrar,
+            CuentaPorCobrar.id_cuenta_por_cobrar == AplicacionNotaCreditoCliente.id_cuenta_por_cobrar,
+        )
     )
     if desde is not None:
-        consulta = consulta.filter(Auditoria.fecha_evento >= desde)
+        consulta = consulta.filter(AplicacionNotaCreditoCliente.fecha_aplicacion >= desde)
     if hasta is not None:
-        consulta = consulta.filter(Auditoria.fecha_evento <= hasta)
+        consulta = consulta.filter(AplicacionNotaCreditoCliente.fecha_aplicacion <= hasta)
 
     if ids_factura is None:
-        eventos = consulta.order_by(Auditoria.fecha_evento).all()
+        filas = consulta.all()
     else:
-        # ISJSON primero: JSON_VALUE revienta con un detalle que no es JSON, y una fila asi no debe romper el reporte.
-        factura_destino = case(
-            (func.isjson(Auditoria.detalle) == 1, func.json_value(Auditoria.detalle, "$.id_factura_destino")),
-            else_=None,
-        )
-        ids = sorted({str(i) for i in ids_factura})
-        eventos = []
-        for inicio in range(
-            0, len(ids), _TAMANO_LOTE_IN
-        ):  # por lotes: SQL Server limita los parametros de una consulta
-            eventos.extend(consulta.filter(factura_destino.in_(ids[inicio : inicio + _TAMANO_LOTE_IN])).all())
-        eventos.sort(key=lambda e: e.fecha_evento)
+        ids = sorted(set(ids_factura))
+        filas = []
+        for inicio in range(0, len(ids), _TAMANO_LOTE_IN):
+            filas.extend(consulta.filter(CuentaPorCobrar.id_factura.in_(ids[inicio : inicio + _TAMANO_LOTE_IN])).all())
 
-    aplicaciones = []
-    for evento in eventos:
-        try:
-            detalle = json.loads(evento.detalle) if evento.detalle else {}
-            aplicaciones.append(
-                {
-                    "fecha": evento.fecha_evento,
-                    "numero_nota_credito": detalle.get("numero_nota_credito"),
-                    "id_factura": int(detalle["id_factura_destino"]),
-                    "monto": Decimal(str(detalle["monto"])),
-                }
-            )
-        except (TypeError, ValueError, KeyError, ArithmeticError):
-            continue
-    return aplicaciones
+    filas.sort(key=lambda fila: fila.fecha_aplicacion)
+    return [
+        {
+            "fecha": fila.fecha_aplicacion,
+            "numero_nota_credito": fila.numero_nota_credito,
+            "id_factura": fila.id_factura,
+            "monto": fila.monto,
+        }
+        for fila in filas
+    ]
+
+
+def _aplicaciones_nc_proveedor(
+    session: Session,
+    desde: datetime | None = None,
+    hasta: datetime | None = None,
+    ids_cuenta: Iterable[int] | None = None,
+) -> list[dict]:
+    """Aplicaciones de notas de credito de proveedor a cuentas por pagar
+    (NotaCreditoService.aplicar_nota_credito_proveedor), de la tabla `aplicaciones_nota_credito_proveedor`
+    (migrations/0101): espejo de `_aplicaciones_nc_cliente`. Cada aplicacion trae `fecha`, `id_nota_credito` (la nota de
+    proveedor no tiene numero propio), `id_cuenta` (la cuenta por pagar destino) y `monto`, de la mas antigua a la mas
+    reciente. Con `ids_cuenta` solo se traen las dirigidas a esas cuentas, por lotes."""
+    consulta = session.query(
+        AplicacionNotaCreditoProveedor.fecha_aplicacion,
+        AplicacionNotaCreditoProveedor.id_nota_credito,
+        AplicacionNotaCreditoProveedor.id_cuenta_por_pagar,
+        AplicacionNotaCreditoProveedor.monto,
+    )
+    if desde is not None:
+        consulta = consulta.filter(AplicacionNotaCreditoProveedor.fecha_aplicacion >= desde)
+    if hasta is not None:
+        consulta = consulta.filter(AplicacionNotaCreditoProveedor.fecha_aplicacion <= hasta)
+
+    if ids_cuenta is None:
+        filas = consulta.all()
+    else:
+        ids = sorted(set(ids_cuenta))
+        filas = []
+        for inicio in range(0, len(ids), _TAMANO_LOTE_IN):
+            lote = ids[inicio : inicio + _TAMANO_LOTE_IN]
+            filas.extend(consulta.filter(AplicacionNotaCreditoProveedor.id_cuenta_por_pagar.in_(lote)).all())
+
+    filas.sort(key=lambda fila: fila.fecha_aplicacion)
+    return [
+        {
+            "fecha": fila.fecha_aplicacion,
+            "id_nota_credito": fila.id_nota_credito,
+            "id_cuenta": fila.id_cuenta_por_pagar,
+            "monto": fila.monto,
+        }
+        for fila in filas
+    ]
 
 
 def _descripcion_abono(grupo: list) -> str:
@@ -284,12 +327,15 @@ def _cuentas_al_corte(
     fecha_corte: date,
     orden,
     nc_por_factura: dict[int, Decimal] | None = None,
+    abonos_posteriores_por_cuenta: dict[int, Decimal] | None = None,
 ) -> list[tuple]:
     """Pares (cuenta, saldo) con saldo > 0 a `fecha_corte`.
 
     Corte de hoy o futuro: las cuentas abiertas con su saldo actual. Corte pasado: el saldo actual es el de
     hoy, no el de entonces, asi que se reconstruye -- solo facturas/compras emitidas hasta el corte, y a cada
-    saldo se le suman los pagos (y notas de credito aplicadas, `nc_por_factura`) posteriores al corte. Las
+    saldo se le suman los pagos (y notas de credito aplicadas, `nc_por_factura`) posteriores al corte, y lo que
+    baje el saldo sin ser un pago -- las transferencias conciliadas en CxC, las notas de proveedor en CxP -- que
+    llega por `abonos_posteriores_por_cuenta` (por id de cuenta). Las
     cuentas hoy pagadas que a esa fecha estaban abiertas entran por eso mismo."""
     if fecha_corte >= date.today():
         cuentas = query.filter(modelo.estado.in_(estados_abiertos)).order_by(orden).all()
@@ -308,6 +354,8 @@ def _cuentas_al_corte(
         saldo = cuenta.saldo_pendiente + to_decimal(posteriores.get(_pk_cuenta(cuenta), 0))
         if nc_por_factura:
             saldo += nc_por_factura.get(getattr(cuenta, "id_factura", None), Decimal("0.00"))
+        if abonos_posteriores_por_cuenta:
+            saldo += abonos_posteriores_por_cuenta.get(_pk_cuenta(cuenta), Decimal("0.00"))
         if saldo > 0:
             pares.append((cuenta, saldo))
     return pares
@@ -323,6 +371,33 @@ def _nc_aplicadas_despues_del_corte(session: Session, fecha_corte: date) -> dict
         id_factura = aplicacion["id_factura"]
         por_factura[id_factura] = por_factura.get(id_factura, Decimal("0.00")) + aplicacion["monto"]
     return por_factura
+
+
+def _conciliado_despues_del_corte(session: Session, fecha_corte: date) -> dict[int, Decimal] | None:
+    """Total conciliado por cuenta por cobrar DESPUES de `fecha_corte` (None si el corte es de hoy o futuro). Una
+    transferencia conciliada baja el saldo de la factura sin ser un pago ni una nota de credito."""
+    if fecha_corte >= date.today():
+        return None
+    por_cuenta: dict[int, Decimal] = {}
+    for id_cuenta, total in (
+        session.query(ConciliacionPartida.id_cuenta_por_cobrar, func.sum(ConciliacionPartida.monto))
+        .filter(ConciliacionPartida.fecha_conciliacion > datetime.combine(fecha_corte, time.max))
+        .group_by(ConciliacionPartida.id_cuenta_por_cobrar)
+    ):
+        por_cuenta[id_cuenta] = to_decimal(total)
+    return por_cuenta
+
+
+def _nc_proveedor_despues_del_corte(session: Session, fecha_corte: date) -> dict[int, Decimal] | None:
+    """Total de notas de credito de proveedor aplicadas por cuenta por pagar DESPUES de `fecha_corte` (None si el corte
+    es de hoy o futuro)."""
+    if fecha_corte >= date.today():
+        return None
+    por_cuenta: dict[int, Decimal] = {}
+    for aplicacion in _aplicaciones_nc_proveedor(session, desde=datetime.combine(fecha_corte, time.max)):
+        id_cuenta = aplicacion["id_cuenta"]
+        por_cuenta[id_cuenta] = por_cuenta.get(id_cuenta, Decimal("0.00")) + aplicacion["monto"]
+    return por_cuenta
 
 
 def _pk_cuenta(cuenta) -> int:
@@ -369,6 +444,7 @@ class ReporteService:
             fecha_corte,
             _ORDEN_AGING_CXC[orden],
             nc_por_factura=_nc_aplicadas_despues_del_corte(session, fecha_corte),
+            abonos_posteriores_por_cuenta=_conciliado_despues_del_corte(session, fecha_corte),
         )
 
         filas = []
@@ -502,6 +578,7 @@ class ReporteService:
             ESTADOS_CXP_ABIERTOS,
             fecha_corte,
             _ORDEN_AGING_CXP[orden],
+            abonos_posteriores_por_cuenta=_nc_proveedor_despues_del_corte(session, fecha_corte),
         )
 
         filas = []
@@ -2569,6 +2646,7 @@ class ReporteService:
             fecha_corte,
             CuentaPorCobrar.fecha_vencimiento,
             nc_por_factura=_nc_aplicadas_despues_del_corte(session, fecha_corte),
+            abonos_posteriores_por_cuenta=_conciliado_despues_del_corte(session, fecha_corte),
         ) + _cuentas_al_corte(
             session,
             session.query(CuentaPorCobrarBCV)
@@ -2960,16 +3038,25 @@ class ReporteService:
             pagos_por_cuenta[p.id_cuenta_por_pagar] = (
                 pagos_por_cuenta.get(p.id_cuenta_por_pagar, Decimal("0.00")) + p.monto
             )
+        # Notas de credito de proveedor aplicadas: bajan el saldo de la cuenta sin ser un pago (como en el estado de
+        # cuenta del cliente), asi que el cargo original las suma y cada una sale como un abono.
+        aplicaciones_nc = _aplicaciones_nc_proveedor(session, ids_cuenta={c.id_cuenta for c in cuentas})
+        nc_por_cuenta: dict[int, Decimal] = {}
+        for aplicacion in aplicaciones_nc:
+            nc_por_cuenta[aplicacion["id_cuenta"]] = (
+                nc_por_cuenta.get(aplicacion["id_cuenta"], Decimal("0.00")) + aplicacion["monto"]
+            )
 
         eventos = []
         for cuenta in cuentas:
             pagos_de_cuenta = pagos_por_cuenta.get(cuenta.id_cuenta, Decimal("0.00"))
+            nc_de_cuenta = nc_por_cuenta.get(cuenta.id_cuenta, Decimal("0.00"))
             eventos.append(
                 {
                     "fecha": cuenta.compra.fecha_emision,
                     "tipo": "Compra",
                     "referencia": cuenta.compra.numero_compra,
-                    "cargo": cuenta.saldo_pendiente + pagos_de_cuenta,
+                    "cargo": cuenta.saldo_pendiente + pagos_de_cuenta + nc_de_cuenta,
                     "abono": Decimal("0.00"),
                 }
             )
@@ -2981,6 +3068,16 @@ class ReporteService:
                     "referencia": pago.referencia or pago.cuenta_por_pagar.compra.numero_compra,
                     "cargo": Decimal("0.00"),
                     "abono": pago.monto,
+                }
+            )
+        for aplicacion in aplicaciones_nc:
+            eventos.append(
+                {
+                    "fecha": aplicacion["fecha"],
+                    "tipo": "Nota de crédito",
+                    "referencia": f"NC proveedor #{aplicacion['id_nota_credito']}",
+                    "cargo": Decimal("0.00"),
+                    "abono": aplicacion["monto"],
                 }
             )
         eventos.sort(key=lambda e: e["fecha"])

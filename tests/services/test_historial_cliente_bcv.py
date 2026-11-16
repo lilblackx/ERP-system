@@ -44,7 +44,7 @@ def test_el_saldo_pendiente_total_suma_las_facturas_bcv(db_session):
     _factura(db_session, admin, cliente, "50.00")
 
     assert cuenta_bcv.saldo_pendiente == Decimal("110.00")
-    assert obtener_saldo_total_pendiente(db_session, cliente.id_cliente) == Decimal("160.00")
+    assert obtener_saldo_total_pendiente(db_session, cliente.id_cliente, admin.id_usuario) == Decimal("160.00")
     del factura_bcv
 
 
@@ -62,7 +62,7 @@ def test_el_saldo_pendiente_total_baja_con_los_abonos_bcv(db_session):
         id_usuario=admin.id_usuario,
     )
 
-    assert obtener_saldo_total_pendiente(db_session, cliente.id_cliente) == Decimal("60.00")
+    assert obtener_saldo_total_pendiente(db_session, cliente.id_cliente, admin.id_usuario) == Decimal("60.00")
 
 
 def test_la_factura_bcv_muestra_su_monto_y_su_saldo_en_el_historial(db_session):
@@ -70,7 +70,9 @@ def test_la_factura_bcv_muestra_su_monto_y_su_saldo_en_el_historial(db_session):
     factura, cuenta, cliente = _emitir_credito_bcv(db_session, admin, precio="110.00", porcentaje="10")
 
     (fila,) = [
-        h for h in obtener_historial_cliente(db_session, cliente.id_cliente) if h["tipo_transaccion"] == "factura"
+        h
+        for h in obtener_historial_cliente(db_session, cliente.id_cliente, admin.id_usuario)
+        if h["tipo_transaccion"] == "factura"
     ]
 
     assert fila["numero_factura"] == factura.numero_factura
@@ -95,7 +97,9 @@ def test_el_monto_de_la_factura_en_el_historial_incluye_iva_y_descuento(db_sessi
     _factura(db_session, admin, cliente, "100.00")
 
     (fila,) = [
-        h for h in obtener_historial_cliente(db_session, cliente.id_cliente) if h["tipo_transaccion"] == "factura"
+        h
+        for h in obtener_historial_cliente(db_session, cliente.id_cliente, admin.id_usuario)
+        if h["tipo_transaccion"] == "factura"
     ]
 
     assert fila["monto"] == Decimal("116.00")
@@ -132,11 +136,11 @@ def test_factura_bcv_de_contado_aparece_pagada_en_el_historial(db_session):
         porcentaje_bcv=Decimal("10"),
     )
 
-    historial = obtener_historial_cliente(db_session, cliente.id_cliente)
+    historial = obtener_historial_cliente(db_session, cliente.id_cliente, admin.id_usuario)
     (factura,) = [h for h in historial if h["tipo_transaccion"] == "factura"]
     pagos = [h for h in historial if h["tipo_transaccion"] == "pago"]
 
     assert factura["monto"] == Decimal("110.00")
     assert factura["saldo_corrido"] == Decimal("0.00")
     assert [p["monto"] for p in pagos] == [Decimal("-110.00")]
-    assert obtener_saldo_total_pendiente(db_session, cliente.id_cliente) == Decimal("0.00")
+    assert obtener_saldo_total_pendiente(db_session, cliente.id_cliente, admin.id_usuario) == Decimal("0.00")

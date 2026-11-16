@@ -142,6 +142,8 @@ def usuario_limitado(db_session):
         "notas_credito_clientes",
         "notas_credito_proveedores",
         "conciliaciones_partida",
+        "aplicaciones_nota_credito_cliente",
+        "aplicaciones_nota_credito_proveedor",
         "auditoria",
         "auditoria_cambios_db",
     ],
@@ -224,6 +226,55 @@ def test_altas_y_borrados_de_movimientos_de_caja_quedan_registrados(db_session):
     assert operaciones == ["I", "D"]
     borrado = [c for c in _cambios(db_session, "caja_movimientos") if c.operacion == "D"][0]
     assert borrado.nuevo is None and json.loads(borrado.anterior)["monto_movimiento"] == 5
+
+
+def test_aplicar_una_nota_de_credito_queda_registrado_en_el_historial_de_cambios(db_session):
+    """La tabla de aplicaciones (migrations/0100) tiene el mismo trigger de cambios que las demas tablas de dinero."""
+    from app.db.models import AplicacionNotaCreditoCliente
+    from app.services.notas_credito import NotaCreditoService
+    from tests.services.test_notas_credito import _nota_y_factura_destino
+
+    nota, destino, admin = _nota_y_factura_destino(db_session)
+    db_session.query(AuditoriaCambioDB).delete()
+    db_session.commit()
+
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session, nota.id_nota_credito, destino.id_factura, Decimal("20.00"), admin.id_usuario
+    )
+    aplicacion = db_session.query(AplicacionNotaCreditoCliente).one()
+
+    (alta,) = _cambios(db_session, "aplicaciones_nota_credito_cliente")
+    assert alta.operacion == "I" and alta.clave == str(aplicacion.id_aplicacion)
+    assert alta.anterior is None and json.loads(alta.nuevo)["monto"] == 20
+
+    db_session.execute(
+        text("UPDATE dbo.aplicaciones_nota_credito_cliente SET monto = 5 WHERE id_aplicacion = :a"),
+        {"a": aplicacion.id_aplicacion},
+    )
+    db_session.commit()
+
+    cambio = [c for c in _cambios(db_session, "aplicaciones_nota_credito_cliente") if c.operacion == "U"][0]
+    assert json.loads(cambio.anterior)["monto"] == 20 and json.loads(cambio.nuevo)["monto"] == 5
+
+
+def test_aplicar_una_nota_de_proveedor_queda_registrado_en_el_historial_de_cambios(db_session):
+    """La tabla de aplicaciones de proveedor (migrations/0101) tiene el mismo trigger de cambios que las demas."""
+    from app.db.models import AplicacionNotaCreditoProveedor
+    from app.services.notas_credito import NotaCreditoService
+    from tests.services.test_notas_credito_proveedor import _nota_y_deuda
+
+    admin, nota, cxp = _nota_y_deuda(db_session)
+    db_session.query(AuditoriaCambioDB).delete()
+    db_session.commit()
+
+    NotaCreditoService.aplicar_nota_credito_proveedor(
+        db_session, nota.id_nota_credito, cxp.id_cuenta, Decimal("20.00"), admin.id_usuario
+    )
+    aplicacion = db_session.query(AplicacionNotaCreditoProveedor).one()
+
+    (alta,) = _cambios(db_session, "aplicaciones_nota_credito_proveedor")
+    assert alta.operacion == "I" and alta.clave == str(aplicacion.id_aplicacion)
+    assert alta.anterior is None and json.loads(alta.nuevo)["monto"] == 20
 
 
 def test_los_cobros_de_una_venta_de_contado_quedan_registrados_pese_al_trigger_instead_of(db_session):

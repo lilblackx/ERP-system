@@ -925,6 +925,31 @@ class NotaCreditoCliente(Base):
     creador = relationship("Usuario")
 
 
+class AplicacionNotaCreditoCliente(Base):
+    """Cada vez que una nota de credito se aplica a una factura del cliente (migrations/0100). Aplicar una nota baja
+    el saldo de la cuenta por cobrar sin crear un pago, y esta fila es la constancia: nota, cuenta destino, monto,
+    fecha y quien. Se escribe en la misma transaccion que baja el saldo. El estado de cuenta del reporte y el
+    historial del cliente leen de aqui (antes parseaban un evento de Auditoria)."""
+
+    __tablename__ = "aplicaciones_nota_credito_cliente"
+    # Tiene trigger de auditoria (migrations/0100): SQL Server no admite OUTPUT sin INTO sobre una tabla con triggers.
+    __table_args__ = {"implicit_returning": False}
+
+    id_aplicacion: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_nota_credito: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("notas_credito_clientes.id_nota_credito"), nullable=False
+    )
+    id_cuenta_por_cobrar: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("cuentas_por_cobrar.id_cuenta_por_cobrar"), nullable=False
+    )
+    monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    fecha_aplicacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    aplicado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+
+    nota = relationship("NotaCreditoCliente")
+    cuenta_por_cobrar = relationship("CuentaPorCobrar")
+
+
 class NotaCreditoProveedor(Base):
     """Simetrico a NotaCreditoCliente, para el lado de compras: saldo a favor de la
     empresa cuando se anula una compra que ya tenia pagos aplicados al proveedor."""
@@ -945,6 +970,31 @@ class NotaCreditoProveedor(Base):
     proveedor = relationship("Proveedor")
     compra_origen = relationship("Compra")
     creador = relationship("Usuario")
+
+
+class AplicacionNotaCreditoProveedor(Base):
+    """Cada vez que una nota de credito de proveedor se aplica a una cuenta por pagar (migrations/0101): espejo de
+    AplicacionNotaCreditoCliente. Aplicar una nota baja el saldo de la cuenta por pagar sin crear un pago, y esta fila
+    es la constancia, escrita en la misma transaccion que baja el saldo. El estado de cuenta de proveedor y la
+    antiguedad de cuentas por pagar leen de aqui."""
+
+    __tablename__ = "aplicaciones_nota_credito_proveedor"
+    # Tiene trigger de auditoria (migrations/0101): SQL Server no admite OUTPUT sin INTO sobre una tabla con triggers.
+    __table_args__ = {"implicit_returning": False}
+
+    id_aplicacion: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_nota_credito: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("notas_credito_proveedores.id_nota_credito"), nullable=False
+    )
+    id_cuenta_por_pagar: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("cuentas_por_pagar.id_cuenta"), nullable=False
+    )
+    monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    fecha_aplicacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    aplicado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+
+    nota = relationship("NotaCreditoProveedor")
+    cuenta_por_pagar = relationship("CuentaPorPagar")
 
 
 class Banco(Base):

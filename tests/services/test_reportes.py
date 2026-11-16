@@ -1,4 +1,3 @@
-import json
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -2429,40 +2428,44 @@ def test_estado_cuenta_cliente_sin_contado_oculta_la_venta_y_su_pago_y_deja_los_
     assert con["incluir_contado"] is True and sin["incluir_contado"] is False
 
 
-def _aplicacion_nc(session, admin, id_factura_destino, monto="5.00", detalle=None):
-    session.add(
-        Auditoria(
+def _facturas_con_nc_aplicada(db, admin, cantidad, monto="5.00"):
+    """`cantidad` facturas a credito de un mismo cliente, cada una con una nota de credito aplicada por `monto`.
+    Devuelve (cliente, [facturas])."""
+    from app.services.notas_credito import NotaCreditoService
+
+    cliente = crear_cliente(db, limite_credito=Decimal("100000.00"))
+    facturas = []
+    for _ in range(cantidad):
+        factura = _factura_a_credito(db, admin, cliente, "70.00", date.today() + timedelta(days=10))
+        nota = NotaCreditoService.crear_nota_credito_cliente(
+            db,
+            id_cliente=cliente.id_cliente,
+            id_factura_origen=factura.id_factura,
+            monto=Decimal(monto),
+            motivo="Ajuste",
             id_usuario=admin.id_usuario,
-            accion="APLICACION_NOTA_CREDITO_CLIENTE",
-            modulo="NOTAS_CREDITO",
-            detalle=(
-                detalle
-                if detalle is not None
-                else json.dumps(
-                    {"numero_nota_credito": "NC-1", "id_factura_destino": id_factura_destino, "monto": monto}
-                )
-            ),
-            fecha_evento=datetime.now(),
         )
-    )
+        NotaCreditoService.aplicar_nota_credito_cliente(
+            db, nota.id_nota_credito, factura.id_factura, Decimal(monto), admin.id_usuario
+        )
+        facturas.append(factura)
+    return cliente, facturas
 
 
-def test_las_aplicaciones_de_nc_se_filtran_por_factura_en_la_base_y_toleran_detalles_rotos(db_session):
+def test_las_aplicaciones_de_nc_se_filtran_por_factura_en_la_base(db_session):
     admin = crear_usuario_admin(db_session)
-    _aplicacion_nc(db_session, admin, 101)
-    _aplicacion_nc(db_session, admin, 102)
-    _aplicacion_nc(db_session, admin, 1010)  # "1010" no es "101": el filtro compara el id completo
-    _aplicacion_nc(db_session, admin, 0, detalle="esto no es json")
-    _aplicacion_nc(db_session, admin, 0, detalle=json.dumps({"numero_nota_credito": "NC-2"}))  # sin factura destino
-    db_session.commit()
+    _cliente, (f1, f2, f3) = _facturas_con_nc_aplicada(db_session, admin, 3)
 
-    solo_101 = _aplicaciones_nc_cliente(db_session, ids_factura=[101])
-    varias = _aplicaciones_nc_cliente(db_session, ids_factura=[101, 102])
+    solo_una = _aplicaciones_nc_cliente(db_session, ids_factura=[f1.id_factura])
+    varias = _aplicaciones_nc_cliente(db_session, ids_factura=[f1.id_factura, f2.id_factura])
+    todas = _aplicaciones_nc_cliente(db_session)
 
-    assert [a["id_factura"] for a in solo_101] == [101]
-    assert sorted(a["id_factura"] for a in varias) == [101, 102]
+    assert [a["id_factura"] for a in solo_una] == [f1.id_factura]
+    assert sorted(a["id_factura"] for a in varias) == sorted([f1.id_factura, f2.id_factura])
+    assert sorted(a["id_factura"] for a in todas) == sorted([f1.id_factura, f2.id_factura, f3.id_factura])
     assert _aplicaciones_nc_cliente(db_session, ids_factura=[]) == []
-    assert _aplicaciones_nc_cliente(db_session, ids_factura=[999]) == []
+    assert _aplicaciones_nc_cliente(db_session, ids_factura=[999_999_999]) == []
+    assert solo_una[0]["monto"] == Decimal("5.00") and solo_una[0]["numero_nota_credito"].startswith("NC-")
 
 
 def test_las_aplicaciones_de_nc_se_piden_por_lotes_si_son_muchas_facturas(db_session, monkeypatch):
@@ -2470,13 +2473,39 @@ def test_las_aplicaciones_de_nc_se_piden_por_lotes_si_son_muchas_facturas(db_ses
 
     monkeypatch.setattr(reportes, "_TAMANO_LOTE_IN", 2)
     admin = crear_usuario_admin(db_session)
-    for id_factura in (1, 2, 3, 4, 5):
-        _aplicacion_nc(db_session, admin, id_factura)
+    _cliente, facturas = _facturas_con_nc_aplicada(db_session, admin, 5)
+
+    aplicaciones = _aplicaciones_nc_cliente(db_session, ids_factura=[f.id_factura for f in facturas])
+
+    assert sorted(a["id_factura"] for a in aplicaciones) == sorted(f.id_factura for f in facturas)  # todos los lotes
+
+
+def test_las_aplicaciones_de_nc_se_filtran_por_fecha(db_session):
+    admin = crear_usuario_admin(db_session)
+    _cliente, (factura,) = _facturas_con_nc_aplicada(db_session, admin, 1)
+    # La fecha de la aplicacion la pone SQL Server (GETDATE()): se compara con SU reloj, no con el de Python.
+    ahora = db_session.execute(text("SELECT GETDATE()")).scalar()
+
+    assert len(_aplicaciones_nc_cliente(db_session, desde=ahora - timedelta(minutes=5))) == 1
+    assert _aplicaciones_nc_cliente(db_session, desde=ahora + timedelta(minutes=5)) == []
+    assert len(_aplicaciones_nc_cliente(db_session, hasta=ahora + timedelta(minutes=5))) == 1
+    assert _aplicaciones_nc_cliente(db_session, hasta=ahora - timedelta(minutes=5)) == []
+    assert factura is not None
+
+
+def test_el_estado_de_cuenta_no_depende_de_la_bitacora_de_auditoria(db_session):
+    """Antes las notas aplicadas se leian de un evento de Auditoria: borrarlo o dañarlo cambiaba el estado de cuenta.
+    Ahora salen de su propia tabla."""
+    admin = crear_usuario_admin(db_session)
+    cliente, _facturas = _facturas_con_nc_aplicada(db_session, admin, 1, monto="30.00")
+    antes = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)
+
+    db_session.query(Auditoria).filter(Auditoria.accion == "APLICACION_NOTA_CREDITO_CLIENTE").delete()
     db_session.commit()
+    despues = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)
 
-    aplicaciones = _aplicaciones_nc_cliente(db_session, ids_factura=[1, 2, 3, 4, 5])
-
-    assert sorted(a["id_factura"] for a in aplicaciones) == [1, 2, 3, 4, 5]  # las de todos los lotes
+    assert [f["tipo"] for f in antes["filas"]] == ["Factura", "Nota de crédito"]
+    assert despues["filas"] == antes["filas"] and despues["saldo_final"] == antes["saldo_final"] == Decimal("40.00")
 
 
 def test_estado_cuenta_cliente_sin_anuladas_oculta_la_factura_anulada_y_sus_pagos_y_deja_los_saldos(db_session):
@@ -4532,3 +4561,77 @@ def test_proximos_vencimientos_paginado_reparte_las_filas_y_el_total_es_de_todo_
         Decimal("30.00"),
     ]  # por fecha de vencimiento
     assert all(p["total_general"] == Decimal("60.00") for p in paginas)
+
+
+# -- Notas de credito de proveedor y transferencias conciliadas: lo que se aplica DESPUES del corte --------------
+
+
+def _compra_vieja_con_nc_aplicada(db, admin, proveedor, total="200.00", nc="50.00", dias=20):
+    """Una compra a credito de hace `dias` dias con una nota de credito de proveedor aplicada HOY."""
+    hoy = date.today()
+    compra = _compra_a_credito(db, admin, proveedor, total, hoy + timedelta(days=10))
+    compra_db = db.query(Compra).filter_by(id_compra=compra.id_compra).one()
+    compra_db.fecha_emision = datetime.combine(hoy - timedelta(days=dias), time(9, 0))
+    db.commit()
+    nota = NotaCreditoService._crear_nota_credito_proveedor(
+        db, proveedor.id_proveedor, compra.id_compra, nc, "Ajuste", admin.id_usuario
+    )
+    db.commit()
+    cxp = db.query(CuentaPorPagar).filter_by(id_compra=compra.id_compra).one()
+    NotaCreditoService.aplicar_nota_credito_proveedor(db, nota.id_nota_credito, cxp.id_cuenta, nc, admin.id_usuario)
+    return compra
+
+
+def test_aging_cxp_con_corte_pasado_suma_la_nota_de_credito_aplicada_despues(db_session):
+    """Lo mismo que ya hace el aging de cuentas por cobrar: una nota aplicada hoy no existia hace 2 dias, asi que a
+    esa fecha la compra todavia debia los 200 (antes el reporte decia 150)."""
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("10000.00"))
+    hoy = date.today()
+    _compra_vieja_con_nc_aplicada(db_session, admin, proveedor)
+
+    actual = ReporteService.aging_cuentas_por_pagar(db_session, admin.id_usuario, fecha_corte=hoy)
+    pasado = ReporteService.aging_cuentas_por_pagar(db_session, admin.id_usuario, fecha_corte=hoy - timedelta(days=2))
+
+    assert actual["total_general"] == Decimal("150.00")
+    assert pasado["total_general"] == Decimal("200.00")
+
+
+def test_el_estado_de_cuenta_de_proveedor_muestra_la_nota_aplicada_como_abono(db_session):
+    """El cargo de la compra es lo que se debio ($200) y la nota un abono aparte: antes la compra salia por $150 y la
+    nota no aparecia en ninguna fila (el saldo final si cuadraba porque la nota ya habia bajado el saldo)."""
+    admin = crear_usuario_admin(db_session)
+    proveedor = crear_proveedor(db_session, limite_credito=Decimal("10000.00"))
+    _compra_vieja_con_nc_aplicada(db_session, admin, proveedor)
+
+    reporte = ReporteService.estado_cuenta_proveedor(db_session, admin.id_usuario, proveedor.id_proveedor)
+
+    assert [(f["tipo"], f["cargo"], f["abono"], f["saldo"]) for f in reporte["filas"]] == [
+        ("Compra", Decimal("200.00"), Decimal("0.00"), Decimal("200.00")),
+        ("Nota de crédito", Decimal("0.00"), Decimal("50.00"), Decimal("150.00")),
+    ]
+    assert reporte["saldo_final"] == Decimal("150.00")
+
+
+def test_aging_cxc_con_corte_pasado_suma_la_transferencia_conciliada_despues(db_session):
+    """Una transferencia conciliada baja el saldo de la factura sin ser un pago ni una nota: a una fecha anterior a la
+    conciliacion la factura todavia debia los $80 (antes el reporte decia $50)."""
+    from app.services.otros_movimientos import OtrosMovimientosService
+    from tests.factories import crear_cuenta_bancaria
+    from tests.services.test_otros_movimientos import _crear_cxc_real, _crear_partida
+
+    admin = crear_usuario_admin(db_session)
+    banco = crear_cuenta_bancaria(db_session)
+    partida = _crear_partida(db_session, banco, admin, Decimal("100.00"))
+    cxc, cliente, _ = _crear_cxc_real(db_session, Decimal("80.00"))
+    _retroceder_factura(db_session, db_session.get(FacturaVenta, cxc.id_factura), 20)
+    OtrosMovimientosService.conciliar_partida(
+        db_session, partida.id_cuenta, cliente.id_cliente, cxc.id_cuenta_por_cobrar, Decimal("30.00"), admin.id_usuario
+    )
+    hoy = date.today()
+
+    actual = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario, fecha_corte=hoy)
+    pasado = ReporteService.aging_cuentas_por_cobrar(db_session, admin.id_usuario, fecha_corte=hoy - timedelta(days=2))
+
+    assert actual["total_general"] == Decimal("50.00")
+    assert pasado["total_general"] == Decimal("80.00")
