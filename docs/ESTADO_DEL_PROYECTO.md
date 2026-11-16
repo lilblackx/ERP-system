@@ -40,7 +40,7 @@ están implementadas, qué decisiones de diseño se tomaron y qué queda pendien
 | Roles y permisos | `permisos.py` | CRUD de roles, y escritura de la matriz `rol_permisos` (asignar/revocar/reemplazar conjunto completo). El catálogo de permisos (`recurso`+`accion`) se mantiene fijo vía schema/seed, no se crea desde aquí. También expone `require_permiso()`, el punto de entrada de autorización que usan los otros 17 servicios (ver sección 7) |
 | Cuentas por cobrar/pagar "otros" | `otros_movimientos.py` | Préstamos/anticipos a cobrar, y conciliación de transferencias bancarias sin identificar (ver sección 4) |
 | Notas de crédito | `notas_credito.py` | Saldo a favor de cliente/proveedor generado automáticamente al anular una factura/compra con pagos ya aplicados (ver sección 3, "Notas de credito automaticas") |
-| Pedidos de venta | `pedidos.py`, `reservas_stock.py` | **Solo en la rama `feature/app-movil-pedidos` (no está en `main`).** Pedidos que toma un vendedor y que apartan stock hasta que caja los aprueba y factura (ver sección 4, "Pedidos con reserva de stock") |
+| Pedidos de venta | `pedidos.py`, `reservas_stock.py`, `pedido_facturacion.py` (+ `app/ui/pedidos_panel.py`) | **Solo en la rama `feature/app-movil-pedidos` (no está en `main`).** Pedidos que toma un vendedor y que apartan stock hasta que caja los aprueba y factura (ver sección 4, "Pedidos con reserva de stock") |
 | Comisiones de vendedor | `comisiones.py` | Cálculo automático al emitir factura (diferencia entre precio de venta y precio de lista) y pago real por caja/banco (C14 2026-08-23, ver sección 3, "Comisiones de vendedor") |
 | Configuración de empresa | `empresa.py` | Datos fiscales y logotipo (registro singleton) |
 | Auditoría | `auditoria.py` | Bitácora transversal de eventos críticos (ver sección 5) |
@@ -500,9 +500,26 @@ y escribe correo + contraseña: servidor/puerto/TLS salen del catálogo `PROVEED
 
 ### Pedidos con reserva de stock (migración 0100, rama `feature/app-movil-pedidos`)
 
-Primera fase de una app Android para que los vendedores tomen pedidos. **Está solo en esa rama y no debe
-llegar a `main` hasta decidirlo.** Hecho: tablas, servicio y tests. Pendiente: panel de escritorio para revisar
-pedidos, API HTTPS (FastAPI detrás de Tailscale Serve, solo HTTPS) y la app Flutter.
+Base de una app Android para que los vendedores tomen pedidos. **Está solo en esa rama y no debe llegar a `main`
+hasta decidirlo.** Hecho: tablas, servicio y tests (Fase 1) y el módulo **Pedidos** del escritorio para revisarlos
+y facturarlos (Fase 2). Pendiente: API HTTPS (FastAPI detrás de Tailscale Serve, solo HTTPS) y la app Flutter.
+
+**Módulo Pedidos (`app/ui/pedidos_panel.py`, menú Operaciones).** Listado paginado (estado y vendedor como filtros,
+refresco automático cada 30 s) y acciones sobre el pedido elegido, cada una con su permiso:
+
+| Acción | Quién | Qué hace |
+|---|---|---|
+| Ver detalle | `pedidos:ver` | `PedidoDetalleDialog`: cliente, vendedor, reserva hasta cuándo, líneas y total. |
+| Aprobar / Rechazar (con motivo) | `pedidos:editar` | `PedidoService.aprobar_pedido` (revisa el stock otra vez) / `rechazar_pedido`. |
+| Anular (con motivo) | `editar`, o el vendedor con `crear` sobre los suyos | Libera el stock. |
+| Facturar | `pedidos:editar` y `ventas:crear` | Abre `FacturaFormDialog` con el pedido; un pedido de contado exige caja abierta en la estación (se ofrece abrirla). |
+
+`FacturaFormDialog(pedido=...)` sale con el cliente, vendedor, condición y líneas del pedido **bloqueados** (la
+factura es ese pedido; si el cliente quiere otra cosa se rechaza o anula y se toma uno nuevo): caja solo agrega
+formas de pago, descuento, vuelto y porcentaje BCV. El vendedor es el del pedido aunque el cliente se haya
+reasignado después, y se conserva si hoy está inactivo. `get_data()` lleva `id_pedido` y la factura cierra el pedido
+en su transacción. El selector de productos y la validación de "Agregar" usan el stock **disponible** (real menos
+apartado, `reservas_stock.anotar_reservado`) y el selector muestra cuánto está apartado.
 
 - **Un pedido no es una factura.** No mueve `inventario.cantidad_unidad`, no abre cuentas por cobrar ni genera
   comisiones. Estados: `ENVIADO → APROBADO → FACTURADO`, y `RECHAZADO`, `ANULADO`, `VENCIDO`.
@@ -539,8 +556,9 @@ pedidos, API HTTPS (FastAPI detrás de Tailscale Serve, solo HTTPS) y la app Flu
   defecto de la base de pruebas.
 - *No cubierto todavía:* el precio lo manda el cliente y no se compara con el de lista al crear el pedido (lo
   rechaza `emitir_factura` si es menor, pero uno mayor no lo detiene nadie y la comisión es venta − lista: la API
-  de la Fase 3 debe fijarlo o acotarlo en el servidor); `FacturaFormDialog` y los reportes de stock siguen
-  mostrando el stock real, no el disponible.
+  de la Fase 3 debe fijarlo o acotarlo en el servidor); el panel de Inventario y los reportes de stock siguen
+  mostrando el stock real, no el disponible; al facturar un pedido desde Pedidos no se imprime sola la factura
+  (como sí hace Facturación): se imprime desde el detalle de la factura.
 
 ## 5. Auditoría
 
