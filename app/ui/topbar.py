@@ -102,6 +102,7 @@ TITULOS = {
     "proveedores": "Proveedores",
     "inventario": "Inventario",
     "facturacion": "Facturación / Ventas",
+    "pedidos": "Pedidos de Venta",
     "compras": "Compras",
     "bancos": "Bancos",
     "cuentas_bancarias": "Cuentas Bancarias",

@@ -46,6 +46,7 @@ SECCIONES = [
         [
             ("panel_general", "Panel General"),
             ("facturacion", "Facturación"),
+            ("pedidos", "Pedidos"),
             ("clientes", "Clientes"),
             ("vendedores", "Vendedores"),
         ],
@@ -97,6 +98,7 @@ SECCIONES = [
 ICONOS_MODULO: dict[str, str] = {
     "panel_general": "fa5s.th-large",
     "facturacion": "fa5s.file-invoice-dollar",
+    "pedidos": "fa5s.clipboard-list",
     "clientes": "fa5s.users",
     "vendedores": "fa5s.user-tie",
     "compras": "fa5s.shopping-cart",

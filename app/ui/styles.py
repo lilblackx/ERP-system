@@ -726,6 +726,16 @@ COLORES_ESTADO_FACTURA = {
     "ANULADA": COLOR_TEXT_MUTED,
 }
 
+# Pedidos de venta (app/services/pedidos.py): ENVIADO espera revision, APROBADO espera facturarse.
+COLORES_ESTADO_PEDIDO = {
+    "ENVIADO": COLOR_WARNING,
+    "APROBADO": COLOR_INFO,
+    "FACTURADO": COLOR_SUCCESS,
+    "RECHAZADO": COLOR_DANGER,
+    "ANULADO": COLOR_TEXT_MUTED,
+    "VENCIDO": COLOR_TEXT_MUTED,
+}
+
 
 def color_con_alpha(color_hex: str, alpha: int = 26) -> str:
     """Version translucida de `color_hex` para fondos de badges/iconos.

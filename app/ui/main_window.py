@@ -58,6 +58,7 @@ from app.ui.inventario_panel import InventarioPanel
 from app.ui.message_box import MessageBox
 from app.ui.novedades_dialog import NovedadesDialog
 from app.ui.pantalla import ajustar_tamano
+from app.ui.pedidos_panel import PedidosPanel
 from app.ui.placeholder_view import PlaceholderView
 from app.ui.proveedores_panel import ProveedoresPanel
 from app.ui.reportes_panel import ReportesPanel
@@ -83,6 +84,7 @@ MODULOS_CONFIG = {
     "proveedores": ("Proveedores", ProveedoresPanel),
     "inventario": ("Inventario", InventarioPanel),
     "facturacion": ("Facturación", FacturacionPanel),
+    "pedidos": ("Pedidos", PedidosPanel),
     "compras": ("Compras", ComprasView),
     "bancos": ("Bancos", BancosPanel),
     "cuentas_bancarias": ("Cuentas Bancarias", CuentasBancariasPanel),
@@ -118,6 +120,7 @@ MODULO_PERMISO: dict[str, tuple[str, str]] = {
     "proveedores": ("proveedores", "ver"),
     "inventario": ("inventario", "ver"),
     "facturacion": ("ventas", "ver"),
+    "pedidos": ("pedidos", "ver"),
     "compras": ("compras", "ver"),
     "bancos": ("bancos", "ver"),
     "cuentas_bancarias": ("bancos", "ver"),
