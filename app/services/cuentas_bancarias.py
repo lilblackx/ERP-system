@@ -102,20 +102,17 @@ class CuentaBancariaService:
 
     @staticmethod
     def _reclasificar_saldo_local(cuenta: CuentaBancaria, moneda_anterior: str | None) -> None:
-        """El monto "local" de los movimientos va a `saldo_total_banco_bs` (cuentas VES/USD) o a
-        `saldo_total_banco_cop` (cuentas COP). Si la cuenta pasa de VES a COP (o al reves) su saldo local pasa
-        de una columna a la otra, para que los pesos no queden contados como bolivares ni al reves."""
+        """El monto "local" de los movimientos va a `saldo_total_banco_bs` (cuentas VES) o a `saldo_total_banco_cop`
+        (cuentas COP); una cuenta en dolares no lleva saldo local (migrations/0102). Al cambiarle la moneda a una cuenta
+        su saldo local pasa a la columna de la nueva moneda, para que los pesos no queden contados como bolivares ni al
+        reves. Una cuenta que pasa a dolares deja ambos en cero: ese saldo local no es un saldo en dolares (su saldo en
+        dolares, `saldo_total_banco`, no cambia)."""
         nueva = cuenta.moneda
         if moneda_anterior == nueva:
             return
-        bs = cuenta.saldo_total_banco_bs or 0
-        cop = cuenta.saldo_total_banco_cop or 0
-        if moneda_anterior != "COP" and nueva == "COP":
-            cuenta.saldo_total_banco_cop = cop + bs
-            cuenta.saldo_total_banco_bs = 0
-        elif moneda_anterior == "COP" and nueva != "COP":
-            cuenta.saldo_total_banco_bs = bs + cop
-            cuenta.saldo_total_banco_cop = 0
+        local = (cuenta.saldo_total_banco_bs or 0) + (cuenta.saldo_total_banco_cop or 0)
+        cuenta.saldo_total_banco_bs = local if nueva == "VES" else 0
+        cuenta.saldo_total_banco_cop = local if nueva == "COP" else 0
 
     @staticmethod
     def resumen_uso(session: Session, id_cuenta: int, id_usuario: int | None = None) -> dict:
