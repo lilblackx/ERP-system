@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import FacturaVenta, Inventario, Usuario
+from app.db.models import Cliente, FacturaVenta, Inventario, Usuario
 from app.db.session import SessionLocal
 from app.services.clientes import create_cliente, list_clientes
 from app.services.db_utils import reintentar_en_deadlock
@@ -42,6 +42,7 @@ from app.services.empresa import EmpresaService
 from app.services.inventario import PrecioService, ProductoService
 from app.services.moneda_cuentas import filtrar_cuentas_por_metodo, moneda_para_metodo, nombre_moneda
 from app.services.permisos import PermisoDenegadoError
+from app.services.reservas_stock import anotar_reservado
 from app.services.tasas import TasaService
 from app.services.tesoreria import BancoService, CajaService
 from app.services.vendedores import VendedorService
@@ -287,8 +288,9 @@ def _tarea_buscar_clientes(session, texto: str | None, id_usuario: int | None) -
 
 
 def _tarea_buscar_productos(session, texto: str | None, id_usuario: int | None) -> list:
-    """Corre en un hilo aparte: productos activos con stock que coinciden con el texto."""
-    return ProductoService.buscar(
+    """Corre en un hilo aparte: productos activos con stock que coinciden con el texto, con lo que los pedidos
+    tienen apartado de cada uno (`cantidad_reservada`)."""
+    productos = ProductoService.buscar(
         session,
         texto=texto,
         solo_con_stock=True,
@@ -296,6 +298,8 @@ def _tarea_buscar_productos(session, texto: str | None, id_usuario: int | None) 
         por_pagina=LIMITE_CATALOGO,
         id_usuario=id_usuario,
     )["items"]
+    anotar_reservado(session, productos)
+    return productos
 
 
 class FacturaFormDialog(CargaAsincronaMixin, QDialog):
@@ -307,9 +311,17 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
     mas abajo).
     """
 
-    def __init__(self, session: Session, id_usuario: int | None, parent=None, session_factory=None):
+    def __init__(
+        self, session: Session, id_usuario: int | None, parent=None, session_factory=None, pedido: dict | None = None
+    ):
         super().__init__(parent)
         self.session = session
+        # Un pedido APROBADO (PedidoService.datos_para_facturar) que se factura aqui: el formulario sale con su
+        # cliente, vendedor, condicion y lineas, que no se pueden cambiar (la factura es ese pedido); caja solo
+        # agrega las formas de pago, descuento, etc. Al emitir, la factura cierra el pedido (id_pedido).
+        self.pedido = pedido
+        self.id_pedido: int | None = pedido["id_pedido"] if pedido else None
+        self._carrito_bloqueado = pedido is not None
         # Con `session_factory` la busqueda mientras se escribe corre en un hilo aparte (con su propia sesion: la
         # del dialogo no se puede compartir con otro hilo); sin ella (otros usos, tests) todo sigue en el hilo de
         # la ventana.
@@ -376,6 +388,8 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         # senal (ver _make_card_cabecera) -- se llama una vez a mano para que el estado
         # inicial (Contado, la primera opcion) muestre la tarjeta de formas de pago.
         self._toggle_credito()
+        if self.pedido is not None:
+            self._precargar_pedido(self.pedido)
 
     def showEvent(self, event: QShowEvent) -> None:
         # El primer pintado de este dialogo (el mas denso de la app: 4 tarjetas con
@@ -445,12 +459,12 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         titulos = QVBoxLayout()
         titulos.setSpacing(1)
         titulos.setContentsMargins(0, 0, 0, 0)
-        lbl_titulo = QLabel("Nueva Factura")
-        lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
-        lbl_subtitulo = QLabel("Seleccione el cliente, agregue productos y emita la factura.")
-        lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
-        titulos.addWidget(lbl_titulo)
-        titulos.addWidget(lbl_subtitulo)
+        self.lbl_titulo = QLabel("Nueva Factura")
+        self.lbl_titulo.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {COLOR_TEXT_DARK};")
+        self.lbl_subtitulo = QLabel("Seleccione el cliente, agregue productos y emita la factura.")
+        self.lbl_subtitulo.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        titulos.addWidget(self.lbl_titulo)
+        titulos.addWidget(self.lbl_subtitulo)
 
         h.addWidget(icon_lbl)
         h.addLayout(titulos)
@@ -990,13 +1004,13 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self.precio_input.setFixedWidth(130)
         self.precio_input.returnPressed.connect(self._agregar_item)
 
-        btn_agregar = QPushButton(" Agregar")
-        btn_agregar.setObjectName("BtnAgregar")
-        btn_agregar.setIcon(qta.icon("fa5s.cart-plus", color=COLOR_PRIMARY))
-        btn_agregar.setFixedHeight(32)
-        btn_agregar.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_agregar.setAutoDefault(False)
-        btn_agregar.clicked.connect(self._agregar_item)
+        self.btn_agregar_item = QPushButton(" Agregar")
+        self.btn_agregar_item.setObjectName("BtnAgregar")
+        self.btn_agregar_item.setIcon(qta.icon("fa5s.cart-plus", color=COLOR_PRIMARY))
+        self.btn_agregar_item.setFixedHeight(32)
+        self.btn_agregar_item.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_agregar_item.setAutoDefault(False)
+        self.btn_agregar_item.clicked.connect(self._agregar_item)
 
         fila_agregar.addWidget(self.producto_buscar_input, stretch=1)
         fila_agregar.addWidget(self.producto_combo, stretch=2)
@@ -1012,7 +1026,7 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self.tipo_venta_combo.currentIndexChanged.connect(self._on_tipo_venta_cambiado)
 
         fila_agregar.addWidget(self.tipo_venta_combo)
-        fila_agregar.addWidget(btn_agregar)
+        fila_agregar.addWidget(self.btn_agregar_item)
         layout.addLayout(fila_agregar)
 
         # Fila para seleccionar el precio a facturar y mostrar la comisión
@@ -1401,6 +1415,84 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
             if indice >= 0:
                 self.vendedor_combo.setCurrentIndex(indice)
 
+    # ── Factura de un pedido ───────────────────────────────────────────────
+
+    def _precargar_pedido(self, pedido: dict) -> None:
+        """Deja el formulario con lo del pedido APROBADO que se factura (datos de `PedidoService.datos_para_facturar`)
+        y lo bloquea: la factura ES ese pedido, asi que cliente, vendedor, condicion y lineas no se cambian (si el
+        cliente quiere otra cosa se rechaza o anula el pedido y se toma uno nuevo). Caja solo completa lo de la
+        factura: formas de pago, descuento, vuelto, porcentaje BCV."""
+        titulo = f"Facturar pedido {pedido['numero_pedido']}"
+        self.setWindowTitle(titulo)
+        self.lbl_titulo.setText(titulo)
+        self.lbl_subtitulo.setText(
+            "Cliente, vendedor y productos son los del pedido: agregue las formas de pago y emita la factura."
+        )
+
+        cliente = self.session.get(Cliente, pedido["id_cliente"])
+        if cliente is not None:
+            self._clientes = [cliente]
+            self._poblar_combo_clientes(self._clientes)
+            self.cliente_combo.setCurrentIndex(max(self.cliente_combo.findData(cliente.id_cliente), 0))
+        # El vendedor del PEDIDO (no el del cliente, que pudo reasignarse): despues del cliente, porque elegirlo
+        # reasigna el vendedor del combo. Si hoy esta inactivo no esta en la lista de activos: se agrega para que
+        # la factura salga a su nombre y emitir_factura decida.
+        indice = self.vendedor_combo.findData(pedido["id_vendedor"])
+        if indice < 0:
+            self.vendedor_combo.addItem(pedido["vendedor"], pedido["id_vendedor"])
+            indice = self.vendedor_combo.findData(pedido["id_vendedor"])
+        self.vendedor_combo.setCurrentIndex(indice)
+        self.condicion_combo.setCurrentIndex(max(self.condicion_combo.findData(pedido["condicion_pago"]), 0))
+        self.observaciones_input.setText(pedido["observaciones"] or "")
+
+        self.items = [self._item_de_pedido(linea) for linea in pedido["lineas"]]
+        self._refrescar_tabla_items()
+
+        for campo in (
+            self.cliente_combo,
+            self.cliente_buscar_input,
+            self.btn_nuevo_cliente,
+            self.vendedor_combo,
+            self.condicion_combo,
+            self.producto_buscar_input,
+            self.producto_combo,
+            self.cantidad_input,
+            self.precio_input,
+            self.tipo_venta_combo,
+            self.btn_agregar_item,
+            self.precio_seleccion_combo,
+            self.nota_item_input,
+        ):
+            campo.setEnabled(False)
+
+    def _item_de_pedido(self, linea: dict) -> dict:
+        """Una linea del pedido como item del carrito (misma forma que arma `_agregar_item`)."""
+        precio = float(linea["precio_unitario"])
+        try:
+            precio_info = PrecioService.obtener_precio(self.session, linea["id_producto"], id_usuario=self.id_usuario)
+        except PermisoDenegadoError:
+            precio_info = None
+        precio_lista = float(precio_info.precio_1) if precio_info is not None else None
+        if precio_lista is not None and linea["tipo_venta"] == "unidad":
+            # Mismo criterio que VentaService.emitir_factura: el precio de lista es por caja; por unidad se divide.
+            producto = self.session.get(Inventario, linea["id_producto"])
+            por_caja = float(producto.cantidad_caja) if producto is not None and producto.cantidad_caja else 0.0
+            if por_caja > 1:
+                precio_lista /= por_caja
+        nombre = f"{linea['codigo']} - {linea['nombre']}" if linea["codigo"] else linea["nombre"]
+        return {
+            "id_producto": linea["id_producto"],
+            "nombre_producto": nombre,
+            "cantidad": float(linea["cantidad"]),
+            "precio_unitario": precio,
+            "precio_base": precio,
+            "observaciones_item": linea["descripcion"],
+            "precio_lista": precio_lista,
+            "tipo_precio_seleccionado": 1,
+            "comision": 0.0,
+            "tipo_venta": linea["tipo_venta"],
+        }
+
     # ── Condicion de pago ──────────────────────────────────────────────────
 
     def _toggle_credito(self) -> None:
@@ -1534,7 +1626,13 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
             id_usuario=self.id_usuario,
         )
         self._productos = resultado["items"]
+        anotar_reservado(self.session, self._productos)
         self._poblar_combo_productos(self._productos)
+
+    @staticmethod
+    def _unidades_apartadas(producto) -> float:
+        """Unidades que pedidos de vendedores tienen apartadas de este producto (0 si no se consulto)."""
+        return float(getattr(producto, "cantidad_reservada", 0) or 0)
 
     def _poblar_combo_productos(self, productos: list) -> None:
         self.producto_combo.blockSignals(True)
@@ -1542,17 +1640,22 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         if not productos:
             self.producto_combo.addItem("Sin resultados")
         for producto in productos:
-            # Mostrar stock usando cantidad_unidad (compatibilidad con modelo antiguo)
+            apartadas = self._unidades_apartadas(producto)
+            # Lo que se puede vender es el stock real MENOS lo apartado por pedidos pendientes (migrations/0100).
             total_unidades = producto.cantidad_unidad
+            if apartadas:
+                total_unidades = Decimal(str(producto.cantidad_unidad)) - Decimal(str(apartadas))
 
             # Si tiene los nuevos campos, mostrar información adicional
             stock_info = f"{total_unidades:g} Und"
-            if (
-                hasattr(producto, "cantidad_caja_total")
-                and producto.cantidad_caja_total
-                and producto.cantidad_caja_total > 0
-            ):
-                stock_info += f" | {producto.cantidad_caja_total:g} cajas"
+            if hasattr(producto, "cantidad_caja_total") and producto.cantidad_caja_total:
+                cajas = producto.cantidad_caja_total
+                if apartadas and producto.cantidad_caja:
+                    cajas = int(total_unidades // Decimal(str(producto.cantidad_caja)))
+                if cajas > 0:
+                    stock_info += f" | {cajas:g} cajas"
+            if apartadas:
+                stock_info += f" | {apartadas:g} apartadas"
 
             etiqueta = f"{producto.cod_producto} - {producto.nombre_producto} (stock: {stock_info})"
             if producto.articulo_bcv:
@@ -1808,6 +1911,8 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
     # ── Carrito ────────────────────────────────────────────────────────────
 
     def _agregar_item(self) -> None:
+        if self._carrito_bloqueado:  # factura de un pedido: las lineas son las del pedido
+            return
         id_producto = self.producto_combo.currentData()
         if id_producto is None:
             MessageBox.warning(self, "Producto requerido", "Seleccione un producto para agregar.")
@@ -1857,12 +1962,15 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
                     else:
                         cantidad_en_carrito_unidades += it["cantidad"]
 
-            stock_disponible = float(producto_seleccionado.cantidad_unidad)
+            # Disponible = stock real menos lo que pedidos de vendedores tienen apartado (migrations/0100).
+            apartadas = self._unidades_apartadas(producto_seleccionado)
+            stock_disponible = float(producto_seleccionado.cantidad_unidad) - apartadas
             if cantidad_en_carrito_unidades + cantidad_unidades_reales > stock_disponible:
                 MessageBox.warning(
                     self,
                     "Stock insuficiente",
                     f"Stock disponible de '{producto_seleccionado.nombre_producto}': {stock_disponible:,.2f} unidades."
+                    + (f" ({apartadas:,.2f} están apartadas por pedidos pendientes.)" if apartadas else "")
                     + (
                         f" Ya tiene {cantidad_en_carrito_unidades:,.2f} unidades en el carrito."
                         if cantidad_en_carrito_unidades > 0
@@ -1955,6 +2063,8 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self.producto_buscar_input.setFocus()
 
     def _quitar_item(self, indice: int) -> None:
+        if self._carrito_bloqueado:
+            return
         del self.items[indice]
         self._refrescar_tabla_items()
 
@@ -1987,6 +2097,8 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
             item_subtotal.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla_items.setItem(fila, 3, item_subtotal)
 
+            if self._carrito_bloqueado:
+                continue  # factura de un pedido: las lineas no se quitan
             btn_quitar = QPushButton()
             btn_quitar.setObjectName("BtnQuitarIcono")
             btn_quitar.setIcon(qta.icon("fa5s.trash-alt", color=COLOR_DANGER))
@@ -2276,7 +2388,7 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         # Porcentaje BCV
         porcentaje_bcv = self.porcentaje_bcv_input.get_value() if self.chk_porcentaje_bcv.isChecked() else None
 
-        return {
+        datos = {
             "id_cliente": self.cliente_combo.currentData(),
             "id_vendedor": self.vendedor_combo.currentData(),
             "condicion_pago": self.condicion_combo.currentData(),
@@ -2314,3 +2426,7 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
                 for it in self.items
             ],
         }
+        if self.id_pedido is not None:
+            # La factura cierra el pedido en su misma transaccion (VentaService.emitir_factura(id_pedido=...)).
+            datos["id_pedido"] = self.id_pedido
+        return datos

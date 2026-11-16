@@ -22,7 +22,7 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, literal_column, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db.models import Cliente, Inventario, Pedido, PedidoDetalle, Vendedor
 from app.services.alcance_vendedor import vendedor_propio
@@ -312,7 +312,11 @@ class PedidoService:
         propio = vendedor_propio(session, id_usuario)
         id_vendedor = propio if propio is not None else id_vendedor
 
-        consulta = session.query(Pedido).options(joinedload(Pedido.cliente), joinedload(Pedido.vendedor))
+        # selectinload (no joinedload) para las lineas: con una coleccion unida el LIMIT de la pagina contaria filas
+        # de lineas y no pedidos. Se cargan para que `Pedido.total` no haga una consulta por fila.
+        consulta = session.query(Pedido).options(
+            joinedload(Pedido.cliente), joinedload(Pedido.vendedor), selectinload(Pedido.detalles)
+        )
         if estado is not None:
             consulta = consulta.filter(Pedido.estado == estado)
         if id_cliente is not None:
@@ -340,6 +344,57 @@ class PedidoService:
         if propio is not None and pedido.id_vendedor != propio:
             raise PermisoDenegadoError("Ese pedido es de otro vendedor: tu usuario solo ve los suyos.")
         return pedido
+
+    @staticmethod
+    def detalle_pedido(session: Session, id_pedido: int, id_usuario: int | None) -> dict:
+        """El pedido y sus lineas como datos simples (sin objetos ligados a la sesion): sirve para mostrarlo en un
+        dialogo o para prellenar la factura sin que la pantalla dependa de que la sesion siga abierta."""
+        pedido = PedidoService.obtener_pedido(session, id_pedido, id_usuario)
+        ids = [d.id_producto for d in pedido.detalles]
+        productos = {p.id_producto: p for p in session.query(Inventario).filter(Inventario.id_producto.in_(ids)).all()}
+        lineas = []
+        for d in pedido.detalles:
+            producto = productos.get(d.id_producto)
+            lineas.append(
+                {
+                    "id_producto": d.id_producto,
+                    "codigo": producto.cod_producto if producto else "",
+                    "nombre": producto.nombre_producto if producto else f"Producto {d.id_producto}",
+                    "descripcion": d.descripcion,
+                    "cantidad": d.cantidad,
+                    "tipo_venta": d.tipo_venta,
+                    "unidades": d.unidades_reservadas,
+                    "precio_unitario": d.precio_unitario,
+                    "subtotal": d.cantidad * d.precio_unitario,
+                }
+            )
+        return {
+            "id_pedido": pedido.id_pedido,
+            "numero_pedido": pedido.numero_pedido,
+            "estado": pedido.estado,
+            "id_cliente": pedido.id_cliente,
+            "cliente": pedido.cliente.nombre_razon_social if pedido.cliente else "",
+            "id_vendedor": pedido.id_vendedor,
+            "vendedor": pedido.vendedor.nombre_vendedor if pedido.vendedor else "",
+            "condicion_pago": pedido.condicion_pago,
+            "observaciones": pedido.observaciones,
+            "motivo": pedido.motivo,
+            "fecha_creacion": pedido.fecha_creacion,
+            "fecha_vencimiento_reserva": pedido.fecha_vencimiento_reserva,
+            "id_factura": pedido.id_factura,
+            "total": pedido.total,
+            "lineas": lineas,
+        }
+
+    @staticmethod
+    def datos_para_facturar(session: Session, id_pedido: int, id_usuario: int | None) -> dict:
+        """`detalle_pedido` de un pedido APROBADO, para prellenar el formulario de factura. Pide el mismo permiso que
+        facturarlo (`pedidos:editar`): verlo no basta para convertirlo en factura."""
+        require_permiso(session, id_usuario, "pedidos", "editar")
+        datos = PedidoService.detalle_pedido(session, id_pedido, id_usuario)
+        if datos["estado"] != "APROBADO":
+            raise ValueError(f"El pedido {datos['numero_pedido']} esta {datos['estado']}: solo se factura uno APROBADO")
+        return datos
 
     @staticmethod
     def aprobar_pedido(session: Session, id_pedido: int, id_usuario: int | None) -> Pedido:

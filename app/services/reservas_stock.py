@@ -43,6 +43,15 @@ def unidades_de_linea(cantidad: Decimal, tipo_venta: str, unidades_por_caja: Dec
     return Decimal(str(cantidad))
 
 
+def anotar_reservado(session: Session, productos: list, excluir_pedido: int | None = None) -> None:
+    """Deja en cada producto (`Inventario`) la cantidad apartada por pedidos como `cantidad_reservada`, un atributo
+    suelto (no es una columna) para que las pantallas muestren y validen contra el stock DISPONIBLE. Una consulta
+    para toda la lista. No bloquea nada: es para mostrar; quien factura vuelve a validar con locks."""
+    reservado = reservado_por_producto(session, [p.id_producto for p in productos], excluir_pedido)
+    for producto in productos:
+        producto.cantidad_reservada = reservado[producto.id_producto]
+
+
 def reservado_por_producto(
     session: Session, ids_producto: Iterable[int], excluir_pedido: int | None = None
 ) -> dict[int, Decimal]:

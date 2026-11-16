@@ -526,6 +526,12 @@ class Pedido(Base):
     vendedor = relationship("Vendedor")
     detalles = relationship("PedidoDetalle", back_populates="pedido", order_by="PedidoDetalle.id_pedido_detalle")
 
+    @property
+    def total(self) -> decimal.Decimal:
+        """Suma de cantidad x precio de las lineas (sin IVA ni descuento: eso lo define la factura). Lee `detalles`:
+        quien lista pedidos debe cargarlas (selectinload) para no hacer una consulta por pedido."""
+        return sum((d.cantidad * d.precio_unitario for d in self.detalles), decimal.Decimal("0"))
+
 
 class PedidoDetalle(Base):
     __tablename__ = "pedido_detalle"

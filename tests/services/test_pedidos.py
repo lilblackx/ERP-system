@@ -737,3 +737,88 @@ def test_el_mismo_envio_simultaneo_se_convierte_en_un_solo_pedido(db_session):
     assert resultados[0][1] == resultados[1][1]
     assert db_session.query(Pedido).count() == 1
     assert _reservado(db_session, esc) == Decimal("5.00")
+
+
+# -- Datos para las pantallas ----------------------------------------------------------------------------------
+
+
+def test_detalle_pedido_devuelve_datos_simples_con_las_lineas_y_el_total(db_session):
+    esc = _escenario(db_session, stock=100, cantidad_caja=Decimal("12"))
+    pedido = _crear(
+        db_session,
+        esc,
+        items=_items(esc, cantidad=2, tipo_venta="bulto") + _items(esc, cantidad=3, precio="5.00"),
+        observaciones="Entregar en la tarde",
+    )
+
+    datos = PedidoService.detalle_pedido(db_session, pedido.id_pedido, esc.usuario.id_usuario)
+
+    assert datos["numero_pedido"] == pedido.numero_pedido
+    assert datos["estado"] == "ENVIADO"
+    assert datos["cliente"] == esc.cliente.nombre_razon_social
+    assert datos["vendedor"] == esc.vendedor.nombre_vendedor
+    assert datos["observaciones"] == "Entregar en la tarde"
+    assert datos["fecha_vencimiento_reserva"] is not None
+    bulto, unidad = datos["lineas"]
+    assert (bulto["tipo_venta"], bulto["cantidad"], bulto["unidades"]) == ("bulto", Decimal("2"), Decimal("24"))
+    assert bulto["codigo"] == esc.producto.cod_producto
+    assert bulto["subtotal"] == Decimal("40.00")
+    assert unidad["subtotal"] == Decimal("15.00")
+    assert datos["total"] == Decimal("55.00")
+
+
+def test_detalle_pedido_de_otro_vendedor_se_rechaza(db_session):
+    esc = _escenario(db_session)
+    otro_vendedor = crear_vendedor(db_session)
+    otro_usuario = _usuario_vendedor(db_session, otro_vendedor)
+    pedido = _crear(db_session, esc)
+
+    with pytest.raises(PermisoDenegadoError, match="otro vendedor"):
+        PedidoService.detalle_pedido(db_session, pedido.id_pedido, otro_usuario.id_usuario)
+
+
+def test_datos_para_facturar_exige_un_pedido_aprobado(db_session):
+    esc = _escenario(db_session)
+    pedido = _crear(db_session, esc)
+    admin = esc.admin.id_usuario
+
+    with pytest.raises(ValueError, match="solo se factura uno APROBADO"):
+        PedidoService.datos_para_facturar(db_session, pedido.id_pedido, admin)
+
+    PedidoService.aprobar_pedido(db_session, pedido.id_pedido, admin)
+    datos = PedidoService.datos_para_facturar(db_session, pedido.id_pedido, admin)
+    assert datos["estado"] == "APROBADO"
+    assert datos["id_cliente"] == esc.cliente.id_cliente
+    assert datos["id_vendedor"] == esc.vendedor.id_vendedor
+
+
+def test_datos_para_facturar_pide_el_permiso_de_revisar_no_basta_con_ver(db_session):
+    esc = _escenario(db_session)
+    pedido = _crear(db_session, esc)
+    PedidoService.aprobar_pedido(db_session, pedido.id_pedido, esc.admin.id_usuario)
+
+    with pytest.raises(PermisoDenegadoError):
+        PedidoService.datos_para_facturar(db_session, pedido.id_pedido, esc.usuario.id_usuario)
+
+
+def test_el_listado_trae_el_total_de_cada_pedido(db_session):
+    esc = _escenario(db_session)
+    _crear(db_session, esc, items=_items(esc, cantidad=2, precio="10.00") + _items(esc, cantidad=1, precio="5.00"))
+    _crear(db_session, esc, items=_items(esc, cantidad=4, precio="3.00"))
+
+    pedidos = PedidoService.listar_pedidos(db_session, esc.admin.id_usuario)["items"]
+
+    assert sorted(p.total for p in pedidos) == [Decimal("12.00"), Decimal("25.00")]
+
+
+def test_anotar_reservado_deja_lo_apartado_en_cada_producto(db_session):
+    from app.services.reservas_stock import anotar_reservado
+
+    esc = _escenario(db_session, stock=100)
+    libre = crear_producto(db_session, cantidad_unidad=100)
+    _crear(db_session, esc, cantidad=7)
+
+    anotar_reservado(db_session, [esc.producto, libre])
+
+    assert esc.producto.cantidad_reservada == Decimal("7")
+    assert libre.cantidad_reservada == Decimal("0")
