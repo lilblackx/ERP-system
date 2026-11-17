@@ -30,6 +30,7 @@ from sqlalchemy.orm import joinedload
 
 from app.db.models import Cliente, CuentaPorCobrarBCV, FacturaVenta, Usuario
 from app.services.db_utils import reintentar_en_deadlock
+from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.moneda_cuentas import (
     METODOS_EN_DOLARES,
@@ -47,6 +48,7 @@ from app.ui.carga_asincrona import CargaAsincronaMixin, sesion_para_dialogo
 from app.ui.conversion_bolivares import ConversionBolivaresMixin
 from app.ui.factura_detalle_dialog import VerFacturaDesdeFilaMixin
 from app.ui.filtros_catalogo import llenar_combo_vendedores, tarea_vendedores_para_filtro
+from app.ui.historial_cliente_window import VISTA_ESTADO_CUENTA, HistorialClienteWindow
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
@@ -1381,6 +1383,7 @@ class DetalleCuentasBCVDialog(VerFacturaDesdeFilaMixin, MixinPermisos, QDialog):
                     MessageBox.information(self, "Cobro registrado", "El cobro BCV se registró con éxito.")
                     # Recargar la tabla de detalle
                     self._recargar_cuentas()
+                    self._mostrar_historial_cliente()
             finally:
                 session.close()
         except PermisoDenegadoError:
@@ -1406,6 +1409,20 @@ class DetalleCuentasBCVDialog(VerFacturaDesdeFilaMixin, MixinPermisos, QDialog):
         except Exception:
             logger.exception("Fallo al recargar cuentas BCV del cliente")
 
+    def _mostrar_historial_cliente(self) -> None:
+        """Tras un cobro/abono exitoso muestra el historial del cliente directo en la
+        vista Estado de cuenta, para ver el pago ya reflejado en la relacion."""
+        if self.cliente is None:
+            return
+        HistorialClienteWindow(
+            self.session_factory,
+            self.cliente.id_cliente,
+            self.cliente,
+            id_usuario=self.id_usuario,
+            parent=self,
+            vista_inicial=VISTA_ESTADO_CUENTA,
+        ).exec()
+
     def _aplicar_abono_general(self) -> None:
         """Abre el diálogo de abono general BCV para el cliente."""
         if not self._exigir_permiso("crear", "No tienes permiso para registrar cobros."):
@@ -1423,6 +1440,7 @@ class DetalleCuentasBCVDialog(VerFacturaDesdeFilaMixin, MixinPermisos, QDialog):
                 MessageBox.information(self, "Abono aplicado", "El abono general BCV se aplicó con éxito.")
                 # Recargar la tabla de detalle
                 self._recargar_cuentas()
+                self._mostrar_historial_cliente()
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar abonos.")
         except Exception:
@@ -1961,11 +1979,13 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                     "Excel (*.xlsx)",
                 )
                 if ruta:
+                    config_empresa = EmpresaService.obtener_datos_documento(session)
                     exportar_excel(
                         ruta,
                         encabezados,
                         filas,
                         titulo="Cuentas por Cobrar BCV (Agrupadas por Cliente)",
+                        config_empresa=config_empresa,
                         filtros=self._filtros_exportacion_cuentas_bcv(),
                         total_row=self._fila_totales_cuentas_bcv(items, len(encabezados)),
                         total_label="TOTALES",
@@ -2021,12 +2041,15 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
                     "PDF (*.pdf)",
                 )
                 if ruta:
+                    config_empresa = EmpresaService.obtener_datos_documento(session)
                     exportar_pdf(
                         ruta,
                         "Cuentas por Cobrar BCV (Agrupadas por Cliente)",
                         encabezados,
                         filas,
                         filtros=self._filtros_exportacion_cuentas_bcv(),
+                        col_widths=[1.6, 1.2, 1.2, 1.4, 0.7, 1.1, 1.0],
+                        config_empresa=config_empresa,
                         total_row=self._fila_totales_cuentas_bcv(items, len(encabezados)),
                         total_label="TOTALES",
                     )

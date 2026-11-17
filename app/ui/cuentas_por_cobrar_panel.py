@@ -60,6 +60,7 @@ from app.ui.conversion_bolivares import ConversionBolivaresMixin
 from app.ui.exportacion_completa import POR_PAGINA_EXPORTACION, ExportacionCompletaMixin
 from app.ui.factura_detalle_dialog import VerFacturaDesdeFilaMixin
 from app.ui.filtros_catalogo import llenar_combo_vendedores, tarea_vendedores_para_filtro
+from app.ui.historial_cliente_window import VISTA_ESTADO_CUENTA, HistorialClienteWindow
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
@@ -1362,6 +1363,7 @@ class DetalleClienteDialog(VerFacturaDesdeFilaMixin, MixinPermisos, MixinPaginac
                 MessageBox.information(self, "Cobro registrado", "El cobro se registró con éxito.")
                 # Recargar la tabla de detalle
                 self._recargar_cuentas()
+                self._mostrar_historial_cliente()
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar cobros.")
         except ValueError as e:
@@ -1386,6 +1388,20 @@ class DetalleClienteDialog(VerFacturaDesdeFilaMixin, MixinPermisos, MixinPaginac
         except Exception:
             logger.exception("Fallo al recargar cuentas del cliente")
 
+    def _mostrar_historial_cliente(self) -> None:
+        """Tras un cobro/abono exitoso muestra el historial del cliente directo en la
+        vista Estado de cuenta, para ver el pago ya reflejado en la relacion."""
+        if self.cliente is None:
+            return
+        HistorialClienteWindow(
+            self.session_factory,
+            self.cliente.id_cliente,
+            self.cliente,
+            id_usuario=self.id_usuario,
+            parent=self,
+            vista_inicial=VISTA_ESTADO_CUENTA,
+        ).exec()
+
     def _aplicar_abono_general(self) -> None:
         """Abre el diálogo de abono general para el cliente."""
         if not self._exigir_permiso("crear", "No tienes permiso para registrar cobros."):
@@ -1403,6 +1419,7 @@ class DetalleClienteDialog(VerFacturaDesdeFilaMixin, MixinPermisos, MixinPaginac
                 MessageBox.information(self, "Abono aplicado", "El abono general se aplicó con éxito.")
                 # Recargar la tabla de detalle
                 self._recargar_cuentas()
+                self._mostrar_historial_cliente()
         except PermisoDenegadoError:
             MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar abonos.")
         except Exception:

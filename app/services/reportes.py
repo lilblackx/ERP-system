@@ -2421,7 +2421,11 @@ class ReporteService:
                     "referencia": cuenta.factura.numero_factura + (" (anulada)" if anulada else ""),
                     "cargo": cargo,
                     "abono": Decimal("0.00"),
-                    "descripcion": _DESCRIPCION_FACTURA_ANULADA if anulada else "",
+                    "descripcion": (
+                        _DESCRIPCION_FACTURA_ANULADA
+                        if anulada
+                        else f"Crédito por Factura n° {cuenta.factura.numero_factura}"
+                    ),
                 }
             )
         for cuenta in cuentas_bcv:
@@ -2434,7 +2438,11 @@ class ReporteService:
                     "referencia": f"{cuenta.factura.numero_factura} (BCV)" + (" (anulada)" if anulada else ""),
                     "cargo": cuenta.saldo_pendiente + pagos_de_cuenta,
                     "abono": Decimal("0.00"),
-                    "descripcion": _DESCRIPCION_FACTURA_ANULADA if anulada else "",
+                    "descripcion": (
+                        _DESCRIPCION_FACTURA_ANULADA
+                        if anulada
+                        else f"Crédito por Factura n° {cuenta.factura.numero_factura}"
+                    ),
                 }
             )
         eventos.extend(_abonos_cliente(pagos, "Abono general"))

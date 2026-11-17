@@ -10,6 +10,7 @@ import qtawesome as qta
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QShowEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -29,6 +30,7 @@ from app.services.historial_cliente import (
     VISTA_FACTURAS,
     VISTA_PAGOS,
     VISTA_TODOS,
+    agrupar_pagos_solidos,
     filtrar_historial,
     monto_para_vista,
     obtener_historial_cliente,
@@ -38,6 +40,7 @@ from app.services.historial_cliente import (
 )
 from app.services.notas_credito import NotaCreditoService
 from app.services.permisos import PermisoDenegadoError
+from app.services.reportes import ReporteService
 from app.ui.animaciones import liberar_boton, ocupar_boton
 from app.ui.aplicar_nota_credito_dialog import AplicarNotaCreditoDialog
 from app.ui.carga_asincrona import CargaAsincronaMixin
@@ -145,16 +148,52 @@ ETIQUETAS_TIPO = {
     "aplicacion_nota_credito": "Abono NC",
 }
 
+# Vista extra del combo "Ver:": el estado de cuenta del cliente (mismo reporte que
+# ReportesPanel -> Estado de Cuenta por Cliente). No usa el historial de
+# obtener_historial_cliente(): sale de ReporteService.estado_cuenta_cliente, que ya
+# agrupa los pagos de un abono general en una sola fila con el monto total.
+VISTA_ESTADO_CUENTA = "estado_cuenta"
+COLS_ESTADO_CUENTA = ["Fecha", "Tipo", "Descripción", "Referencia", "Cargo", "Abono", "Saldo"]
+COL_WIDTHS_ESTADO_CUENTA = [1.0, 0.9, 2.2, 1.5, 1.0, 1.0, 1.0]
+
 # Anchos relativos de las columnas en el PDF (12 columnas: Observaciones es la mas ancha).
 COL_WIDTHS_PDF = [0.9, 1.2, 1.3, 0.9, 0.9, 0.9, 0.5, 2.0, 1.0, 1.0, 1.0, 1.0]
 
+_ALINEACION_HISTORIAL = {
+    0: Qt.AlignmentFlag.AlignCenter,
+    1: Qt.AlignmentFlag.AlignCenter,
+    2: Qt.AlignmentFlag.AlignCenter,
+    3: Qt.AlignmentFlag.AlignCenter,
+    4: Qt.AlignmentFlag.AlignCenter,
+    5: Qt.AlignmentFlag.AlignCenter,
+    6: Qt.AlignmentFlag.AlignCenter,
+    7: Qt.AlignmentFlag.AlignLeft,
+    8: Qt.AlignmentFlag.AlignRight,
+    9: Qt.AlignmentFlag.AlignRight,
+    10: Qt.AlignmentFlag.AlignRight,
+    11: Qt.AlignmentFlag.AlignRight,
+}
+_ALINEACION_ESTADO_CUENTA = {
+    0: Qt.AlignmentFlag.AlignLeft,
+    1: Qt.AlignmentFlag.AlignLeft,
+    2: Qt.AlignmentFlag.AlignLeft,
+    3: Qt.AlignmentFlag.AlignLeft,
+    4: Qt.AlignmentFlag.AlignRight,
+    5: Qt.AlignmentFlag.AlignRight,
+    6: Qt.AlignmentFlag.AlignRight,
+}
+
 
 def _filas_historial_para_exportar(
-    session, id_cliente: int, id_usuario: int | None, vista: str = VISTA_TODOS
+    session, id_cliente: int, id_usuario: int | None, vista: str = VISTA_TODOS, ver_todos: bool = False
 ) -> list[list]:
     """Filas del historial para Excel/PDF, SOLO las de `vista` (la misma que el usuario ve en pantalla).
     Los montos van como Decimal (numeros), no como texto."""
     historial = filtrar_historial(obtener_historial_cliente(session, id_cliente, id_usuario), vista)
+    if vista == VISTA_PAGOS:
+        # "Solo pagos" muestra cada abono como un solo monto, no una fila por factura.
+        historial = agrupar_pagos_solidos(historial)
+    historial = _ordenar_historial(historial, ver_todos)
     filas = []
     for item in historial:
         tipo = item["tipo_transaccion"]
@@ -194,24 +233,123 @@ def _filas_historial_para_exportar(
 
 def _titulo_excel_historial(cliente_nombre: str | None, vista: str) -> str:
     cliente = ": " + cliente_nombre if cliente_nombre else ""
-    return "Historial del Cliente" + cliente + " - " + ETIQUETAS_VISTA[vista]
+    etiqueta = ETIQUETAS_VISTA.get(vista, "Estado de cuenta")
+    return "Historial del Cliente" + cliente + " - " + etiqueta
+
+
+def _ordenar_historial(historial: list, ver_todos: bool) -> list:
+    """Orden de la tabla del historial:
+
+    - Los abonos/pagos realizados quedan arriba, en su lugar cronologico (ya no bajan
+      junto a su factura).
+    - Las facturas con saldo pendiente (no anuladas) van al final, de la mas antigua a
+      la mas reciente: es el orden en que el proximo abono FIFO las va a cubrir.
+    - Las facturas ya liquidadas (saldo 0 o menos) se ocultan, salvo que `ver_todos`
+      este activo ("Ver todos los movimientos").
+    """
+    if not ver_todos:
+        historial = [item for item in historial if item["tipo_transaccion"] != "factura" or item["saldo_factura"] > 0]
+    ids_pendientes = {
+        item["id_factura"]
+        for item in historial
+        if item["tipo_transaccion"] == "factura" and item["saldo_factura"] > 0 and item["estado_factura"] != "ANULADA"
+    }
+    if not ids_pendientes:
+        return historial
+    fecha_por_factura = {
+        item["id_factura"]: item["fecha"] or ""
+        for item in historial
+        if item["tipo_transaccion"] == "factura" and item["id_factura"] in ids_pendientes
+    }
+    normales = [
+        item
+        for item in historial
+        if not (item["tipo_transaccion"] == "factura" and item["id_factura"] in ids_pendientes)
+    ]
+    pendientes = sorted(
+        (item for item in historial if item["tipo_transaccion"] == "factura" and item["id_factura"] in ids_pendientes),
+        key=lambda i: fecha_por_factura.get(i["id_factura"], ""),
+    )
+    return normales + pendientes
+
+
+def _tarea_estado_cuenta(session, id_cliente: int, id_usuario: int | None) -> dict:
+    """Estado de cuenta del cliente para la vista dedicada del historial: corre en el
+    hilo del QueryWorker y devuelve el dict de ReporteService.estado_cuenta_cliente."""
+    return ReporteService.estado_cuenta_cliente(session, id_usuario=id_usuario, id_cliente=id_cliente)
+
+
+def _filas_estado_cuenta(session, id_cliente: int, id_usuario: int | None):
+    """(resultado, filas, total_row) del estado de cuenta para exportar: las filas van
+    con montos numericos y la ultima es el saldo pendiente con el formato de fila de
+    totales (fondo azul) de los exportadores."""
+    resultado = ReporteService.estado_cuenta_cliente(session, id_usuario=id_usuario, id_cliente=id_cliente)
+    filas = [
+        [
+            f["fecha"].strftime("%d/%m/%Y"),
+            f["tipo"],
+            f.get("descripcion") or "",
+            f["referencia"] or "",
+            float(f["cargo"]),
+            float(f["abono"]),
+            float(f["saldo"]),
+        ]
+        for f in resultado["filas"]
+    ]
+    total_row = ["", "", "", "Saldo Pendiente", "", "", float(resultado["saldo_final"])]
+    return resultado, filas, total_row
 
 
 def _tarea_exportar_historial_excel(
-    session, ruta: str, id_cliente: int, id_usuario: int | None, vista: str, cliente_nombre: str | None
+    session,
+    ruta: str,
+    id_cliente: int,
+    id_usuario: int | None,
+    vista: str,
+    cliente_nombre: str | None,
+    ver_todos: bool = False,
 ) -> str:
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el historial
     completo del cliente a un archivo (openpyxl) es lo bastante lento como para
     congelar la ventana si se hace en el hilo de GUI."""
-    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista)
+    if vista == VISTA_ESTADO_CUENTA:
+        _resultado, filas, total_row = _filas_estado_cuenta(session, id_cliente, id_usuario)
+        exportar_excel(
+            ruta,
+            COLS_ESTADO_CUENTA,
+            filas,
+            titulo=_titulo_excel_historial(cliente_nombre, vista),
+            total_row=total_row,
+        )
+        return ruta
+    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista, ver_todos)
     exportar_excel(ruta, COLS_HISTORIAL, filas, titulo=_titulo_excel_historial(cliente_nombre, vista))
     return ruta
 
 
 def _tarea_exportar_historial_pdf(
-    session, ruta: str, id_cliente: int, id_usuario: int | None, vista: str, cliente_nombre: str | None
+    session,
+    ruta: str,
+    id_cliente: int,
+    id_usuario: int | None,
+    vista: str,
+    cliente_nombre: str | None,
+    ver_todos: bool = False,
 ) -> str:
-    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista)
+    if vista == VISTA_ESTADO_CUENTA:
+        _resultado, filas, total_row = _filas_estado_cuenta(session, id_cliente, id_usuario)
+        exportar_pdf(
+            ruta,
+            "Estado de Cuenta por Cliente",
+            COLS_ESTADO_CUENTA,
+            filas,
+            cliente_nombre=cliente_nombre,
+            filtros={"Vista": "Estado de cuenta"},
+            col_widths=COL_WIDTHS_ESTADO_CUENTA,
+            total_row=total_row,
+        )
+        return ruta
+    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista, ver_todos)
     exportar_pdf(
         ruta,
         "Historial del Cliente",
@@ -249,6 +387,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         cliente: Cliente,
         id_usuario: int | None = None,
         parent=None,
+        vista_inicial: str | None = None,
     ):
         super().__init__(parent)
         self.session_factory = session_factory
@@ -261,10 +400,11 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         # DevolverNotaCreditoDialog (ver NotaCreditoService).
         self._notas_disponibles: list = []
         self._facturas_pendientes: list[dict] = []
-        # Historial completo cargado + vista activa. Por defecto se ocultan los abonos (los pagos se ven en
-        # "Solo pagos" o "Todos los movimientos"); la tabla y las exportaciones muestran solo la vista activa.
+        # Por defecto "Todos los movimientos": la relacion principal muestra los abonos
+        # arriba y las facturas pendientes abajo (las pagadas se ocultan salvo que se
+        # tilde "Ver todos los movimientos").
         self._historial: list = []
-        self._vista: str = VISTA_FACTURAS
+        self._vista: str = VISTA_TODOS
         # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
         # el motivo (hallazgo 3.3, auditoria 2026-09-05).
         self._abriendo_dialogo = False
@@ -275,6 +415,11 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
             self.windowFlags() | Qt.WindowType.WindowCloseButtonHint & ~Qt.WindowType.WindowContextHelpButtonHint
         )
         self._setup_ui()
+        if vista_inicial == VISTA_ESTADO_CUENTA:
+            indice = self.vista_combo.findData(VISTA_ESTADO_CUENTA)
+            if indice >= 0:
+                # Dispara _on_vista_cambiada -> _cargar_estado_cuenta (asincrono).
+                self.vista_combo.setCurrentIndex(indice)
         self.cargar_historial()
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -329,16 +474,29 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         lbl_vista = QLabel("Ver:")
         lbl_vista.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
         self.vista_combo = QComboBox()
-        for clave in (VISTA_FACTURAS, VISTA_TODOS, VISTA_PAGOS):
+        for clave in (VISTA_TODOS, VISTA_FACTURAS, VISTA_PAGOS):
             self.vista_combo.addItem(ETIQUETAS_VISTA[clave], clave)
+        self.vista_combo.addItem("Estado de cuenta", VISTA_ESTADO_CUENTA)
+        self.vista_combo.setCurrentIndex(0)  # VISTA_TODOS
         self.vista_combo.setFixedHeight(34)
         self.vista_combo.setMinimumWidth(230)
         self.vista_combo.setToolTip("Qué movimientos mostrar. La exportación (Excel/PDF) sigue la vista elegida.")
         self.vista_combo.currentIndexChanged.connect(self._on_vista_cambiada)
 
+        # Casilla "Ver todos los movimientos": destildada, la tabla muestra solo las
+        # facturas pendientes (abajo) y los abonos/notas ya realizados (arriba); las
+        # facturas liquidadas se ocultan. Al tildarla aparecen tambien esas facturas.
+        self.chk_ver_todos = QCheckBox("Ver todos los movimientos")
+        self.chk_ver_todos.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        self.chk_ver_todos.setToolTip(
+            "Muestra tambien las facturas ya pagadas. Destildada solo se ven las pendientes y los movimientos."
+        )
+        self.chk_ver_todos.toggled.connect(self._on_ver_todos_cambiado)
+
         h.addWidget(icon_lbl)
         h.addLayout(titulos)
         h.addStretch()
+        h.addWidget(self.chk_ver_todos)
         h.addWidget(lbl_vista)
         h.addWidget(self.vista_combo)
         return w
@@ -387,23 +545,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
     def _make_table(self) -> QTableWidget:
         self.tabla = QTableWidget(0, len(COLS_HISTORIAL))
         self.tabla.setHorizontalHeaderLabels(COLS_HISTORIAL)
-        alinear_encabezados(
-            self.tabla,
-            {
-                0: Qt.AlignmentFlag.AlignCenter,
-                1: Qt.AlignmentFlag.AlignCenter,
-                2: Qt.AlignmentFlag.AlignCenter,
-                3: Qt.AlignmentFlag.AlignCenter,
-                4: Qt.AlignmentFlag.AlignCenter,
-                5: Qt.AlignmentFlag.AlignCenter,
-                6: Qt.AlignmentFlag.AlignCenter,
-                7: Qt.AlignmentFlag.AlignLeft,
-                8: Qt.AlignmentFlag.AlignRight,
-                9: Qt.AlignmentFlag.AlignRight,
-                10: Qt.AlignmentFlag.AlignRight,
-                11: Qt.AlignmentFlag.AlignRight,
-            },
-        )
+        alinear_encabezados(self.tabla, _ALINEACION_HISTORIAL)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -540,12 +682,90 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
 
     def _on_vista_cambiada(self) -> None:
         self._vista = self.vista_combo.currentData() or VISTA_FACTURAS
-        self._aplicar_vista()
+        if self._vista == VISTA_ESTADO_CUENTA:
+            self._cargar_estado_cuenta()
+        else:
+            self._aplicar_vista()
+
+    def _on_ver_todos_cambiado(self, _checked: bool) -> None:
+        # En la vista "Estado de cuenta" la tabla tiene otro formato y no aplica el filtro.
+        if self._vista != VISTA_ESTADO_CUENTA:
+            self._aplicar_vista()
+
+    def _cargar_estado_cuenta(self) -> None:
+        """Vista "Estado de cuenta": consulta ReporteService.estado_cuenta_cliente en un
+        hilo aparte (mismo patron que cargar_historial). Los abonos de un pago general
+        llegan ya agrupados en una sola fila con el monto total."""
+        self.lbl_total_pagado.hide()
+        self.cargar_async(
+            "estado_cuenta",
+            _tarea_estado_cuenta,
+            self._mostrar_estado_cuenta,
+            texto_error="No se pudo cargar el estado de cuenta del cliente.",
+            texto_sin_permiso="No tienes permiso para ver el estado de cuenta por cliente.",
+            id_cliente=self.id_cliente,
+            id_usuario=self.id_usuario,
+        )
+
+    def _configurar_columnas(self, estado_cuenta: bool) -> None:
+        """La tabla cambia entre las 12 columnas del historial y las 7 del estado de
+        cuenta segun la vista activa."""
+        if estado_cuenta:
+            self.tabla.setColumnCount(len(COLS_ESTADO_CUENTA))
+            self.tabla.setHorizontalHeaderLabels(COLS_ESTADO_CUENTA)
+            alinear_encabezados(self.tabla, _ALINEACION_ESTADO_CUENTA)
+        else:
+            self.tabla.setColumnCount(len(COLS_HISTORIAL))
+            self.tabla.setHorizontalHeaderLabels(COLS_HISTORIAL)
+            alinear_encabezados(self.tabla, _ALINEACION_HISTORIAL)
+
+    def _mostrar_estado_cuenta(self, resultado: dict) -> None:
+        self._configurar_columnas(True)
+        filas = resultado["filas"]
+        self.tabla.setRowCount(len(filas))
+        izq = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        der = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        for fila, f in enumerate(filas):
+            fecha = f["fecha"].strftime("%d/%m/%Y") if hasattr(f["fecha"], "strftime") else str(f["fecha"])
+            for col, texto, align in (
+                (0, fecha, izq),
+                (1, f["tipo"], izq),
+                (2, f.get("descripcion") or "", izq),
+                (3, f["referencia"] or "N/A", izq),
+            ):
+                item = QTableWidgetItem(str(texto))
+                item.setTextAlignment(align)
+                self.tabla.setItem(fila, col, item)
+            for col, valor, align in (
+                (4, f["cargo"], der),
+                (5, f["abono"], der),
+                (6, f["saldo"], der),
+            ):
+                item = QTableWidgetItem(f"${float(valor):,.2f}" if valor else "")
+                item.setTextAlignment(align)
+                if col == 6:
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                    item.setData(
+                        Qt.ItemDataRole.ForegroundRole,
+                        QColor(COLOR_DANGER if valor > 0 else COLOR_SUCCESS),
+                    )
+                self.tabla.setItem(fila, col, item)
 
     def _aplicar_vista(self) -> None:
         """Pinta en la tabla solo las filas de la vista activa. El historial completo (`self._historial`) no se
         toca: los saldos, las notas de credito y el boton de aplicar se calculan siempre con todo."""
-        self._poblar_tabla(filtrar_historial(self._historial, self._vista))
+        if self._vista == VISTA_ESTADO_CUENTA:
+            # La tabla del estado de cuenta la pinta _mostrar_estado_cuenta; el
+            # historial que acaba de llegar no debe pisarla (filtrar_historial no
+            # conoce esta vista).
+            return
+        self._configurar_columnas(False)
+        historial = filtrar_historial(self._historial, self._vista)
+        if self._vista == VISTA_PAGOS:
+            historial = agrupar_pagos_solidos(historial)
+        self._poblar_tabla(_ordenar_historial(historial, self.chk_ver_todos.isChecked()))
         if self._vista == VISTA_PAGOS:
             self.lbl_total_pagado.setText(f"TOTAL PAGADO : $ {float(total_pagado(self._historial)):,.2f}")
             self.lbl_total_pagado.show()
@@ -781,6 +1001,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
                 id_usuario=self.id_usuario,
                 vista=self._vista,
                 cliente_nombre=self.cliente.nombre_razon_social,
+                ver_todos=self.chk_ver_todos.isChecked(),
             )
             self._worker_export_excel.resultado.connect(self._on_exportar_excel_ok)
             self._worker_export_excel.error.connect(self._on_exportar_excel_error)
@@ -807,6 +1028,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
                 id_usuario=self.id_usuario,
                 vista=self._vista,
                 cliente_nombre=self.cliente.nombre_razon_social,
+                ver_todos=self.chk_ver_todos.isChecked(),
             )
             self._worker_export_pdf.resultado.connect(self._on_exportar_pdf_ok)
             self._worker_export_pdf.error.connect(self._on_exportar_pdf_error)

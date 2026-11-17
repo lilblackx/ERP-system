@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -52,6 +52,13 @@ class HistorialItem(TypedDict):
     # historial puede mostrarse SIN las filas de abono y asi se sigue viendo cuanto se pago de cada factura.
     monto_pagado: Decimal
     saldo_factura: Decimal
+    # Solo en las filas de pago: clave que identifica el abono completo (las filas de un
+    # pago general comparten estos datos) y el detalle en Bs/tasa/banco para poder
+    # mostrar el pago agrupado como un solo monto en la vista "Solo pagos".
+    grupo_abono: NotRequired[tuple | None]
+    monto_bolivares: NotRequired[Decimal | None]
+    tasa_cambio: NotRequired[Decimal | None]
+    banco: NotRequired[str | None]
 
 
 # Vistas del historial: que filas se muestran (y se exportan). Por defecto se ocultan los abonos: el
@@ -89,6 +96,61 @@ def monto_para_vista(item: HistorialItem, vista: str) -> Decimal:
 def total_pagado(historial: list[HistorialItem]) -> Decimal:
     """Suma de todos los abonos del historial (en positivo)."""
     return sum((-item["monto"] for item in historial if item["tipo_transaccion"] == "pago"), Decimal("0.00"))
+
+
+def agrupar_pagos_solidos(items: list[HistorialItem]) -> list[HistorialItem]:
+    """Fusiona en una sola fila los pagos que pertenecen al mismo abono.
+
+    Un abono general crea un PagoCobro/PagoCobroBCV por cada factura afectada (el saldo
+    de cada una se descuenta por separado), pero para el usuario es UN solo pago: las
+    filas comparten `grupo_abono` (fecha, metodo, moneda, cuenta destino, tasa y
+    referencia). La fila fusionada suma los montos y recompone la observacion con el
+    total en Bs; las filas sin grupo (pagos individuales, transferencias conciliadas)
+    quedan igual."""
+    grupos: dict[tuple, list[int]] = {}
+    for idx, item in enumerate(items):
+        clave = item.get("grupo_abono")
+        if item["tipo_transaccion"] == "pago" and clave is not None:
+            grupos.setdefault(clave, []).append(idx)
+    # Solo se fusionan los grupos con mas de una fila: un pago a una sola factura se
+    # muestra como siempre (con su numero de factura y su detalle).
+    fusionar = {idx for indices in grupos.values() if len(indices) > 1 for idx in indices}
+    if not fusionar:
+        return list(items)
+
+    resultado: list[HistorialItem] = []
+    idx_grupo: dict[int, HistorialItem] = {}
+    for idx, item in enumerate(items):
+        if idx not in fusionar:
+            resultado.append(item)
+            continue
+        clave = item["grupo_abono"]
+        if clave not in idx_grupo:
+            fusionado = dict(item)
+            fusionado["numero_factura"] = "Varios"
+            fusionado["id_factura"] = None  # abarca varias facturas: el detalle es por abono
+            fusionado["id_pago"] = None
+            fusionado["id_cuenta"] = None
+            idx_grupo[clave] = fusionado
+            resultado.append(fusionado)
+            continue
+        grupo = idx_grupo[clave]
+        grupo["monto"] += item["monto"]  # ambos negativos: la suma agranda el abono
+        bs_previos = grupo.get("monto_bolivares")
+        bs_nuevos = item.get("monto_bolivares")
+        if bs_previos is not None or bs_nuevos is not None:
+            grupo["monto_bolivares"] = (bs_previos or Decimal("0")) + (bs_nuevos or Decimal("0"))
+        observaciones = []
+        monto_bs = grupo.get("monto_bolivares")
+        if monto_bs:
+            observaciones.append(f"Bs. {monto_bs:,.2f}")
+        tasa = grupo.get("tasa_cambio")
+        if tasa:
+            observaciones.append(f"{tasa:,.2f}")
+        if grupo.get("banco"):
+            observaciones.append(grupo["banco"])
+        grupo["observaciones"] = " - ".join(observaciones) if observaciones else grupo.get("observaciones")
+    return resultado
 
 
 def _exigir_acceso_al_cliente(session: Session, id_cliente: int, id_usuario: int | None) -> None:
@@ -348,6 +410,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int, id_usuario: int
                     observaciones = f"Bs. {monto_bs:,.2f}"
 
                 # Agregar banco si existe
+                nombre_banco = ""
                 if pago.cuenta_bancaria:
                     banco = pago.cuenta_bancaria.banco
                     nombre_banco = banco.nombre_banco if banco else ""
@@ -378,6 +441,20 @@ def obtener_historial_cliente(session: Session, id_cliente: int, id_usuario: int
                     "saldo_corrido": Decimal("0.00"),  # No aplica para pagos individuales
                     "monto_pagado": Decimal("0.00"),
                     "saldo_factura": Decimal("0.00"),
+                    # Clave del abono completo: misma que usa el estado de cuenta del
+                    # reporte (_abonos_cliente en reportes.py) -- las filas de un pago
+                    # general comparten estos datos; ver agrupar_pagos_solidos().
+                    "grupo_abono": (
+                        pago.fecha_pago,
+                        pago.metodo_pago,
+                        pago.referencia,
+                        pago.id_cuenta_bancaria,
+                        pago.id_caja,
+                        pago.creado_por,
+                    ),
+                    "monto_bolivares": monto_bs,
+                    "tasa_cambio": tasa,
+                    "banco": nombre_banco or None,
                 }
                 historial.append(item_pago)
 
