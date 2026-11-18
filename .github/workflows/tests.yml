@@ -19,8 +19,14 @@ env:
   # cuando se tienen las librerías EGL instaladas.
   QT_QPA_PLATFORM: offscreen
 
+# Una corrida nueva del mismo PR/rama cancela la anterior: no se gastan minutos en commits ya superados.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    timeout-minutes: 30
     # Fijo en 22.04 (no ubuntu-latest): el paquete msodbcsql18 de Microsoft se instala
     # contra una version de Ubuntu especifica -- ubuntu-latest podria saltar a una
     # version mas nueva sin aviso y romper la instalacion del driver.
@@ -65,20 +71,23 @@ jobs:
       # fija la variable para el propio comando `sudo`, que por diseño no la propaga al
       # proceso que ejecuta como root -- el postinst de msodbcsql18 nunca ve el EULA
       # aceptado y no registra el driver en odbcinst.ini, aunque apt termine con exit 0.
-      - name: Instalar ODBC Driver 18 para SQL Server
+      #
+      # Driver ODBC y librerias de Qt (pytest-qt instancia QApplication real, con xvfb como
+      # respaldo de framebuffer) en UNA sola llamada a apt: un solo update y una sola
+      # resolucion de dependencias.
+      - name: Instalar ODBC Driver 18 y dependencias de Qt
         run: |
           sudo apt-get update
-          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
-
-      # Qt necesita xvfb para framebuffer virtual en CI headless
-      - name: Instalar dependencias de Qt
-        run: |
-          sudo apt-get install -y libegl1 libgl1-mesa-glx libxcb-xinerama0 xvfb
+          sudo ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 libegl1 libgl1-mesa-glx libxcb-xinerama0 xvfb
 
       - name: Configurar Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+          # Cache de pip atada al lock: si requirements-dev-lock.txt no cambia, no se vuelven a
+          # descargar PySide6 y compania (lo mas pesado de la instalacion).
+          cache: pip
+          cache-dependency-path: requirements-dev-lock.txt
 
       # requirements-dev-lock.txt (C9): freeze completo con transitivas, para que el
       # entorno de CI sea el mismo bit a bit que el que corrio la suite localmente.
@@ -97,10 +106,12 @@ jobs:
       # tests/conftest.py (fixture test_engine) crea distribuidora_dj_test y aplica el
       # schema + migraciones pendientes automaticamente la primera vez que corren los
       # tests, igual que en local.
-      # Correr tests de servicios primero (sin Qt, no requiere xvfb)
-      - name: Correr tests de servicios
-        run: pytest -q --ignore=tests/ui
-
-      # Tests de UI con QT_QPA_PLATFORM=offscreen (no requiere xvfb)
-      - name: Correr tests de UI
-        run: pytest -q tests/ui
+      # Suite completa en paralelo, igual que en local (pytest -n 6 --dist loadfile, ver
+      # README.md): cada worker de pytest-xdist usa SU propia base (distribuidora_dj_test_gw0,
+      # _gw1, ...) y --dist loadfile manda todos los tests de un archivo al mismo worker, que
+      # es lo que la limpieza por DELETE de tests/conftest.py necesita. -n auto toma los
+      # nucleos del runner (2 o 4 segun el plan), asi no se sobrecarga el SQL Server que
+      # comparte maquina con los tests. Servicios y UI van juntos: ya no hay que separarlos.
+      # --durations muestra los tests mas lentos para detectar regresiones de tiempo.
+      - name: Correr la suite en paralelo
+        run: pytest -n auto --dist loadfile -q --durations=15
