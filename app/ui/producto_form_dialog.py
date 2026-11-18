@@ -418,14 +418,34 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         grid.addWidget(lbl_unidad, 5, 0, 1, 2)
         grid.addWidget(self.cantidad_unidad_input, 6, 0, 1, 2)
 
+        # En edicion el stock real no se edita a mano: la barra queda visible pero
+        # bloqueada, y debajo va "Modificar Stock", un ajuste con signo (+ suma,
+        # - resta) que se aplica sobre el stock actual al guardar.
+        self._stock_base = Decimal("0")
+        self.modificar_stock_input = None
+        fila = 7
+        if self.producto:
+            self.cantidad_unidad_input.setEnabled(False)
+            lbl_modificar = QLabel("Modificar Stock (+/-)")
+            lbl_modificar.setProperty("class", "FormLabel")
+            lbl_modificar.setToolTip("Escribe un número positivo para sumar o negativo para restar del stock actual.")
+            self.modificar_stock_input = NumericLineEdit(NumericFieldType.QUANTITY, allow_negative=True)
+            self.modificar_stock_input.setFixedHeight(32)
+            self.modificar_stock_input.setMaximumWidth(220)
+            self.modificar_stock_input.setPlaceholderText("Ej: 5 o -3")
+            self.modificar_stock_input.valueChanged.connect(self._aplicar_modificacion_stock)
+            grid.addWidget(lbl_modificar, 7, 0)
+            grid.addWidget(self.modificar_stock_input, 8, 0)
+            fila = 9
+
         # Umbral para el reporte "Stock bajo minimo" (migrations/0037). 0 = sin minimo
         # configurado, el producto no aparece en ese reporte.
         lbl_minima = QLabel("Stock Mínimo (alerta)")
         lbl_minima.setProperty("class", "FormLabel")
         self.cantidad_minima_input = NumericLineEdit(NumericFieldType.QUANTITY)
         self.cantidad_minima_input.setFixedHeight(32)
-        grid.addWidget(lbl_minima, 7, 0, 1, 2)
-        grid.addWidget(self.cantidad_minima_input, 8, 0, 1, 2)
+        grid.addWidget(lbl_minima, fila, 0, 1, 2)
+        grid.addWidget(self.cantidad_minima_input, fila + 1, 0, 1, 2)
 
         # Cantidad por caja (unidades por caja) - reactivado para calculo de cajas/unidades
         lbl_caja = QLabel("Unidades por Caja")
@@ -434,16 +454,16 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         self.cantidad_caja_input.setFixedHeight(32)
         self.cantidad_caja_input.setPlaceholderText("Ej: 12")
         self.cantidad_caja_input.valueChanged.connect(self._calcular_cajas_unidades)
-        grid.addWidget(lbl_caja, 9, 0, 1, 2)
-        grid.addWidget(self.cantidad_caja_input, 10, 0, 1, 2)
+        grid.addWidget(lbl_caja, fila + 2, 0, 1, 2)
+        grid.addWidget(self.cantidad_caja_input, fila + 3, 0, 1, 2)
 
         # Campos de solo lectura para mostrar el calculo de cajas y unidades sueltas
         self.lbl_cajas_calculadas = QLabel("Cajas: 0")
         self.lbl_cajas_calculadas.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
         self.lbl_unidades_sueltas = QLabel("Unidades sueltas: 0")
         self.lbl_unidades_sueltas.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
-        grid.addWidget(self.lbl_cajas_calculadas, 11, 0)
-        grid.addWidget(self.lbl_unidades_sueltas, 11, 1)
+        grid.addWidget(self.lbl_cajas_calculadas, fila + 4, 0)
+        grid.addWidget(self.lbl_unidades_sueltas, fila + 4, 1)
 
         # Articulo BCV (migrations/0079): al facturar con porcentaje BCV se queda con su precio guardado.
         self.articulo_bcv_check = QCheckBox("Artículo BCV")
@@ -453,8 +473,8 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         )
         lbl_articulo_bcv = QLabel("No se le aplica el porcentaje BCV al facturar")
         lbl_articulo_bcv.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED}; margin-top: -4px;")
-        grid.addWidget(self.articulo_bcv_check, 12, 0, 1, 2)
-        grid.addWidget(lbl_articulo_bcv, 13, 0, 1, 2)
+        grid.addWidget(self.articulo_bcv_check, fila + 5, 0, 1, 2)
+        grid.addWidget(lbl_articulo_bcv, fila + 6, 0, 1, 2)
 
         layout.addLayout(grid)
         layout.addStretch()
@@ -543,6 +563,13 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         margen = ((precio - costo) / costo * 100) if costo else Decimal("0")
         self.lbl_margen.setText(f"Margen: {margen:.2f}%")
 
+    def _aplicar_modificacion_stock(self) -> None:
+        """En edicion el campo de stock esta bloqueado: muestra stock actual + ajuste.
+        El ajuste es un delta con signo; al guardar, get_data() devuelve el resultado."""
+        if self.modificar_stock_input is None:
+            return
+        self.cantidad_unidad_input.set_value(self._stock_base + self.modificar_stock_input.get_value())
+
     def _calcular_cajas_unidades(self) -> None:
         """Calcula cajas y unidades sueltas basado en cantidad total y unidades por caja."""
         cantidad_total = self.cantidad_unidad_input.get_value()
@@ -565,6 +592,7 @@ class ProductoFormDialog(MixinPermisos, QDialog):
         self.nombre_input.setText(producto.nombre_producto or "")
         self.descripcion_input.setText(producto.descripcion_producto or "")
         self.costo_input.set_value(producto.costo_producto or 0)
+        self._stock_base = Decimal(str(producto.cantidad_unidad or 0))
         self.cantidad_unidad_input.set_value(producto.cantidad_unidad or 0)
         self.cantidad_minima_input.set_value(producto.cantidad_minima or 0)
         self.cantidad_caja_input.set_value(producto.cantidad_caja or 0)
@@ -592,6 +620,13 @@ class ProductoFormDialog(MixinPermisos, QDialog):
     # ── Validación / datos ────────────────────────────────────────────────
 
     def _validar_y_aceptar(self) -> None:
+        if self.cantidad_unidad_input.get_value() < 0:
+            MessageBox.warning(
+                self,
+                "Stock inválido",
+                "El ajuste de stock no puede dejar la cantidad en negativo.",
+            )
+            return
         if not self.codigo_input.text().strip():
             MessageBox.warning(self, "Dato requerido", "El código del producto es obligatorio.")
             self.codigo_input.setFocus()

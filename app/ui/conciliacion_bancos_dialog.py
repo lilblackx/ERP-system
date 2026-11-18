@@ -6,6 +6,7 @@ from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -17,10 +18,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from sqlalchemy import case, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import Banco, BancoMovimiento, ControlDeTasa, CuentaBancaria, Usuario
 from app.services.banco_movimientos import BancoMovimientoService
+from app.services.empresa import EmpresaService
+from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.moneda_cuentas import MONEDA_BS, MONEDA_COP, MONEDA_USD
 from app.ui.calendario import CalendarioApp
 from app.ui.message_box import MessageBox
@@ -38,6 +41,7 @@ from app.ui.styles import (
     alinear_encabezados,
     dar_ancho_a_texto,
 )
+from app.ui.toolbar_popups import BotonExportar
 
 # Columnas de la tabla de movimientos del dia.
 COL_MONTO_USD = 2
@@ -54,6 +58,7 @@ class ConciliacionBancosDialog(QDialog):
         self.usuario = usuario
         self._cuentas = []
         self._movimientos_manuales = []
+        self._movimientos_dia = []
         self._fecha_conciliacion = QDate.currentDate()
         # Moneda de cada cuenta del combo y de la seleccionada: manda sobre que montos se muestran (ver
         # _aplicar_modo_moneda). Sin cuentas se muestra el lado en dolares.
@@ -276,13 +281,6 @@ class ConciliacionBancosDialog(QDialog):
         btn_marcar_conciliado.clicked.connect(self._marcar_conciliado)
         botones_layout.addWidget(btn_marcar_conciliado)
 
-        btn_calcular = QPushButton("Calcular Conciliación")
-        btn_calcular.setIcon(qta.icon("fa5s.calculator", color=COLOR_PRIMARY))
-        btn_calcular.setStyleSheet(BUTTON_PRIMARY_QSS)
-        btn_calcular.setMinimumHeight(32)  # Altura mínima en lugar de fija
-        btn_calcular.clicked.connect(self._calcular_conciliacion)
-        botones_layout.addWidget(btn_calcular)
-
         btn_guardar = QPushButton("Guardar Movimientos")
         btn_guardar.setIcon(qta.icon("fa5s.save", color="#16A34A"))
         btn_guardar.setStyleSheet(BUTTON_PRIMARY_QSS)
@@ -290,14 +288,32 @@ class ConciliacionBancosDialog(QDialog):
         btn_guardar.clicked.connect(self._guardar_movimientos)
         botones_layout.addWidget(btn_guardar)
 
+        self.btn_exportar = BotonExportar(on_excel=self._exportar_excel, on_pdf=self._exportar_pdf)
+        botones_layout.addWidget(self.btn_exportar)
+
         botones_layout.addStretch()
 
         layout.addLayout(botones_layout)
 
+        # ── Busqueda por referencia o descripcion dentro del dia ──
+        busqueda_layout = QHBoxLayout()
+        busqueda_layout.setSpacing(8)
+        lbl_buscar = QLabel("Buscar:")
+        lbl_buscar.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT_DARK};")
+        self.buscar_input = QLineEdit()
+        self.buscar_input.setPlaceholderText("Referencia o descripción...")
+        self.buscar_input.setMaximumWidth(320)
+        self.buscar_input.setMinimumHeight(30)
+        self.buscar_input.textChanged.connect(lambda _texto: self._poblar_tabla())
+        busqueda_layout.addWidget(lbl_buscar)
+        busqueda_layout.addWidget(self.buscar_input)
+        busqueda_layout.addStretch()
+        layout.addLayout(busqueda_layout)
+
         # ── Tabla de movimientos del día ──
         self.table = QTableWidget()
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # solo lectura
-        self.table.setColumnCount(8)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(
             [
                 "Fecha",
@@ -308,6 +324,7 @@ class ConciliacionBancosDialog(QDialog):
                 "Origen",
                 "Referencia",
                 "Descripción",
+                "Usuario",
             ]
         )
         self.table.setMinimumHeight(280)  # Altura mínima aumentada
@@ -322,6 +339,7 @@ class ConciliacionBancosDialog(QDialog):
         self.table.setColumnWidth(4, 80)
         self.table.setColumnWidth(5, 70)
         self.table.setColumnWidth(6, 90)
+        self.table.setColumnWidth(8, 110)
         alinear_encabezados(
             self.table,
             {
@@ -333,6 +351,7 @@ class ConciliacionBancosDialog(QDialog):
                 5: Qt.AlignmentFlag.AlignLeft,
                 6: Qt.AlignmentFlag.AlignLeft,
                 7: Qt.AlignmentFlag.AlignLeft,
+                8: Qt.AlignmentFlag.AlignLeft,
             },
         )
         layout.addWidget(self.table, stretch=1)  # Tabla ocupa espacio disponible
@@ -550,9 +569,9 @@ class ConciliacionBancosDialog(QDialog):
             self._calcular_conciliacion()
 
     def _actualizar_tabla_manuales(self):
-        """Actualiza la tabla de movimientos manuales."""
-        # Esta tabla ahora muestra todos los movimientos del día
-        self.table.setRowCount(0)
+        """Recarga los movimientos del día y repuebla la tabla (con el filtro de búsqueda si hay)."""
+        self._movimientos_dia = []
+        self._poblar_tabla()
 
         # Cargar movimientos del día de la base de datos
         id_cuenta = self.cuenta_combo.currentData()
@@ -570,6 +589,7 @@ class ConciliacionBancosDialog(QDialog):
                 BancoMovimiento.fecha_movimiento >= fecha_inicio,
                 BancoMovimiento.fecha_movimiento <= fecha_fin,
             )
+            .options(joinedload(BancoMovimiento.creador))
             .order_by(BancoMovimiento.fecha_movimiento.asc())
             .all()
         )
@@ -607,6 +627,7 @@ class ConciliacionBancosDialog(QDialog):
                     "descripcion": mov.descripcion_movimiento or "N/A",
                     "fecha": mov.fecha_movimiento,
                     "es_manual": False,
+                    "usuario": self._nombre_usuario(mov.creador),
                 }
             )
 
@@ -631,11 +652,29 @@ class ConciliacionBancosDialog(QDialog):
                     "descripcion": mov["descripcion"],
                     "fecha": None,
                     "es_manual": True,
+                    "usuario": self._nombre_usuario(self.usuario),
                 }
             )
 
-        # Mostrar en tabla
-        for row, movimiento in enumerate(todos_movimientos):
+        self._movimientos_dia = todos_movimientos
+        self._poblar_tabla()
+
+    def _movimientos_filtrados(self) -> list[dict]:
+        """Movimientos del día que coinciden con la búsqueda (referencia o descripción, sin
+        distinguir mayúsculas). Sin texto, devuelve todos."""
+        texto = self.buscar_input.text().strip().lower()
+        if not texto:
+            return self._movimientos_dia
+        return [
+            mov
+            for mov in self._movimientos_dia
+            if texto in (mov["referencia"] or "").lower() or texto in (mov["descripcion"] or "").lower()
+        ]
+
+    def _poblar_tabla(self) -> None:
+        """Llena la tabla con los movimientos del día que pasan el filtro de búsqueda."""
+        self.table.setRowCount(0)
+        for row, movimiento in enumerate(self._movimientos_filtrados()):
             self.table.insertRow(row)
 
             # Fecha
@@ -683,6 +722,72 @@ class ConciliacionBancosDialog(QDialog):
 
             # Descripción
             self.table.setItem(row, 7, QTableWidgetItem(movimiento["descripcion"]))
+
+            # Usuario que registro el movimiento
+            self.table.setItem(row, 8, QTableWidgetItem(movimiento.get("usuario") or "N/A"))
+
+    @staticmethod
+    def _nombre_usuario(usuario) -> str:
+        """Nombre visible del usuario que registro el movimiento (nombre o usuario de acceso)."""
+        if usuario is None:
+            return "N/A"
+        return usuario.nombre or usuario.nombre_usuario or "N/A"
+
+    def _filas_exportacion(self) -> tuple[list[str], list[list[str]]]:
+        """Encabezados y filas de la tabla tal como se ven (solo columnas visibles segun la
+        moneda de la cuenta), para exportar exactamente lo que muestra la pantalla."""
+        indices = [c for c in range(self.table.columnCount()) if not self.table.isColumnHidden(c)]
+        encabezados = [self.table.horizontalHeaderItem(c).text() for c in indices]
+        filas = [
+            [self.table.item(fila, c).text() if self.table.item(fila, c) else "" for c in indices]
+            for fila in range(self.table.rowCount())
+        ]
+        return encabezados, filas
+
+    def _exportar_excel(self) -> None:
+        self._exportar("excel")
+
+    def _exportar_pdf(self) -> None:
+        self._exportar("pdf")
+
+    def _exportar(self, formato: str) -> None:
+        if self.table.rowCount() == 0:
+            MessageBox.information(self, "Sin datos", "No hay movimientos para exportar.")
+            return
+        nombre = "conciliacion_bancos.xlsx" if formato == "excel" else "conciliacion_bancos.pdf"
+        filtro = "Excel (*.xlsx)" if formato == "excel" else "PDF (*.pdf)"
+        titulo_dialogo = "Exportar a Excel" if formato == "excel" else "Exportar a PDF"
+        ruta, _ = QFileDialog.getSaveFileName(self, titulo_dialogo, nombre, filtro)
+        if not ruta:
+            return
+
+        encabezados, filas = self._filas_exportacion()
+        cuenta_texto = self.cuenta_combo.currentText()
+        fecha_texto = self._fecha_conciliacion.toString("dd/MM/yyyy")
+        config_empresa = EmpresaService.obtener_datos_documento(self.session)
+        filtros = {"Cuenta": cuenta_texto, "Fecha": fecha_texto}
+
+        if formato == "excel":
+            exportar_excel(
+                ruta,
+                encabezados,
+                filas,
+                titulo="Conciliación de Bancos",
+                config_empresa=config_empresa,
+                filtros=filtros,
+            )
+        else:
+            exportar_pdf(
+                ruta,
+                "Conciliación de Bancos",
+                encabezados,
+                filas,
+                filtros=filtros,
+                col_widths=[90, 55, 90, 60, 100, 80, 110, 170, 110],
+                config_empresa=config_empresa,
+                apaisado=True,
+            )
+        MessageBox.information(self, "Exportación exitosa", f"El reporte se guardó en:\n{ruta}")
 
     def _eliminar_movimiento_manual(self, index: int):
         """Elimina un movimiento manual."""

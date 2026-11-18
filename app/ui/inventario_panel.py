@@ -35,6 +35,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Inventario, ProductoPrecio, Usuario
 from app.services.categorias import CategoriaService
+from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf
 from app.services.inventario import PrecioService, ProductoService
 from app.services.permisos import PermisoDenegadoError
@@ -152,7 +153,13 @@ def _tarea_exportar_productos_excel(
     filas = _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario)
     if conciliar:
         filas = [[fila[i] for i in _INDICES_CONCILIACION] + [""] for fila in filas]
-        exportar_excel(ruta, _COLUMNAS_CONCILIACION, filas, titulo="Conciliación de Inventario")
+        exportar_excel(
+            ruta,
+            _COLUMNAS_CONCILIACION,
+            filas,
+            titulo="Conciliación de Inventario",
+            config_empresa=EmpresaService.obtener_datos_documento(session),
+        )
     else:
         exportar_excel(ruta, COLS_VISIBLES, filas)
     return ruta, len(filas)
@@ -164,7 +171,13 @@ def _tarea_exportar_productos_pdf(
     filas = _filas_productos_query(session, texto, id_categoria, solo_con_stock, id_usuario)
     if conciliar:
         filas = [[fila[i] for i in _INDICES_CONCILIACION] + [""] for fila in filas]
-        exportar_pdf(ruta, "Conciliación de Inventario", _COLUMNAS_CONCILIACION, filas)
+        exportar_pdf(
+            ruta,
+            "Conciliación de Inventario",
+            _COLUMNAS_CONCILIACION,
+            filas,
+            config_empresa=EmpresaService.obtener_datos_documento(session),
+        )
     else:
         exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
     return ruta, len(filas)

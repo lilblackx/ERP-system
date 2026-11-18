@@ -45,6 +45,7 @@ def test_las_columnas_del_conteo_son_las_del_catalogo_en_su_lugar():
 
 def test_la_exportacion_a_excel_en_modo_conciliacion_lleva_solo_las_columnas_del_conteo(monkeypatch, tmp_path):
     monkeypatch.setattr(inv, "_filas_productos_query", _filas)
+    monkeypatch.setattr(inv.EmpresaService, "obtener_datos_documento", lambda session: None)
     ruta = str(tmp_path / "inventario_fisico.xlsx")
 
     resultado = inv._tarea_exportar_productos_excel(MagicMock(), ruta, None, None, False, 1, conciliar=True)
@@ -72,19 +73,22 @@ def test_la_exportacion_a_excel_sin_modo_conciliacion_sigue_igual(monkeypatch, t
 
 def test_la_exportacion_a_pdf_en_modo_conciliacion_usa_otro_titulo_y_las_columnas_del_conteo(monkeypatch):
     monkeypatch.setattr(inv, "_filas_productos_query", _filas)
+    monkeypatch.setattr(inv.EmpresaService, "obtener_datos_documento", lambda session: None)
     llamadas = []
     monkeypatch.setattr(
-        inv, "exportar_pdf", lambda ruta, titulo, columnas, filas, **k: llamadas.append((titulo, columnas, filas))
+        inv, "exportar_pdf", lambda ruta, titulo, columnas, filas, **k: llamadas.append((titulo, columnas, filas, k))
     )
 
     resultado = inv._tarea_exportar_productos_pdf(MagicMock(), "x.pdf", None, None, False, 1, conciliar=True)
     inv._tarea_exportar_productos_pdf(MagicMock(), "y.pdf", None, None, False, 1)
 
     assert resultado == ("x.pdf", 2)
-    titulo, columnas, filas = llamadas[0]
+    titulo, columnas, filas, kwargs = llamadas[0]
     assert titulo == "Conciliación de Inventario" and columnas == inv._COLUMNAS_CONCILIACION
     assert filas[0] == ["Harina PAN", "Alimentos", "120", "10", "0", ""]
+    assert "config_empresa" in kwargs  # el encabezado lleva los datos de Configuracion de Empresa
     assert llamadas[1][0] == "Inventario" and llamadas[1][1] == inv.COLS_VISIBLES
+    assert "config_empresa" not in llamadas[1][3]
 
 
 @pytest.fixture()

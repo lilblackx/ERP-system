@@ -73,7 +73,7 @@ def test_cuenta_en_usd_solo_muestra_dolares(qtbot, db_session, escenario):
 
     assert _visible(dlg, dlg.saldo_final_input) and not _visible(dlg, dlg.saldo_final_bs_input)
     assert _visible(dlg, dlg.lbl_saldo_final) and not _visible(dlg, dlg.lbl_saldo_final_bs)
-    assert _columnas_visibles(dlg) == ["Fecha", "Tipo", "Monto", "Origen", "Referencia", "Descripción"]
+    assert _columnas_visibles(dlg) == ["Fecha", "Tipo", "Monto", "Origen", "Referencia", "Descripción", "Usuario"]
     texto = _texto_resumen(dlg)
     assert "$100.00" in texto and "BS" not in texto.upper().replace("DIFERENCIA", "")
     assert "Tasa" not in " ".join(
@@ -131,6 +131,7 @@ def test_cuenta_en_bolivares_solo_muestra_bolivares(qtbot, db_session, escenario
         "Origen",
         "Referencia",
         "Descripción",
+        "Usuario",
     ]
     texto = _texto_resumen(dlg)
     assert "BS 4,000.00" in texto and "$" not in texto
