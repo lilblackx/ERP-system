@@ -1,6 +1,46 @@
 {
   "entregas": [
     {
+      "version": "1.1.2",
+      "fecha": "2026-11-18",
+      "titulo": "Estado de cuenta en el historial, ajuste de stock y conciliación exportable",
+      "cambios": [
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "El historial del cliente suma la vista «Estado de cuenta» y muestra un abono a varias facturas como un solo pago.",
+          "modulos": ["clientes", "cuentas_por_cobrar"]
+        },
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "Al registrar un cobro o abono se abre el estado de cuenta del cliente con el pago ya reflejado.",
+          "modulos": ["cuentas_por_cobrar"]
+        },
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "Al editar un producto puedes sumar o restar stock con «Modificar Stock (+/-)».",
+          "modulos": ["inventario"]
+        },
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "Conciliación de bancos: busca por referencia o descripción, ve quién registró cada movimiento y exporta a Excel o PDF.",
+          "modulos": ["bancos"]
+        },
+        {
+          "tipo": "mejorado",
+          "texto": "Las cuentas en dólares ya no muestran saldos en bolívares.",
+          "modulos": ["bancos"]
+        },
+        {
+          "tipo": "general",
+          "texto": "Mejoras de estabilidad y funcionamiento."
+        }
+      ]
+    },
+    {
       "version": "1.1.1",
       "fecha": "2026-11-10",
       "titulo": "Filtro por vendedor, IVA en ventas de contado y búsqueda por RIF",
