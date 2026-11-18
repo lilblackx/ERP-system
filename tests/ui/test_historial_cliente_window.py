@@ -106,6 +106,31 @@ def test_la_vista_facturas_sigue_ocultando_los_abonos(ventana):
     assert _tipos(ventana) == ["Nota Crédito", "Factura", "Factura"]
 
 
+def test_la_vista_facturas_muestra_tambien_las_facturas_pagadas(qtbot, monkeypatch):
+    """ "Solo facturas" lista todas las facturas, liquidadas incluidas, sin tildar "Ver todos los movimientos";
+    esa casilla solo aplica a la vista por defecto y queda inactiva en las demas."""
+    pagada = _item("factura", 3, "FV-3", "20.00", monto_pagado=Decimal("20.00"), saldo_factura=Decimal("0.00"))
+    historial = [*HISTORIAL, pagada]
+    monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente, id_usuario: historial)
+    monkeypatch.setattr(hw, "obtener_saldo_total_pendiente", lambda session, id_cliente, id_usuario: Decimal("75.00"))
+    monkeypatch.setattr(hw, "obtener_saldo_total_positivo", lambda session, id_cliente, id_usuario: Decimal("15.00"))
+    monkeypatch.setattr(hw.NotaCreditoService, "listar_notas_credito_cliente", lambda *a, **k: [])
+    cliente = SimpleNamespace(nombre_razon_social="Cliente de Prueba")
+    win = HistorialClienteWindow(MagicMock(return_value=MagicMock()), 1, cliente, id_usuario=1)
+    qtbot.addWidget(win)
+
+    # Vista por defecto: la pagada (FV-3) se oculta mientras la casilla este destildada.
+    assert _tipos(win) == ["Abono", "Nota Crédito", "Abono", "Abono", "Factura", "Factura"]
+    assert win.chk_ver_todos.isEnabled()
+
+    _elegir_vista(win, VISTA_FACTURAS)
+
+    assert _tipos(win) == ["Nota Crédito", "Factura", "Factura", "Factura"]
+    assert not win.chk_ver_todos.isEnabled()
+    numeros = [win.tabla.item(f, COLS_HISTORIAL.index("N° Factura/Nota")).text() for f in range(win.tabla.rowCount())]
+    assert "FV-3" in numeros
+
+
 def test_la_factura_muestra_cuanto_se_pago_y_cuanto_falta_aunque_los_abonos_esten_ocultos(ventana):
     col_pagado, col_saldo = COLS_HISTORIAL.index("Pagado"), COLS_HISTORIAL.index("Saldo Factura")
 
@@ -175,6 +200,23 @@ def test_agrupar_pagos_solidos_fusiona_el_abono_general_en_un_solo_pago():
     assert resultado[1]["monto"] == Decimal("-25.00")
     assert resultado[1]["numero_factura"] == "FV-3"  # grupo de uno: no se toca
     assert resultado[2]["numero_factura"] == "FV-4"
+
+
+def test_agrupar_pagos_solidos_conserva_el_numero_si_todas_las_lineas_son_de_una_factura():
+    """Dos lineas de pago de UNA misma factura (p. ej. dos efectivos de una venta de contado) se fusionan,
+    pero siguen mostrando el numero de esa factura, igual que el estado de cuenta del reporte."""
+    grupo_abono = ("2026-11-01 10:00", "efectivo", None, None, 2, 900)
+    items = [
+        _item("pago", 5, "FV-5", "-30.00", grupo_abono=grupo_abono),
+        _item("pago", 5, "FV-5", "-20.00", grupo_abono=grupo_abono),
+    ]
+
+    resultado = agrupar_pagos_solidos(items)
+
+    assert len(resultado) == 1
+    assert resultado[0]["numero_factura"] == "FV-5"
+    assert resultado[0]["id_factura"] == 5
+    assert resultado[0]["monto"] == Decimal("-50.00")
 
 
 def test_volver_a_facturas_vuelve_a_ocultar_los_abonos_y_el_total(ventana):

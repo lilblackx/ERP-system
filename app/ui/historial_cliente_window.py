@@ -193,7 +193,7 @@ def _filas_historial_para_exportar(
     if vista == VISTA_PAGOS:
         # "Solo pagos" muestra cada abono como un solo monto, no una fila por factura.
         historial = agrupar_pagos_solidos(historial)
-    historial = _ordenar_historial(historial, ver_todos)
+    historial = _ordenar_historial(historial, _mostrar_facturas_pagadas(vista, ver_todos))
     filas = []
     for item in historial:
         tipo = item["tipo_transaccion"]
@@ -235,6 +235,12 @@ def _titulo_excel_historial(cliente_nombre: str | None, vista: str) -> str:
     cliente = ": " + cliente_nombre if cliente_nombre else ""
     etiqueta = ETIQUETAS_VISTA.get(vista, "Estado de cuenta")
     return "Historial del Cliente" + cliente + " - " + etiqueta
+
+
+def _mostrar_facturas_pagadas(vista: str, ver_todos: bool) -> bool:
+    """ "Solo facturas" lista siempre todas las facturas (es justo lo que el usuario pidio ver); la casilla
+    "Ver todos los movimientos" solo decide si en la vista por defecto se ven tambien las ya liquidadas."""
+    return ver_todos or vista == VISTA_FACTURAS
 
 
 def _ordenar_historial(historial: list, ver_todos: bool) -> list:
@@ -682,6 +688,8 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
 
     def _on_vista_cambiada(self) -> None:
         self._vista = self.vista_combo.currentData() or VISTA_FACTURAS
+        # La casilla solo tiene efecto en "Todos los movimientos"; en las demas vistas queda inactiva.
+        self.chk_ver_todos.setEnabled(self._vista == VISTA_TODOS)
         if self._vista == VISTA_ESTADO_CUENTA:
             self._cargar_estado_cuenta()
         else:
@@ -765,7 +773,9 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         historial = filtrar_historial(self._historial, self._vista)
         if self._vista == VISTA_PAGOS:
             historial = agrupar_pagos_solidos(historial)
-        self._poblar_tabla(_ordenar_historial(historial, self.chk_ver_todos.isChecked()))
+        self._poblar_tabla(
+            _ordenar_historial(historial, _mostrar_facturas_pagadas(self._vista, self.chk_ver_todos.isChecked()))
+        )
         if self._vista == VISTA_PAGOS:
             self.lbl_total_pagado.setText(f"TOTAL PAGADO : $ {float(total_pagado(self._historial)):,.2f}")
             self.lbl_total_pagado.show()

@@ -127,10 +127,14 @@ def agrupar_pagos_solidos(items: list[HistorialItem]) -> list[HistorialItem]:
         clave = item["grupo_abono"]
         if clave not in idx_grupo:
             fusionado = dict(item)
-            fusionado["numero_factura"] = "Varios"
-            fusionado["id_factura"] = None  # abarca varias facturas: el detalle es por abono
             fusionado["id_pago"] = None
-            fusionado["id_cuenta"] = None
+            # Igual que el estado de cuenta del reporte: solo es "Varios" si el abono reparte el dinero entre
+            # facturas distintas; varias lineas de pago de UNA misma factura conservan su numero.
+            facturas_del_grupo = {items[i]["id_factura"] for i in grupos[clave]}
+            if len(facturas_del_grupo) > 1:
+                fusionado["numero_factura"] = "Varios"
+                fusionado["id_factura"] = None  # abarca varias facturas: el detalle es por abono
+                fusionado["id_cuenta"] = None
             idx_grupo[clave] = fusionado
             resultado.append(fusionado)
             continue

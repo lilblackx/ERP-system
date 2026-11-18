@@ -733,6 +733,9 @@ class ConciliacionBancosDialog(QDialog):
             return "N/A"
         return usuario.nombre or usuario.nombre_usuario or "N/A"
 
+    # Peso relativo de cada columna de la tabla en el PDF (mismo orden que las columnas de la tabla).
+    _ANCHOS_PDF = [90, 55, 90, 60, 100, 80, 110, 170, 110]
+
     def _filas_exportacion(self) -> tuple[list[str], list[list[str]]]:
         """Encabezados y filas de la tabla tal como se ven (solo columnas visibles segun la
         moneda de la cuenta), para exportar exactamente lo que muestra la pantalla."""
@@ -762,6 +765,7 @@ class ConciliacionBancosDialog(QDialog):
             return
 
         encabezados, filas = self._filas_exportacion()
+        anchos_pdf = [self._ANCHOS_PDF[c] for c in range(self.table.columnCount()) if not self.table.isColumnHidden(c)]
         cuenta_texto = self.cuenta_combo.currentText()
         fecha_texto = self._fecha_conciliacion.toString("dd/MM/yyyy")
         config_empresa = EmpresaService.obtener_datos_documento(self.session)
@@ -783,7 +787,7 @@ class ConciliacionBancosDialog(QDialog):
                 encabezados,
                 filas,
                 filtros=filtros,
-                col_widths=[90, 55, 90, 60, 100, 80, 110, 170, 110],
+                col_widths=anchos_pdf,
                 config_empresa=config_empresa,
                 apaisado=True,
             )
