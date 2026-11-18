@@ -185,7 +185,7 @@ _ALINEACION_ESTADO_CUENTA = {
 
 
 def _filas_historial_para_exportar(
-    session, id_cliente: int, id_usuario: int | None, vista: str = VISTA_TODOS, ver_todos: bool = False
+    session, id_cliente: int, id_usuario: int | None, vista: str = VISTA_TODOS, ocultar_pagadas: bool = False
 ) -> list[list]:
     """Filas del historial para Excel/PDF, SOLO las de `vista` (la misma que el usuario ve en pantalla).
     Los montos van como Decimal (numeros), no como texto."""
@@ -193,7 +193,7 @@ def _filas_historial_para_exportar(
     if vista == VISTA_PAGOS:
         # "Solo pagos" muestra cada abono como un solo monto, no una fila por factura.
         historial = agrupar_pagos_solidos(historial)
-    historial = _ordenar_historial(historial, _mostrar_facturas_pagadas(vista, ver_todos))
+    historial = _ordenar_historial(historial, _ocultar_facturas_pagadas(vista, ocultar_pagadas))
     filas = []
     for item in historial:
         tipo = item["tipo_transaccion"]
@@ -209,6 +209,8 @@ def _filas_historial_para_exportar(
                 dias_transcurridos = "—"
 
         estado = item["estado_factura"] if tipo in ("factura", "nota_credito", "devolucion_nota_credito") else "—"
+        if _es_factura_pagada(item):
+            estado = ESTADO_PAGADA
 
         filas.append(
             [
@@ -237,23 +239,31 @@ def _titulo_excel_historial(cliente_nombre: str | None, vista: str) -> str:
     return "Historial del Cliente" + cliente + " - " + etiqueta
 
 
-def _mostrar_facturas_pagadas(vista: str, ver_todos: bool) -> bool:
-    """ "Solo facturas" lista siempre todas las facturas (es justo lo que el usuario pidio ver); la casilla
-    "Ver todos los movimientos" solo decide si en la vista por defecto se ven tambien las ya liquidadas."""
-    return ver_todos or vista == VISTA_FACTURAS
+ESTADO_PAGADA = "PAGADA"
 
 
-def _ordenar_historial(historial: list, ver_todos: bool) -> list:
+def _es_factura_pagada(item: dict) -> bool:
+    """Factura liquidada: saldo 0 o menos y no anulada (una anulada conserva su estado)."""
+    return item["tipo_transaccion"] == "factura" and item["saldo_factura"] <= 0 and item["estado_factura"] != "ANULADA"
+
+
+def _ocultar_facturas_pagadas(vista: str, ocultar_pagadas: bool) -> bool:
+    """La casilla "Ocultar facturas pagadas" solo aplica a "Todos los movimientos"; "Solo facturas" lista
+    siempre todas las facturas (es justo lo que el usuario pidio ver)."""
+    return ocultar_pagadas and vista == VISTA_TODOS
+
+
+def _ordenar_historial(historial: list, ocultar_pagadas: bool) -> list:
     """Orden de la tabla del historial:
 
-    - Los abonos/pagos realizados quedan arriba, en su lugar cronologico (ya no bajan
-      junto a su factura).
+    - Los abonos/pagos realizados y las facturas ya liquidadas quedan arriba, en su lugar
+      cronologico (los abonos ya no bajan junto a su factura).
     - Las facturas con saldo pendiente (no anuladas) van al final, de la mas antigua a
       la mas reciente: es el orden en que el proximo abono FIFO las va a cubrir.
-    - Las facturas ya liquidadas (saldo 0 o menos) se ocultan, salvo que `ver_todos`
-      este activo ("Ver todos los movimientos").
+    - Con `ocultar_pagadas` ("Ocultar facturas pagadas") las liquidadas (saldo 0 o menos)
+      no se listan.
     """
-    if not ver_todos:
+    if ocultar_pagadas:
         historial = [item for item in historial if item["tipo_transaccion"] != "factura" or item["saldo_factura"] > 0]
     ids_pendientes = {
         item["id_factura"]
@@ -313,7 +323,7 @@ def _tarea_exportar_historial_excel(
     id_usuario: int | None,
     vista: str,
     cliente_nombre: str | None,
-    ver_todos: bool = False,
+    ocultar_pagadas: bool = False,
 ) -> str:
     """Corre en un QThread aparte (QueryWorker) -- consultar y volcar el historial
     completo del cliente a un archivo (openpyxl) es lo bastante lento como para
@@ -328,7 +338,7 @@ def _tarea_exportar_historial_excel(
             total_row=total_row,
         )
         return ruta
-    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista, ver_todos)
+    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista, ocultar_pagadas)
     exportar_excel(ruta, COLS_HISTORIAL, filas, titulo=_titulo_excel_historial(cliente_nombre, vista))
     return ruta
 
@@ -340,7 +350,7 @@ def _tarea_exportar_historial_pdf(
     id_usuario: int | None,
     vista: str,
     cliente_nombre: str | None,
-    ver_todos: bool = False,
+    ocultar_pagadas: bool = False,
 ) -> str:
     if vista == VISTA_ESTADO_CUENTA:
         _resultado, filas, total_row = _filas_estado_cuenta(session, id_cliente, id_usuario)
@@ -355,7 +365,7 @@ def _tarea_exportar_historial_pdf(
             total_row=total_row,
         )
         return ruta
-    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista, ver_todos)
+    filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista, ocultar_pagadas)
     exportar_pdf(
         ruta,
         "Historial del Cliente",
@@ -407,8 +417,8 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         self._notas_disponibles: list = []
         self._facturas_pendientes: list[dict] = []
         # Por defecto "Todos los movimientos": la relacion principal muestra los abonos
-        # arriba y las facturas pendientes abajo (las pagadas se ocultan salvo que se
-        # tilde "Ver todos los movimientos").
+        # arriba (con las facturas pagadas marcadas) y las facturas pendientes abajo; las
+        # pagadas solo se ocultan si se tilda "Ocultar facturas pagadas".
         self._historial: list = []
         self._vista: str = VISTA_TODOS
         # Guard anti-reentrancia para ver_detalle_factura() -- ver bancos_panel.py para
@@ -489,20 +499,20 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         self.vista_combo.setToolTip("Qué movimientos mostrar. La exportación (Excel/PDF) sigue la vista elegida.")
         self.vista_combo.currentIndexChanged.connect(self._on_vista_cambiada)
 
-        # Casilla "Ver todos los movimientos": destildada, la tabla muestra solo las
-        # facturas pendientes (abajo) y los abonos/notas ya realizados (arriba); las
-        # facturas liquidadas se ocultan. Al tildarla aparecen tambien esas facturas.
-        self.chk_ver_todos = QCheckBox("Ver todos los movimientos")
-        self.chk_ver_todos.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
-        self.chk_ver_todos.setToolTip(
-            "Muestra tambien las facturas ya pagadas. Destildada solo se ven las pendientes y los movimientos."
+        # Casilla "Ocultar facturas pagadas": destildada (por defecto), las facturas liquidadas
+        # se ven con la marca PAGADA junto a los movimientos; tildada se ocultan y quedan solo
+        # los abonos/notas (arriba) y las facturas pendientes (abajo).
+        self.chk_ocultar_pagadas = QCheckBox("Ocultar facturas pagadas")
+        self.chk_ocultar_pagadas.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MEDIUM};")
+        self.chk_ocultar_pagadas.setToolTip(
+            "Oculta las facturas ya pagadas: solo se ven las pendientes y los movimientos."
         )
-        self.chk_ver_todos.toggled.connect(self._on_ver_todos_cambiado)
+        self.chk_ocultar_pagadas.toggled.connect(self._on_ocultar_pagadas_cambiado)
 
         h.addWidget(icon_lbl)
         h.addLayout(titulos)
         h.addStretch()
-        h.addWidget(self.chk_ver_todos)
+        h.addWidget(self.chk_ocultar_pagadas)
         h.addWidget(lbl_vista)
         h.addWidget(self.vista_combo)
         return w
@@ -689,13 +699,13 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
     def _on_vista_cambiada(self) -> None:
         self._vista = self.vista_combo.currentData() or VISTA_FACTURAS
         # La casilla solo tiene efecto en "Todos los movimientos"; en las demas vistas queda inactiva.
-        self.chk_ver_todos.setEnabled(self._vista == VISTA_TODOS)
+        self.chk_ocultar_pagadas.setEnabled(self._vista == VISTA_TODOS)
         if self._vista == VISTA_ESTADO_CUENTA:
             self._cargar_estado_cuenta()
         else:
             self._aplicar_vista()
 
-    def _on_ver_todos_cambiado(self, _checked: bool) -> None:
+    def _on_ocultar_pagadas_cambiado(self, _checked: bool) -> None:
         # En la vista "Estado de cuenta" la tabla tiene otro formato y no aplica el filtro.
         if self._vista != VISTA_ESTADO_CUENTA:
             self._aplicar_vista()
@@ -774,7 +784,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
         if self._vista == VISTA_PAGOS:
             historial = agrupar_pagos_solidos(historial)
         self._poblar_tabla(
-            _ordenar_historial(historial, _mostrar_facturas_pagadas(self._vista, self.chk_ver_todos.isChecked()))
+            _ordenar_historial(historial, _ocultar_facturas_pagadas(self._vista, self.chk_ocultar_pagadas.isChecked()))
         )
         if self._vista == VISTA_PAGOS:
             self.lbl_total_pagado.setText(f"TOTAL PAGADO : $ {float(total_pagado(self._historial)):,.2f}")
@@ -895,8 +905,16 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
                 estado = item["estado_factura"] or ""
             else:
                 estado = ""
+            pagada = _es_factura_pagada(item)
+            if pagada:
+                estado = f"✓ {ESTADO_PAGADA}"
             item_estado = QTableWidgetItem(estado)
             item_estado.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            if pagada:
+                item_estado.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_SUCCESS))
+                font_estado = item_estado.font()
+                font_estado.setBold(True)
+                item_estado.setFont(font_estado)
             self.tabla.setItem(fila, 3, item_estado)
 
             # Condición Pago (solo para facturas)
@@ -989,6 +1007,14 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
             item_corrido.setFont(font_corrido)
             self.tabla.setItem(fila, 11, item_corrido)
 
+            if pagada:
+                # Factura liquidada: el resto de la fila se atenua (el estado, Pagado y Saldo ya van en verde)
+                # para que las pendientes sigan destacando.
+                for columna in (0, 1, 2, 4, 5, 6, 7, 8):
+                    celda = self.tabla.item(fila, columna)
+                    if celda is not None:
+                        celda.setData(Qt.ItemDataRole.ForegroundRole, QColor(COLOR_TEXT_MUTED))
+
     def exportar_excel(self) -> None:
         session = self.session_factory()
         try:
@@ -1011,7 +1037,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
                 id_usuario=self.id_usuario,
                 vista=self._vista,
                 cliente_nombre=self.cliente.nombre_razon_social,
-                ver_todos=self.chk_ver_todos.isChecked(),
+                ocultar_pagadas=self.chk_ocultar_pagadas.isChecked(),
             )
             self._worker_export_excel.resultado.connect(self._on_exportar_excel_ok)
             self._worker_export_excel.error.connect(self._on_exportar_excel_error)
@@ -1038,7 +1064,7 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
                 id_usuario=self.id_usuario,
                 vista=self._vista,
                 cliente_nombre=self.cliente.nombre_razon_social,
-                ver_todos=self.chk_ver_todos.isChecked(),
+                ocultar_pagadas=self.chk_ocultar_pagadas.isChecked(),
             )
             self._worker_export_pdf.resultado.connect(self._on_exportar_pdf_ok)
             self._worker_export_pdf.error.connect(self._on_exportar_pdf_error)

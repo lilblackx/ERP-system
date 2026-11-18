@@ -1696,6 +1696,20 @@ de servicio.
   `saldo_corrido` en cada item (el resultado se invierte al final para seguir mostrando
   mas reciente primero en la tabla, pero el acumulado se calculo en orden cronologico).
   Tabla UI y export a Excel incluyen la columna nueva.
+- **Facturas pagadas visibles en el Historial de Cliente** (2026-11-18,
+  `app/ui/historial_cliente_window.py`): en "Todos los movimientos" las facturas liquidadas ya no se
+  ocultan por defecto; salen en su lugar cronológico con el estado "✓ PAGADA" y la fila atenuada, y las
+  pendientes siguen al final en orden FIFO. La casilla "Ver todos los movimientos" pasó a ser "Ocultar
+  facturas pagadas" (destildada por defecto, solo aplica a esa vista). Excel/PDF marcan "PAGADA" y
+  respetan la casilla.
+- **Pendiente: historial y relación de pagos de Proveedores.** Hoy solo Clientes tiene ventana de
+  historial (`historial_cliente_window.py` + `app/services/historial_cliente.py`: vistas Todos/Facturas/
+  Pagos/Estado de cuenta, notas de crédito, exportación). Para Proveedores solo existen el estado de
+  cuenta en Reportes (`ReporteService.estado_cuenta_proveedor`) y los pagos por cuenta por pagar
+  (`PagoService.listar_pagos_proveedor` en `cuentas_por_pagar_panel.py`); `proveedores_panel.py` no tiene
+  "ver historial". Haría falta un servicio equivalente (compras, pagos, notas de crédito de proveedor,
+  saldo corrido) y una ventana nueva abierta desde la ficha del proveedor, con la misma lógica de
+  facturas pagadas visibles/ocultables.
 
 ## 10. Checklist de producción (consolidado, reemplaza `docs/CHECKLIST_PRODUCCION.md`)
 

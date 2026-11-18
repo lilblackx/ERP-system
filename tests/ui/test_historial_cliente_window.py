@@ -1,6 +1,6 @@
 """Historial del cliente: por defecto ("Todos los movimientos") los abonos quedan arriba y las
-facturas pendientes abajo; las pagadas se ocultan salvo "Ver todos los movimientos". La
-exportacion (Excel/PDF) sigue la vista activa, y el detalle de factura sale de los datos de la
+facturas pendientes abajo; las pagadas se ven con la marca PAGADA y solo se ocultan con "Ocultar facturas
+pagadas". La exportacion (Excel/PDF) sigue la vista activa, y el detalle de factura sale de los datos de la
 fila (no de su posicion, que cambia al ocultar filas)."""
 
 from decimal import Decimal
@@ -106,9 +106,8 @@ def test_la_vista_facturas_sigue_ocultando_los_abonos(ventana):
     assert _tipos(ventana) == ["Nota Crédito", "Factura", "Factura"]
 
 
-def test_la_vista_facturas_muestra_tambien_las_facturas_pagadas(qtbot, monkeypatch):
-    """ "Solo facturas" lista todas las facturas, liquidadas incluidas, sin tildar "Ver todos los movimientos";
-    esa casilla solo aplica a la vista por defecto y queda inactiva en las demas."""
+@pytest.fixture
+def ventana_con_pagada(qtbot, monkeypatch):
     pagada = _item("factura", 3, "FV-3", "20.00", monto_pagado=Decimal("20.00"), saldo_factura=Decimal("0.00"))
     historial = [*HISTORIAL, pagada]
     monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente, id_usuario: historial)
@@ -118,17 +117,53 @@ def test_la_vista_facturas_muestra_tambien_las_facturas_pagadas(qtbot, monkeypat
     cliente = SimpleNamespace(nombre_razon_social="Cliente de Prueba")
     win = HistorialClienteWindow(MagicMock(return_value=MagicMock()), 1, cliente, id_usuario=1)
     qtbot.addWidget(win)
+    return win
 
-    # Vista por defecto: la pagada (FV-3) se oculta mientras la casilla este destildada.
+
+def _numeros(win):
+    col = COLS_HISTORIAL.index("N° Factura/Nota")
+    return [win.tabla.item(f, col).text() for f in range(win.tabla.rowCount())]
+
+
+def test_por_defecto_la_factura_pagada_se_ve_con_la_marca_pagada(ventana_con_pagada):
+    """Vista por defecto: la pagada (FV-3) aparece entre los movimientos, marcada PAGADA, y las pendientes
+    siguen al final sin marca."""
+    win = ventana_con_pagada
+    col_estado = COLS_HISTORIAL.index("Estado")
+
+    assert _tipos(win) == ["Abono", "Nota Crédito", "Abono", "Abono", "Factura", "Factura", "Factura"]
+    assert _numeros(win)[4] == "FV-3"
+    assert win.tabla.item(4, col_estado).text() == "✓ PAGADA"
+    assert win.tabla.item(5, col_estado).text() == "EMITIDA"  # FV-2, pendiente
+    assert win.tabla.item(6, col_estado).text() == "EMITIDA"  # FV-1, pendiente
+    assert not win.chk_ocultar_pagadas.isChecked()
+
+
+def test_ocultar_facturas_pagadas_quita_solo_las_liquidadas(ventana_con_pagada):
+    win = ventana_con_pagada
+
+    win.chk_ocultar_pagadas.setChecked(True)
+
     assert _tipos(win) == ["Abono", "Nota Crédito", "Abono", "Abono", "Factura", "Factura"]
-    assert win.chk_ver_todos.isEnabled()
+    assert "FV-3" not in _numeros(win)
+
+    win.chk_ocultar_pagadas.setChecked(False)
+
+    assert "FV-3" in _numeros(win)
+
+
+def test_la_vista_facturas_lista_todas_las_facturas_y_deja_inactiva_la_casilla(ventana_con_pagada):
+    """ "Solo facturas" lista todas las facturas, liquidadas incluidas, aunque la casilla este tildada; la casilla
+    solo aplica a la vista por defecto y queda inactiva en las demas."""
+    win = ventana_con_pagada
+    assert win.chk_ocultar_pagadas.isEnabled()
+    win.chk_ocultar_pagadas.setChecked(True)
 
     _elegir_vista(win, VISTA_FACTURAS)
 
     assert _tipos(win) == ["Nota Crédito", "Factura", "Factura", "Factura"]
-    assert not win.chk_ver_todos.isEnabled()
-    numeros = [win.tabla.item(f, COLS_HISTORIAL.index("N° Factura/Nota")).text() for f in range(win.tabla.rowCount())]
-    assert "FV-3" in numeros
+    assert not win.chk_ocultar_pagadas.isEnabled()
+    assert "FV-3" in _numeros(win)
 
 
 def test_la_factura_muestra_cuanto_se_pago_y_cuanto_falta_aunque_los_abonos_esten_ocultos(ventana):
@@ -234,9 +269,9 @@ def test_el_saldo_pendiente_no_depende_de_la_vista(ventana):
     assert ventana.lbl_saldo_pendiente.text() == texto
 
 
-def test_la_factura_pagada_se_oculta_solo_si_no_se_piden_todos_los_movimientos():
-    """_ordenar_historial: por defecto las facturas liquidadas (saldo 0) no aparecen;
-    con ver_todos=True vuelven a su lugar cronologico. Las pendientes van siempre al
+def test_la_factura_pagada_se_oculta_solo_si_se_pide_ocultarla():
+    """_ordenar_historial: por defecto las facturas liquidadas (saldo 0) quedan en su lugar
+    cronologico; con ocultar_pagadas=True no aparecen. Las pendientes van siempre al
     final, de la mas antigua a la mas reciente."""
     historial = [
         _item(
@@ -268,11 +303,23 @@ def test_la_factura_pagada_se_oculta_solo_si_no_se_piden_todos_los_movimientos()
         ),  # pendiente
     ]
 
-    sin_todos = [item["numero_factura"] for item in hw._ordenar_historial(historial, ver_todos=False)]
-    con_todos = [item["numero_factura"] for item in hw._ordenar_historial(historial, ver_todos=True)]
+    ocultas = [item["numero_factura"] for item in hw._ordenar_historial(historial, ocultar_pagadas=True)]
+    visibles = [item["numero_factura"] for item in hw._ordenar_historial(historial, ocultar_pagadas=False)]
 
-    assert sin_todos == ["FV-1", "FV-2"]  # FV-3 oculta; pendientes: la mas antigua primero
-    assert con_todos == ["FV-3", "FV-1", "FV-2"]  # FV-3 arriba en su lugar; pendientes abajo
+    assert ocultas == ["FV-1", "FV-2"]  # FV-3 oculta; pendientes: la mas antigua primero
+    assert visibles == ["FV-3", "FV-1", "FV-2"]  # FV-3 arriba en su lugar; pendientes abajo
+
+
+def test_es_factura_pagada_excluye_pendientes_anuladas_y_otros_tipos():
+    pagada = _item("factura", 1, "FV-1", "10.00", saldo_factura=Decimal("0.00"))
+    pendiente = _item("factura", 2, "FV-2", "10.00", saldo_factura=Decimal("5.00"))
+    anulada = _item("factura", 3, "FV-3", "10.00", saldo_factura=Decimal("0.00"), estado_factura="ANULADA")
+    abono = _item("pago", 1, "FV-1", "-10.00")
+
+    assert hw._es_factura_pagada(pagada)
+    assert not hw._es_factura_pagada(pendiente)
+    assert not hw._es_factura_pagada(anulada)
+    assert not hw._es_factura_pagada(abono)
 
 
 def test_el_detalle_sale_de_los_datos_de_la_fila_no_de_su_posicion(ventana, monkeypatch):
@@ -313,6 +360,19 @@ def test_la_exportacion_sigue_la_vista(_sin_bd):
     assert tipos(VISTA_FACTURAS) == ["Nota Crédito", "Factura", "Factura"]
     assert tipos(VISTA_PAGOS) == ["Abono", "Abono", "Abono"]
     assert len(tipos(VISTA_TODOS)) == 6
+
+
+def test_la_exportacion_marca_las_facturas_pagadas_y_respeta_ocultar(monkeypatch):
+    pagada = _item("factura", 3, "FV-3", "20.00", monto_pagado=Decimal("20.00"), saldo_factura=Decimal("0.00"))
+    monkeypatch.setattr(hw, "obtener_historial_cliente", lambda session, id_cliente, id_usuario: [*HISTORIAL, pagada])
+    col_estado, col_num = COLS_HISTORIAL.index("Estado"), COLS_HISTORIAL.index("N° Factura/Nota")
+
+    con = _filas_historial_para_exportar(None, 1, 1, VISTA_TODOS)
+    sin = _filas_historial_para_exportar(None, 1, 1, VISTA_TODOS, ocultar_pagadas=True)
+
+    assert [f[col_estado] for f in con if f[col_num] == "FV-3"] == ["PAGADA"]
+    assert all(f[col_num] != "FV-3" for f in sin)
+    assert len(con) == len(sin) + 1
 
 
 def test_las_filas_exportadas_tienen_una_celda_por_columna_y_tipo_en_la_primera(_sin_bd):
