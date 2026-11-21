@@ -163,6 +163,21 @@ def _run_schema_script() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _sin_http_real(monkeypatch):
+    """Ningun test debe golpear la red. Un QThread de fondo (HttpWorker de geo_http)
+    haciendo urllib.request.urlopen real provoco un segfault dentro de shiboken que
+    tumbo un worker de xdist y congelo la suite en CI. Los tests que necesitan simular
+    HTTP parchean urlopen ellos mismos (ver tests/ui/test_geo_http.py) -- ese patch
+    interno sigue funcionando porque se aplica encima de este."""
+    import urllib.request
+
+    def _bloqueado(*_args, **_kwargs):
+        raise OSError("Acceso a red deshabilitado durante los tests")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _bloqueado)
+
+
+@pytest.fixture(autouse=True)
 def _llave_del_servidor_en_carpeta_temporal(tmp_path, monkeypatch):
     """Ningun test debe crear ni leer la llave privada real del equipo (app/services/
     cifrado_servidor.py): se redirige a una carpeta temporal por test."""
