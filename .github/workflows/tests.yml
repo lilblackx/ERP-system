@@ -26,7 +26,9 @@ concurrency:
 
 jobs:
   test:
-    timeout-minutes: 30
+    # La suite completa en un solo runner (~2700 tests, Qt + SQL Server compartiendo
+    # los 4 vCPU) tarda ~31 min: 30 quedaba corto y GitHub cancelaba el job al 96%.
+    timeout-minutes: 60
     # Fijo en 22.04 (no ubuntu-latest): el paquete msodbcsql18 de Microsoft se instala
     # contra una version de Ubuntu especifica -- ubuntu-latest podria saltar a una
     # version mas nueva sin aviso y romper la instalacion del driver.
@@ -113,5 +115,8 @@ jobs:
       # nucleos del runner (2 o 4 segun el plan), asi no se sobrecarga el SQL Server que
       # comparte maquina con los tests. Servicios y UI van juntos: ya no hay que separarlos.
       # --durations muestra los tests mas lentos para detectar regresiones de tiempo.
+      # -n 8 (mas workers que los 4 vCPU del runner): gran parte de los tests de UI/Qt
+      # y de base es espera (DB, qtbot.waitUntil, timers), no CPU pura -- el
+      # oversubscription suele ganar ~20-30%. Si resulta flaky, volver a -n auto.
       - name: Correr la suite en paralelo
-        run: pytest -n auto --dist loadfile -q --durations=15
+        run: pytest -n 8 --dist loadfile -q --durations=15
