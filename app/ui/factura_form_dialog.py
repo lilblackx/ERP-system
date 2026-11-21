@@ -9,6 +9,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from functools import partial
 
 import qtawesome as qta
+from PySide6 import Shiboken
 from PySide6.QtCore import QDate, QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtGui import QShortcut, QShowEvent
 from PySide6.QtWidgets import (
@@ -1983,8 +1984,19 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         # facturacion, cajero). Se difiere un tick porque cuando el alta viene de Enter
         # en cantidad/precio, NumericLineEdit.keyPressEvent mueve el foco al siguiente
         # widget del tab-order DESPUES de emitir returnPressed -- sin el singleShot ese
-        # avance automatico pisaria el enfoque en la busqueda.
-        QTimer.singleShot(0, self.producto_buscar_input.setFocus)
+        # avance automatico pisaria el enfoque en la busqueda. Va por metodo propio y no
+        # por el bound method del widget: si el dialogo ya se destruyo cuando el tick
+        # dispara (teardown de un test procesando eventos), setFocus sobre un objeto C++
+        # muerto es fatal -- aqui se sale limpio.
+        QTimer.singleShot(0, self._enfocar_busqueda_diferido)
+
+    def _enfocar_busqueda_diferido(self) -> None:
+        try:
+            busqueda = self.producto_buscar_input
+        except RuntimeError:
+            return
+        if Shiboken.isValid(busqueda):
+            busqueda.setFocus()
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         # Enter con el foco en el boton "Agregar": agrega el item seleccionado en los
