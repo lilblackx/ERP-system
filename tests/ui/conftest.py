@@ -123,6 +123,20 @@ def _sin_cargas_iniciales_diferidas(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _sin_geo_http_real(monkeypatch):
+    """MapaWidget lanza HttpWorker (QThread) que hace llamadas HTTPS reales (ipwho.is,
+    Nominatim, geolocalizacion de Windows) al crearse/editarse/buscar -- en CI ese hilo
+    de fondo sin QApplication seguro hizo segfault dentro de shiboken/urllib y tumbo un
+    worker de xdist (node down al 96%). Ningun test de UI debe golpear la red: se
+    neutralizan los tres puntos de entrada que crean el worker."""
+    from app.ui.mapa_widget import MapaWidget
+
+    monkeypatch.setattr(MapaWidget, "_centrar_en_dispositivo", lambda self: None)
+    monkeypatch.setattr(MapaWidget, "_ejecutar_busqueda", lambda self, texto, aplicar_primero: None)
+    monkeypatch.setattr(MapaWidget, "_usar_ubicacion_precisa", lambda self: None)
+
+
+@pytest.fixture(autouse=True)
 def _permisos_concedidos_por_defecto(request, monkeypatch):
     """Los paneles muestran sus botones segun el permiso del usuario (app/ui/permisos_ui.py). Los
     tests de UI arman paneles con una Session mockeada, contra la que ese chequeo daria "sin
