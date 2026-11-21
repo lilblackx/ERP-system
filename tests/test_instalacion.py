@@ -35,7 +35,8 @@ def _limpiar():
         # abierta en el pool de SQLAlchemy y SQL Server no deja borrar un login con sesiones activas.
         cur.execute(
             "DECLARE @k NVARCHAR(MAX) = N''; "
-            "SELECT @k += N'KILL ' + CAST(session_id AS NVARCHAR(10)) + N'; ' "
+            "SELECT @k += N'BEGIN TRY KILL ' + CAST(session_id AS NVARCHAR(10)) "
+            "+ N'; END TRY BEGIN CATCH END CATCH; ' "
             f"FROM sys.dm_exec_sessions WHERE login_name = N'{USUARIO_APP}'; EXEC (@k);"
         )
         cur.execute(

@@ -97,9 +97,12 @@ def _admin_pyodbc():
 def _limpiar_login(cur):
     """El pool de conexiones de ODBC mantiene viva la sesion tras close(): se la mata antes de
     borrar el login (si no, SQL Server rechaza el DROP porque 'esta conectado')."""
+    # Cada KILL va en su propio TRY/CATCH: una sesion del pool puede morir entre el SELECT
+    # y el EXEC ("Process ID ... is not an active process ID") y sin el CATCH tumba el batch.
     cur.execute(
         "DECLARE @k NVARCHAR(MAX) = N''; "
-        "SELECT @k += N'KILL ' + CAST(session_id AS NVARCHAR(10)) + N';' "
+        "SELECT @k += N'BEGIN TRY KILL ' + CAST(session_id AS NVARCHAR(10)) "
+        "+ N'; END TRY BEGIN CATCH END CATCH; ' "
         f"FROM sys.dm_exec_sessions WHERE login_name = N'{LOGIN_PRUEBA}'; EXEC (@k);"
     )
     cur.execute(f"IF USER_ID('{LOGIN_PRUEBA}') IS NOT NULL DROP USER [{LOGIN_PRUEBA}]")
