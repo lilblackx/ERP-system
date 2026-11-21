@@ -18,6 +18,12 @@ env:
   # QApplication real -- QT_QPA_PLATFORM=offscreen es más estable que xcb en CI headless
   # cuando se tienen las librerías EGL instaladas.
   QT_QPA_PLATFORM: offscreen
+  # QtWebEngine/Chromium dentro del runner (los tests de UI crean MapaWidget/QWebEngineView):
+  # /dev/shm de los contenedores es pequeno y Chromium segfaulta al agotarlo en teardown
+  # (los "node down" de xdist en CI). --disable-dev-shm-usage lo evita; --no-sandbox es
+  # requerido corriendo como root en contenedor. app/main.py usa setdefault, asi que este
+  # valor (que ya incluye --disable-gpu) no lo pisa.
+  QTWEBENGINE_CHROMIUM_FLAGS: "--disable-gpu --no-sandbox --disable-dev-shm-usage"
 
 # Una corrida nueva del mismo PR/rama cancela la anterior: no se gastan minutos en commits ya superados.
 concurrency:
