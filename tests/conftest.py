@@ -243,9 +243,7 @@ def db_session(test_engine):
 
 
 def pytest_collection_modifyitems(items):
-    """Marca con `db` los tests que usan la base real: `pytest -m "not db"` corre solo los que no la tocan (rapido).
-    Se marcan por cualquiera de los dos fixtures que abren conexion (db_session y test_engine -- este ultimo es el
-    que crea la base de pruebas, y un test puede pedirlo directo o via un fixture propio sin pasar por db_session)."""
+    """Marca con `db` los tests que usan la base real: `pytest -m "not db"` corre solo los que no la tocan (rapido)."""
     for item in items:
-        if {"db_session", "test_engine"} & set(item.fixturenames):
+        if "db_session" in item.fixturenames:
             item.add_marker(pytest.mark.db)
