@@ -124,5 +124,10 @@ jobs:
       # -n auto = un worker por vCPU del runner (4). -n 8 se probo y fue PEOR (~59 min,
       # timeout): 8 bases de prueba migrando a la vez saturan el SQL Server del runner
       # y los tests de Qt hacen thrashing. No subir de ahi.
+      # --max-worker-restart: los workers de xdist a veces mueren con segfault de Qt
+      # (PySide6/QWebEngine en teardown, flaky -- ya tumbó gw3 y gw1 en corridas
+      # distintas). Sin esto un solo crash mata la suite entera; con esto xdist levanta
+      # otro worker y reparte el trabajo -- el test que estaba en vuelo se reporta como
+      # fallido/crashed pero el resto termina y se ve cual fue.
       - name: Correr la suite en paralelo
-        run: pytest -n auto --dist loadfile -q --durations=15
+        run: pytest -n auto --dist loadfile --max-worker-restart=8 -q --durations=15
