@@ -123,6 +123,47 @@ def _sin_cargas_iniciales_diferidas(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _sin_webengine_real(monkeypatch):
+    """MapaWidget crea QWebEngineView + _MapaPage(QWebEnginePage) en su __init__ -- cada
+    instancia levanta un proceso Chromium real. En CI headless eso es la fuente de los
+    segfaults aleatorios que tumban workers de xdist (3 'node down' en gw0/gw1/gw3 en
+    corridas distintas, siempre con QtWebEngineCore cargado). Ningun test de UI
+    verifica el mapa en si: se cambian por dobles que no crean proceso de Chromium."""
+    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtWidgets import QWidget
+
+    import app.ui.mapa_widget as mw
+
+    class _PaginaFalsa(QObject):
+        renderProcessTerminated = Signal(object)
+
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+        def runJavaScript(self, *args, **kwargs):
+            pass
+
+    class _VistaFalsa(QWidget):
+        loadFinished = Signal(bool)
+
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            self._pagina = None
+
+        def setPage(self, page):
+            self._pagina = page
+
+        def page(self):
+            return self._pagina
+
+        def setHtml(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(mw, "QWebEngineView", _VistaFalsa)
+    monkeypatch.setattr(mw, "_MapaPage", _PaginaFalsa)
+
+
+@pytest.fixture(autouse=True)
 def _sin_geo_http_real(monkeypatch):
     """MapaWidget lanza HttpWorker (QThread) que hace llamadas HTTPS reales (ipwho.is,
     Nominatim, geolocalizacion de Windows) al crearse/editarse/buscar -- en CI ese hilo
