@@ -153,6 +153,12 @@ ETIQUETAS_TIPO = {
 # obtener_historial_cliente(): sale de ReporteService.estado_cuenta_cliente, que ya
 # agrupa los pagos de un abono general en una sola fila con el monto total.
 VISTA_ESTADO_CUENTA = "estado_cuenta"
+
+# Tipo de cada fila del estado de cuenta -> el "tipo" que guarda _poblar_tabla en UserRole
+# y que _fila_seleccionada_id_factura sabe resolver a un id_factura (doble clic abre el detalle).
+_TIPO_POR_TIPO_ESTADO = {
+    "Factura": "factura",
+}
 COLS_ESTADO_CUENTA = ["Fecha", "Tipo", "Descripción", "Referencia", "Cargo", "Abono", "Saldo"]
 COL_WIDTHS_ESTADO_CUENTA = [1.0, 0.9, 2.2, 1.5, 1.0, 1.0, 1.0]
 
@@ -753,6 +759,14 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
             ):
                 item = QTableWidgetItem(str(texto))
                 item.setTextAlignment(align)
+                if col == 0 and f["tipo"] in _TIPO_POR_TIPO_ESTADO:
+                    # Doble clic -> ver_detalle_factura resuelve la factura desde estos datos.
+                    # Solo las filas de factura lo llevan: pagos, notas de credito y
+                    # conciliaciones no abren nada al hacer doble clic.
+                    item.setData(
+                        Qt.ItemDataRole.UserRole,
+                        {"tipo": "factura", "id_factura": f.get("id_factura")},
+                    )
                 self.tabla.setItem(fila, col, item)
             for col, valor, align in (
                 (4, f["cargo"], der),

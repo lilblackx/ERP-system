@@ -299,7 +299,8 @@ def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "") -> lis
         primero = grupo[0]
         # "Abono general" solo si el grupo reparte el dinero entre varias facturas. Varias lineas de pago de UNA misma
         # factura (p. ej. dos efectivos de una venta de contado) siguen mostrando el numero de esa factura.
-        if len({p.cuenta_por_cobrar.id_factura for p in grupo}) > 1:
+        ids_facturas = {p.cuenta_por_cobrar.id_factura for p in grupo}
+        if len(ids_facturas) > 1:
             referencia = primero.referencia or etiqueta_abono
         else:
             referencia = primero.referencia or primero.cuenta_por_cobrar.factura.numero_factura + sufijo_factura
@@ -307,6 +308,7 @@ def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "") -> lis
             {
                 "fecha": primero.fecha_pago,
                 "tipo": "Pago",
+                "id_factura": next(iter(ids_facturas)) if len(ids_facturas) == 1 else None,
                 "referencia": referencia,
                 "cargo": Decimal("0.00"),
                 "abono": sum((p.monto for p in grupo), Decimal("0.00")),
@@ -2418,6 +2420,7 @@ class ReporteService:
                 {
                     "fecha": cuenta.factura.fecha_emision,
                     "tipo": "Factura",
+                    "id_factura": cuenta.id_factura,
                     "referencia": cuenta.factura.numero_factura + (" (anulada)" if anulada else ""),
                     "cargo": cargo,
                     "abono": Decimal("0.00"),
@@ -2435,6 +2438,7 @@ class ReporteService:
                 {
                     "fecha": cuenta.factura.fecha_emision,
                     "tipo": "Factura",
+                    "id_factura": cuenta.id_factura,
                     "referencia": f"{cuenta.factura.numero_factura} (BCV)" + (" (anulada)" if anulada else ""),
                     "cargo": cuenta.saldo_pendiente + pagos_de_cuenta,
                     "abono": Decimal("0.00"),
@@ -2453,6 +2457,7 @@ class ReporteService:
                 {
                     "fecha": conciliacion.fecha_conciliacion,
                     "tipo": "Conciliación",
+                    "id_factura": conciliacion.cuenta_por_cobrar.id_factura,
                     "referencia": conciliacion.cuenta_por_cobrar.factura.numero_factura,
                     "cargo": Decimal("0.00"),
                     "abono": conciliacion.monto,
@@ -2465,6 +2470,7 @@ class ReporteService:
                 {
                     "fecha": aplicacion["fecha"],
                     "tipo": "Nota de crédito",
+                    "id_factura": aplicacion["id_factura"],
                     "referencia": aplicacion["numero_nota_credito"],
                     "cargo": Decimal("0.00"),
                     "abono": aplicacion["monto"],
