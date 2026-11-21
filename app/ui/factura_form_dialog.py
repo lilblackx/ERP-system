@@ -383,15 +383,53 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
     # Carrito guardado al cerrar el dialogo con items y responder "Si" a "¿Desea
     # mantener el pedido?" -- la proxima vez que se abra Nueva Factura se restauran
     # tal cual (el dialogo se crea nuevo en cada apertura, ver facturacion_panel).
-    _pedido_guardado: list | None = None
+    # Es estado de clase (vive lo que la app), asi que se guarda junto al id del usuario
+    # que lo armo: otro cajero que abra la factura en la misma sesion no debe heredar
+    # el carrito del anterior.
+    _pedido_guardado: tuple[int | None, list] | None = None
+    _aviso_pedido_restaurado: str | None = None
 
     def _restaurar_pedido_guardado(self) -> None:
         guardado = FacturaFormDialog._pedido_guardado
-        FacturaFormDialog._pedido_guardado = None
         if not guardado:
             return
-        self.items = [dict(it) for it in guardado]
+        id_usuario_dueno, items = guardado
+        if id_usuario_dueno != self.id_usuario:
+            # Pedido de otro usuario: se deja intacto para cuando ese usuario vuelva.
+            return
+        FacturaFormDialog._pedido_guardado = None
+        vigentes, descartados = [], []
+        for item in items or []:
+            (vigentes if self._precio_de_lista_vigente(item) else descartados).append(item)
+        if descartados:
+            # Se avisa al mostrarse el dialogo (showEvent), no desde el constructor: un aviso modal
+            # aqui saldria antes de que la ventana exista.
+            nombres = "\n".join(f"• {it['nombre_producto']}" for it in descartados)
+            self._aviso_pedido_restaurado = (
+                "El precio de estos productos cambió desde que se guardó el pedido, así que no se "
+                f"restauraron. Agrégalos de nuevo para tomar el precio vigente:\n\n{nombres}"
+            )
+        if not vigentes:
+            return
+        self.items = [dict(it) for it in vigentes]
         self._refrescar_tabla_items()
+
+    def _precio_de_lista_vigente(self, item: dict) -> bool:
+        """True si el precio de lista del producto sigue siendo el que tenia cuando la linea entro al
+        carrito. El precio de la linea puede ser uno editado a mano (se respeta, igual que antes de
+        guardar: la autorizacion de precio bajo lista se pide al emitir), pero si la lista cambio, un
+        precio viejo restaurado a ciegas facturaria a un valor que ya no existe. Ante la duda (producto
+        sin precio, error al consultarlo) la linea no se restaura: volver a agregarla es barato."""
+        try:
+            precio = PrecioService.obtener_precio(self.session, item["id_producto"], id_usuario=self.id_usuario)
+        except Exception:
+            logger.warning("No se pudo validar el precio del producto %s al restaurar el pedido", item["id_producto"])
+            return False
+        actual = float(precio.precio_venta) if precio else None
+        guardado = item.get("precio_lista")
+        if actual is None or guardado is None:
+            return actual is None and guardado is None
+        return abs(actual - float(guardado)) < 0.0001
 
     def showEvent(self, event: QShowEvent) -> None:
         # El primer pintado de este dialogo (el mas denso de la app: 4 tarjetas con
@@ -401,6 +439,13 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         # diferido apenas se muestra, sin esperar a que el usuario lo note.
         super().showEvent(event)
         QTimer.singleShot(0, self.update)
+        if self._aviso_pedido_restaurado:
+            aviso, self._aviso_pedido_restaurado = self._aviso_pedido_restaurado, None
+            QTimer.singleShot(0, partial(self._mostrar_aviso_pedido, aviso))
+
+    def _mostrar_aviso_pedido(self, aviso: str) -> None:
+        if Shiboken.isValid(self):
+            MessageBox.warning(self, "Pedido restaurado", aviso)
 
     # ── Construcción de la UI ─────────────────────────────────────────────
 
@@ -2314,7 +2359,7 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         ):
             respuesta = MessageBox.question(self, "Pedido en curso", "¿Desea mantener el pedido?")
             if respuesta == QMessageBox.StandardButton.Yes:
-                FacturaFormDialog._pedido_guardado = [dict(it) for it in self.items]
+                FacturaFormDialog._pedido_guardado = (self.id_usuario, [dict(it) for it in self.items])
             else:
                 FacturaFormDialog._pedido_guardado = None
         elif result == QDialog.DialogCode.Accepted:

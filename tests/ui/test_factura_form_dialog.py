@@ -16,7 +16,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from PySide6.QtWidgets import QSizePolicy
+from PySide6.QtWidgets import QDialog, QMessageBox, QSizePolicy
 
 import app.ui.factura_form_dialog as ffd
 from tests.factories import (
@@ -928,3 +928,198 @@ def test_producto_fuera_del_catalogo_busca_la_marca_en_la_base(qtbot, monkeypatc
     dialogo.session.get.return_value = SimpleNamespace(articulo_bcv=True)
     assert dialogo._es_articulo_bcv(999) is True
     assert dialogo._es_articulo_bcv(None) is False
+
+
+# --- "¿Desea mantener el pedido?" al cerrar con items en el carrito --------------------
+
+
+def _con_un_item(qtbot, monkeypatch, id_usuario=1):
+    """Dialogo (del usuario `id_usuario`) con un articulo normal ya en el carrito."""
+    dialogo = _dialogo_con_articulos(qtbot, monkeypatch)
+    dialogo.id_usuario = id_usuario
+    _seleccionar(dialogo, 1)
+    dialogo._agregar_item()
+    assert len(dialogo.items) == 1
+    return dialogo
+
+
+def _responder_pregunta(monkeypatch, boton):
+    preguntas = []
+
+    def _question(*args, **kwargs):
+        preguntas.append(args)
+        return boton
+
+    monkeypatch.setattr(ffd.MessageBox, "question", staticmethod(_question))
+    return preguntas
+
+
+def _precio_lista(monkeypatch, precio_venta):
+    """Fija el precio de lista vigente que devuelve PrecioService (None = producto sin precio)."""
+    precio = SimpleNamespace(precio_1=precio_venta, precio_2=None, precio_3=None, precio_venta=precio_venta)
+    monkeypatch.setattr(
+        ffd.PrecioService, "obtener_precio", staticmethod(lambda *a, **k: precio if precio_venta else None)
+    )
+
+
+def _abrir_otro(qtbot, monkeypatch, id_usuario, precio_venta=10.0):
+    """Un dialogo nuevo, como el que crea el panel en cada apertura de Nueva Factura."""
+    _mock_servicios(monkeypatch, productos=[_producto_catalogo(1, False)])
+    _precio_lista(monkeypatch, precio_venta)
+    session = MagicMock()
+    session.get.return_value = None
+    dialogo = ffd.FacturaFormDialog(session, id_usuario=id_usuario)
+    qtbot.addWidget(dialogo)
+    return dialogo
+
+
+def test_cerrar_sin_items_no_pregunta_por_el_pedido(qtbot, monkeypatch):
+    preguntas = _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    dialogo.reject()
+    assert preguntas == []
+    assert ffd.FacturaFormDialog._pedido_guardado is None
+
+
+def test_cerrar_con_items_pregunta_y_si_guarda_el_pedido(qtbot, monkeypatch):
+    dialogo = _con_un_item(qtbot, monkeypatch)
+    preguntas = _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo.reject()
+    assert len(preguntas) == 1
+    assert dialogo.result() == QDialog.DialogCode.Rejected
+
+    reabierto = _abrir_otro(qtbot, monkeypatch, id_usuario=1)
+    assert [i["cantidad"] for i in reabierto.items] == [1]
+    assert reabierto.items == dialogo.items
+    assert reabierto.items[0] is not dialogo.items[0]  # copia: editar uno no toca el otro
+    assert reabierto.tabla_items.rowCount() == 1
+
+
+def test_el_pedido_restaurado_se_consume_una_sola_vez(qtbot, monkeypatch):
+    dialogo = _con_un_item(qtbot, monkeypatch)
+    _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo.reject()
+
+    assert _abrir_otro(qtbot, monkeypatch, id_usuario=1).items
+    assert _abrir_otro(qtbot, monkeypatch, id_usuario=1).items == []
+
+
+def test_cerrar_con_items_y_responder_no_descarta_el_pedido(qtbot, monkeypatch):
+    dialogo = _con_un_item(qtbot, monkeypatch)
+    _responder_pregunta(monkeypatch, QMessageBox.StandardButton.No)
+    dialogo.reject()
+    assert dialogo.result() == QDialog.DialogCode.Rejected  # el dialogo se cierra igual
+    assert _abrir_otro(qtbot, monkeypatch, id_usuario=1).items == []
+
+
+def test_otro_usuario_no_hereda_el_pedido_guardado(qtbot, monkeypatch):
+    dialogo = _con_un_item(qtbot, monkeypatch, id_usuario=1)
+    _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo.reject()
+
+    otro_cajero = _abrir_otro(qtbot, monkeypatch, id_usuario=2)
+    assert otro_cajero.items == []
+
+
+def test_el_pedido_de_un_usuario_sigue_esperandolo_si_otro_abre_primero(qtbot, monkeypatch):
+    dialogo = _con_un_item(qtbot, monkeypatch, id_usuario=1)
+    _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo.reject()
+
+    _abrir_otro(qtbot, monkeypatch, id_usuario=2)  # no lo toca ni lo consume
+    de_vuelta = _abrir_otro(qtbot, monkeypatch, id_usuario=1)
+    assert len(de_vuelta.items) == 1
+
+
+def test_aceptar_la_factura_descarta_el_pedido_guardado(qtbot, monkeypatch):
+    dialogo = _crear_dialogo(qtbot, monkeypatch)
+    ffd.FacturaFormDialog._pedido_guardado = (2, [{"cantidad": 1}])  # de otro usuario: no se restaura aqui
+    dialogo.accept()
+    assert ffd.FacturaFormDialog._pedido_guardado is None
+
+
+def test_cerrar_mientras_se_emite_no_pregunta_por_el_pedido(qtbot, monkeypatch):
+    dialogo = _con_un_item(qtbot, monkeypatch)
+    preguntas = _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo._emitiendo_factura = True
+    dialogo.reject()  # reject() ya esta bloqueado mientras emite
+    dialogo.done(QDialog.DialogCode.Rejected)
+    assert preguntas == []
+
+
+def _guardar_pedido(qtbot, monkeypatch, id_usuario=1):
+    dialogo = _con_un_item(qtbot, monkeypatch, id_usuario=id_usuario)
+    _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo.reject()
+    return dialogo
+
+
+def _capturar_avisos(monkeypatch):
+    avisos = []
+    monkeypatch.setattr(ffd.MessageBox, "warning", staticmethod(lambda *a, **k: avisos.append(a)))
+    return avisos
+
+
+def test_pedido_restaurado_con_la_lista_cambiada_descarta_la_linea_y_avisa(qtbot, monkeypatch):
+    _guardar_pedido(qtbot, monkeypatch)
+    avisos = _capturar_avisos(monkeypatch)
+
+    reabierto = _abrir_otro(qtbot, monkeypatch, id_usuario=1, precio_venta=12.0)  # subio de 10 a 12
+    assert reabierto.items == []
+    assert reabierto.tabla_items.rowCount() == 0
+
+    reabierto.show()
+    qtbot.waitUntil(lambda: len(avisos) == 1)
+    assert "P-1 - Producto 1" in avisos[0][2] and "cambió" in avisos[0][2]
+
+
+def test_pedido_con_la_lista_igual_se_restaura_sin_avisos(qtbot, monkeypatch):
+    _guardar_pedido(qtbot, monkeypatch)
+    avisos = _capturar_avisos(monkeypatch)
+
+    reabierto = _abrir_otro(qtbot, monkeypatch, id_usuario=1, precio_venta=10.0)
+    reabierto.show()
+    qtbot.waitExposed(reabierto)
+    qtbot.wait(50)
+    assert len(reabierto.items) == 1
+    assert avisos == []
+
+
+def test_precio_editado_a_mano_se_respeta_si_la_lista_no_cambio(qtbot, monkeypatch):
+    dialogo = _con_un_item(qtbot, monkeypatch)
+    dialogo.items[0]["precio_unitario"] = 8.0  # descuento puesto por el cajero (la lista sigue en 10)
+    _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo.reject()
+
+    reabierto = _abrir_otro(qtbot, monkeypatch, id_usuario=1, precio_venta=10.0)
+    assert [i["precio_unitario"] for i in reabierto.items] == [8.0]
+
+
+def test_producto_que_ya_no_tiene_precio_no_se_restaura(qtbot, monkeypatch):
+    _guardar_pedido(qtbot, monkeypatch)
+    _capturar_avisos(monkeypatch)
+    assert _abrir_otro(qtbot, monkeypatch, id_usuario=1, precio_venta=None).items == []
+
+
+def test_error_al_validar_el_precio_no_impide_abrir_ni_restaura_la_linea(qtbot, monkeypatch):
+    _guardar_pedido(qtbot, monkeypatch)
+    _capturar_avisos(monkeypatch)
+
+    def _falla(*a, **k):
+        raise RuntimeError("base caida")
+
+    reabierto = _abrir_otro(qtbot, monkeypatch, id_usuario=1)
+    monkeypatch.setattr(ffd.PrecioService, "obtener_precio", staticmethod(_falla))
+    assert reabierto._precio_de_lista_vigente({"id_producto": 1, "precio_lista": 10.0}) is False
+
+
+def test_restaura_solo_las_lineas_vigentes_de_un_pedido_mixto(qtbot, monkeypatch):
+    dialogo = _con_un_item(qtbot, monkeypatch)
+    viejo = dict(dialogo.items[0], id_producto=2, nombre_producto="PROD-2 - Cambiado", precio_lista=7.0)
+    dialogo.items.append(viejo)
+    _responder_pregunta(monkeypatch, QMessageBox.StandardButton.Yes)
+    dialogo.reject()
+    _capturar_avisos(monkeypatch)
+
+    reabierto = _abrir_otro(qtbot, monkeypatch, id_usuario=1, precio_venta=10.0)  # el 2 estaba en 7
+    assert [i["id_producto"] for i in reabierto.items] == [1]
