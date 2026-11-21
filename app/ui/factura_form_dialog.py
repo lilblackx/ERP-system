@@ -1002,18 +1002,16 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self.cantidad_input = NumericLineEdit(NumericFieldType.QUANTITY, min_value=Decimal("0.01"), allow_empty=True)
         self.cantidad_input.setFixedHeight(32)
         self.cantidad_input.setFixedWidth(100)
-        # Enter en Cantidad o Precio agrega directo -- ya se vio/confirmo el producto en
-        # el combo antes de llegar aca, cerrando el ciclo escaneo/tipeo -> agregar sin
-        # tocar el mouse (auditoria UX de facturacion, cajero).
-        # Enter en cantidad/precio NO agrega el item: solo devuelve el foco a la barra
-        # de busqueda del producto para escanear/tipear el siguiente (el alta se hace
-        # con el boton "Agregar" o Enter en la nota del item).
-        self.cantidad_input.returnPressed.connect(self._enfocar_busqueda_producto)
+        # Enter en Cantidad o Precio agrega el item al carrito y devuelve el foco a la
+        # barra de busqueda -- ya se vio/confirmo el producto en el combo antes de llegar
+        # aca, cerrando el ciclo escaneo/tipeo -> agregar -> escaneo/tipeo sin tocar el
+        # mouse (auditoria UX de facturacion, cajero).
+        self.cantidad_input.returnPressed.connect(self._agregar_item)
 
         self.precio_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         self.precio_input.setFixedHeight(32)
         self.precio_input.setFixedWidth(130)
-        self.precio_input.returnPressed.connect(self._enfocar_busqueda_producto)
+        self.precio_input.returnPressed.connect(self._agregar_item)
 
         btn_agregar = QPushButton(" Agregar")
         btn_agregar.setObjectName("BtnAgregar")
@@ -1620,13 +1618,6 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self._productos = productos
         self._poblar_combo_productos(productos)
 
-    def _enfocar_busqueda_producto(self) -> None:
-        # Enter en cantidad/precio: el foco vuelve a la barra de busqueda. Se difiere
-        # un tick porque NumericLineEdit.keyPressEvent mueve el foco al siguiente widget
-        # del tab-order DESPUES de emitir returnPressed -- sin el singleShot ese avance
-        # automatico pisaria el enfoque en la busqueda.
-        QTimer.singleShot(0, self.producto_buscar_input.setFocus)
-
     def _on_producto_buscar_return_pressed(self) -> None:
         if hasattr(self, "_timer_busqueda_producto"):
             self._timer_busqueda_producto.stop()
@@ -1989,8 +1980,11 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self._on_producto_cambiado()
         # Vuelve el foco a la busqueda para el siguiente item sin tocar el mouse --
         # cierra el ciclo escaneo/tipeo -> agregar -> escaneo/tipeo (auditoria UX de
-        # facturacion, cajero).
-        self.producto_buscar_input.setFocus()
+        # facturacion, cajero). Se difiere un tick porque cuando el alta viene de Enter
+        # en cantidad/precio, NumericLineEdit.keyPressEvent mueve el foco al siguiente
+        # widget del tab-order DESPUES de emitir returnPressed -- sin el singleShot ese
+        # avance automatico pisaria el enfoque en la busqueda.
+        QTimer.singleShot(0, self.producto_buscar_input.setFocus)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         # Enter con el foco en el boton "Agregar": agrega el item seleccionado en los
