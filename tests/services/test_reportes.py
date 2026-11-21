@@ -4013,6 +4013,62 @@ def test_estado_cuenta_cliente_muestra_las_notas_de_credito_aplicadas(db_session
     assert resultado["saldo_final"] == Decimal("70.00")
 
 
+def test_estado_cuenta_cliente_cada_fila_trae_el_id_de_su_factura(db_session):
+    """La ventana del historial abre el detalle de la factura con este id: la factura, el pago de UNA factura
+    y la nota de credito aplicada deben apuntar a la factura correcta."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    factura = _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+    cxc = db_session.query(CuentaPorCobrar).filter_by(id_factura=factura.id_factura).one()
+    PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto="30.00",
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    nota = NotaCreditoService._crear_nota_credito_cliente(
+        db_session, cliente.id_cliente, None, "20.00", "Sobreabono", admin.id_usuario
+    )
+    db_session.commit()
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session, nota.id_nota_credito, factura.id_factura, "20.00", admin.id_usuario
+    )
+
+    filas = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)["filas"]
+
+    assert {f["tipo"] for f in filas} == {"Factura", "Pago", "Nota de crédito"}
+    assert all(f["id_factura"] == factura.id_factura for f in filas)
+
+
+def test_estado_cuenta_cliente_abono_general_no_apunta_a_una_sola_factura(db_session):
+    """Un abono general reparte el dinero entre varias facturas: no hay UNA factura que abrir."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    f1 = _factura_a_credito(db_session, admin, cliente, "60.00", date.today() + timedelta(days=10))
+    f2 = _factura_a_credito(db_session, admin, cliente, "40.00", date.today() + timedelta(days=10))
+    PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("100.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    filas = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)["filas"]
+
+    (pago,) = [f for f in filas if f["tipo"] == "Pago"]
+    assert pago["id_factura"] is None
+    assert {f["id_factura"] for f in filas if f["tipo"] == "Factura"} == {f1.id_factura, f2.id_factura}
+
+
 def test_kardex_incluye_el_stock_previo_al_primer_movimiento(db_session):
     admin = crear_usuario_admin(db_session)
     cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))

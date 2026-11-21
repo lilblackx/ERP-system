@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from openpyxl import load_workbook
+from PySide6.QtCore import Qt
 
 from app.services.historial_cliente import VISTA_FACTURAS, VISTA_PAGOS, VISTA_TODOS, agrupar_pagos_solidos
 from app.ui import historial_cliente_window as hw
@@ -404,3 +405,64 @@ def test_el_excel_de_facturas_trae_pagado_y_saldo_y_el_titulo_indica_la_vista(_s
     assert [f[0] for f in datos] == ["Nota Crédito", "Factura", "Factura"]  # sin abonos, pendientes al final
     col_pagado, col_saldo = COLS_HISTORIAL.index("Pagado"), COLS_HISTORIAL.index("Saldo Factura")
     assert (datos[1][col_pagado], datos[1][col_saldo]) == (40, 60)  # FV-2, numeros no texto
+
+
+# --- Estado de cuenta: doble clic abre el detalle solo en las filas de factura ----------
+
+
+def _fila_estado(tipo, referencia, id_factura, cargo="0", abono="0", saldo="0"):
+    return {
+        "fecha": "2026-11-01",
+        "tipo": tipo,
+        "id_factura": id_factura,
+        "descripcion": "",
+        "referencia": referencia,
+        "cargo": Decimal(cargo),
+        "abono": Decimal(abono),
+        "saldo": Decimal(saldo),
+    }
+
+
+FILAS_ESTADO = [
+    _fila_estado("Factura", "FV-5", 5, cargo="100.00", saldo="100.00"),
+    _fila_estado("Pago", "FV-5", 5, abono="30.00", saldo="70.00"),
+    _fila_estado("Pago", "Abono general", None, abono="10.00", saldo="60.00"),
+    _fila_estado("Nota de crédito", "NC-1", 5, abono="5.00", saldo="55.00"),
+]
+
+
+@pytest.fixture
+def ventana_estado(ventana):
+    ventana._mostrar_estado_cuenta({"filas": FILAS_ESTADO})
+    return ventana
+
+
+def _datos_fila(win, fila):
+    return win.tabla.item(fila, 0).data(Qt.ItemDataRole.UserRole)
+
+
+def test_estado_de_cuenta_solo_las_filas_de_factura_guardan_el_id_para_el_detalle(ventana_estado):
+    assert _datos_fila(ventana_estado, 0) == {"tipo": "factura", "id_factura": 5}
+    assert [_datos_fila(ventana_estado, f) for f in (1, 2, 3)] == [None, None, None]
+
+
+def test_doble_clic_en_una_factura_del_estado_de_cuenta_pide_su_detalle(ventana_estado, monkeypatch):
+    pedidos = []
+    monkeypatch.setattr(ventana_estado, "cargar_async", lambda *a, **k: pedidos.append(k))
+    ventana_estado.tabla.selectRow(0)
+
+    ventana_estado.ver_detalle_factura()
+
+    assert [p["id_factura"] for p in pedidos] == [5]
+
+
+@pytest.mark.parametrize("fila", [1, 2, 3])
+def test_doble_clic_en_pagos_o_notas_del_estado_de_cuenta_no_abre_nada(ventana_estado, monkeypatch, fila):
+    pedidos = []
+    monkeypatch.setattr(ventana_estado, "cargar_async", lambda *a, **k: pedidos.append(k))
+    ventana_estado.tabla.selectRow(fila)
+
+    ventana_estado.ver_detalle_factura()
+
+    assert pedidos == []
+    assert ventana_estado._abriendo_dialogo is False
