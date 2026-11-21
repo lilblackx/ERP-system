@@ -49,6 +49,29 @@ jobs:
   tests-sin-base:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+
+    # SQL Server tambien aqui aunque los tests "not db" no lo usen: hay tests que no
+    # llevan el fixture db_session (y por tanto no quedan marcados "db") pero igual
+    # abren una conexion real -- sin servidor esas conexiones quedan colgadas en el
+    # timeout de login de pyodbc y el job nunca termina (visto en la primera corrida:
+    # 96% y >10 min). Con el servicio presente esas conexiones resuelven al instante;
+    # el contenedor queda idle, no roba CPU a los tests.
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "CIPassword123*"
+          MSSQL_PID: Developer
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P $MSSQL_SA_PASSWORD -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

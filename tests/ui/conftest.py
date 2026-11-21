@@ -129,7 +129,7 @@ def _permisos_concedidos_por_defecto(request, monkeypatch):
     permiso" y ocultaria los botones (o abriria un aviso modal que bloquea el test). Por defecto se
     conceden todos los permisos; los tests con base de datos real (fixture db_session) prueban la
     matriz de verdad y no se tocan."""
-    if "db_session" in request.fixturenames:
+    if {"db_session", "test_engine"} & set(request.fixturenames):
         return
     for nombre in ("tiene_permiso", "es_admin", "tiene_permiso_en_sesion", "es_admin_en_sesion"):
         monkeypatch.setattr(permisos_ui, nombre, lambda *args, **kwargs: True)
