@@ -73,9 +73,9 @@ def _escribir_y_perder_foco(qtbot, campo, texto):
 # --- cantidad_input / precio_input (fila "Agregar" del carrito) ------------------------
 
 
-def test_cantidad_input_arranca_en_1(qtbot, monkeypatch):
+def test_cantidad_input_arranca_vacia(qtbot, monkeypatch):
     dialogo = _crear_dialogo(qtbot, monkeypatch)
-    assert dialogo.cantidad_input.get_value() == Decimal("1")
+    assert dialogo.cantidad_input.get_value() is None
 
 
 def test_cantidad_input_no_admite_cero_ni_negativos(qtbot, monkeypatch):
@@ -174,6 +174,7 @@ def test_stock_solo_en_el_selector_no_en_el_carrito(qtbot, monkeypatch):
 
     dialogo.producto_combo.setCurrentIndex(dialogo.producto_combo.findData(1))
     dialogo.precio_input.set_value(Decimal("10.00"))  # sin precio, _agregar_item abre un aviso modal
+    dialogo.cantidad_input.set_value(1)
     dialogo._agregar_item()
 
     assert dialogo.items[0]["nombre_producto"] == "PROD-1 - Producto Uno"
@@ -199,9 +200,12 @@ def test_agregar_el_mismo_producto_dos_veces_suma_en_la_misma_linea(qtbot, monke
     monkeypatch.setattr(ffd.PrecioService, "obtener_precio", staticmethod(lambda *a, **k: precio))
     dialogo.producto_combo.setCurrentIndex(dialogo.producto_combo.findData(1))
     dialogo._on_producto_cambiado()
+    dialogo.cantidad_input.set_value(1)
 
     dialogo._agregar_item()
+    dialogo.cantidad_input.set_value(1)
     dialogo._agregar_item()
+    dialogo.cantidad_input.set_value(1)
     dialogo._agregar_item()
 
     assert len(dialogo.items) == 1
@@ -863,6 +867,9 @@ def _cambiar_porcentaje_bcv(dialogo, porcentaje):
 def _seleccionar(dialogo, id_producto):
     dialogo.producto_combo.setCurrentIndex(dialogo.producto_combo.findData(id_producto))
     dialogo._on_producto_cambiado()
+    # El campo arranca vacio (ver test_cantidad_input_arranca_vacia): para agregar hay
+    # que fijar la cantidad explicitamente, igual que haria el cajero.
+    dialogo.cantidad_input.set_value(1)
 
 
 def test_articulo_normal_lleva_el_porcentaje_bcv(qtbot, monkeypatch):

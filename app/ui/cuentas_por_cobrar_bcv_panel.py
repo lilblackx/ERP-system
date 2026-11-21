@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from app.db.models import Cliente, CuentaPorCobrarBCV, FacturaVenta, Usuario
@@ -1457,38 +1456,11 @@ def _tarea_cargar_cuentas_bcv(session, id_usuario: int, **filtros) -> dict:
         ),
         session=session,
     )
-    subquery = (
-        session.query(
-            func.sum(CuentaPorCobrarBCV.saldo_pendiente).label("saldo_cliente"),
-            func.sum(CuentaPorCobrarBCV.saldo_favor).label("saldo_favor_cliente"),
-        )
-        .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
-        .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
-        .filter(CuentaPorCobrarBCV.estado.in_(("pendiente", "parcial")))
-        .group_by(Cliente.id_cliente)
-        .having(func.sum(CuentaPorCobrarBCV.saldo_pendiente) > 0)
-        .subquery()
-    )
-    total_pendiente, total_favor, total_clientes = (
-        session.query(
-            func.coalesce(func.sum(subquery.c.saldo_cliente), 0),
-            func.coalesce(func.sum(subquery.c.saldo_favor_cliente), 0),
-            func.count(),
-        )
-        .select_from(subquery)
-        .one()
-    )
     try:
         tasa = TasaService.obtener_tasa_actual(session, id_usuario=id_usuario)
     except Exception:  # informativa: sin permiso o sin tasa, el panel sigue sin el equivalente en Bs
         tasa = None
-    return {
-        "resultado": resultado,
-        "tasa": tasa,
-        "total_pendiente": Decimal(str(total_pendiente or 0)),
-        "total_favor": Decimal(str(total_favor or 0)),
-        "total_clientes": int(total_clientes or 0),
-    }
+    return {"resultado": resultado, "tasa": tasa}
 
 
 def _tarea_cuentas_cliente_bcv(session, session_factory, id_cliente: int) -> dict:
@@ -1535,9 +1507,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         self.filtro_vendedor = None
         self._tasa_bcv = None
         self._cuentas_cargadas = []
-        self._total_pendiente = Decimal("0.00")
-        self._total_favor = Decimal("0.00")
-        self._total_registros = 0
+
         self.setObjectName("ContentArea")
         self._setup_ui()
         self._cargar_vendedores()
@@ -1740,11 +1710,6 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
     def _mostrar_cuentas(self, datos: dict) -> None:
         self._mostrar_tasa(datos["tasa"])
         self._mostrar_datos(datos["resultado"])
-        self._total_pendiente = datos["total_pendiente"]
-        self._total_favor = datos["total_favor"]
-        self._total_registros = datos["total_clientes"]
-        self.lbl_total.setText(f"{self._total_registros} clientes con saldo pendiente")
-        self.lbl_saldo_total.setText(f"${float(self._total_pendiente):,.2f}")
 
     @staticmethod
     def _item_numerico(texto: str, alineacion: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignRight) -> QTableWidgetItem:
@@ -1760,6 +1725,9 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         total = resultado.get("total", 0)
         pagina = resultado.get("pagina", 1)
 
+        # Suma del saldo pendiente de las filas cargadas (ya filtradas), como en el panel
+        # de cuentas por cobrar normal: cambia con cada filtro que se aplica.
+        saldo_total = Decimal("0.00")
         for item in items:
             fila = self.tabla.rowCount()
             self.tabla.insertRow(fila)
@@ -1772,6 +1740,7 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
 
             # SALDO PENDIENTE (acumulado)
             saldo = _as_decimal(item.saldo_pendiente)
+            saldo_total += saldo
             saldo_text = f"${float(saldo):,.2f}"
             if self._tasa_bcv:
                 tasa_bcv = float(self._tasa_bcv) if not isinstance(self._tasa_bcv, float) else self._tasa_bcv
@@ -1811,6 +1780,9 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
 
         # Pagina y total_paginas vienen ya corregidos por el servicio (paginar()).
         self.paginacion.actualizar_desde(resultado)
+
+        self.lbl_total.setText(f"{total} clientes con saldo pendiente")
+        self.lbl_saldo_total.setText(f"${float(saldo_total):,.2f}")
 
         logger.info(f"Mostrando {len(items)} clientes agrupados de {total} total, página {pagina}")
 

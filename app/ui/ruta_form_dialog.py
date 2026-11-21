@@ -1,5 +1,4 @@
 import json
-import math
 
 import qtawesome as qta
 from PySide6.QtCore import QSize, Qt
@@ -122,41 +121,26 @@ QPushButton#BtnZona:hover {{
 """
 
 
-def _ordenar_por_angulo(
-    vertices: list[tuple[float, float]],
-) -> list[tuple[float, float]]:
-    """Reordena los vertices alrededor de su centroide (angulo respecto al centro) para
-    que el poligono quede siempre sin auto-intersecciones sin importar en que orden el
-    usuario los haya clickeado -- sin esto, clickear fuera del orden del perimetro
-    producia una figura en forma de moño en vez de una zona con area limpia (reportado
-    por el usuario, 2026-09-03). Con menos de 3 vertices no hay nada que reordenar (una
-    linea entre 1-2 puntos no puede auto-intersectarse)."""
-    if len(vertices) < 3:
-        return list(vertices)
-    centro_lat = sum(v[0] for v in vertices) / len(vertices)
-    centro_lng = sum(v[1] for v in vertices) / len(vertices)
-    return sorted(vertices, key=lambda v: math.atan2(v[0] - centro_lat, v[1] - centro_lng))
-
-
 class RutaFormDialog(QDialog):
     """Dialogo de alta/edicion de rutas -- mismo patron visual que
     VendedorFormDialog (app/ui/vendedor_form_dialog.py). Nombre + descripcion (opcional)
-    mas la zona de cobertura de la ruta: un poligono marcado con clicks en el mapa
-    (MapaWidget(modo="zona"), migrations/0043) -- decision de negocio 2026-09-03: "una
-    ruta no es un punto A/B, es una zona donde todos los clientes dentro de ella son
-    atendidos por su vendedor", reemplazando el modelo anterior de origen/destino/
-    trazado por calles (migrations/0039/0040)."""
+    mas la zona de cobertura de la ruta: un poligono trazado punto a punto en el mapa
+    (MapaWidget(modo="zona"), migrations/0043) -- el usuario marca los vertices en
+    orden y cierra el area volviendo a tocar el primer punto; decision de negocio
+    2026-09-03: "una ruta no es un punto A/B, es una zona donde todos los clientes
+    dentro de ella son atendidos por su vendedor", reemplazando el modelo anterior de
+    origen/destino/trazado por calles (migrations/0039/0040)."""
 
     def __init__(self, ruta: Ruta | None = None, parent=None):
         super().__init__(parent)
         self.ruta = ruta
         # [(lat,lng), ...] vertices de la zona en el orden en que se marcaron (o se
         # cargaron al editar) -- es la fuente de verdad para "Deshacer ultimo punto"
-        # (siempre quita el ultimo click, sin importar como se vea reordenado en el
-        # mapa). Lo que se dibuja y se persiste como zona_geojson es
-        # _ordenar_por_angulo(self._vertices), NUNCA esta lista cruda -- ver
-        # _vertices_ordenados().
+        # (siempre quita el ultimo click) y para lo que se dibuja y se persiste como
+        # zona_geojson: el usuario traza el contorno punto a punto y cierra la zona
+        # volviendo a tocar el primer punto (ver _on_zona_cerrada).
         self._vertices: list[tuple[float, float]] = []
+        self._cerrada = False
         self.setWindowTitle("Editar Ruta" if ruta else "Nueva Ruta")
         # Mas ancho/alto que el resto de los dialogos de este tamaño (VendedorFormDialog,
         # etc.) a proposito -- pedido del usuario 2026-09-03: la zona se marca a puro
@@ -257,7 +241,9 @@ class RutaFormDialog(QDialog):
         lbl_zona.setTextFormat(Qt.TextFormat.RichText)
         card_mapa_layout.addWidget(lbl_zona)
 
-        lbl_instrucciones = QLabel("Haz clic en el mapa para marcar los vértices del contorno de la zona (mínimo 3).")
+        lbl_instrucciones = QLabel(
+            "Toca los puntos del contorno en orden y vuelve a tocar el primero para cerrar el área (mínimo 3)."
+        )
         lbl_instrucciones.setWordWrap(True)
         lbl_instrucciones.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
         card_mapa_layout.addWidget(lbl_instrucciones)
@@ -265,6 +251,7 @@ class RutaFormDialog(QDialog):
         self.mapa = MapaWidget(editable=True, modo="zona", centrar_en_dispositivo=self.ruta is None)
         self.mapa.setMinimumHeight(340)
         self.mapa.vertice_zona_agregado.connect(self._on_vertice_agregado)
+        self.mapa.zona_cerrada_solicitada.connect(self._on_zona_cerrada)
         card_mapa_layout.addWidget(self.mapa)
 
         # Fila de botones y contador en dos filas separadas (no una sola con stretch) --
@@ -330,33 +317,52 @@ class RutaFormDialog(QDialog):
         footer_layout.addWidget(self.btn_guardar)
         root.addLayout(footer_layout)
 
-    def _vertices_ordenados(self) -> list[tuple[float, float]]:
-        return _ordenar_por_angulo(self._vertices)
-
     def _redibujar_zona(self) -> None:
-        self.mapa.establecer_zona(self._vertices_ordenados())
+        self.mapa.establecer_zona(self._vertices, cerrada=self._cerrada)
         self._actualizar_contador()
 
     def _on_vertice_agregado(self, lat: float, lng: float) -> None:
         self._vertices.append((lat, lng))
+        # Un vertice nuevo despues de cerrar reabre el trazo: el area vuelve a la
+        # linea punteada hasta que se vuelva a tocar el primer punto.
+        self._cerrada = False
+        self._redibujar_zona()
+
+    def _on_zona_cerrada(self) -> None:
+        """El usuario toco el marcador del primer vertice: con 3+ puntos el area queda
+        cerrada y el mapa la pinta como poligono."""
+        if len(self._vertices) < 3:
+            MessageBox.information(
+                self,
+                "Zona incompleta",
+                "Marca al menos 3 puntos en el mapa antes de cerrar el área.",
+            )
+            return
+        self._cerrada = True
         self._redibujar_zona()
 
     def _deshacer_vertice(self) -> None:
         if not self._vertices:
             return
         self._vertices.pop()
+        if len(self._vertices) < 3:
+            self._cerrada = False
         self._redibujar_zona()
 
     def _limpiar_zona(self) -> None:
         self._vertices = []
+        self._cerrada = False
         self.mapa.limpiar_zona()
         self._actualizar_contador()
 
     def _actualizar_contador(self) -> None:
         n = len(self._vertices)
-        texto = f"{n} vértice{'s' if n != 1 else ''} marcado{'s' if n != 1 else ''}"
-        if n < 3:
-            texto += " (mínimo 3)"
+        if self._cerrada:
+            texto = f"Zona cerrada — {n} vértices"
+        else:
+            texto = f"{n} vértice{'s' if n != 1 else ''} marcado{'s' if n != 1 else ''}"
+            if n < 3:
+                texto += " (mínimo 3)"
         self.lbl_contador.setText(texto)
 
     def _precargar(self, ruta: Ruta) -> None:
@@ -364,6 +370,7 @@ class RutaFormDialog(QDialog):
         self.descripcion_input.setText(ruta.descripcion_ruta or "")
         if ruta.zona_geojson:
             self._vertices = [tuple(p) for p in json.loads(ruta.zona_geojson)]
+            self._cerrada = len(self._vertices) >= 3
             self._redibujar_zona()
 
     def _validar_y_aceptar(self) -> None:
@@ -386,5 +393,5 @@ class RutaFormDialog(QDialog):
         return {
             "nombre_ruta": self.nombre_input.text().strip(),
             "descripcion_ruta": self.descripcion_input.text().strip() or None,
-            "zona_geojson": json.dumps(self._vertices_ordenados()),
+            "zona_geojson": json.dumps(self._vertices),
         }

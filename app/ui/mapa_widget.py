@@ -147,7 +147,9 @@ html, body, #mapa {{ height: 100%; margin: 0; padding: 0; }}
 
     var marcadores = [];
     var poligonoZona = null;
+    var cierreZona = null;
     var verticesZona = [];
+    var zonaCerrada = false;
     var marcadoresZona = [];
 
     function limpiarMarcadores() {{
@@ -192,27 +194,36 @@ html, body, #mapa {{ height: 100%; margin: 0; padding: 0; }}
             marcadoresZona.push(m);
         }});
 
-        if (verticesZona.length >= 3) {{
+        if (cierreZona) {{ map.removeLayer(cierreZona); cierreZona = null; }}
+        if (zonaCerrada && verticesZona.length >= 3) {{
             poligonoZona = L.polygon(verticesZona, {{
                 color: '#2563EB', weight: 3, fillColor: '#3B82F6', fillOpacity: 0.25
             }}).addTo(map);
-        }} else if (verticesZona.length === 2) {{
-            // Menos de 3 vertices todavia no es un poligono valido -- se muestra como
-            // linea punteada mientras el usuario sigue marcando, en vez de no mostrar
-            // nada (sin feedback visual de los primeros clicks). Con 1 solo vertice no
-            // hay linea que trazar -- el marcador numerado de arriba ya es suficiente
-            // feedback.
-            poligonoZona = L.polyline(verticesZona, {{ color: '#2563EB', weight: 3, dashArray: '6 6' }}).addTo(map);
+        }} else if (verticesZona.length >= 2) {{
+            // Mientras la zona no esta cerrada se muestra la linea por puntos en el orden
+            // en que se marcaron (pedido del usuario: trazar el contorno tocando puntos y
+            // cerrar volviendo al primero) -- con 2+ vertices ya hay una linea visible.
+            poligonoZona = L.polyline(verticesZona, {{ color: '#2563EB', weight: 3 }}).addTo(map);
+            if (verticesZona.length >= 3) {{
+                // Segmento punteado del ultimo punto de vuelta al primero: es el tramo que
+                // el poligono cerraria, para que se vea el area que esta por abarcar.
+                cierreZona = L.polyline(
+                    [verticesZona[verticesZona.length - 1], verticesZona[0]],
+                    {{ color: '#2563EB', weight: 2, dashArray: '6 6' }}
+                ).addTo(map);
+            }}
         }}
     }}
 
     function limpiarZona() {{
         verticesZona = [];
+        zonaCerrada = false;
         redibujarZona();
     }}
 
-    function establecerZona(vertices) {{
+    function establecerZona(vertices, cerrada) {{
         verticesZona = vertices.slice();
+        zonaCerrada = !!cerrada;
         redibujarZona();
         ajustarVista();
     }}
@@ -245,6 +256,17 @@ html, body, #mapa {{ height: 100%; margin: 0; padding: 0; }}
 
     if ({editable}) {{
         map.on('click', function(e) {{
+            // En modo "zona", tocar el marcador del primer vertice (el punto de partida)
+            // cierra el contorno del area en vez de agregar un vertice duplicado. La
+            // tolerancia es en pixeles (~14px) para que sirva a cualquier zoom.
+            if ('{modo_js}' === 'zona' && verticesZona.length >= 3) {{
+                var p0 = map.latLngToContainerPoint(verticesZona[0]);
+                var pc = map.latLngToContainerPoint(e.latlng);
+                if (p0.distanceTo(pc) < 14) {{
+                    document.getElementById('canal-click').src = 'mapaclick://cerrar';
+                    return;
+                }}
+            }}
             document.getElementById('canal-click').src =
                 'mapaclick://set?lat=' + e.latlng.lat + '&lng=' + e.latlng.lng;
         }});
@@ -261,9 +283,10 @@ class _MapaPage(QWebEnginePage):
     (solo clicks -- la geolocalizacion precisa del boton "Mi ubicacion" ya NO pasa por
     esta pagina, ver `app/ui/geo_windows.py`) llama on_click."""
 
-    def __init__(self, on_click, parent=None):
+    def __init__(self, on_click, on_cerrar=None, parent=None):
         super().__init__(parent)
         self._on_click = on_click
+        self._on_cerrar = on_cerrar or (lambda: None)
         # La pagina se sirve desde file:// (Leaflet vendorizado en disco, ver docstring
         # del modulo) -- por defecto Chromium bloquea que una pagina file:// pida
         # recursos a un host remoto, asi que sin esto las tiles de OpenStreetMap
@@ -284,6 +307,11 @@ class _MapaPage(QWebEnginePage):
         # Ensure url is a QUrl object (handle both QUrl and str from base class signature)
         url_obj = QUrl(url) if isinstance(url, str) else url
         if url_obj.scheme() == "mapaclick":
+            if url_obj.host() == "cerrar":
+                # Click sobre el primer vertice de la zona (ver el handler JS del mapa):
+                # mismo diferido a la siguiente vuelta del event loop que un click normal.
+                QTimer.singleShot(0, self._on_cerrar)
+                return False
             query = QUrlQuery(url_obj)
             try:
                 lat = float(query.queryItemValue("lat"))
@@ -323,11 +351,10 @@ class MapaWidget(QWidget):
     `coordenadas_cambiadas` -- el llamador mantiene la lista de vertices y llama
     `establecer_zona()`/`limpiar_zona()` para reflejarla en el mapa (mismo criterio que
     modo "punto": el dialogo es dueño del estado, MapaWidget solo dibuja lo que se le
-    pide). `establecer_zona()` reemplaza el poligono COMPLETO en cada llamada -- no hay
-    un "agregar un vertice" incremental: RutaFormDialog reordena los vertices por angulo
-    antes de cada redibujado para que el poligono nunca quede auto-intersectado (ver
-    ruta_form_dialog.py::_ordenar_por_angulo), asi que la lista entera puede cambiar de
-    orden con cada click, no solo crecer. Buscar un lugar en este modo solo re-centra el
+    pide).     `establecer_zona()` reemplaza la zona COMPLETA en cada llamada -- no hay un
+    "agregar un vertice" incremental: RutaFormDialog la reenvia entera en el orden de
+    los clicks (linea punteada de trazo) y al tocar el primer punto la marca como
+    cerrada y se pinta el poligono. Buscar un lugar en este modo solo re-centra el
     mapa (no agrega un vertice): con varios vertices en juego, no hay "el punto activo"
     al que aplicarle un resultado de busqueda.
 
@@ -338,6 +365,7 @@ class MapaWidget(QWidget):
 
     coordenadas_cambiadas = Signal(float, float)
     vertice_zona_agregado = Signal(float, float)
+    zona_cerrada_solicitada = Signal()
 
     def __init__(
         self,
@@ -418,7 +446,7 @@ class MapaWidget(QWidget):
         # problema -- confirmado en 2026-09-01: loadFinished(ok=True) en el log pero el
         # mapa seguia sin pintarse en pantalla.
         self.view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
-        pagina = _MapaPage(self._on_click_js, self.view)
+        pagina = _MapaPage(self._on_click_js, self._on_cierre_zona_js, self.view)
         pagina.renderProcessTerminated.connect(self._on_render_process_terminated)
         self.view.setPage(pagina)
         self.view.loadFinished.connect(self._on_load_finished)
@@ -441,6 +469,7 @@ class MapaWidget(QWidget):
             zoom=_ZOOM_DEFAULT,
             zoom_marcador=_ZOOM_MARCADOR,
             editable="true" if self.editable else "false",
+            modo_js=self.modo,
             COLOR_WHITE=COLOR_WHITE,
         )
         self.view.setHtml(html, _LEAFLET_BASE_URL)
@@ -722,21 +751,26 @@ class MapaWidget(QWidget):
         else:
             self.coordenadas_cambiadas.emit(lat, lng)
 
+    def _on_cierre_zona_js(self) -> None:
+        # Click sobre el primer vertice de la zona (JS detecta la proximidad en pixeles):
+        # solo tiene sentido en modo "zona".
+        if self.modo == "zona":
+            self.zona_cerrada_solicitada.emit()
+
     def set_coordenadas(self, lat: float, lng: float) -> None:
         self._ejecutar(f"establecerMarcadorUnico({lat}, {lng});")
 
     def limpiar_zona(self) -> None:
         self._ejecutar("limpiarZona();")
 
-    def establecer_zona(self, vertices: list[tuple[float, float]]) -> None:
-        """Reemplaza el poligono de zona completo -- unico punto de entrada para
-        dibujarla (RutaFormDialog llama esto en cada click, no solo al precargar una
-        ruta existente: los vertices se reordenan por angulo antes de cada redibujado
-        para que el poligono nunca quede auto-intersectado, ver
-        ruta_form_dialog.py::_ordenar_por_angulo -- asi que la lista completa cambia en
-        cada paso, no solo el ultimo punto). Tambien usado por MapaRutasPanel (mapa
-        general, modo solo-lectura)."""
-        self._ejecutar(f"establecerZona({json.dumps(vertices)});")
+    def establecer_zona(self, vertices: list[tuple[float, float]], cerrada: bool = True) -> None:
+        """Reemplaza la zona completa -- unico punto de entrada para dibujarla.
+        `cerrada=True` la pinta como poligono relleno (mapa de rutas, solo lectura, y
+        zonas ya persistidas); `cerrada=False` la muestra como la linea por puntos que
+        el usuario esta trazando, con el segmento de cierre punteado (ver el JS de
+        redibujarZona). En modo "zona" el orden de `vertices` es el orden de los clicks:
+        el usuario traza el contorno y cierra volviendo al primer punto."""
+        self._ejecutar(f"establecerZona({json.dumps(vertices)}, {str(bool(cerrada)).lower()});")
 
     def centrar(self, lat: float, lng: float, zoom: int = _ZOOM_DEFAULT) -> None:
         """Centra/hace zoom sin tocar marcadores -- para el centrado por ubicacion del

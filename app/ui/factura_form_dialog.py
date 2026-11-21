@@ -9,8 +9,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from functools import partial
 
 import qtawesome as qta
-from PySide6.QtCore import QDate, QSize, Qt, QTimer
-from PySide6.QtGui import QShowEvent
+from PySide6.QtCore import QDate, QEvent, QObject, QSize, Qt, QTimer
+from PySide6.QtGui import QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QTableWidget,
@@ -376,6 +377,20 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         # senal (ver _make_card_cabecera) -- se llama una vez a mano para que el estado
         # inicial (Contado, la primera opcion) muestre la tarjeta de formas de pago.
         self._toggle_credito()
+        self._restaurar_pedido_guardado()
+
+    # Carrito guardado al cerrar el dialogo con items y responder "Si" a "¿Desea
+    # mantener el pedido?" -- la proxima vez que se abra Nueva Factura se restauran
+    # tal cual (el dialogo se crea nuevo en cada apertura, ver facturacion_panel).
+    _pedido_guardado: list | None = None
+
+    def _restaurar_pedido_guardado(self) -> None:
+        guardado = FacturaFormDialog._pedido_guardado
+        FacturaFormDialog._pedido_guardado = None
+        if not guardado:
+            return
+        self.items = [dict(it) for it in guardado]
+        self._refrescar_tabla_items()
 
     def showEvent(self, event: QShowEvent) -> None:
         # El primer pintado de este dialogo (el mas denso de la app: 4 tarjetas con
@@ -556,9 +571,15 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self.btn_nuevo_cliente.setIcon(qta.icon("fa5s.plus", color=COLOR_PRIMARY))
         self.btn_nuevo_cliente.setFixedSize(30, 30)
         self.btn_nuevo_cliente.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_nuevo_cliente.setToolTip("Crear nuevo cliente")
+        # Sin esto el boton queda como "default" del dialogo (autoDefault) y cualquier
+        # Enter en cualquier campo lo activa, abriendo el dialogo de nuevo cliente.
+        self.btn_nuevo_cliente.setAutoDefault(False)
+        self.btn_nuevo_cliente.setToolTip("Crear nuevo cliente (F1)")
         self.btn_nuevo_cliente.setObjectName("BtnNuevoCliente")
         self.btn_nuevo_cliente.clicked.connect(self._abrir_nuevo_cliente)
+        # F1 abre el mismo dialogo de nuevo cliente desde cualquier campo de la factura
+        # (atajo pedido por el usuario: no hay que buscar el boton "+").
+        QShortcut(Qt.Key.Key_F1, self, activated=self._abrir_nuevo_cliente)
 
         cliente_buscar_hbox = QHBoxLayout()
         cliente_buscar_hbox.setSpacing(6)
@@ -976,19 +997,23 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self.producto_combo.setMinimumWidth(220)
         self.producto_combo.currentIndexChanged.connect(self._on_producto_cambiado)
 
-        self.cantidad_input = NumericLineEdit(NumericFieldType.QUANTITY, min_value=Decimal("0.01"))
-        self.cantidad_input.set_value(1)
+        # allow_empty: el campo arranca vacio (equivale a 0 -- _agregar_item lo valida
+        # como cantidad invalida si se intenta agregar sin tipear). Antes arrancaba en 1.
+        self.cantidad_input = NumericLineEdit(NumericFieldType.QUANTITY, min_value=Decimal("0.01"), allow_empty=True)
         self.cantidad_input.setFixedHeight(32)
         self.cantidad_input.setFixedWidth(100)
         # Enter en Cantidad o Precio agrega directo -- ya se vio/confirmo el producto en
         # el combo antes de llegar aca, cerrando el ciclo escaneo/tipeo -> agregar sin
         # tocar el mouse (auditoria UX de facturacion, cajero).
-        self.cantidad_input.returnPressed.connect(self._agregar_item)
+        # Enter en cantidad/precio NO agrega el item: solo devuelve el foco a la barra
+        # de busqueda del producto para escanear/tipear el siguiente (el alta se hace
+        # con el boton "Agregar" o Enter en la nota del item).
+        self.cantidad_input.returnPressed.connect(self._enfocar_busqueda_producto)
 
         self.precio_input = NumericLineEdit(NumericFieldType.AMOUNT, min_value=Decimal("0.01"), prefix="$ ")
         self.precio_input.setFixedHeight(32)
         self.precio_input.setFixedWidth(130)
-        self.precio_input.returnPressed.connect(self._agregar_item)
+        self.precio_input.returnPressed.connect(self._enfocar_busqueda_producto)
 
         btn_agregar = QPushButton(" Agregar")
         btn_agregar.setObjectName("BtnAgregar")
@@ -997,6 +1022,12 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         btn_agregar.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_agregar.setAutoDefault(False)
         btn_agregar.clicked.connect(self._agregar_item)
+        self._btn_agregar_item = btn_agregar
+        # QPushButton solo responde a Enter/Return cuando es el boton por defecto del
+        # dialogo (y setAutoDefault(False) lo excluye a proposito para no robar el Enter
+        # de los demas campos). Con el foco en el propio boton, Enter debe agregar el
+        # item igual que los campos cantidad/precio/nota -- se intercepta aqui.
+        btn_agregar.installEventFilter(self)
 
         fila_agregar.addWidget(self.producto_buscar_input, stretch=1)
         fila_agregar.addWidget(self.producto_combo, stretch=2)
@@ -1589,6 +1620,13 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         self._productos = productos
         self._poblar_combo_productos(productos)
 
+    def _enfocar_busqueda_producto(self) -> None:
+        # Enter en cantidad/precio: el foco vuelve a la barra de busqueda. Se difiere
+        # un tick porque NumericLineEdit.keyPressEvent mueve el foco al siguiente widget
+        # del tab-order DESPUES de emitir returnPressed -- sin el singleShot ese avance
+        # automatico pisaria el enfoque en la busqueda.
+        QTimer.singleShot(0, self.producto_buscar_input.setFocus)
+
     def _on_producto_buscar_return_pressed(self) -> None:
         if hasattr(self, "_timer_busqueda_producto"):
             self._timer_busqueda_producto.stop()
@@ -1599,7 +1637,7 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
 
     def _on_producto_cambiado(self) -> None:
         id_producto = self.producto_combo.currentData()
-        self.cantidad_input.set_value(1)
+        self.cantidad_input.set_value(None)
         if id_producto is None:
             self.precio_input.set_value(0)
             self._precio_lista_actual = None
@@ -1954,6 +1992,19 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         # facturacion, cajero).
         self.producto_buscar_input.setFocus()
 
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        # Enter con el foco en el boton "Agregar": agrega el item seleccionado en los
+        # campos (mismo efecto que returnPressed en cantidad/precio/nota) y el foco
+        # vuelve solo a la barra de busqueda via _agregar_item.
+        if (
+            obj is self._btn_agregar_item
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        ):
+            self._agregar_item()
+            return True
+        return super().eventFilter(obj, event)
+
     def _quitar_item(self, indice: int) -> None:
         del self.items[indice]
         self._refrescar_tabla_items()
@@ -2242,6 +2293,29 @@ class FacturaFormDialog(CargaAsincronaMixin, QDialog):
         # tecnico crudo (mismo criterio que el except Exception generico de antes).
         self._finalizar_emision_ui()
         MessageBox.critical(self, "Error", "No se pudo emitir la factura.")
+
+    def done(self, result: int) -> None:
+        # QDialog.done() es el funnel comun de accept()/reject()/closeEvent() -- tanto el
+        # boton Cancelar, Esc como la X de la ventana terminan aqui. Si se sale con
+        # productos en el carrito (y no es una emision exitosa en curso), se pregunta si
+        # se mantiene el pedido: Si lo guarda para restaurarlo en la proxima apertura;
+        # No lo descarta. En ambos casos el dialogo se cierra.
+        if (
+            result == QDialog.DialogCode.Rejected
+            and not getattr(self, "_emitiendo_factura", False)
+            and self.factura_emitida is None
+            and self.items
+        ):
+            respuesta = MessageBox.question(self, "Pedido en curso", "¿Desea mantener el pedido?")
+            if respuesta == QMessageBox.StandardButton.Yes:
+                FacturaFormDialog._pedido_guardado = [dict(it) for it in self.items]
+            else:
+                FacturaFormDialog._pedido_guardado = None
+        elif result == QDialog.DialogCode.Accepted:
+            # Factura emitida: el carrito ya no es un "pedido en curso" -- no debe
+            # restaurarse en la proxima apertura.
+            FacturaFormDialog._pedido_guardado = None
+        super().done(result)
 
     def reject(self) -> None:
         if getattr(self, "_emitiendo_factura", False):

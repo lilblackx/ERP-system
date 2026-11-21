@@ -37,6 +37,9 @@ def _crear_dialogo(qtbot, monkeypatch):
     session.get.return_value = None
     dialogo = ffd.FacturaFormDialog(session, id_usuario=1)
     qtbot.addWidget(dialogo)
+    # El campo cantidad arranca vacio: hay que fijarlo para poder agregar (igual que
+    # haria el cajero). Ojo: cada _agregar_item() lo resetea a vacio.
+    dialogo.cantidad_input.set_value(1)
     return dialogo
 
 
@@ -63,6 +66,7 @@ def test_agregar_el_mismo_item_otra_vez_resalta_la_fila_existente(qtbot, monkeyp
     dialogo.show()
     qtbot.waitExposed(dialogo)
     dialogo._agregar_item()
+    dialogo.cantidad_input.set_value(1)  # _agregar_item resetea el campo a vacio
     dialogo._agregar_item()
     assert len(dialogo.items) == 1 and dialogo.items[0]["cantidad"] == 2
     assert dialogo.tabla_items.viewport().findChildren(_Destello)
