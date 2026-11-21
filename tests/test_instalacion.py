@@ -11,6 +11,7 @@ import pytest
 from app import instalacion
 from app.config import DB_PASSWORD, DB_SERVER, DB_USER
 from app.instalacion import ErrorInstalacion, main
+from tests.conftest import matar_sesiones_y_borrar_login
 
 BASE = "dj_inst_test"
 USUARIO_APP = "dj_inst_app"
@@ -33,15 +34,7 @@ def _limpiar():
         )
         # Las pruebas llaman a las herramientas en el mismo proceso: puede quedar alguna sesion del login
         # abierta en el pool de SQLAlchemy y SQL Server no deja borrar un login con sesiones activas.
-        cur.execute(
-            "DECLARE @k NVARCHAR(MAX) = N''; "
-            "SELECT @k += N'BEGIN TRY KILL ' + CAST(session_id AS NVARCHAR(10)) "
-            "+ N'; END TRY BEGIN CATCH END CATCH; ' "
-            f"FROM sys.dm_exec_sessions WHERE login_name = N'{USUARIO_APP}'; EXEC (@k);"
-        )
-        cur.execute(
-            f"IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'{USUARIO_APP}') DROP LOGIN [{USUARIO_APP}]"
-        )
+        matar_sesiones_y_borrar_login(cur, USUARIO_APP)
     finally:
         conn.close()
 

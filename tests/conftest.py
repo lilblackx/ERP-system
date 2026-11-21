@@ -14,6 +14,7 @@ TEST_DB_NAME para no chocar con la base de datos real
 
 import os
 import re
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -107,6 +108,33 @@ TABLES_DELETE_ORDER = [
     "usuarios",
     "roles",
 ]
+
+
+def matar_sesiones_y_borrar_login(cur, login: str, intentos: int = 20, pausa: float = 0.5) -> None:
+    """Borra un login de prueba aunque le queden sesiones abiertas (p. ej. en el pool de ODBC).
+
+    KILL es asincrono: la sesion sigue listada en sys.dm_exec_sessions un instante (estado KILLED/rollback) y
+    un DROP LOGIN inmediato falla con "Could not drop login ... as the user is currently logged in" -- era el
+    error de teardown, intermitente en CI. Por eso se repite: matar, esperar a que ya no quede ninguna sesion y
+    solo entonces borrar, reintentando si entre medias el pool abrio otra."""
+    ultimo_error: Exception | None = None
+    for _ in range(intentos):
+        sesiones = [
+            r[0] for r in cur.execute("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = ?", login)
+        ]
+        for id_sesion in sesiones:
+            try:
+                cur.execute(f"KILL {int(id_sesion)}")
+            except pyodbc.Error:
+                pass  # la sesion ya murio entre el SELECT y el KILL: es lo que se queria
+        if not sesiones:
+            try:
+                cur.execute(f"IF SUSER_ID(N'{login}') IS NOT NULL DROP LOGIN [{login}]")
+                return
+            except pyodbc.Error as error:
+                ultimo_error = error
+        time.sleep(pausa)
+    raise AssertionError(f"No se pudo borrar el login de prueba {login!r} tras {intentos} intentos") from ultimo_error
 
 
 def _odbc_connect_str(database: str) -> str:

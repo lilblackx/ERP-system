@@ -14,7 +14,7 @@ from app.services.auditoria_base import AuditoriaBaseService
 from app.services.notificaciones import NotificacionesService
 from app.services.permisos import PermisoDenegadoError
 from app.utils import dpapi
-from tests.conftest import TEST_DB_NAME, _odbc_connect_str
+from tests.conftest import TEST_DB_NAME, _odbc_connect_str, matar_sesiones_y_borrar_login
 from tests.factories import (
     crear_caja,
     crear_cliente,
@@ -95,18 +95,10 @@ def _admin_pyodbc():
 
 
 def _limpiar_login(cur):
-    """El pool de conexiones de ODBC mantiene viva la sesion tras close(): se la mata antes de
-    borrar el login (si no, SQL Server rechaza el DROP porque 'esta conectado')."""
-    # Cada KILL va en su propio TRY/CATCH: una sesion del pool puede morir entre el SELECT
-    # y el EXEC ("Process ID ... is not an active process ID") y sin el CATCH tumba el batch.
-    cur.execute(
-        "DECLARE @k NVARCHAR(MAX) = N''; "
-        "SELECT @k += N'BEGIN TRY KILL ' + CAST(session_id AS NVARCHAR(10)) "
-        "+ N'; END TRY BEGIN CATCH END CATCH; ' "
-        f"FROM sys.dm_exec_sessions WHERE login_name = N'{LOGIN_PRUEBA}'; EXEC (@k);"
-    )
+    """El pool de conexiones de ODBC mantiene viva la sesion tras close(): hay que matarla (y esperar a que
+    desaparezca) antes del DROP LOGIN -- ver matar_sesiones_y_borrar_login."""
     cur.execute(f"IF USER_ID('{LOGIN_PRUEBA}') IS NOT NULL DROP USER [{LOGIN_PRUEBA}]")
-    cur.execute(f"IF SUSER_ID('{LOGIN_PRUEBA}') IS NOT NULL DROP LOGIN [{LOGIN_PRUEBA}]")
+    matar_sesiones_y_borrar_login(cur, LOGIN_PRUEBA)
 
 
 @pytest.fixture()

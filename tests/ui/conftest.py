@@ -123,6 +123,31 @@ def _sin_cargas_iniciales_diferidas(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _sin_preguntas_modales_reales(monkeypatch):
+    """MessageBox.question abre un dialogo modal real (exec) que nadie contesta en un test: se queda
+    esperando para siempre. Pasaba al cerrar un FacturaFormDialog con items en el carrito (done() pregunta
+    "¿Desea mantener el pedido?"): el teardown de qtbot cierra los widgets, aparecia la pregunta y el worker
+    de xdist se colgaba -- la suite entera quedaba esperando. Por defecto se contesta "No"; el test que
+    verifique una pregunta la parchea el mismo (ese patch se aplica encima de este)."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from app.ui.message_box import MessageBox
+
+    monkeypatch.setattr(MessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+
+@pytest.fixture(autouse=True)
+def _sin_pedido_guardado_de_otro_test():
+    """FacturaFormDialog guarda el carrito "mantenido" en un atributo de clase (vive lo que
+    la app): sin limpiarlo, el pedido de un test apareceria en el dialogo del siguiente."""
+    from app.ui.factura_form_dialog import FacturaFormDialog
+
+    FacturaFormDialog._pedido_guardado = None
+    yield
+    FacturaFormDialog._pedido_guardado = None
+
+
+@pytest.fixture(autouse=True)
 def _sin_webengine_real(monkeypatch):
     """MapaWidget crea QWebEngineView + _MapaPage(QWebEnginePage) en su __init__ -- cada
     instancia levanta un proceso Chromium real. En CI headless eso es la fuente de los
