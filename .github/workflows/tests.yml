@@ -115,8 +115,8 @@ jobs:
       # nucleos del runner (2 o 4 segun el plan), asi no se sobrecarga el SQL Server que
       # comparte maquina con los tests. Servicios y UI van juntos: ya no hay que separarlos.
       # --durations muestra los tests mas lentos para detectar regresiones de tiempo.
-      # -n 8 (mas workers que los 4 vCPU del runner): gran parte de los tests de UI/Qt
-      # y de base es espera (DB, qtbot.waitUntil, timers), no CPU pura -- el
-      # oversubscription suele ganar ~20-30%. Si resulta flaky, volver a -n auto.
+      # -n auto = un worker por vCPU del runner (4). -n 8 se probo y fue PEOR (~59 min,
+      # timeout): 8 bases de prueba migrando a la vez saturan el SQL Server del runner
+      # y los tests de Qt hacen thrashing. No subir de ahi.
       - name: Correr la suite en paralelo
-        run: pytest -n 8 --dist loadfile -q --durations=15
+        run: pytest -n auto --dist loadfile -q --durations=15
