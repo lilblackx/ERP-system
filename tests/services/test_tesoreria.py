@@ -1,7 +1,9 @@
+import socket
 from decimal import Decimal
 
 import pytest
 
+from app.db.models import Rol, Usuario
 from app.services.permisos import PermisoDenegadoError, PermisoService
 from app.services.tesoreria import BancoService, CajaService
 from tests.factories import (
@@ -250,6 +252,45 @@ def test_abrir_caja(db_session):
     assert abierta.saldo_apertura == Decimal("100.00")
     assert abierta.fecha_apertura is not None
     assert abierta.fecha_cierre is None
+    assert abierta.equipo == socket.gethostname()[:128]
+
+    estado = CajaService.obtener_estado_cajas(db_session, id_usuario=admin.id_usuario)
+    assert next(e for e in estado if e["id_caja"] == caja.id_caja)["equipo"] == abierta.equipo
+
+
+def _crear_usuario_cajero(session) -> Usuario:
+    rol = session.query(Rol).filter_by(nombre="CAJERO").first()
+    if rol is None:
+        rol = crear_rol(session, nombre="CAJERO")
+    return crear_usuario(session, id_rol=rol.id_rol)
+
+
+def test_abrir_caja_cajero_puede_abrir(db_session):
+    """El cajero abre el turno al facturar (ver _require_admin_o_cajero en tesoreria.py)."""
+    cajero = _crear_usuario_cajero(db_session)
+    caja = crear_caja(db_session)
+
+    abierta = CajaService.abrir_caja(
+        db_session,
+        caja.id_caja,
+        id_usuario=cajero.id_usuario,
+        saldo_apertura=Decimal("50.00"),
+    )
+
+    assert abierta.estado_caja == "ABIERTA"
+    assert abierta.id_usuario == cajero.id_usuario
+
+
+def test_cerrar_caja_cajero_puede_cerrar(db_session):
+    admin = crear_usuario_admin(db_session)
+    cajero = _crear_usuario_cajero(db_session)
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    cerrada = CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=cajero.id_usuario)
+
+    assert cerrada.estado_caja == "CERRADA"
+    assert cerrada.modificado_por == cajero.id_usuario
 
 
 def test_abrir_caja_sin_usuario_autorizado_falla(db_session):
@@ -285,7 +326,7 @@ def test_abrir_caja_usuario_no_admin_falla(db_session):
     usuario = crear_usuario(db_session, id_rol=rol.id_rol)
     caja = crear_caja(db_session)
 
-    with pytest.raises(PermisoDenegadoError, match="administrador"):
+    with pytest.raises(PermisoDenegadoError, match="ADMIN o CAJERO"):
         CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=usuario.id_usuario, saldo_apertura=0)
 
 
@@ -298,7 +339,7 @@ def test_cerrar_caja_usuario_no_admin_falla(db_session):
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
-    with pytest.raises(PermisoDenegadoError, match="administrador"):
+    with pytest.raises(PermisoDenegadoError, match="ADMIN o CAJERO"):
         CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=usuario.id_usuario)
 
 

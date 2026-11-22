@@ -1,4 +1,5 @@
 import logging
+import socket
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -32,18 +33,11 @@ TIPOS_MOVIMIENTO_CAJA = {"entrada", "salida"}
 ESTADOS_VALIDOS = {"ACTIVO", "INACTIVO"}
 
 
-def _require_admin(
-    session: Session,
-    id_usuario: int | None,
-    accion: str = "gestionar cajas (crear, abrir o cerrar turnos)",
-) -> Usuario:
-    """Crear una caja o abrir/cerrar su turno fija el saldo inicial/final -- mas sensible
-    que "editar" un registro cualquiera, asi que se restringe especificamente a ADMIN en
-    vez del RBAC generico de 'cajas'/'editar' (un rol podria tener ese permiso para otras
-    operaciones de caja sin que eso deba habilitar crear/abrir/cerrar turnos). Repite las
-    mismas validaciones de estado/bloqueo que require_permiso() (ver
-    app/services/permisos.py) porque no hay bypass de ADMIN que reusar aca -- ADMIN es
-    justamente el unico rol permitido."""
+def _require_rol(session: Session, id_usuario: int | None, roles: set[str], accion: str) -> Usuario:
+    """Valida que el usuario sea de uno de los roles indicados. Repite las mismas
+    validaciones de estado/bloqueo que require_permiso() (ver app/services/permisos.py)
+    porque aca no hay bypass de la matriz de permisos que reusar -- el permiso se decide
+    por el NOMBRE del rol, no por rol_permisos."""
     if id_usuario is None:
         raise PermisoDenegadoError("Esta operación requiere un usuario autenticado")
     usuario = session.get(Usuario, id_usuario)
@@ -54,9 +48,32 @@ def _require_admin(
     if esta_bloqueado(usuario):
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
     rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
-    if rol is None or rol.nombre != "ADMIN":
-        raise PermisoDenegadoError(f"Solo un administrador puede {accion}")
+    if rol is None or rol.nombre not in roles:
+        raise PermisoDenegadoError(f"Solo un usuario con rol {' o '.join(sorted(roles))} puede {accion}")
     return usuario
+
+
+def _require_admin(
+    session: Session,
+    id_usuario: int | None,
+    accion: str = "gestionar cajas (crear, abrir o cerrar turnos)",
+) -> Usuario:
+    """Crear una caja fija el saldo inicial del turno -- mas sensible que "editar" un
+    registro cualquiera, asi que se restringe especificamente a ADMIN en vez del RBAC
+    generico de 'cajas'/'editar' (un rol podria tener ese permiso para otras operaciones
+    de caja sin que eso deba habilitar crear cajas fisicas)."""
+    return _require_rol(session, id_usuario, {"ADMIN"}, accion)
+
+
+def _require_admin_o_cajero(
+    session: Session,
+    id_usuario: int | None,
+    accion: str = "abrir o cerrar turnos de caja",
+) -> Usuario:
+    """Abrir/cerrar turno lo hace a diario el cajero que factura (y el ADMIN); un rol con
+    'cajas'/'editar' en la matriz no alcanza porque el saldo inicial/final del turno se
+    fija aca, no con el RBAC generico."""
+    return _require_rol(session, id_usuario, {"ADMIN", "CAJERO"}, accion)
 
 
 def _enmascarar_numero_cuenta(numero_cuenta: str | None) -> str | None:
@@ -456,10 +473,10 @@ class CajaService:
     @staticmethod
     def crear_caja(session: Session, nombre_caja: str, id_usuario: int | None) -> Caja:
         """Da de alta una caja nueva (turno todavia no abierto, id_usuario/fecha_apertura
-        quedan NULL hasta que alguien la abra con abrir_caja()). Restringido a ADMIN,
-        mismo criterio que abrir/cerrar turno (_require_admin) -- crear una caja fisica
-        es un acto de configuracion del negocio, no una operacion diaria de cualquier rol
-        con el permiso generico 'cajas'."""
+        quedan NULL hasta que alguien la abra con abrir_caja()). Restringido a ADMIN:
+        crear una caja fisica es un acto de configuracion del negocio, no una operacion
+        diaria -- a diferencia de abrir/cerrar turno, que tambien puede hacer un CAJERO
+        (_require_admin_o_cajero)."""
         _require_admin(session, id_usuario)
         nombre_caja = (nombre_caja or "").strip()
         if not nombre_caja:
@@ -491,7 +508,7 @@ class CajaService:
 
     @staticmethod
     def abrir_caja(session: Session, id_caja: int, id_usuario: int, saldo_apertura) -> Caja:
-        _require_admin(session, id_usuario)
+        _require_admin_o_cajero(session, id_usuario)
         aplicar_lock_timeout(session)
         # WITH (UPDLOCK, ROWLOCK): mismo patron que C1/C18 -- bloquea la fila hasta el
         # commit para que una segunda apertura/cierre concurrente sobre la misma caja
@@ -511,6 +528,7 @@ class CajaService:
         caja.saldo_cierre = None
         caja.estado_caja = "ABIERTA"
         caja.id_usuario = id_usuario
+        caja.equipo = socket.gethostname()[:128]
 
         try:
             session.commit()
@@ -542,7 +560,7 @@ class CajaService:
 
     @staticmethod
     def cerrar_caja(session: Session, id_caja: int, id_usuario_cierre: int) -> Caja:
-        _require_admin(session, id_usuario_cierre)
+        _require_admin_o_cajero(session, id_usuario_cierre)
         aplicar_lock_timeout(session)
         # Ver el comentario de abrir_caja() -- mismo patron.
         caja = session.execute(
@@ -611,6 +629,7 @@ class CajaService:
                     "saldo_apertura": caja.saldo_apertura,
                     "saldo_cierre": caja.saldo_cierre,
                     "cantidad_movimientos": cantidad_movimientos,
+                    "equipo": caja.equipo,
                 }
             )
         return resultado

@@ -1056,6 +1056,7 @@ class Caja(Base):
     fecha_cierre: Mapped[datetime.datetime | None] = mapped_column(DateTime)
     id_usuario: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     modificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    equipo: Mapped[str | None] = mapped_column(String(128))
 
     usuario = relationship("Usuario", foreign_keys=[id_usuario])
     modificador = relationship("Usuario", foreign_keys=[modificado_por])

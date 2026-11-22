@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy.orm import Session
 
-from app.db.models import Caja, Usuario
+from app.db.models import Caja, Rol, Usuario
 from app.services.auth import CuentaBloqueadaError, authenticate
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
@@ -48,7 +48,7 @@ from app.ui.styles import (
     ICON_CHEVRON_DOWN_URL,
     aplicar_sombra,
 )
-from app.utils.caja_local import guardar_caja_local
+from app.utils.caja_local import guardar_caja_local, obtener_caja_local
 
 DIALOG_STYLE = f"""
 QDialog {{
@@ -293,6 +293,22 @@ class CajaAperturaDialog(QDialog):
             return
 
         cajas_cerradas = [c for c in cajas if c.fecha_apertura is None or c.fecha_cierre is not None]
+        # CAJERO: solo puede abrir la caja anclada a esta estacion (la que esta estacion
+        # abrió antes, guardada en QSettings). Sin ancla previa se muestran todas las
+        # cerradas para que la primera apertura fije el vinculo -- a partir de ahi el
+        # cajero queda atado a esa caja y no puede abrir otra.
+        rol = self.session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
+        if rol is not None and rol.nombre == "CAJERO":
+            id_local = obtener_caja_local()
+            if id_local is not None:
+                cajas_cerradas = [c for c in cajas_cerradas if c.id_caja == id_local]
+                if not cajas_cerradas:
+                    MessageBox.warning(
+                        self,
+                        "Caja no disponible",
+                        "La caja anclada a esta estación no está disponible para abrir.",
+                    )
+                    return
         if not cajas_cerradas:
             MessageBox.warning(
                 self,

@@ -1,7 +1,7 @@
 """Dialogo de cierre de turno de caja: arqueo (movimientos del turno + saldo calculado)
 seguido de la confirmacion que dispara CajaService.cerrar_caja(). Simetrico a
 CajaAperturaDialog (app/ui/caja_apertura_dialog.py) pero sin el paso de reautenticacion --
-CajasPanel ya exige estar logueado como ADMIN para llegar aqui (_require_admin en el
+CajasPanel ya exige rol ADMIN o CAJERO para llegar aqui (_require_admin_o_cajero en el
 servicio es la barrera real, esto es solo UX)."""
 
 import logging
@@ -259,8 +259,8 @@ class CajaCierreDialog(QDialog):
         return col, lbl_valor
 
     def _make_tabla_movimientos(self) -> QTableWidget:
-        self.tabla = QTableWidget(0, 4)
-        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Descripción", "Monto"])
+        self.tabla = QTableWidget(0, 5)
+        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Descripción", "Monto", "Usuario"])
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabla.setAlternatingRowColors(True)
@@ -271,6 +271,7 @@ class CajaCierreDialog(QDialog):
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setWordWrap(True)  # Permitir ajuste de texto
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
@@ -281,6 +282,7 @@ class CajaCierreDialog(QDialog):
                 1: Qt.AlignmentFlag.AlignLeft,
                 2: Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                 3: Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                4: Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
             },
         )
         return self.tabla
@@ -319,6 +321,9 @@ class CajaCierreDialog(QDialog):
             item_monto = QTableWidgetItem(f"$ {mov.monto_movimiento or 0:,.2f}")
             item_monto.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 3, item_monto)
+
+            creador = mov.creador
+            self.tabla.setItem(fila, 4, QTableWidgetItem(creador.nombre_usuario if creador else "—"))
 
             # Ajustar altura de la fila para mostrar toda la descripción
             self.tabla.resizeRowToContents(fila)

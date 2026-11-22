@@ -6,9 +6,10 @@ desde antes sin ninguna pantalla que los use (ver docs/ESTADO_DEL_PROYECTO.md, h
 sigue viviendo en app/ui/caja_apertura_dialog.py (gate de entrada a Facturacion), este
 panel no la duplica.
 
-Abrir/cerrar turno esta restringido a ADMIN en el servicio (_require_admin en
-tesoreria.py, no el RBAC generico de 'cajas'/'editar') -- un cajero sin ese rol ve el
-listado (con 'cajas'/'ver') pero el boton de cierre le devuelve PermisoDenegadoError."""
+Abrir/cerrar turno esta restringido a ADMIN y CAJERO en el servicio
+(_require_admin_o_cajero en tesoreria.py, no el RBAC generico de 'cajas'/'editar') -- un
+usuario con otro rol ve el listado (con 'cajas'/'ver') pero el boton de cierre le devuelve
+PermisoDenegadoError. Crear cajas sigue siendo solo ADMIN (_require_admin)."""
 
 import logging
 from datetime import date, datetime
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy import case, func
 
-from app.db.models import Caja, CajaMovimiento, Usuario
+from app.db.models import Caja, CajaMovimiento, Rol, Usuario
 from app.services.paginacion import paginar
 from app.services.permisos import PermisoDenegadoError
 from app.services.tesoreria import CajaService
@@ -65,6 +66,7 @@ from app.ui.styles import (
     aplicar_sombra,
     dar_ancho_a_texto,
 )
+from app.utils.caja_local import obtener_caja_local
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,7 @@ COLS_VISIBLES = [
     "SALDO APERTURA",
     "SALDO CIERRE",
     "MOVIMIENTOS",
+    "NOMBRE DEL EQUIPO",
 ]
 
 DIALOG_STYLE_MOVIMIENTO = f"""
@@ -232,6 +235,11 @@ def _tarea_historial_caja(session, id_caja: int, desde, hasta, pagina: int) -> d
     )
     resultado["total_entradas"] = Decimal(str(entradas))
     resultado["total_salidas"] = Decimal(str(salidas))
+    # El nombre del usuario va resuelto desde aca: al volver al hilo de la ventana la
+    # sesion ya se cerro y mov.creador (relacion) no se puede cargar lazy.
+    for mov in resultado["items"]:
+        creador = mov.creador
+        mov.usuario_nombre = creador.nombre_usuario if creador is not None else None
     return resultado
 
 
@@ -298,8 +306,8 @@ class HistorialMovimientosDialog(CargaAsincronaMixin, QDialog):
         root.addLayout(header)
 
         # Tabla de movimientos
-        self.tabla = QTableWidget(0, 5)
-        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Descripción", "Monto", "Origen"])
+        self.tabla = QTableWidget(0, 6)
+        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Descripción", "Monto", "Origen", "Usuario"])
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabla.setAlternatingRowColors(True)
@@ -311,6 +319,7 @@ class HistorialMovimientosDialog(CargaAsincronaMixin, QDialog):
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setWordWrap(True)  # Permitir ajuste de texto
         self.tabla.setStyleSheet(TABLE_QSS)
         aplicar_sombra(self.tabla)
@@ -322,6 +331,7 @@ class HistorialMovimientosDialog(CargaAsincronaMixin, QDialog):
                 2: Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                 3: Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
                 4: Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                5: Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
             },
         )
         root.addWidget(self.tabla, stretch=1)
@@ -434,6 +444,8 @@ class HistorialMovimientosDialog(CargaAsincronaMixin, QDialog):
                 origen = "Pago Comisión"
             self.tabla.setItem(fila, 4, QTableWidgetItem(origen))
 
+            self.tabla.setItem(fila, 5, QTableWidgetItem(getattr(mov, "usuario_nombre", None) or "—"))
+
             # Ajustar altura de la fila para mostrar toda la descripción
             self.tabla.resizeRowToContents(fila)
 
@@ -445,8 +457,15 @@ class HistorialMovimientosDialog(CargaAsincronaMixin, QDialog):
 
 
 def _tarea_estado_cajas(session, id_usuario: int):
-    """Corre en un hilo aparte (ver carga_asincrona.py): el estado de cada caja, ya como diccionarios simples."""
-    return CajaService.obtener_estado_cajas(session, id_usuario=id_usuario)
+    """Corre en un hilo aparte (ver carga_asincrona.py): el estado de cada caja, ya como diccionarios simples.
+    El CAJERO solo ve la caja anclada a esta estacion (ver app/utils/caja_local.py); el ADMIN ve todas."""
+    estados = CajaService.obtener_estado_cajas(session, id_usuario=id_usuario)
+    usuario = session.get(Usuario, id_usuario)
+    rol = session.get(Rol, usuario.id_rol) if usuario is not None and usuario.id_rol is not None else None
+    if rol is not None and rol.nombre == "CAJERO":
+        id_local = obtener_caja_local()
+        estados = [e for e in estados if e["id_caja"] == id_local]
+    return estados
 
 
 class CajasPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
@@ -523,6 +542,7 @@ class CajasPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
                 5: Qt.AlignmentFlag.AlignRight,
                 6: Qt.AlignmentFlag.AlignRight,
                 7: Qt.AlignmentFlag.AlignRight,
+                8: Qt.AlignmentFlag.AlignLeft,
             },
         )
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -566,7 +586,7 @@ class CajasPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
         if self._puede("crear"):
             h.addWidget(self.btn_movimiento)
         h.addWidget(btn_historial)
-        if self._es_admin():
+        if self._es_admin_o_cajero():
             h.addWidget(btn_cerrar)
         return w
 
@@ -650,6 +670,10 @@ class CajasPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
             item_movimientos.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tabla.setItem(fila, 7, item_movimientos)
 
+            item_equipo = QTableWidgetItem(est.get("equipo") or "—")
+            item_equipo.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(fila, 8, item_equipo)
+
         self.lbl_total.setText(f"{len(estados)} caja{'s' if len(estados) != 1 else ''}")
 
     def _fila_seleccionada_id(self) -> int | None:
@@ -663,7 +687,7 @@ class CajasPanel(CargaAsincronaMixin, MixinPermisos, QWidget):
         return int(item.text())
 
     def cerrar_turno_seleccionado(self) -> None:
-        if not self._exigir_admin("Solo un administrador puede cerrar el turno de una caja."):
+        if not self._exigir_admin_o_cajero("Solo un administrador o cajero puede cerrar el turno de una caja."):
             return
         id_caja = self._fila_seleccionada_id()
         if id_caja is None:

@@ -306,8 +306,8 @@ class FacturacionPanel(CargaAsincronaMixin, MixinPermisos, MixinPaginacion, QWid
         # Solo actualiza el badge "Caja abierta"/"Sin caja abierta" -- NO ofrece abrir
         # turno aca (ofrecer_apertura=False). Antes se lanzaba CajaAperturaDialog cada
         # vez que se entraba al modulo mientras no hubiera ninguna caja abierta: un
-        # cajero sin rol ADMIN (que ya no puede abrir turnos, ver CajaService.
-        # _require_admin) quedaba interrumpido por ese modal cada vez que volvia a la
+        # cajero sin permiso de apertura (rol distinto de ADMIN/CAJERO, ver
+        # CajaService._require_admin_o_cajero) quedaba interrumpido por ese modal cada vez que volvia a la
         # pestana sin poder resolverlo el mismo -- solo cancelarlo (hallazgo #4 de la
         # auditoria de facturacion). El gate real sigue intacto: nueva_factura() pide
         # la apertura explicitamente (ofrecer_apertura=True) recien cuando hace falta

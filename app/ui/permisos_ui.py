@@ -25,16 +25,26 @@ def tiene_permiso_en_sesion(session: Session, id_usuario: int | None, recurso: s
     return UsuarioService.verificar_permiso(session, id_usuario, recurso, accion)
 
 
-def es_admin_en_sesion(session: Session, id_usuario: int | None) -> bool:
-    """Operaciones que los servicios restringen al rol ADMIN literal (abrir/cerrar turno, crear cajas,
-    crear bancos, etc.), sin importar la matriz de permisos."""
+def _nombre_rol_en_sesion(session: Session, id_usuario: int | None) -> str | None:
     if id_usuario is None:
-        return False
+        return None
     # Una sola consulta (usuario + rol) en vez de dos: ver consultar_permiso().
     usuario, nombre_rol, _ = consultar_permiso(session, id_usuario, "", "")
     if usuario is None or usuario.id_rol is None or usuario.estado != "ACTIVO":
-        return False
-    return nombre_rol == "ADMIN"
+        return None
+    return nombre_rol
+
+
+def es_admin_en_sesion(session: Session, id_usuario: int | None) -> bool:
+    """Operaciones que los servicios restringen al rol ADMIN literal (crear cajas,
+    crear bancos, etc.), sin importar la matriz de permisos."""
+    return _nombre_rol_en_sesion(session, id_usuario) == "ADMIN"
+
+
+def es_admin_o_cajero_en_sesion(session: Session, id_usuario: int | None) -> bool:
+    """Abrir/cerrar turno de caja: lo hacen ADMIN y CAJERO (ver
+    _require_admin_o_cajero en app/services/tesoreria.py)."""
+    return _nombre_rol_en_sesion(session, id_usuario) in {"ADMIN", "CAJERO"}
 
 
 def tiene_permiso(session_factory, id_usuario: int | None, recurso: str, accion: str) -> bool:
@@ -49,6 +59,14 @@ def es_admin(session_factory, id_usuario: int | None) -> bool:
     session = session_factory()
     try:
         return es_admin_en_sesion(session, id_usuario)
+    finally:
+        session.close()
+
+
+def es_admin_o_cajero(session_factory, id_usuario: int | None) -> bool:
+    session = session_factory()
+    try:
+        return es_admin_o_cajero_en_sesion(session, id_usuario)
     finally:
         session.close()
 
@@ -81,6 +99,13 @@ class MixinPermisos:
             return es_admin(fabrica, id_usuario)
         return es_admin_en_sesion(self.session, id_usuario)  # type: ignore[attr-defined]
 
+    def _es_admin_o_cajero(self) -> bool:
+        id_usuario = self._id_usuario_permisos()
+        fabrica = getattr(self, "session_factory", None)
+        if fabrica is not None:
+            return es_admin_o_cajero(fabrica, id_usuario)
+        return es_admin_o_cajero_en_sesion(self.session, id_usuario)  # type: ignore[attr-defined]
+
     def _exigir_permiso(self, accion: str, mensaje: str, recurso: str | None = None) -> bool:
         """True si puede; si no, avisa y devuelve False (el handler debe retornar sin abrir nada)."""
         if self._puede(accion, recurso):
@@ -90,6 +115,12 @@ class MixinPermisos:
 
     def _exigir_admin(self, mensaje: str) -> bool:
         if self._es_admin():
+            return True
+        MessageBox.warning(self, "Sin permiso", mensaje)  # type: ignore[arg-type]
+        return False
+
+    def _exigir_admin_o_cajero(self, mensaje: str) -> bool:
+        if self._es_admin_o_cajero():
             return True
         MessageBox.warning(self, "Sin permiso", mensaje)  # type: ignore[arg-type]
         return False
