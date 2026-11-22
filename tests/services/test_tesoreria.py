@@ -326,7 +326,7 @@ def test_abrir_caja_usuario_no_admin_falla(db_session):
     usuario = crear_usuario(db_session, id_rol=rol.id_rol)
     caja = crear_caja(db_session)
 
-    with pytest.raises(PermisoDenegadoError, match="ADMIN o CAJERO"):
+    with pytest.raises(PermisoDenegadoError, match="administrador o cajero"):
         CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=usuario.id_usuario, saldo_apertura=0)
 
 
@@ -339,7 +339,7 @@ def test_cerrar_caja_usuario_no_admin_falla(db_session):
     caja = crear_caja(db_session)
     CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
 
-    with pytest.raises(PermisoDenegadoError, match="ADMIN o CAJERO"):
+    with pytest.raises(PermisoDenegadoError, match="administrador o cajero"):
         CajaService.cerrar_caja(db_session, caja.id_caja, id_usuario_cierre=usuario.id_usuario)
 
 

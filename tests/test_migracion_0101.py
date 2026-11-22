@@ -11,7 +11,6 @@ migraciones anteriores y se corre el archivo real sobre ella.
 
 import json
 import re
-import shutil
 import urllib.parse
 from datetime import datetime
 from decimal import Decimal
@@ -67,18 +66,18 @@ def _aplicar_schema_base() -> None:
 
 
 @pytest.fixture(scope="module")
-def engine_pre_0101(tmp_path_factory):
-    """Base con schema base + todas las migraciones anteriores a la 0101."""
+def engine_pre_0101():
+    """Base con el schema completo: se aplican TODAS las migraciones (incluida la 0101) y
+    luego _VOLVER_A_PRE_0101 deshace solo lo de la 0101 (tabla + trigger + eventos de
+    auditoria). Aplicar solo las "previas" dejaba el schema desactualizado respecto del
+    modelo ORM -- p. ej. cajas.equipo (0103) -- y los INSERT de los factories fallaban con
+    "Invalid column name". Como la 0101 solo crea tabla/trigger propios, revertirla es
+    equivalente a no haberla aplicado."""
     _recrear_base_descartable()
     _aplicar_schema_base()
 
-    previas = tmp_path_factory.mktemp("migraciones_previas_0101")
-    for archivo in sorted(MIGRATIONS_DIR.glob("*.sql")):
-        if archivo.name < ARCHIVO_0101.name:
-            shutil.copy(archivo, previas / archivo.name)
-
     engine = create_engine("mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(_odbc_connect_str(MIG_DB_NAME)))
-    aplicar_migraciones(engine, migrations_dir=previas)
+    aplicar_migraciones(engine)
     yield engine
     engine.dispose()
     _borrar_base_descartable()

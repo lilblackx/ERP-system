@@ -49,7 +49,13 @@ def _require_rol(session: Session, id_usuario: int | None, roles: set[str], acci
         raise PermisoDenegadoError(f"El usuario '{usuario.nombre_usuario}' esta bloqueado")
     rol = session.get(Rol, usuario.id_rol) if usuario.id_rol is not None else None
     if rol is None or rol.nombre not in roles:
-        raise PermisoDenegadoError(f"Solo un usuario con rol {' o '.join(sorted(roles))} puede {accion}")
+        if roles == {"ADMIN"}:
+            quien = "un administrador"
+        elif roles == {"ADMIN", "CAJERO"}:
+            quien = "un administrador o cajero"
+        else:
+            quien = f"un usuario con rol {' o '.join(sorted(roles))}"
+        raise PermisoDenegadoError(f"Solo {quien} puede {accion}")
     return usuario
 
 
