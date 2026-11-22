@@ -1892,7 +1892,13 @@ class CuentasPorCobrarPanel(CargaAsincronaMixin, ExportacionCompletaMixin, Mixin
         self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} cliente{'s' if total != 1 else ''} con deuda")
-        self.lbl_saldo_total.setText(f"${_as_decimal(saldo_total):,.2f}")
+        # El rotulo suma el saldo de TODAS las paginas filtradas (lo calcula el servicio
+        # sobre clientes_lista completo); el acumulado por pagina queda de respaldo por
+        # si un resultado mockeado no trae la clave.
+        saldo_total_general = resultado.get("saldo_total_general")
+        if saldo_total_general is None:
+            saldo_total_general = saldo_total
+        self.lbl_saldo_total.setText(f"${_as_decimal(saldo_total_general):,.2f}")
 
     def _determinar_estado_cliente(self, cuentas: list) -> str:
         """Determina el estado general de un cliente basado en sus cuentas por cobrar."""

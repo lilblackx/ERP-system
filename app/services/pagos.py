@@ -923,6 +923,9 @@ class PagoService:
         )
 
         resultado = paginar_lista(clientes_lista, pagina, por_pagina)
+        # Suma del saldo de TODOS los clientes filtrados (todas las paginas), para el
+        # rotulo superior del panel -- `items` solo trae la pagina pedida.
+        resultado["saldo_total_general"] = sum((datos["saldo_total"] for datos in clientes_lista), Decimal("0"))
         clientes_paginados = resultado["items"]
 
         # Calcular días transcurridos para cada cliente
