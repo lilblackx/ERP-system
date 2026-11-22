@@ -161,7 +161,13 @@ def _tarea_exportar_productos_excel(
             config_empresa=EmpresaService.obtener_datos_documento(session),
         )
     else:
-        exportar_excel(ruta, COLS_VISIBLES, filas)
+        exportar_excel(
+            ruta,
+            COLS_VISIBLES,
+            filas,
+            titulo="Inventario",
+            config_empresa=EmpresaService.obtener_datos_documento(session),
+        )
     return ruta, len(filas)
 
 
@@ -179,7 +185,13 @@ def _tarea_exportar_productos_pdf(
             config_empresa=EmpresaService.obtener_datos_documento(session),
         )
     else:
-        exportar_pdf(ruta, "Inventario", COLS_VISIBLES, filas)
+        exportar_pdf(
+            ruta,
+            "Inventario",
+            COLS_VISIBLES,
+            filas,
+            config_empresa=EmpresaService.obtener_datos_documento(session),
+        )
     return ruta, len(filas)
 
 

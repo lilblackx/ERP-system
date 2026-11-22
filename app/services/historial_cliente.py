@@ -59,6 +59,7 @@ class HistorialItem(TypedDict):
     monto_bolivares: NotRequired[Decimal | None]
     tasa_cambio: NotRequired[Decimal | None]
     banco: NotRequired[str | None]
+    moneda_cuenta: NotRequired[str | None]
 
 
 # Vistas del historial: que filas se muestran (y se exportan). Por defecto se ocultan los abonos: el
@@ -145,12 +146,15 @@ def agrupar_pagos_solidos(items: list[HistorialItem]) -> list[HistorialItem]:
         if bs_previos is not None or bs_nuevos is not None:
             grupo["monto_bolivares"] = (bs_previos or Decimal("0")) + (bs_nuevos or Decimal("0"))
         observaciones = []
-        monto_bs = grupo.get("monto_bolivares")
-        if monto_bs:
-            observaciones.append(f"Bs. {monto_bs:,.2f}")
-        tasa = grupo.get("tasa_cambio")
-        if tasa:
-            observaciones.append(f"{tasa:,.2f}")
+        # En una cuenta en dolares el pago ya se recibio en USD: no hay equivalente en
+        # Bs que mostrar, solo el banco destino.
+        if grupo.get("moneda_cuenta") != "USD":
+            monto_bs = grupo.get("monto_bolivares")
+            if monto_bs:
+                observaciones.append(f"Bs. {monto_bs:,.2f}")
+            tasa = grupo.get("tasa_cambio")
+            if tasa:
+                observaciones.append(f"{tasa:,.2f}")
         if grupo.get("banco"):
             observaciones.append(grupo["banco"])
         grupo["observaciones"] = " - ".join(observaciones) if observaciones else grupo.get("observaciones")
@@ -408,21 +412,25 @@ def obtener_historial_cliente(session: Session, id_cliente: int, id_usuario: int
                 monto_bs = pago.monto_bolivares or pago.monto_moneda_origen
                 tasa = pago.tasa_cambio
 
-                if monto_bs and tasa:
-                    observaciones = f"Bs. {monto_bs:,.2f} - {tasa:,.2f}"
-                elif monto_bs:
-                    observaciones = f"Bs. {monto_bs:,.2f}"
-
                 # Agregar banco si existe
                 nombre_banco = ""
+                moneda_cuenta = None
                 if pago.cuenta_bancaria:
                     banco = pago.cuenta_bancaria.banco
                     nombre_banco = banco.nombre_banco if banco else ""
+                    moneda_cuenta = pago.cuenta_bancaria.moneda
+
+                if moneda_cuenta == "USD":
+                    # Pago a cuenta en dolares: se recibio en USD, no hay equivalente
+                    # en Bs -- la descripcion lleva solo el banco destino.
+                    observaciones = nombre_banco
+                else:
+                    if monto_bs and tasa:
+                        observaciones = f"Bs. {monto_bs:,.2f} - {tasa:,.2f}"
+                    elif monto_bs:
+                        observaciones = f"Bs. {monto_bs:,.2f}"
                     if nombre_banco:
-                        if observaciones:
-                            observaciones += f" - {nombre_banco}"
-                        else:
-                            observaciones = nombre_banco
+                        observaciones = f"{observaciones} - {nombre_banco}" if observaciones else nombre_banco
 
                 id_pago = pago.id_pago_cobro_bcv if isinstance(pago, PagoCobroBCV) else pago.id_pago_cobro
                 item_pago: HistorialItem = {
@@ -459,6 +467,7 @@ def obtener_historial_cliente(session: Session, id_cliente: int, id_usuario: int
                     "monto_bolivares": monto_bs,
                     "tasa_cambio": tasa,
                     "banco": nombre_banco or None,
+                    "moneda_cuenta": moneda_cuenta,
                 }
                 historial.append(item_pago)
 

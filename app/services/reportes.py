@@ -252,20 +252,25 @@ def _aplicaciones_nc_proveedor(
 def _descripcion_abono(grupo: list) -> str:
     """Formato de pago del abono para el estado de cuenta: 'Efectivo' o, para el resto,
     'Bs. <monto_bs> - <tasa> - <banco>' con las partes que existan (monto en bolivares
-    sumado del grupo, tasa y banco de la cuenta destino)."""
+    sumado del grupo, tasa y banco de la cuenta destino). Si la cuenta destino es en
+    dolares (USD) el pago ya se recibio en USD: no hay equivalente en Bs que mostrar
+    y la descripcion lleva solo el banco."""
     primero = grupo[0]
     if (primero.metodo_pago or "").strip().lower() == "efectivo":
         return "Efectivo"
-    monto_bs = sum((p.monto_bolivares for p in grupo if p.monto_bolivares is not None), Decimal("0.00"))
-    partes = []
-    if monto_bs:
-        partes.append(f"Bs. {float(monto_bs):,.2f}")
-    if primero.tasa_cambio is not None:
-        partes.append(f"{float(primero.tasa_cambio):,.2f}")
     cuenta = primero.cuenta_bancaria
     banco = None
+    moneda_cuenta = None
     if cuenta is not None:
         banco = cuenta.banco.nombre_banco if cuenta.banco is not None else cuenta.numero_cuenta
+        moneda_cuenta = cuenta.moneda
+    partes = []
+    if moneda_cuenta != "USD":
+        monto_bs = sum((p.monto_bolivares for p in grupo if p.monto_bolivares is not None), Decimal("0.00"))
+        if monto_bs:
+            partes.append(f"Bs. {float(monto_bs):,.2f}")
+        if primero.tasa_cambio is not None:
+            partes.append(f"{float(primero.tasa_cambio):,.2f}")
     if banco:
         partes.append(banco)
     if partes:

@@ -238,6 +238,41 @@ def test_agrupar_pagos_solidos_fusiona_el_abono_general_en_un_solo_pago():
     assert resultado[2]["numero_factura"] == "FV-4"
 
 
+def test_agrupar_pagos_solidos_a_cuenta_usd_solo_muestra_el_banco():
+    """Un abono a cuenta en dolares se recibio en USD: la descripcion no lleva el
+    formato 'Bs. monto - tasa', solo el banco destino."""
+    grupo_abono = ("2026-11-01 10:00", "zelle", "REF-1", 7, None, 900)
+    items = [
+        _item(
+            "pago",
+            1,
+            "FV-1",
+            "-40.00",
+            grupo_abono=grupo_abono,
+            monto_bolivares=Decimal("36000.00"),
+            tasa_cambio=Decimal("900.00"),
+            banco="Banesco USD",
+            moneda_cuenta="USD",
+        ),
+        _item(
+            "pago",
+            2,
+            "FV-2",
+            "-60.00",
+            grupo_abono=grupo_abono,
+            monto_bolivares=Decimal("54000.00"),
+            tasa_cambio=Decimal("900.00"),
+            banco="Banesco USD",
+            moneda_cuenta="USD",
+        ),
+    ]
+
+    resultado = agrupar_pagos_solidos(items)
+
+    assert len(resultado) == 1
+    assert resultado[0]["observaciones"] == "Banesco USD"
+
+
 def test_agrupar_pagos_solidos_conserva_el_numero_si_todas_las_lineas_son_de_una_factura():
     """Dos lineas de pago de UNA misma factura (p. ej. dos efectivos de una venta de contado) se fusionan,
     pero siguen mostrando el numero de esa factura, igual que el estado de cuenta del reporte."""

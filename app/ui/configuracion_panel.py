@@ -15,6 +15,10 @@ from app.ui.styles import TABS_QSS, aplicar_fondo_panel
 
 
 class ConfiguracionPanel(QWidget):
+    # Sus pestanas son formularios de configuracion reales (empresa, licencia, SMTP,
+    # apariencia, roles): limpiar sus campos al salir borraria datos sin guardar.
+    _no_limpiar_al_salir = True
+
     def __init__(self, session_factory, usuario: Usuario, parent=None):
         super().__init__(parent)
         self.setObjectName("ContentArea")

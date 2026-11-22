@@ -14,12 +14,16 @@ que se accede a cada módulo para minimizar el tiempo de arranque.
 
 import logging
 
-from PySide6.QtCore import QEvent, QTimer
+from PySide6.QtCore import QDate, QEvent, QSignalBlocker, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QComboBox,
+    QDateEdit,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QStackedWidget,
@@ -442,9 +446,41 @@ class MainWindow(QMainWindow):
     # ── Conmutador de vistas ─────────────────────────────────────────────
 
     def _ir_a_modulo(self, clave: str) -> None:
+        self._limpiar_panel_actual()
         panel = self._obtener_o_crear_panel(clave)
         self.stack.setCurrentWidget(panel)
         self.topbar.actualizar_modulo(clave)
+
+    def _limpiar_panel_actual(self) -> None:
+        """Al salir de un modulo se limpian sus campos y filtros (busqueda, combos de
+        filtro, checks, fechas) para que la proxima visita arranque sin filtros. Los
+        paneles se cachean en el QStackedWidget, asi que sin esto los filtros quedaban
+        puestos de la visita anterior. Las senales se bloquean para no disparar una
+        recarga por cada widget tocado -- el showEvent del panel ya recarga al entrar.
+        Los QCheckBox vuelven a su estado inicial (capturado al crear el panel en
+        _obtener_o_crear_panel): hay checks que vienen marcados por defecto y no son
+        "filtros apagados" (ej. "incluir anuladas" en Reportes)."""
+        panel = self.stack.currentWidget()
+        if panel is None or getattr(panel, "_no_limpiar_al_salir", False):
+            return
+        iniciales = getattr(panel, "_filtros_iniciales", {})
+        for widget in panel.findChildren(QLineEdit):
+            with QSignalBlocker(widget):
+                widget.clear()
+        for widget in panel.findChildren(QComboBox):
+            if widget.count():
+                with QSignalBlocker(widget):
+                    widget.setCurrentIndex(0)
+        for widget in panel.findChildren(QDateEdit):
+            with QSignalBlocker(widget):
+                widget.setDate(QDate.currentDate())
+        for widget in panel.findChildren(QCheckBox):
+            with QSignalBlocker(widget):
+                widget.setChecked(iniciales.get(widget, False))
+        # La paginacion vuelve a la primera pagina (reiniciar() no emite: no recarga).
+        paginacion = getattr(panel, "paginacion", None)
+        if paginacion is not None and hasattr(paginacion, "reiniciar"):
+            paginacion.reiniciar()
 
     def _abrir_desde_topbar(self, clave: str, texto_busqueda: str) -> None:
         """Destino elegido en la búsqueda global o en la campana: navega al módulo y, si
@@ -513,6 +549,10 @@ class MainWindow(QMainWindow):
                 panel.tasa_registrada.connect(self.ticker_tasas.cargar_tasa)
             if isinstance(panel, ConfiguracionPanel):
                 panel.licencia_panel.estado_cambiado.connect(self._refrescar_banner_licencia)
+
+            # Estado inicial de los checks del panel: _limpiar_panel_actual los restaura
+            # al salir del modulo (los que vienen marcados por defecto no son filtros).
+            panel._filtros_iniciales = {w: w.isChecked() for w in panel.findChildren(QCheckBox)}
 
             self._paneles[clave] = panel
             self.stack.addWidget(panel)

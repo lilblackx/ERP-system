@@ -60,14 +60,23 @@ def test_la_exportacion_a_excel_en_modo_conciliacion_lleva_solo_las_columnas_del
     assert all(len(f) >= 6 for f in filas) and "Activo" not in str(filas)  # ni precios ni estado
 
 
-def test_la_exportacion_a_excel_sin_modo_conciliacion_sigue_igual(monkeypatch, tmp_path):
+def test_la_exportacion_a_excel_sin_modo_conciliacion_lleva_encabezado_de_empresa(monkeypatch, tmp_path):
     monkeypatch.setattr(inv, "_filas_productos_query", _filas)
+    empresa = SimpleNamespace(
+        razon_social_empresa="Distribuidora DJ C.A.",
+        rif_empresa="J-12345678-9",
+        direccion_empresa="Av. Principal",
+        telefono_empresa="0212-555-0000",
+        logotipo_empresa=None,
+    )
+    monkeypatch.setattr(inv.EmpresaService, "obtener_datos_documento", lambda session: empresa)
     ruta = str(tmp_path / "inventario.xlsx")
 
     resultado = inv._tarea_exportar_productos_excel(MagicMock(), ruta, None, None, False, 1)
 
     assert resultado == (ruta, 2)
     contenido = _contenido(ruta)
+    assert "Distribuidora DJ C.A." in str(contenido)
     assert inv.COLS_VISIBLES in contenido and "INVENTARIO FÍSICO" not in str(contenido)
 
 
@@ -88,7 +97,7 @@ def test_la_exportacion_a_pdf_en_modo_conciliacion_usa_otro_titulo_y_las_columna
     assert filas[0] == ["Harina PAN", "Alimentos", "120", "10", "0", ""]
     assert "config_empresa" in kwargs  # el encabezado lleva los datos de Configuracion de Empresa
     assert llamadas[1][0] == "Inventario" and llamadas[1][1] == inv.COLS_VISIBLES
-    assert "config_empresa" not in llamadas[1][3]
+    assert "config_empresa" in llamadas[1][3]  # el catalogo tambien lleva el encabezado de empresa
 
 
 @pytest.fixture()

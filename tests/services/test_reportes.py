@@ -2162,6 +2162,34 @@ def test_estado_cuenta_cliente_descripcion_de_transferencia(db_session):
     assert pagos[0]["descripcion"] == "Bs. 45,000.00 - 900.00 - Banesco"
 
 
+def test_estado_cuenta_cliente_abono_a_cuenta_usd_solo_muestra_el_banco(db_session):
+    """Un abono a cuenta en dolares se recibio en USD: la descripcion no lleva el
+    formato 'Bs. <monto> - <tasa>', solo el banco destino."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    banco = crear_banco(db_session, nombre_banco="Banesco USD")
+    cuenta = crear_cuenta_bancaria(db_session, banco=banco, moneda="USD")
+    _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+
+    PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("50.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="zelle",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
+    assert len(pagos) == 1
+    assert pagos[0]["descripcion"] == "Banesco USD"
+
+
 def test_estado_cuenta_cliente_abono_general_bcv_sale_como_un_solo_pago(db_session):
     """Igual que el abono general normal: un pago BCV por factura en la base, UN solo movimiento en el estado de
     cuenta, con el rotulo "Abono general BCV"."""
