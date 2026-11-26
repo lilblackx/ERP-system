@@ -85,6 +85,14 @@ def engine_pre_0100(tmp_path_factory):
 
     engine = create_engine("mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(_odbc_connect_str(MIG_DB_NAME)))
     aplicar_migraciones(engine, migrations_dir=previas)
+    # El codigo actual (VentaService.emitir_factura) exige dbo.correlativos, creado por
+    # la 0104 -- posterior a la 0100 bajo prueba, asi que no esta en "previas". Se aplica
+    # aparte para que los escenarios puedan emitir facturas; no interfiere con la 0100.
+    with engine.connect() as connection:
+        _ejecutar_batches(
+            connection, (MIGRATIONS_DIR / "0104_correlativo_de_facturas.sql").read_text(encoding="utf-8")
+        )
+        connection.commit()
     yield engine
     engine.dispose()
     _borrar_base_descartable()
