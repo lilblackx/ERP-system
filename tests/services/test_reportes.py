@@ -2082,7 +2082,7 @@ def test_estado_cuenta_cliente_combina_cargo_y_abono_con_saldo_corrido(db_sessio
     assert resultado["filas"][0]["tipo"] == "Factura"
     assert resultado["filas"][0]["cargo"] == Decimal("80.00")
     assert resultado["filas"][1]["tipo"] == "Pago"
-    assert resultado["filas"][1]["abono"] == Decimal("30.00")
+    assert resultado["filas"][1]["abono"] == Decimal("-30.00")
     assert resultado["saldo_final"] == Decimal("50.00")
 
 
@@ -2128,10 +2128,92 @@ def test_estado_cuenta_cliente_abono_general_sale_como_un_solo_pago(db_session):
 
     pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
     assert len(pagos) == 1
-    assert pagos[0]["abono"] == Decimal("100.00")
+    assert pagos[0]["abono"] == Decimal("-100.00")
     assert pagos[0]["referencia"] == "Abono general"
     assert pagos[0]["descripcion"] == "Efectivo"
     assert resultado["saldo_final"] == Decimal("0.00")
+
+
+def test_estado_cuenta_cliente_sobreabono_muestra_el_pago_exacto_y_saldo_a_favor(db_session):
+    """El cliente pago $120 sobre una deuda de $100: la fila del abono muestra lo
+    exacto entregado ($120, no solo lo aplicado) y el saldo corrido queda en -$20,
+    que es el saldo a favor. La nota de credito del excedente no sale como fila
+    aparte (su dinero ya esta dentro del pago)."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    _factura_a_credito(db_session, admin, cliente, "60.00", date.today() + timedelta(days=10))
+    _factura_a_credito(db_session, admin, cliente, "40.00", date.today() + timedelta(days=10))
+
+    PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("120.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
+    assert len(pagos) == 1
+    assert pagos[0]["abono"] == Decimal("-120.00")
+    assert resultado["saldo_final"] == Decimal("-20.00")
+    assert resultado["saldo_a_favor"] == Decimal("20.00")
+    # La NC del excedente no aparece: su monto ya esta dentro del pago exacto.
+    assert [f["tipo"] for f in resultado["filas"]] == ["Factura", "Factura", "Pago"]
+
+
+def test_estado_cuenta_cliente_devolucion_de_saldo_a_favor_sale_como_cargo(db_session):
+    """Devolver parte del saldo a favor al cliente es una salida real de dinero:
+    la relacion la muestra como un cargo 'Devolución' y la nota sigue mostrando el
+    credito otorgado completo (saldo disponible + lo devuelto), no solo lo que
+    queda a favor -- si no, la devolucion contaria dos veces."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=Decimal("500.00"))
+    factura = _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+
+    nota = NotaCreditoService.crear_nota_credito_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_factura_origen=factura.id_factura,
+        monto=Decimal("30.00"),
+        motivo="Ajuste comercial",
+        id_usuario=admin.id_usuario,
+    )
+    NotaCreditoService.devolver_nota_credito_cliente(
+        db_session,
+        id_nota_credito=nota.id_nota_credito,
+        monto=Decimal("10.00"),
+        metodo_devolucion="efectivo",
+        id_caja=caja.id_caja,
+        id_autorizador=admin.id_usuario,
+        id_usuario=admin.id_usuario,
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(
+        db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente
+    )
+
+    devoluciones = [f for f in resultado["filas"] if f["tipo"] == "Devolución"]
+    assert len(devoluciones) == 1
+    assert devoluciones[0]["cargo"] == Decimal("10.00")
+    assert devoluciones[0]["abono"] == Decimal("0.00")
+    assert devoluciones[0]["referencia"] == nota.numero_nota_credito
+    notas = [f for f in resultado["filas"] if f["tipo"] == "Nota de crédito"]
+    assert len(notas) == 1
+    assert notas[0]["abono"] == Decimal("-30.00")
+    # Factura 100 - credito 30 + devolucion 10 = 80; el favor vigente es 20.
+    assert resultado["saldo_final"] == Decimal("80.00")
+    assert resultado["saldo_a_favor"] == Decimal("20.00")
 
 
 def test_estado_cuenta_cliente_descripcion_de_transferencia(db_session):
@@ -2230,7 +2312,7 @@ def test_estado_cuenta_cliente_abono_general_bcv_sale_como_un_solo_pago(db_sessi
     assert db_session.query(PagoCobroBCV).count() == 2
     pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
     assert len(pagos) == 1
-    assert pagos[0]["abono"] == abono
+    assert pagos[0]["abono"] == -abono
     assert pagos[0]["referencia"] == "Abono general BCV"
     assert pagos[0]["descripcion"] == "Efectivo"
 
@@ -2268,7 +2350,7 @@ def test_estado_cuenta_cliente_dos_lineas_de_pago_de_una_factura_no_son_abono_ge
 
     pagos = [f for f in resultado["filas"] if f["tipo"] == "Pago"]
     assert len(pagos) == 1
-    assert pagos[0]["abono"] == Decimal("100.00")
+    assert pagos[0]["abono"] == Decimal("-100.00")
     assert pagos[0]["referencia"] == factura.numero_factura
 
 
@@ -2351,7 +2433,9 @@ def test_estado_cuenta_cliente_factura_anulada_con_pago_se_marca_como_anulada(db
     assert [f["tipo"] for f in filas] == ["Factura", "Pago", "Nota de crédito"]
     assert filas[0]["referencia"] == f"{factura.numero_factura} (anulada)"
     assert "anulada" in filas[0]["descripcion"].lower()
-    assert resultado["saldo_final"] == Decimal("0.00")
+    # El pago de $30 quedo como nota de credito: saldo corrido negativo = saldo a favor.
+    assert filas[2]["abono"] == Decimal("-30.00")
+    assert resultado["saldo_final"] == Decimal("-30.00")
 
 
 def test_estado_cuenta_cliente_factura_conciliada_con_banco_muestra_el_total_y_la_conciliacion(db_session):
@@ -2379,7 +2463,7 @@ def test_estado_cuenta_cliente_factura_conciliada_con_banco_muestra_el_total_y_l
     filas = resultado["filas"]
     assert [(f["tipo"], f["cargo"], f["abono"]) for f in filas] == [
         ("Factura", Decimal("100.00"), Decimal("0.00")),
-        ("Conciliación", Decimal("0.00"), Decimal("40.00")),
+        ("Conciliación", Decimal("0.00"), Decimal("-40.00")),
     ]
     assert resultado["saldo_final"] == Decimal("60.00")
 
@@ -2565,7 +2649,8 @@ def test_estado_cuenta_cliente_sin_anuladas_oculta_la_factura_anulada_y_sus_pago
         ("Factura", viva.numero_factura),
         ("Nota de crédito", nc.numero_nota_credito),
     ]
-    assert (con["saldo_final"], sin["saldo_final"]) == (Decimal("70.00"), Decimal("70.00"))
+    # 70 (factura viva) + 30 (cargo de la anulada) - 30 (su pago) - 30 (NC a favor) = 40
+    assert (con["saldo_final"], sin["saldo_final"]) == (Decimal("40.00"), Decimal("40.00"))
     assert con["incluir_anuladas"] is True and sin["incluir_anuladas"] is False
 
 
@@ -2611,10 +2696,12 @@ def test_estado_cuenta_cliente_factura_bcv_anulada_con_pago_sale_marcada_y_sus_p
         ("Pago", f"{factura.numero_factura} (BCV)"),
         ("Nota de crédito", nc.numero_nota_credito),
     ]
-    assert con["filas"][0]["cargo"] == con["filas"][1]["abono"] == Decimal("40.00")
-    assert con["saldo_final"] == Decimal("0.00")
+    assert con["filas"][0]["cargo"] == Decimal("40.00")
+    assert con["filas"][1]["abono"] == Decimal("-40.00")
+    # 40 (cargo) - 40 (pago) - 40 (NC a favor de la anulacion) = -40: saldo a favor.
+    assert con["saldo_final"] == Decimal("-40.00")
     assert [(f["tipo"], f["referencia"]) for f in sin["filas"]] == [("Nota de crédito", nc.numero_nota_credito)]
-    assert sin["saldo_final"] == Decimal("0.00")
+    assert sin["saldo_final"] == Decimal("-40.00")
 
 
 # --- cobros_del_periodo ---------------------------------------------------------------
@@ -4028,7 +4115,7 @@ def test_estado_cuenta_cliente_incluye_facturas_y_pagos_bcv(db_session):
     assert [f["tipo"] for f in resultado["filas"]] == ["Factura", "Pago"]
     assert resultado["filas"][0]["cargo"] == total_bcv
     assert resultado["filas"][0]["referencia"].endswith("(BCV)")
-    assert resultado["filas"][1]["abono"] == Decimal("25.00")
+    assert resultado["filas"][1]["abono"] == Decimal("-25.00")
     assert resultado["saldo_final"] == total_bcv - Decimal("25.00")
 
 
@@ -4048,7 +4135,7 @@ def test_estado_cuenta_cliente_muestra_las_notas_de_credito_aplicadas(db_session
 
     assert [f["tipo"] for f in resultado["filas"]] == ["Factura", "Nota de crédito"]
     assert resultado["filas"][0]["cargo"] == Decimal("100.00")  # el monto original, no el saldo tras la nota
-    assert resultado["filas"][1]["abono"] == Decimal("30.00")
+    assert resultado["filas"][1]["abono"] == Decimal("-30.00")
     assert resultado["filas"][1]["referencia"] == nota.numero_nota_credito
     assert resultado["saldo_final"] == Decimal("70.00")
 

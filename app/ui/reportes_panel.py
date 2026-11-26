@@ -80,6 +80,7 @@ from app.ui.styles import (
 )
 from app.ui.toolbar_popups import BotonExportar
 from app.ui.workers import QueryWorker
+from app.utils.decimal_utils import formatear_usd
 
 logger = logging.getLogger(__name__)
 
@@ -4622,24 +4623,25 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
             self.tabla.setItem(row, 1, QTableWidgetItem(f["tipo"]))
             self.tabla.setItem(row, 2, QTableWidgetItem(f.get("descripcion") or ""))
             self.tabla.setItem(row, 3, QTableWidgetItem(f["referencia"] or "N/A"))
+            # Abono y saldo pueden ser negativos (abonos negativos / saldo a favor).
             self.tabla.setItem(
                 row,
                 4,
-                self._item_num(f"${float(f['cargo']):,.2f}" if f["cargo"] else ""),
+                self._item_num(formatear_usd(f["cargo"]) if f["cargo"] else ""),
             )
             self.tabla.setItem(
                 row,
                 5,
-                self._item_num(f"${float(f['abono']):,.2f}" if f["abono"] else ""),
+                self._item_num(formatear_usd(f["abono"]) if f["abono"] else ""),
             )
-            self.tabla.setItem(row, 6, self._item_num(f"${float(f['saldo']):,.2f}"))
+            self.tabla.setItem(row, 6, self._item_num(formatear_usd(f["saldo"])))
 
         self.lbl_total.setText(f"{resultado['cliente']} — {n_filas} movimiento{'s' if n_filas != 1 else ''}")
         self._limpiar_resumen()
-        self.resumen_layout.addWidget(self._chip(f"Saldo inicial: ${float(resultado['saldo_inicial']):,.2f}"))
+        self.resumen_layout.addWidget(self._chip(f"Saldo inicial: {formatear_usd(resultado['saldo_inicial'])}"))
         self.resumen_layout.addWidget(
             self._chip(
-                f"Saldo final: ${float(resultado['saldo_final']):,.2f}",
+                f"Saldo final: {formatear_usd(resultado['saldo_final'])}",
                 "#FFFFFF",
                 COLOR_PRIMARY,
             )
@@ -5838,7 +5840,13 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         if self._ultimo_modo == REPORTE_ESTADO_CTA_CLIENTE:
             resultado = self._ultimo_resultado
             hasta = resultado.get("fecha_hasta")
-            etiqueta = f"Saldo al {hasta.strftime('%d/%m/%Y')}" if hasta and hasta < date.today() else "Saldo Pendiente"
+            if resultado["saldo_final"] < 0:
+                # Saldo corrido negativo = el cliente tiene saldo a favor, no deuda.
+                etiqueta = "Saldo a favor"
+            else:
+                etiqueta = (
+                    f"Saldo al {hasta.strftime('%d/%m/%Y')}" if hasta and hasta < date.today() else "Saldo Pendiente"
+                )
             return ["", "", "", etiqueta, "", "", float(resultado["saldo_final"])]
         return None
 
@@ -6168,12 +6176,15 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
             return "Histórico de Precios", filtros, [1.3, 1.0, 1.0, 1.5]
 
         if self._ultimo_modo == REPORTE_ESTADO_CTA_CLIENTE:
+            saldo_a_favor = self._ultimo_resultado.get("saldo_a_favor") or 0
             filtros = {
                 "Cliente": resultado["cliente"],
                 "Desde": (resultado["fecha_desde"].strftime("%d/%m/%Y") if resultado["fecha_desde"] else "N/A"),
                 "Hasta": (resultado["fecha_hasta"].strftime("%d/%m/%Y") if resultado["fecha_hasta"] else "N/A"),
                 "Saldo inicial": f"${float(resultado['saldo_inicial']):,.2f}",
                 "Saldo final": f"${float(resultado['saldo_final']):,.2f}",
+                # Solo se imprime si el cliente tiene saldo a favor vigente; None lo omite.
+                "Saldo a favor": f"${float(saldo_a_favor):,.2f}" if saldo_a_favor > 0 else None,
                 "Ventas de contado": None if resultado.get("incluir_contado", True) else "No incluidas",
                 "Facturas anuladas": None if resultado.get("incluir_anuladas", True) else "No incluidas",
             }

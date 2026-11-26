@@ -698,6 +698,9 @@ class PagoService:
                         else f"Sobreabono por pago en exceso - {metodo_pago}"
                     ),
                     id_usuario=id_usuario,
+                    # Vinculo con el abono: el estado de cuenta suma este monto a la
+                    # fila del pago para mostrar lo exacto que el cliente entrego.
+                    fecha_pago_origen=fecha_pago_abono,
                 )
                 nota_credito_id = nota_credito.id_nota_credito
                 descripcion_sobreabono = f"Sobreabono (saldo a favor) de {cliente.nombre_razon_social}"[:255]

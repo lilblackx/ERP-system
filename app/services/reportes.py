@@ -55,6 +55,7 @@ from app.db.models import (
     CuentaPorCobrarOtro,
     CuentaPorPagar,
     CuentaPorPagarOtro,
+    DevolucionNotaCredito,
     FacturaDetalle,
     FacturaVenta,
     Inventario,
@@ -171,7 +172,9 @@ def _aplicaciones_nc_cliente(
     consulta = (
         session.query(
             AplicacionNotaCreditoCliente.fecha_aplicacion,
+            NotaCreditoCliente.id_nota_credito,
             NotaCreditoCliente.numero_nota_credito,
+            NotaCreditoCliente.fecha_pago_origen,
             CuentaPorCobrar.id_factura,
             AplicacionNotaCreditoCliente.monto,
         )
@@ -198,7 +201,12 @@ def _aplicaciones_nc_cliente(
     return [
         {
             "fecha": fila.fecha_aplicacion,
+            "id_nota_credito": fila.id_nota_credito,
             "numero_nota_credito": fila.numero_nota_credito,
+            # NOT NULL = la nota es el excedente de un abono: ese dinero ya salio en la
+            # fila del pago (monto exacto), asi que su aplicacion no debe contarse
+            # otra vez como abono.
+            "vinculada_a_abono": fila.fecha_pago_origen is not None,
             "id_factura": fila.id_factura,
             "monto": fila.monto,
         }
@@ -278,7 +286,7 @@ def _descripcion_abono(grupo: list) -> str:
     return (primero.metodo_pago or "pago").replace("_", " ").capitalize()
 
 
-def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "") -> list[dict]:
+def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "", excedentes: dict | None = None) -> list[dict]:
     """Pagos de un cliente agrupados por abono para el estado de cuenta.
 
     En la base cada factura afectada por un abono general guarda su propio pago
@@ -286,7 +294,13 @@ def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "") -> lis
     dinero: las filas que comparten fecha, metodo, referencia, origen y usuario se
     muestran como un solo evento con el monto total. Un pago individual siempre
     forma su propio grupo (su fecha_pago es unica). Los abonos anteriores a que todos
-    los pagos del abono compartieran fecha no se agrupan (cada pago tiene la suya)."""
+    los pagos del abono compartieran fecha no se agrupan (cada pago tiene la suya).
+
+    `excedentes` mapea fecha_pago -> monto de las notas de credito que ese abono dejo
+    como saldo a favor (migrations/0105): el cliente entrego ese dinero igual, asi que
+    la fila del abono muestra el pago EXACTO (aplicado + excedente) y el saldo corrido
+    puede quedar negativo, que es como se lee el saldo a favor."""
+    excedentes = excedentes or {}
     grupos: dict[tuple, list] = {}
     for pago in pagos:
         clave = (
@@ -316,7 +330,8 @@ def _abonos_cliente(pagos, etiqueta_abono: str, sufijo_factura: str = "") -> lis
                 "id_factura": next(iter(ids_facturas)) if len(ids_facturas) == 1 else None,
                 "referencia": referencia,
                 "cargo": Decimal("0.00"),
-                "abono": sum((p.monto for p in grupo), Decimal("0.00")),
+                "abono": sum((p.monto for p in grupo), Decimal("0.00"))
+                + excedentes.get(primero.fecha_pago, Decimal("0.00")),
                 "descripcion": _descripcion_abono(grupo),
             }
         )
@@ -2388,18 +2403,53 @@ class ReporteService:
         ids_facturas_cliente = {c.id_factura for c in cuentas}
         aplicaciones_nc = _aplicaciones_nc_cliente(session, ids_factura=ids_facturas_cliente)
         ids_facturas_bcv = {c.id_factura for c in cuentas_bcv}
-        # Notas de credito con saldo sin aplicar = saldo a favor vigente del cliente
-        # (incluye las que crea un abono sin facturas pendientes o un sobreabono, que
-        # tienen id_factura_origen NULL y por eso nunca pasaban por este reporte).
-        notas_a_favor = (
-            session.query(NotaCreditoCliente)
-            .filter(
-                NotaCreditoCliente.id_cliente == id_cliente,
-                NotaCreditoCliente.estado == "disponible",
-                NotaCreditoCliente.saldo_disponible > 0,
+        # Notas de credito del cliente. Las vinculadas a un abono (fecha_pago_origen,
+        # migrations/0105) son el excedente de un pago: ese dinero ya se muestra dentro
+        # de la fila del abono con el monto exacto, asi que no generan fila propia ni
+        # cuentan sus aplicaciones (saldaria el credito dos veces). Las demas (anulacion,
+        # devoluciones, abonos historicos anteriores a la migracion) si son fila propia:
+        # son credito que el cliente puede usar y el saldo corrido debe mostrarlo.
+        notas_cliente = session.query(NotaCreditoCliente).filter(NotaCreditoCliente.id_cliente == id_cliente).all()
+        # Devoluciones del saldo a favor (migrations/0106): son una SALIDA real de dinero
+        # (egreso en caja/banco) y en la relacion aparecen como un cargo del cliente.
+        devoluciones_nc = (
+            session.query(
+                DevolucionNotaCredito.id_devolucion,
+                DevolucionNotaCredito.id_nota_credito,
+                DevolucionNotaCredito.monto,
+                DevolucionNotaCredito.metodo_devolucion,
+                DevolucionNotaCredito.fecha_devolucion,
+                NotaCreditoCliente.numero_nota_credito,
+                NotaCreditoCliente.id_factura_origen,
             )
+            .join(
+                NotaCreditoCliente,
+                NotaCreditoCliente.id_nota_credito == DevolucionNotaCredito.id_nota_credito,
+            )
+            .filter(NotaCreditoCliente.id_cliente == id_cliente)
             .all()
         )
+        devuelto_por_nota: dict[int, Decimal] = {}
+        for d in devoluciones_nc:
+            devuelto_por_nota[d.id_nota_credito] = devuelto_por_nota.get(d.id_nota_credito, Decimal("0.00")) + d.monto
+        fechas_con_pago = {p.fecha_pago for p in pagos} | {p.fecha_pago for p in pagos_bcv}
+        excedentes_abono: dict = {}
+        notas_a_favor = []
+        for nota in notas_cliente:
+            if nota.fecha_pago_origen is not None and nota.fecha_pago_origen in fechas_con_pago:
+                excedentes_abono[nota.fecha_pago_origen] = (
+                    excedentes_abono.get(nota.fecha_pago_origen, Decimal("0.00")) + nota.monto
+                )
+            else:
+                # El abono de la fila es el credito otorgado neto de aplicaciones:
+                # saldo_disponible + lo ya devuelto = monto - aplicado. Si quedara en
+                # solo saldo_disponible, la devolucion contaria dos veces (la fila
+                # encoge sola al devolver y ademas sale el cargo de la devolucion).
+                credito_neto = nota.saldo_disponible + devuelto_por_nota.get(nota.id_nota_credito, Decimal("0.00"))
+                if credito_neto > 0:
+                    # Si la NC vinculada no encuentra su abono (p. ej. pago a cliente sin
+                    # deuda, que no genera lineas de pago), cae aqui y se ve como nota a favor.
+                    notas_a_favor.append((nota, credito_neto))
 
         # Sumas por cuenta/factura de una sola pasada: recorrer todos los pagos por cada cuenta era cuadratico (un
         # cliente con 3 500 movimientos tardaba 1,4 s).
@@ -2466,8 +2516,10 @@ class ReporteService:
                     ),
                 }
             )
-        eventos.extend(_abonos_cliente(pagos, "Abono general"))
-        eventos.extend(_abonos_cliente(pagos_bcv, "Abono general BCV", sufijo_factura=" (BCV)"))
+        eventos.extend(_abonos_cliente(pagos, "Abono general", excedentes=excedentes_abono))
+        eventos.extend(
+            _abonos_cliente(pagos_bcv, "Abono general BCV", sufijo_factura=" (BCV)", excedentes=excedentes_abono)
+        )
         for conciliacion in conciliaciones:
             referencia_bancaria = conciliacion.partida.referencia_bancaria if conciliacion.partida else None
             eventos.append(
@@ -2483,6 +2535,9 @@ class ReporteService:
                 }
             )
         for aplicacion in aplicaciones_nc:
+            # La nota vinculada a un abono ya tiene su dinero dentro de la fila del pago
+            # (monto exacto): su aplicacion queda solo como constancia informativa para
+            # no contar el credito dos veces. Las demas si bajan el saldo como abono.
             eventos.append(
                 {
                     "fecha": aplicacion["fecha"],
@@ -2490,17 +2545,22 @@ class ReporteService:
                     "id_factura": aplicacion["id_factura"],
                     "referencia": aplicacion["numero_nota_credito"],
                     "cargo": Decimal("0.00"),
-                    "abono": aplicacion["monto"],
+                    "abono": Decimal("0.00") if aplicacion["vinculada_a_abono"] else aplicacion["monto"],
                     "descripcion": "",
                 }
             )
-        # Las notas a favor se muestran como fila informativa (cargo=abono=0: el saldo
-        # corrido es la DEUDA y no debe bajar hasta que la nota se aplique a una
-        # factura -- si contara como abono, la aplicacion posterior la contaria dos
-        # veces). El monto va en la descripcion y el total en saldo_a_favor.
-        for nota in notas_a_favor:
+        # Las notas a favor no vinculadas a un pago SI bajan el saldo: son credito del
+        # cliente (anulaciones, devoluciones, sobreabonos anteriores a la migracion).
+        # El abono es el saldo_disponible vigente -- lo que aun queda a favor -- y cada
+        # aplicacion posterior tambien cuenta como abono, asi la suma de la fila mas
+        # sus aplicaciones siempre refleja el credito total de la nota. Un saldo
+        # corrido negativo es la forma en que se lee el saldo a favor del cliente.
+        for nota, credito_neto in notas_a_favor:
             motivo = (nota.motivo or "").strip()
-            descripcion = f"Saldo a favor ${nota.saldo_disponible:,.2f}"
+            if nota.saldo_disponible > 0:
+                descripcion = f"Saldo a favor ${nota.saldo_disponible:,.2f}"
+            else:
+                descripcion = "Nota de crédito"
             if motivo:
                 descripcion += f" - {motivo}"
             eventos.append(
@@ -2510,8 +2570,26 @@ class ReporteService:
                     "id_factura": nota.id_factura_origen,
                     "referencia": nota.numero_nota_credito,
                     "cargo": Decimal("0.00"),
-                    "abono": Decimal("0.00"),
+                    "abono": credito_neto,
                     "descripcion": descripcion[:255],
+                }
+            )
+        # Devolucion del saldo a favor: es dinero que salio de la empresa hacia el
+        # cliente, asi que va como CARGO (positivo) y sube el saldo corrido -- es la
+        # contrapartida del abono que la nota dejo cuando se creo/aplico.
+        for d in devoluciones_nc:
+            metodo = {"efectivo": "Efectivo", "pago_movil": "Pago móvil", "transferencia": "Transferencia"}.get(
+                d.metodo_devolucion or "", d.metodo_devolucion or ""
+            )
+            eventos.append(
+                {
+                    "fecha": d.fecha_devolucion,
+                    "tipo": "Devolución",
+                    "id_factura": d.id_factura_origen,
+                    "referencia": d.numero_nota_credito,
+                    "cargo": d.monto,
+                    "abono": Decimal("0.00"),
+                    "descripcion": f"Devolución de saldo a favor - {metodo}".strip(" -"),
                 }
             )
         eventos.sort(key=lambda e: e["fecha"])
@@ -2532,7 +2610,10 @@ class ReporteService:
             if hasta_dt is not None and evento["fecha"] > hasta_dt:
                 continue
             saldo += evento["cargo"] - evento["abono"]
-            filas.append({**evento, "saldo": saldo})
+            # Convencion de la relacion: cargos positivos y abonos NEGATIVOS, para que
+            # el saldo corrido se lea como una suma simple y quede negativo cuando el
+            # cliente tiene saldo a favor.
+            filas.append({**evento, "abono": -evento["abono"], "saldo": saldo})
 
         return {
             "id_cliente": cliente.id_cliente,
@@ -2544,7 +2625,13 @@ class ReporteService:
             "saldo_inicial": saldo_inicial,
             "filas": filas,
             "saldo_final": saldo,
-            "saldo_a_favor": sum((n.saldo_disponible for n in notas_a_favor), Decimal("0.00")),
+            # Saldo a favor vigente = TODAS las notas disponibles con saldo, incluidas
+            # las vinculadas a un abono (su dinero ya esta en la fila del pago, pero el
+            # credito sigue existiendo hasta aplicarse).
+            "saldo_a_favor": sum(
+                (n.saldo_disponible for n in notas_cliente if n.estado == "disponible" and n.saldo_disponible > 0),
+                Decimal("0.00"),
+            ),
         }
 
     @staticmethod

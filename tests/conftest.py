@@ -69,6 +69,7 @@ TABLES_DELETE_ORDER = [
     "cuentas_por_cobrar_otros",
     "aplicaciones_nota_credito_cliente",
     "aplicaciones_nota_credito_proveedor",
+    "devoluciones_nota_credito",
     "notas_credito_clientes",
     "notas_credito_proveedores",
     "pagos_cobros",

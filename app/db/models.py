@@ -917,6 +917,10 @@ class NotaCreditoCliente(Base):
     saldo_disponible: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     motivo: Mapped[str | None] = mapped_column(String(255))
     estado: Mapped[str] = mapped_column(String(15), server_default="disponible")
+    # Fecha_pago compartida por los pagos_cobros del abono que dejo esta nota como
+    # excedente (migrations/0105): el estado de cuenta la suma a la fila del abono
+    # para mostrar el pago exacto. NULL en notas de anulacion/otros origenes.
+    fecha_pago_origen: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
     fecha_creacion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
 
@@ -948,6 +952,31 @@ class AplicacionNotaCreditoCliente(Base):
 
     nota = relationship("NotaCreditoCliente")
     cuenta_por_cobrar = relationship("CuentaPorCobrar")
+
+
+class DevolucionNotaCredito(Base):
+    """Cada devolucion en efectivo/banco del saldo a favor de una nota de credito de
+    cliente (NotaCreditoService.devolver_nota_credito_cliente, migrations/0106).
+    Es un egreso real de dinero -- a diferencia de aplicar_nota_credito_cliente, que
+    es una transferencia contable interna -- y esta fila es su constancia en la misma
+    transaccion que baja saldo_disponible y registra el egreso en caja/banco. El
+    estado de cuenta del reporte la muestra como un cargo (salida) del cliente."""
+
+    __tablename__ = "devoluciones_nota_credito"
+    # Tiene trigger de auditoria (migrations/0106): SQL Server no admite OUTPUT sin INTO.
+    __table_args__ = {"implicit_returning": False}
+
+    id_devolucion: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_nota_credito: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("notas_credito_clientes.id_nota_credito"), nullable=False
+    )
+    monto: Mapped[decimal.Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    metodo_devolucion: Mapped[str | None] = mapped_column(String(20))
+    fecha_devolucion: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.getdate())
+    devuelto_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+    autorizado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id_usuario"))
+
+    nota = relationship("NotaCreditoCliente")
 
 
 class NotaCreditoProveedor(Base):

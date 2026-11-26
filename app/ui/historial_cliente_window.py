@@ -70,6 +70,7 @@ from app.ui.styles import (
     dar_ancho_a_texto,
 )
 from app.ui.workers import QueryWorker
+from app.utils.decimal_utils import formatear_usd
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +319,9 @@ def _filas_estado_cuenta(session, id_cliente: int, id_usuario: int | None):
         ]
         for f in resultado["filas"]
     ]
-    total_row = ["", "", "", "Saldo Pendiente", "", "", float(resultado["saldo_final"])]
+    # Saldo corrido negativo = el cliente tiene saldo a favor, no deuda pendiente.
+    etiqueta_total = "Saldo a favor" if resultado["saldo_final"] < 0 else "Saldo Pendiente"
+    total_row = ["", "", "", etiqueta_total, "", "", float(resultado["saldo_final"])]
     return resultado, filas, total_row
 
 
@@ -335,13 +338,18 @@ def _tarea_exportar_historial_excel(
     completo del cliente a un archivo (openpyxl) es lo bastante lento como para
     congelar la ventana si se hace en el hilo de GUI."""
     if vista == VISTA_ESTADO_CUENTA:
-        _resultado, filas, total_row = _filas_estado_cuenta(session, id_cliente, id_usuario)
+        resultado, filas, total_row = _filas_estado_cuenta(session, id_cliente, id_usuario)
+        filtros = {"Vista": "Estado de cuenta"}
+        saldo_a_favor = resultado.get("saldo_a_favor") or 0
+        if saldo_a_favor > 0:
+            filtros["Saldo a favor"] = f"${float(saldo_a_favor):,.2f}"
         exportar_excel(
             ruta,
             COLS_ESTADO_CUENTA,
             filas,
             titulo=_titulo_excel_historial(cliente_nombre, vista),
             total_row=total_row,
+            filtros=filtros,
         )
         return ruta
     filas = _filas_historial_para_exportar(session, id_cliente, id_usuario, vista, ocultar_pagadas)
@@ -359,14 +367,18 @@ def _tarea_exportar_historial_pdf(
     ocultar_pagadas: bool = False,
 ) -> str:
     if vista == VISTA_ESTADO_CUENTA:
-        _resultado, filas, total_row = _filas_estado_cuenta(session, id_cliente, id_usuario)
+        resultado, filas, total_row = _filas_estado_cuenta(session, id_cliente, id_usuario)
+        filtros = {"Vista": "Estado de cuenta"}
+        saldo_a_favor = resultado.get("saldo_a_favor") or 0
+        if saldo_a_favor > 0:
+            filtros["Saldo a favor"] = f"${float(saldo_a_favor):,.2f}"
         exportar_pdf(
             ruta,
             "Estado de Cuenta por Cliente",
             COLS_ESTADO_CUENTA,
             filas,
             cliente_nombre=cliente_nombre,
-            filtros={"Vista": "Estado de cuenta"},
+            filtros=filtros,
             col_widths=COL_WIDTHS_ESTADO_CUENTA,
             total_row=total_row,
         )
@@ -773,7 +785,8 @@ class HistorialClienteWindow(CargaAsincronaMixin, MixinPermisos, QDialog):
                 (5, f["abono"], der),
                 (6, f["saldo"], der),
             ):
-                item = QTableWidgetItem(f"${float(valor):,.2f}" if valor else "")
+                # Abono y saldo pueden ser negativos (abonos negativos / saldo a favor).
+                item = QTableWidgetItem(formatear_usd(valor) if valor else "")
                 item.setTextAlignment(align)
                 if col == 6:
                     font = item.font()

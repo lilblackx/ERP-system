@@ -21,3 +21,10 @@ def to_decimal(value, default=Decimal("0")):
     if isinstance(value, str):
         return Decimal(value)
     raise TypeError(f"Can't convert {type(value)} to Decimal")
+
+
+def formatear_usd(valor) -> str:
+    """'$1,234.56' / '-$1,234.56': signo delante del simbolo, para montos que pueden
+    quedar negativos (p. ej. el saldo a favor en el estado de cuenta del cliente)."""
+    v = float(to_decimal(valor))
+    return f"-${abs(v):,.2f}" if v < 0 else f"${v:,.2f}"

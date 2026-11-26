@@ -15,6 +15,7 @@ from app.db.models import (
     CuentaBancaria,
     CuentaPorCobrar,
     CuentaPorPagar,
+    DevolucionNotaCredito,
     FacturaVenta,
     NotaCreditoCliente,
     NotaCreditoProveedor,
@@ -69,6 +70,7 @@ class NotaCreditoService:
         monto,
         motivo: str,
         id_usuario: int | None,
+        fecha_pago_origen=None,
     ) -> NotaCreditoCliente:
         """Nucleo sin commit propio -- para que VentaService.anular_factura() pueda crear
         la nota de credito en la MISMA transaccion atomica que la anulacion (antes cada una
@@ -88,6 +90,7 @@ class NotaCreditoService:
             saldo_disponible=monto,
             motivo=motivo,
             estado="disponible",
+            fecha_pago_origen=fecha_pago_origen,
             creado_por=id_usuario,
         )
         session.add(nota)
@@ -368,6 +371,17 @@ class NotaCreditoService:
         if nota.saldo_disponible == 0:
             nota.estado = "devuelta"
 
+        # La constancia de la devolucion va en la MISMA transaccion que baja el saldo y
+        # registra el egreso en caja/banco: el estado de cuenta la lee de aqui como cargo.
+        session.add(
+            DevolucionNotaCredito(
+                id_nota_credito=nota.id_nota_credito,
+                monto=monto,
+                metodo_devolucion=metodo_devolucion,
+                devuelto_por=id_usuario,
+                autorizado_por=id_autorizador,
+            )
+        )
         session.commit()
         session.refresh(nota)
 

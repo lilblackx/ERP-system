@@ -86,17 +86,21 @@ def _afirmar_que_cuadra(db, admin, id_cliente):
     historial, reporte = _historial_y_reporte(db, admin, id_cliente)
     facturas = _facturas(historial)
 
-    # 1. Mismo saldo: la factura mas reciente, la cabecera del historial y el cierre del reporte.
-    assert (
-        facturas[0]["saldo_corrido"]
-        == reporte["saldo_final"]
-        == obtener_saldo_total_pendiente(db, id_cliente, admin.id_usuario)
-    )
+    pendiente = obtener_saldo_total_pendiente(db, id_cliente, admin.id_usuario)
+    favor = obtener_saldo_total_positivo(db, id_cliente, admin.id_usuario)
 
-    # 2. Lo cargado y lo abonado suman lo mismo (pagos, conciliaciones y notas de credito aplicadas son abonos).
+    # 1. El historial muestra la DEUDA; el estado de cuenta muestra la posicion neta:
+    #    deuda menos saldo a favor (puede quedar negativa cuando el cliente tiene
+    #    credito a su favor).
+    assert facturas[0]["saldo_corrido"] == pendiente
+    assert reporte["saldo_final"] == pendiente - favor
+
+    # 2. Lo cargado y lo abonado suman lo mismo. Los abonos del reporte son negativos
+    #    y ademas incluyen el saldo a favor vigente (NC sin aplicar) y el excedente
+    #    dentro del pago exacto: son credito que el historial no cuenta como abono.
     assert sum(f["monto"] for f in facturas) == sum(f["cargo"] for f in reporte["filas"])
     abonos = sum(-i["monto"] for i in historial if i["tipo_transaccion"] in ("pago", "aplicacion_nota_credito"))
-    assert abonos == sum(f["abono"] for f in reporte["filas"])
+    assert abonos + favor == -sum(f["abono"] for f in reporte["filas"])
 
     # 3. Cada factura trae lo que se le abono y lo que le queda, y el saldo corrido es la suma de lo que queda.
     acumulado = Decimal("0.00")
@@ -160,7 +164,8 @@ def test_una_nota_disponible_sigue_siendo_saldo_a_favor_y_no_cambia_lo_que_se_de
 
     historial, reporte = _afirmar_que_cuadra(db, admin, cliente.id_cliente)
 
-    assert reporte["saldo_final"] == Decimal("100.00")  # la nota sin aplicar no resta de la deuda
+    # 100 de deuda - 20 de saldo a favor = 80 de posicion neta.
+    assert reporte["saldo_final"] == Decimal("80.00")
     assert obtener_saldo_total_positivo(db, cliente.id_cliente, admin.id_usuario) == Decimal("20.00")
     assert [i["monto"] for i in historial if i["tipo_transaccion"] == "nota_credito"] == [Decimal("20.00")]
 
@@ -176,7 +181,8 @@ def test_una_factura_anulada_con_pago_sale_como_en_el_reporte_neto_cero(db_sessi
 
     historial, reporte = _afirmar_que_cuadra(db, admin, cliente.id_cliente)
 
-    assert reporte["saldo_final"] == Decimal("40.00")
+    # 40 de deuda - 100 de saldo a favor (la NC de la anulacion) = -60.
+    assert reporte["saldo_final"] == Decimal("-60.00")
     anulada = next(f for f in _facturas(historial) if f["id_factura"] == contado.id_factura)
     assert anulada["estado_factura"] == "ANULADA"
     assert (anulada["monto"], anulada["monto_pagado"], anulada["saldo_factura"]) == (
