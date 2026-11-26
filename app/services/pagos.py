@@ -564,9 +564,12 @@ class PagoService:
             logger.error(f"Error al obtener cuentas pendientes: {e}")
             raise ValueError(f"Error al obtener cuentas pendientes: {str(e)}") from e
 
-        # Validar que el cliente tenga facturas pendientes (antes de cualquier otra operación)
-        if not cuentas_pendientes:
-            raise ValueError("el cliente no tiene facturas pendientes")
+        # Sin facturas pendientes el abono igual se acepta: no hay nada que amortizar,
+        # asi que el 100% queda como saldo a favor (nota de credito) mas abajo -- mismo
+        # camino que el sobreabono. La caja/banco si recibe el dinero completo.
+        sin_deuda = not cuentas_pendientes
+        if sin_deuda:
+            logger.info(f"Abono general a cliente {id_cliente} sin facturas pendientes: todo queda como saldo a favor")
 
         # Calcular total de deuda
         try:
@@ -689,7 +692,11 @@ class PagoService:
                     id_cliente=id_cliente,
                     id_factura_origen=None,
                     monto=saldo_restante,
-                    motivo=f"Sobreabono por pago en exceso - {metodo_pago}",
+                    motivo=(
+                        f"Abono sin facturas pendientes - {metodo_pago}"
+                        if sin_deuda
+                        else f"Sobreabono por pago en exceso - {metodo_pago}"
+                    ),
                     id_usuario=id_usuario,
                 )
                 nota_credito_id = nota_credito.id_nota_credito

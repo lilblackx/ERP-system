@@ -4644,6 +4644,9 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
                 COLOR_PRIMARY,
             )
         )
+        saldo_a_favor = resultado.get("saldo_a_favor") or 0
+        if saldo_a_favor > 0:
+            self.resumen_layout.addWidget(self._chip(f"Saldo a favor: ${float(saldo_a_favor):,.2f}", COLOR_SUCCESS))
         self.resumen_layout.addStretch()
 
     # ── Resultados: cobros del período ────────────────────────────────────────

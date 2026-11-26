@@ -2388,6 +2388,18 @@ class ReporteService:
         ids_facturas_cliente = {c.id_factura for c in cuentas}
         aplicaciones_nc = _aplicaciones_nc_cliente(session, ids_factura=ids_facturas_cliente)
         ids_facturas_bcv = {c.id_factura for c in cuentas_bcv}
+        # Notas de credito con saldo sin aplicar = saldo a favor vigente del cliente
+        # (incluye las que crea un abono sin facturas pendientes o un sobreabono, que
+        # tienen id_factura_origen NULL y por eso nunca pasaban por este reporte).
+        notas_a_favor = (
+            session.query(NotaCreditoCliente)
+            .filter(
+                NotaCreditoCliente.id_cliente == id_cliente,
+                NotaCreditoCliente.estado == "disponible",
+                NotaCreditoCliente.saldo_disponible > 0,
+            )
+            .all()
+        )
 
         # Sumas por cuenta/factura de una sola pasada: recorrer todos los pagos por cada cuenta era cuadratico (un
         # cliente con 3 500 movimientos tardaba 1,4 s).
@@ -2482,6 +2494,26 @@ class ReporteService:
                     "descripcion": "",
                 }
             )
+        # Las notas a favor se muestran como fila informativa (cargo=abono=0: el saldo
+        # corrido es la DEUDA y no debe bajar hasta que la nota se aplique a una
+        # factura -- si contara como abono, la aplicacion posterior la contaria dos
+        # veces). El monto va en la descripcion y el total en saldo_a_favor.
+        for nota in notas_a_favor:
+            motivo = (nota.motivo or "").strip()
+            descripcion = f"Saldo a favor ${nota.saldo_disponible:,.2f}"
+            if motivo:
+                descripcion += f" - {motivo}"
+            eventos.append(
+                {
+                    "fecha": nota.fecha_creacion,
+                    "tipo": "Nota de crédito",
+                    "id_factura": nota.id_factura_origen,
+                    "referencia": nota.numero_nota_credito,
+                    "cargo": Decimal("0.00"),
+                    "abono": Decimal("0.00"),
+                    "descripcion": descripcion[:255],
+                }
+            )
         eventos.sort(key=lambda e: e["fecha"])
 
         desde_dt = datetime.combine(fecha_desde, time.min) if fecha_desde else None
@@ -2512,6 +2544,7 @@ class ReporteService:
             "saldo_inicial": saldo_inicial,
             "filas": filas,
             "saldo_final": saldo,
+            "saldo_a_favor": sum((n.saldo_disponible for n in notas_a_favor), Decimal("0.00")),
         }
 
     @staticmethod

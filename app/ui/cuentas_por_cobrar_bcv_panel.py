@@ -53,7 +53,8 @@ from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
-from app.ui.permisos_ui import MixinPermisos
+from app.ui.permisos_ui import MixinPermisos, tiene_permiso
+from app.ui.seleccionar_cliente_dialog import SeleccionarClienteDialog
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BORDER,
@@ -763,27 +764,29 @@ class AbonoGeneralBCVDialog(ConversionBolivaresMixin, QDialog):
         lbl_deuda.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_deuda)
 
-        # Calcular saldo a favor del cliente (desde la primera cuenta BCV del cliente)
+        # Saldo a favor del cliente = suma de saldo_disponible de sus notas de credito
+        # vigentes. Es la fuente real: cuentas_por_cobrar_bcv.saldo_favor no la escribe
+        # ningun trigger/servicio, y un cliente sin facturas BCV (pago que queda todo
+        # como saldo a favor) no tiene cuenta donde reflejarla.
         saldo_favor = Decimal("0.00")
         if self.cliente:
             try:
                 session = self.session_factory()
                 try:
-                    from app.db.models import CuentaPorCobrarBCV, FacturaVenta
+                    from sqlalchemy import func
 
-                    primera_cuenta = (
-                        session.query(CuentaPorCobrarBCV)
-                        .join(
-                            FacturaVenta,
-                            FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura,
+                    from app.db.models import NotaCreditoCliente
+
+                    saldo_favor = (
+                        session.query(func.coalesce(func.sum(NotaCreditoCliente.saldo_disponible), 0))
+                        .filter(
+                            NotaCreditoCliente.id_cliente == self.cliente.id_cliente,
+                            NotaCreditoCliente.estado == "disponible",
                         )
-                        .filter(FacturaVenta.id_cliente_factura == self.cliente.id_cliente)
-                        .first()
+                        .scalar()
                     )
-                    if primera_cuenta:
-                        saldo_favor = primera_cuenta.saldo_favor if primera_cuenta.saldo_favor else Decimal("0.00")
-                        if saldo_favor is None:
-                            saldo_favor = Decimal("0.00")
+                    # Sesiones mockeadas en tests devuelven MagicMock: solo un Decimal real cuenta.
+                    saldo_favor = saldo_favor if isinstance(saldo_favor, Decimal) else Decimal("0.00")
                 finally:
                     session.close()
             except Exception as e:
@@ -1332,8 +1335,33 @@ class DetalleCuentasBCVDialog(VerFacturaDesdeFilaMixin, MixinPermisos, QDialog):
             self.tabla.setCellWidget(fila, 6, estado_widget)
             self.tabla.setCellWidget(fila, 7, self._boton_ver_factura(cuenta))
 
-        # Calcular y mostrar saldo a favor
-        saldo_favor_total = sum(_as_decimal(c.saldo_favor) if c.saldo_favor else Decimal("0.00") for c in self.cuentas)
+        # Saldo a favor del cliente = suma de saldo_disponible de sus notas de credito
+        # vigentes. Es la fuente real: cuentas_por_cobrar_bcv.saldo_favor no la escribe
+        # ningun trigger/servicio, y un cliente sin facturas BCV (pago que queda todo
+        # como saldo a favor) no tiene cuenta donde reflejarla.
+        saldo_favor_total = Decimal("0.00")
+        if self.cliente:
+            try:
+                session = self.session_factory()
+                try:
+                    from sqlalchemy import func
+
+                    from app.db.models import NotaCreditoCliente
+
+                    saldo_favor_total = (
+                        session.query(func.coalesce(func.sum(NotaCreditoCliente.saldo_disponible), 0))
+                        .filter(
+                            NotaCreditoCliente.id_cliente == self.cliente.id_cliente,
+                            NotaCreditoCliente.estado == "disponible",
+                        )
+                        .scalar()
+                    )
+                    saldo_favor_total = saldo_favor_total if isinstance(saldo_favor_total, Decimal) else Decimal("0.00")
+                finally:
+                    session.close()
+            except Exception as e:
+                logger.warning(f"Error al obtener saldo a favor BCV: {e}")
+                saldo_favor_total = Decimal("0.00")
         if saldo_favor_total > 0:
             self.lbl_saldo_favor.setText(f"Saldo a favor: ${float(saldo_favor_total):,.2f}")
         else:
@@ -1672,6 +1700,17 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         h.addWidget(self.paginacion)
         h.addStretch()
 
+        # Abono a cualquier cliente aunque no tenga facturas BCV pendientes: el pago
+        # queda como saldo a favor (nota de credito) -- el listado solo muestra clientes
+        # con deuda o saldo a favor, asi que el cliente se elige en un dialogo aparte.
+        btn_abono_cliente = QPushButton("Abono a Cliente")
+        btn_abono_cliente.setIcon(qta.icon("fa5s.hand-holding-usd", color=COLOR_TEXT_DARK))
+        btn_abono_cliente.setObjectName("BtnPrimary")
+        btn_abono_cliente.setFixedHeight(32)
+        btn_abono_cliente.setAutoDefault(False)
+        btn_abono_cliente.clicked.connect(self._abono_a_cliente)
+        h.addWidget(btn_abono_cliente)
+
         btn_ver_detalle = QPushButton("Ver Detalle")
         btn_ver_detalle.setIcon(qta.icon("fa5s.list", color=COLOR_TEXT_DARK))
         btn_ver_detalle.setObjectName("BtnSecondary")
@@ -1885,6 +1924,34 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
 
         item = self._cuentas_cargadas[fila_actual]
         self._mostrar_cuentas_cliente(item)
+
+    def _abono_a_cliente(self) -> None:
+        """Abono BCV a cualquier cliente, tenga o no facturas BCV pendientes: si no
+        debe nada, el pago completo queda como saldo a favor (nota de credito). El
+        listado solo muestra clientes con deuda o saldo a favor, asi que el cliente se
+        elige en un dialogo de busqueda aparte."""
+        if not tiene_permiso(self.session_factory, self.id_usuario, "pagos", "crear"):
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar cobros.")
+            return
+        dialogo = SeleccionarClienteDialog(self.session_factory, self.id_usuario, parent=self)
+        if not dialogo.exec() or dialogo.cliente_seleccionado is None:
+            return
+        try:
+            abono = AbonoGeneralBCVDialog(
+                self.session_factory,
+                dialogo.cliente_seleccionado,
+                self.id_usuario,
+                tasa_bcv=self._tasa_bcv,
+                parent=self,
+            )
+            if abono.exec() and abono.abono_aplicado is not None:
+                MessageBox.information(self, "Abono aplicado", "El abono general BCV se aplicó con éxito.")
+                self.cargar_cuentas()
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar abonos.")
+        except Exception:
+            logger.exception("Fallo al aplicar abono BCV a cliente sin deuda")
+            MessageBox.critical(self, "Error", "No se pudo aplicar el abono general BCV.")
 
     def _filtros_exportacion_cuentas_bcv(self) -> dict:
         """Estado y vendedor activos, para el encabezado del reporte exportado."""

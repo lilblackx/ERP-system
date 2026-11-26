@@ -2348,7 +2348,7 @@ def test_estado_cuenta_cliente_factura_anulada_con_pago_se_marca_como_anulada(db
     )
 
     filas = resultado["filas"]
-    assert [f["tipo"] for f in filas] == ["Factura", "Pago"]
+    assert [f["tipo"] for f in filas] == ["Factura", "Pago", "Nota de crédito"]
     assert filas[0]["referencia"] == f"{factura.numero_factura} (anulada)"
     assert "anulada" in filas[0]["descripcion"].lower()
     assert resultado["saldo_final"] == Decimal("0.00")

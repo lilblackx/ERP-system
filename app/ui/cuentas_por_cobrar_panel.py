@@ -36,9 +36,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import CuentaPorCobrar, FacturaVenta, Usuario
+from app.db.models import CuentaPorCobrar, Usuario
 from app.services.db_utils import reintentar_en_deadlock
 from app.services.empresa import EmpresaService
 from app.services.exportacion import exportar_excel, exportar_pdf, valor_para_exportar
@@ -66,7 +67,8 @@ from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit, _as_decimal
 from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
-from app.ui.permisos_ui import MixinPermisos
+from app.ui.permisos_ui import MixinPermisos, tiene_permiso
+from app.ui.seleccionar_cliente_dialog import SeleccionarClienteDialog
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     BUTTON_SECONDARY_QSS,
@@ -650,23 +652,25 @@ class AbonoGeneralDialog(ConversionBolivaresMixin, QDialog):
         lbl_deuda.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT_MUTED};")
         layout.addWidget(lbl_deuda)
 
-        # Calcular saldo a favor del cliente (desde la primera cuenta por cobrar del cliente)
+        # Saldo a favor del cliente = suma de saldo_disponible de sus notas de credito
+        # vigentes. Es la fuente real: cuentas_por_cobrar.saldo_favor la mantiene un
+        # trigger que necesita que el cliente tenga al menos una cuenta por cobrar, y
+        # un cliente sin facturas (pago que queda todo como saldo a favor) no tiene.
         saldo_favor = Decimal("0.00")
         if self.cliente:
             try:
-                primera_cuenta = (
-                    self.session.query(CuentaPorCobrar)
-                    .join(
-                        FacturaVenta,
-                        FacturaVenta.id_factura == CuentaPorCobrar.id_factura,
+                from app.db.models import NotaCreditoCliente
+
+                saldo_favor = (
+                    self.session.query(func.coalesce(func.sum(NotaCreditoCliente.saldo_disponible), 0))
+                    .filter(
+                        NotaCreditoCliente.id_cliente == self.cliente.id_cliente,
+                        NotaCreditoCliente.estado == "disponible",
                     )
-                    .filter(FacturaVenta.id_cliente_factura == self.cliente.id_cliente)
-                    .first()
+                    .scalar()
                 )
-                if primera_cuenta:
-                    saldo_favor = getattr(primera_cuenta, "saldo_favor", Decimal("0.00"))
-                    if saldo_favor is None:
-                        saldo_favor = Decimal("0.00")
+                # Sesiones mockeadas en tests devuelven MagicMock: solo un Decimal real cuenta.
+                saldo_favor = saldo_favor if isinstance(saldo_favor, Decimal) else Decimal("0.00")
             except Exception as e:
                 logger.warning(f"Error al obtener saldo a favor: {e}")
                 saldo_favor = Decimal("0.00")
@@ -1269,23 +1273,24 @@ class DetalleClienteDialog(VerFacturaDesdeFilaMixin, MixinPermisos, MixinPaginac
             self.tabla.setCellWidget(fila, 5, EstadoBadge(estado_visual.capitalize(), color))
             self.tabla.setCellWidget(fila, 6, self._boton_ver_factura(cuenta))
 
-        # Calcular y mostrar saldo a favor del cliente (desde la primera cuenta por cobrar)
+        # Saldo a favor del cliente = suma de saldo_disponible de sus notas de credito
+        # vigentes. Es la fuente real: cuentas_por_cobrar.saldo_favor la mantiene un
+        # trigger que necesita que el cliente tenga al menos una cuenta por cobrar, y
+        # un cliente sin facturas (pago que queda todo como saldo a favor) no tiene.
         saldo_favor = Decimal("0.00")
         if self.cliente:
             try:
-                primera_cuenta = (
-                    self.session.query(CuentaPorCobrar)
-                    .join(
-                        FacturaVenta,
-                        FacturaVenta.id_factura == CuentaPorCobrar.id_factura,
+                from app.db.models import NotaCreditoCliente
+
+                saldo_favor = (
+                    self.session.query(func.coalesce(func.sum(NotaCreditoCliente.saldo_disponible), 0))
+                    .filter(
+                        NotaCreditoCliente.id_cliente == self.cliente.id_cliente,
+                        NotaCreditoCliente.estado == "disponible",
                     )
-                    .filter(FacturaVenta.id_cliente_factura == self.cliente.id_cliente)
-                    .first()
+                    .scalar()
                 )
-                if primera_cuenta:
-                    saldo_favor = getattr(primera_cuenta, "saldo_favor", Decimal("0.00"))
-                    if saldo_favor is None:
-                        saldo_favor = Decimal("0.00")
+                saldo_favor = saldo_favor if isinstance(saldo_favor, Decimal) else Decimal("0.00")
             except Exception:
                 saldo_favor = Decimal("0.00")
 
@@ -1755,8 +1760,19 @@ class CuentasPorCobrarPanel(CargaAsincronaMixin, ExportacionCompletaMixin, Mixin
         btn_cobrar.setStyleSheet(BUTTON_SECONDARY_QSS)
         btn_cobrar.clicked.connect(self.cobrar_seleccionada)
 
+        # Abono a cualquier cliente aunque no tenga facturas pendientes: el pago queda
+        # como saldo a favor (nota de credito) -- el listado solo muestra clientes con
+        # deuda o saldo a favor, asi que el cliente se elige en un dialogo aparte.
+        btn_abono_cliente = QPushButton("Abono a Cliente")
+        btn_abono_cliente.setIcon(qta.icon("fa5s.hand-holding-usd", color=COLOR_TEXT_DARK))
+        btn_abono_cliente.setObjectName("BtnPrimary")
+        btn_abono_cliente.setFixedHeight(34)
+        btn_abono_cliente.setAutoDefault(False)
+        btn_abono_cliente.clicked.connect(self._abono_a_cliente)
+
         h.addWidget(self.paginacion)
         h.addStretch()
+        h.addWidget(btn_abono_cliente)
         h.addWidget(btn_cobrar)
         return w
 
@@ -1977,6 +1993,37 @@ class CuentasPorCobrarPanel(CargaAsincronaMixin, ExportacionCompletaMixin, Mixin
         if id_cliente is None:
             return
         self._mostrar_detalle_cliente(id_cliente)
+
+    def _abono_a_cliente(self) -> None:
+        """Abono a cualquier cliente, tenga o no facturas pendientes: si no debe nada,
+        el pago completo queda como saldo a favor (nota de credito). El listado solo
+        muestra clientes con deuda o saldo a favor, asi que el cliente se elige en un
+        dialogo de busqueda aparte."""
+        if not tiene_permiso(self.session_factory, self.usuario.id_usuario, "pagos", "crear"):
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para registrar cobros.")
+            return
+        dialogo = SeleccionarClienteDialog(self.session_factory, self.usuario.id_usuario, parent=self)
+        if not dialogo.exec() or dialogo.cliente_seleccionado is None:
+            return
+        sesion = sesion_para_dialogo(self.session_factory)
+        try:
+            abono = AbonoGeneralDialog(
+                sesion,
+                dialogo.cliente_seleccionado,
+                self.usuario.id_usuario,
+                tasa_bcv=self._tasa_paralelo,
+                parent=self,
+            )
+            if abono.exec() and abono.abono_aplicado is not None:
+                MessageBox.information(self, "Abono aplicado", "El abono se aplicó con éxito.")
+                self.cargar_cuentas()
+        except PermisoDenegadoError:
+            MessageBox.warning(self, "Sin permiso", "No tienes permiso para aplicar abonos.")
+        except Exception:
+            logger.exception("Fallo al aplicar abono a cliente sin deuda")
+            MessageBox.critical(self, "Error", "No se pudo aplicar el abono.")
+        finally:
+            sesion.close()
 
     # ── Exportación ───────────────────────────────────────────────────────
 

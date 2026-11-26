@@ -803,17 +803,21 @@ def test_aplicar_abono_general_validaciones_basicas(db_session):
             id_usuario=admin.id_usuario,
         )
 
-    # Test cliente sin facturas pendientes
-    with pytest.raises(ValueError, match="no tiene facturas pendientes"):
-        PagoService.aplicar_abono_general_cliente(
-            db_session,
-            id_cliente=cliente.id_cliente,
-            monto_abono=Decimal("100.00"),
-            tasa_cambio=Decimal("900.00"),
-            metodo_pago="efectivo",
-            id_caja=caja.id_caja,
-            id_usuario=admin.id_usuario,
-        )
+    # Test cliente sin facturas pendientes: el abono completo queda como
+    # saldo a favor (nota de crédito) en vez de rechazarse.
+    res = PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("100.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    assert res["monto_total_aplicado"] == 0
+    assert res["saldo_restante"] == Decimal("100.00")
+    assert res["es_sobreabono"] is True
+    assert res["nota_credito_id"] is not None
 
 
 def test_aplicar_abono_general_transaccion_atomica(db_session):
