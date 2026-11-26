@@ -2552,12 +2552,19 @@ def test_estado_cuenta_cliente_sin_anuladas_oculta_la_factura_anulada_y_sus_pago
         db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente, incluir_anuladas=False
     )
 
+    # La anulacion deja una nota de credito con saldo a favor: sale como fila
+    # informativa en ambos reportes (no es parte de la factura anulada).
+    nc = db_session.query(NotaCreditoCliente).filter_by(id_cliente=cliente.id_cliente).one()
     assert {f["referencia"] for f in con["filas"]} == {
         viva.numero_factura,
         f"{anulada.numero_factura} (anulada)",
         anulada.numero_factura,
+        nc.numero_nota_credito,
     }
-    assert [(f["tipo"], f["referencia"]) for f in sin["filas"]] == [("Factura", viva.numero_factura)]
+    assert [(f["tipo"], f["referencia"]) for f in sin["filas"]] == [
+        ("Factura", viva.numero_factura),
+        ("Nota de crédito", nc.numero_nota_credito),
+    ]
     assert (con["saldo_final"], sin["saldo_final"]) == (Decimal("70.00"), Decimal("70.00"))
     assert con["incluir_anuladas"] is True and sin["incluir_anuladas"] is False
 
@@ -2596,13 +2603,18 @@ def test_estado_cuenta_cliente_factura_bcv_anulada_con_pago_sale_marcada_y_sus_p
         db_session, id_usuario=admin.id_usuario, id_cliente=cliente.id_cliente, incluir_anuladas=False
     )
 
+    # La anulacion deja una nota de credito con saldo a favor: fila informativa
+    # incluso en el reporte "sin anuladas" (el saldo a favor es real).
+    nc = db_session.query(NotaCreditoCliente).filter_by(id_cliente=cliente.id_cliente).one()
     assert [(f["tipo"], f["referencia"]) for f in con["filas"]] == [
         ("Factura", f"{factura.numero_factura} (BCV) (anulada)"),
         ("Pago", f"{factura.numero_factura} (BCV)"),
+        ("Nota de crédito", nc.numero_nota_credito),
     ]
     assert con["filas"][0]["cargo"] == con["filas"][1]["abono"] == Decimal("40.00")
     assert con["saldo_final"] == Decimal("0.00")
-    assert sin["filas"] == [] and sin["saldo_final"] == Decimal("0.00")
+    assert [(f["tipo"], f["referencia"]) for f in sin["filas"]] == [("Nota de crédito", nc.numero_nota_credito)]
+    assert sin["saldo_final"] == Decimal("0.00")
 
 
 # --- cobros_del_periodo ---------------------------------------------------------------
