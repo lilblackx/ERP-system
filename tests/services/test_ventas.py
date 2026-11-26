@@ -1798,7 +1798,10 @@ def test_emitir_factura_numero_control_correlativo_unico(db_session):
 
     assert primera.numero_control.startswith("00-")
     assert primera.numero_control != segunda.numero_control
-    assert primera.numero_control == f"00-{primera.id_factura:08d}"
+    # numero_control y numero_factura comparten el mismo correlativo (ver
+    # correlativos.py): "FV-000123" -> numero_control "00-00000123".
+    correlativo = int(primera.numero_factura.removeprefix("FV-"))
+    assert primera.numero_control == f"00-{correlativo:08d}"
 
 
 def test_emitir_factura_sin_config_empresa_no_calcula_iva(db_session):
@@ -2951,3 +2954,50 @@ def test_factura_de_contado_con_iva_registra_el_cobro_completo_y_la_nota_de_cred
     VentaService.anular_factura(db_session, factura.id_factura, id_usuario=admin.id_usuario, motivo="Prueba")
     nota = db_session.query(NotaCreditoCliente).filter_by(id_factura_origen=factura.id_factura).one()
     assert nota.monto == Decimal("116.00")  # se devuelve lo que el cliente pago, IVA incluido
+
+
+def test_correlativo_factura_no_se_quema_si_la_transaccion_revierte(db_session):
+    """El correlativo vive en la misma transaccion que la factura: si esta revierte
+    (error de validacion posterior, deadlock, o apagado forzoso de SQL Server), el
+    numero queda libre y la siguiente emision lo reutiliza -- sin huecos."""
+    from app.services.correlativos import siguiente_numero
+
+    primero = siguiente_numero(db_session, "factura_venta")
+    db_session.rollback()
+    segundo = siguiente_numero(db_session, "factura_venta")
+    assert segundo == primero
+
+
+def test_emitir_factura_numero_sigue_al_correlativo_no_al_id(db_session):
+    """numero_factura/numero_control salen de dbo.correlativos, no de id_factura:
+    dos facturas seguidas tienen correlativos consecutivos aunque el identity de
+    id_factura haya saltado (p. ej. por cache de identity tras un reinicio)."""
+    admin = crear_usuario_admin(db_session)
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=50)
+    crear_precio_producto(db_session, producto, "20.00")
+    cliente = crear_cliente(db_session)
+
+    primera = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+    segunda = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="contado",
+        pagos=pago_contado(db_session),
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "20.00"}],
+    )
+
+    n1 = int(primera.numero_factura.removeprefix("FV-"))
+    n2 = int(segunda.numero_factura.removeprefix("FV-"))
+    assert n2 == n1 + 1
+    assert primera.numero_factura != segunda.numero_factura

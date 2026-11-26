@@ -29,6 +29,7 @@ from app.services.auditoria import AuditoriaService
 from app.services.busqueda_sql import contiene, patron_contiene
 from app.services.busqueda_sql import escapar_like as _escapar_like
 from app.services.comisiones import ComisionService
+from app.services.correlativos import siguiente_numero as _siguiente_correlativo
 from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
@@ -48,10 +49,9 @@ logger = logging.getLogger(__name__)
 
 def _numero_factura_temporal() -> str:
     """Placeholder unico para el INSERT inicial: numero_factura es NOT NULL UNIQUE y el
-    numero definitivo (FV-{id_factura:06d}) solo se conoce despues del flush que asigna
-    el id_factura real. Generarlo antes con MAX(id_factura)+1 tiene una carrera entre dos
-    emisiones concurrentes que leen el mismo MAX y violan el UNIQUE -- este placeholder
-    aleatorio evita esa colision sin necesitar un lock de tabla completa."""
+    numero definitivo (FV-{correlativo:06d}, ver correlativos.py) se asigna despues del
+    flush. Un placeholder aleatorio evita colisiones sin necesitar un lock de tabla
+    completa antes de conocer el correlativo."""
     return f"TMP-{uuid.uuid4().hex[:16]}"
 
 
@@ -604,7 +604,10 @@ class VentaService:
         # --- Insercion atomica de cabecera y lineas ---
         # numero_factura/numero_control definitivos se asignan DESPUES del flush -- ver
         # _numero_factura_temporal()/_numero_control_temporal() para el porque del
-        # placeholder.
+        # placeholder. El correlativo se consume dentro de esta misma transaccion: si
+        # la emision revierte (error, deadlock, apagado forzoso), el numero no se quema
+        # -- a diferencia del id_factura IDENTITY, que si podia saltar ~10.000 valores
+        # por la cache de identity de SQL Server tras un reinicio sin checkpoint.
         factura = FacturaVenta(
             numero_factura=_numero_factura_temporal(),
             numero_control=_numero_control_temporal(),
@@ -633,8 +636,9 @@ class VentaService:
         )
         session.add(factura)
         session.flush()
-        factura.numero_factura = f"FV-{factura.id_factura:06d}"
-        factura.numero_control = f"00-{factura.id_factura:08d}"
+        correlativo = _siguiente_correlativo(session, "factura_venta")
+        factura.numero_factura = f"FV-{correlativo:06d}"
+        factura.numero_control = f"00-{correlativo:08d}"
 
         detalles_creados = []
         for item in items:
