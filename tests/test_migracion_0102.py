@@ -84,9 +84,7 @@ def engine_pre_0102(tmp_path_factory):
     # posterior a la 0102 bajo prueba, asi que no esta en "previas". Se aplica aparte
     # para que los escenarios puedan emitir facturas; no interfiere con la 0102.
     with engine.connect() as connection:
-        _ejecutar_batches(
-            connection, (MIGRATIONS_DIR / "0104_correlativo_de_facturas.sql").read_text(encoding="utf-8")
-        )
+        _ejecutar_batches(connection, (MIGRATIONS_DIR / "0104_correlativo_de_facturas.sql").read_text(encoding="utf-8"))
         connection.commit()
     yield engine
     engine.dispose()
