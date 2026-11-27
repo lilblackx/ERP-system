@@ -7,7 +7,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
@@ -19,6 +19,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.correlativos import siguiente_numero
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
@@ -30,13 +31,11 @@ TIPOS_CAMBIO_ENMIENDA = {"CANTIDAD", "PRECIO", "FECHA"}
 def _generar_numero_oc(session: Session) -> str:
     # Prefijo "ODC-" (no "OC-") a pedido del usuario -- mas facil de identificar que el
     # numero_compra del flujo directo (compras.py), que ya usaba "OC-" desde antes.
-    ultimo_id = session.query(func.max(CompraOC.id_oc)).scalar() or 0
-    return f"ODC-{ultimo_id + 1:06d}"
+    return f"ODC-{siguiente_numero(session, 'orden_compra'):06d}"
 
 
 def _generar_numero_enmienda(session: Session) -> str:
-    ultimo_id = session.query(func.max(CompraOCEnmienda.id_enmienda)).scalar() or 0
-    return f"ENM-{ultimo_id + 1:06d}"
+    return f"ENM-{siguiente_numero(session, 'enmienda_oc'):06d}"
 
 
 def _validar_items_oc(items: list[dict]) -> None:

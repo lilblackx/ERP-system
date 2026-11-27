@@ -594,6 +594,8 @@ class CompraDetalle(Base):
 
 class CompraOC(Base):
     __tablename__ = "compra_oc"
+    # Tiene trigger de correlativo (migrations/0107): SQL Server no admite OUTPUT sin INTO.
+    __table_args__ = {"implicit_returning": False}
 
     id_oc: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_proveedor: Mapped[int] = mapped_column(BigInteger, ForeignKey("proveedores.id_proveedor"), nullable=False)
@@ -676,6 +678,8 @@ class CompraOCEnmienda(Base):
 
 class NotaRecepcion(Base):
     __tablename__ = "nota_recepcion"
+    # Tiene trigger de correlativo (migrations/0107): SQL Server no admite OUTPUT sin INTO.
+    __table_args__ = {"implicit_returning": False}
 
     id_nr: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_oc: Mapped[int] = mapped_column(BigInteger, ForeignKey("compra_oc.id_oc"), nullable=False)
@@ -714,6 +718,8 @@ class NotaRecepcionDetalle(Base):
 
 class NotaDevolucion(Base):
     __tablename__ = "nota_devolucion"
+    # Tiene trigger de correlativo (migrations/0107): SQL Server no admite OUTPUT sin INTO.
+    __table_args__ = {"implicit_returning": False}
 
     id_devolucion: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     id_nr: Mapped[int] = mapped_column(BigInteger, ForeignKey("nota_recepcion.id_nr"), nullable=False)

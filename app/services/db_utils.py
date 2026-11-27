@@ -54,7 +54,9 @@ def _es_deadlock(exc: BaseException) -> bool:
 
 
 def _es_lock_timeout(exc: BaseException) -> bool:
-    if not isinstance(exc, (SqlAlchemyOperationalError, PyodbcOperationalError)):
+    # pyodbc entrega el 1222 como ProgrammingError (SQLSTATE 42000), no como OperationalError: se reconoce por el texto
+    # en cualquier error de la base.
+    if not isinstance(exc, (SqlAlchemyDBAPIError, PyodbcError)):
         return False
     return _ERROR_LOCK_TIMEOUT_TEXTO in str(exc).lower()
 

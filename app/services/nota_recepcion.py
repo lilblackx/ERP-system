@@ -26,6 +26,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.correlativos import siguiente_numero
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 
@@ -33,13 +34,11 @@ logger = logging.getLogger(__name__)
 
 
 def _generar_numero_nr(session: Session) -> str:
-    ultimo_id = session.query(func.max(NotaRecepcion.id_nr)).scalar() or 0
-    return f"NR-{ultimo_id + 1:06d}"
+    return f"NR-{siguiente_numero(session, 'nota_recepcion'):06d}"
 
 
 def _generar_numero_devolucion(session: Session) -> str:
-    ultimo_id = session.query(func.max(NotaDevolucion.id_devolucion)).scalar() or 0
-    return f"ND-{ultimo_id + 1:06d}"
+    return f"ND-{siguiente_numero(session, 'nota_devolucion'):06d}"
 
 
 class NotaRecepcionService:

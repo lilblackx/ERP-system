@@ -1,5 +1,4 @@
 import logging
-import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -22,21 +21,12 @@ from app.db.models import (
     Proveedor,
 )
 from app.services.auditoria import AuditoriaService
+from app.services.correlativos import siguiente_numero
 from app.services.paginacion import paginar
 from app.services.permisos import require_permiso
 from app.services.tesoreria import BancoService, CajaService
 
 logger = logging.getLogger(__name__)
-
-
-def _numero_nota_credito_temporal() -> str:
-    """Placeholder unico para el INSERT inicial: numero_nota_credito es NOT NULL UNIQUE y
-    el numero definitivo (NC-{id_nota_credito:06d}) solo se conoce despues del flush que
-    asigna el id autoincremental -- mismo patron y motivo que
-    VentaService._numero_factura_temporal(): evita la carrera de leer MAX(id)+1 sin lock
-    entre dos anulaciones concurrentes, que violaria UQ_notas_credito_clientes_numero.
-    """
-    return f"TMP-{uuid.uuid4().hex[:16]}"
 
 
 class NotaCreditoService:
@@ -83,7 +73,9 @@ class NotaCreditoService:
             raise ValueError("monto debe ser mayor a cero")
 
         nota = NotaCreditoCliente(
-            numero_nota_credito=_numero_nota_credito_temporal(),
+            # Del correlativo (migrations/0107) y no del IDENTITY: es un documento fiscal y el IDENTITY salta de
+            # bloque cuando SQL Server se apaga de golpe. Va en esta misma transaccion: si revierte, no se quema.
+            numero_nota_credito=f"NC-{siguiente_numero(session, 'nota_credito_cliente'):06d}",
             id_cliente=id_cliente,
             id_factura_origen=id_factura_origen,
             monto=monto,
@@ -95,7 +87,6 @@ class NotaCreditoService:
         )
         session.add(nota)
         session.flush()
-        nota.numero_nota_credito = f"NC-{nota.id_nota_credito:06d}"
         return nota
 
     @staticmethod

@@ -20,6 +20,7 @@ from app.db.models import (
 )
 from app.services.auditoria import AuditoriaService
 from app.services.busqueda_sql import contiene, patron_contiene
+from app.services.correlativos import siguiente_numero
 from app.services.db_utils import (
     _es_deadlock,
     _es_lock_timeout,
@@ -39,8 +40,7 @@ TOLERANCIA_CENTAVO = Decimal("0.01")
 
 
 def _generar_numero_compra(session: Session) -> str:
-    ultimo_id = session.query(func.max(Compra.id_compra)).scalar() or 0
-    return f"OC-{ultimo_id + 1:06d}"
+    return f"OC-{siguiente_numero(session, 'compra'):06d}"
 
 
 def _validar_items(items: list[dict]) -> None:

@@ -90,6 +90,7 @@ def engine_pre_0102(tmp_path_factory):
             "0104_correlativo_de_facturas.sql",
             "0105_fecha_pago_origen_en_notas_credito.sql",
             "0106_devoluciones_nota_credito.sql",
+            "0107_correlativos_de_documentos.sql",
         ):
             _ejecutar_batches(connection, (MIGRATIONS_DIR / nombre).read_text(encoding="utf-8"))
         connection.commit()
