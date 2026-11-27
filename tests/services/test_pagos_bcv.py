@@ -638,3 +638,29 @@ def test_listado_bcv_agrupado_combina_vendedor_busqueda_y_totales(db_session):
     assert [i.id_cliente for i in acierta["items"]] == [cliente_a.id_cliente]
     assert acierta["items"][0].saldo_pendiente > 0
     assert no_acierta["items"] == []
+
+
+def test_listar_agrupadas_bcv_el_saldo_total_suma_todas_las_paginas_y_respeta_el_filtro(db_session):
+    """El rotulo del panel muestra la deuda de TODOS los clientes filtrados, no solo la de la pagina visible."""
+    admin = crear_usuario_admin(db_session)
+    for nombre, precio in (("Andes", "100.00"), ("Barinas", "200.00"), ("Coro", "300.00")):
+        cliente = crear_cliente(db_session, limite_credito=Decimal("100000.00"), nombre_razon_social=nombre)
+        _emitir_credito_bcv(db_session, admin, cliente=cliente, precio=precio)
+
+    def listar(**filtros):
+        return PagoBCVService.listar_cuentas_por_cobrar_bcv_agrupadas(
+            db_session, id_usuario=admin.id_usuario, **filtros
+        )
+
+    todos = listar()
+    primera = listar(pagina=1, por_pagina=2)
+    segunda = listar(pagina=2, por_pagina=2)
+    filtrado = listar(busqueda="Coro", por_pagina=2)
+
+    total = sum(i.saldo_pendiente for i in todos["items"])
+    assert total > 0
+    assert len(primera["items"]) == 2
+    assert primera["saldo_total_general"] == total
+    assert segunda["saldo_total_general"] == total
+    assert filtrado["saldo_total_general"] == filtrado["items"][0].saldo_pendiente
+    assert listar(busqueda="no existe")["saldo_total_general"] == Decimal("0.00")

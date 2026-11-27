@@ -52,6 +52,7 @@ from app.services.paginacion import paginar_lista
 from app.services.reportes import POR_PAGINA_REPORTE, ReporteService
 from app.ui.exportacion_completa import ExportacionCompletaMixin
 from app.ui.filtros_catalogo import fijar_vendedor_propio
+from app.ui.filtros_iniciales import recordar_filtros_iniciales
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.paginacion import ControlPaginacion
@@ -1077,7 +1078,8 @@ def _modelo_combo(filas: list[tuple], primero: str | None = None) -> _ModeloList
 # filtros: un QWidget no puede pertenecer a dos layouts a la vez. caja_combo (arqueo) siempre requiere una caja
 # puntual; caja_combo_mcp (movimientos por periodo) es opcional y lleva su propia opcion "Todas". Kardex e historico de
 # precios requieren un producto puntual; ventas por producto y cliente admite todos. Movimientos por cuenta requiere
-# una cuenta puntual (sin "Todas").
+# una cuenta puntual (sin "Todas"). Los estados de cuenta son de UN cliente o proveedor: su primera opcion invita a
+# elegirlo, no ofrece "Todos".
 _GRUPOS_CATALOGO: tuple[tuple[str, str | None, tuple[str, ...]], ...] = (
     (
         "clientes",
@@ -1087,11 +1089,11 @@ _GRUPOS_CATALOGO: tuple[tuple[str, str | None, tuple[str, ...]], ...] = (
             "cliente_combo_bcv",
             "cliente_combo_lv",
             "cliente_combo_nc",
-            "cliente_combo_ecc",
             "cliente_combo_cbp",
             "cliente_combo_cxco",
         ),
     ),
+    ("clientes", "Seleccione un cliente…", ("cliente_combo_ecc",)),
     (
         "proveedores",
         "Todos los proveedores",
@@ -1100,11 +1102,11 @@ _GRUPOS_CATALOGO: tuple[tuple[str, str | None, tuple[str, ...]], ...] = (
             "proveedor_combo_oc",
             "proveedor_combo_dp",
             "proveedor_combo_ncp",
-            "proveedor_combo_ecp",
             "proveedor_combo_pp",
             "proveedor_combo_pv",
         ),
     ),
+    ("proveedores", "Seleccione un proveedor…", ("proveedor_combo_ecp",)),
     ("cajas", None, ("caja_combo",)),
     ("cajas", "Todas las cajas", ("caja_combo_mcp",)),
     (
@@ -2702,6 +2704,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         if pagina is None:
             pagina = self._filtros_fabricas[modo]()
             pagina.setVisible(False)
+            recordar_filtros_iniciales(pagina)
             self._alinear_primer_control(pagina)
             self._filtros_layout.addWidget(pagina)
             self._filtros_paginas[modo] = pagina
@@ -2709,6 +2712,17 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         return pagina
 
     # ── Generación del reporte ──────────────────────────────────────────────
+
+    def _avisar_falta_elegir(self, combo: QComboBox, uno: str, varios: str) -> None:
+        """Aviso de un reporte que es de UN cliente o proveedor y no tiene ninguno elegido. Solo dice que no hay
+        cuando la lista llego vacia: lo normal es que falte elegirlo."""
+        if getattr(self, "_catalogos", None) is None:
+            titulo, texto = "Cargando listas", "Las listas todavía se están cargando. Intente de nuevo en un momento."
+        elif combo.count() <= 1:  # solo la opcion "Seleccione..."
+            titulo, texto = f"Sin {varios}", f"No hay {varios} registrados."
+        else:
+            titulo, texto = f"Seleccione {uno}", f"Elija {uno} de la lista para generar su estado de cuenta."
+        MessageBox.information(self, titulo, texto)
 
     def _pedir_paginado(self, tarea, filtros: dict) -> None:
         """Pide la pagina actual de un reporte paginado (ver REPORTES_PAGINADOS) y guarda `(tarea, filtros)` para que
@@ -3203,7 +3217,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         elif modo == REPORTE_ESTADO_CTA_CLIENTE:
             id_cliente = self.cliente_combo_ecc.currentData()
             if id_cliente is None:
-                MessageBox.information(self, "Sin clientes", "No hay clientes registrados.")
+                self._avisar_falta_elegir(self.cliente_combo_ecc, "un cliente", "clientes")
                 return
             fecha_desde = self.fecha_desde_ecc_input.date().toPython()
             fecha_hasta = self.fecha_hasta_ecc_input.date().toPython()
@@ -3266,7 +3280,7 @@ class ReportesPanel(ExportacionCompletaMixin, QWidget):
         elif modo == REPORTE_ESTADO_CTA_PROVEEDOR:
             id_proveedor = self.proveedor_combo_ecp.currentData()
             if id_proveedor is None:
-                MessageBox.information(self, "Sin proveedores", "No hay proveedores registrados.")
+                self._avisar_falta_elegir(self.proveedor_combo_ecp, "un proveedor", "proveedores")
                 return
             fecha_desde = self.fecha_desde_ecp_input.date().toPython()
             fecha_hasta = self.fecha_hasta_ecp_input.date().toPython()

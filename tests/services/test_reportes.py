@@ -23,8 +23,10 @@ from app.services.compras import CompraService
 from app.services.empresa import EmpresaService
 from app.services.inventario import PrecioService
 from app.services.nota_recepcion import NotaRecepcionService
+from app.services.notas_credito import NotaCreditoService
 from app.services.otros_movimientos import OtrosMovimientosService
 from app.services.pagos import PagoService
+from app.services.pagos_bcv import PagoBCVService
 from app.services.permisos import PermisoDenegadoError
 from app.services.reportes import ReporteService, _aplicaciones_nc_cliente
 from app.services.tesoreria import CajaService
@@ -2216,6 +2218,77 @@ def test_estado_cuenta_cliente_devolucion_de_saldo_a_favor_sale_como_cargo(db_se
     assert resultado["saldo_a_favor"] == Decimal("20.00")
 
 
+@pytest.mark.parametrize(
+    "servicio_abono",
+    [PagoService.aplicar_abono_general_cliente, PagoBCVService.aplicar_abono_general_cliente_bcv],
+    ids=["general", "bcv"],
+)
+def test_estado_cuenta_cliente_anticipo_sin_deuda_aplicado_despues_no_deja_deuda(db_session, servicio_abono):
+    """Un anticipo de un cliente sin deuda no genera lineas de pago: su dinero solo existe en la nota de credito.
+    Al aplicarla a una factura posterior, la aplicacion TIENE que contar como abono; si cuenta cero, el estado de
+    cuenta le cobra al cliente una factura que ya pago."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+
+    servicio_abono(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("100.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    factura = _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+    nota = db_session.query(NotaCreditoCliente).filter_by(id_cliente=cliente.id_cliente).one()
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session, nota.id_nota_credito, factura.id_factura, Decimal("60.00"), admin.id_usuario
+    )
+
+    parcial = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)
+    assert parcial["saldo_final"] == Decimal("0.00")
+    assert parcial["saldo_a_favor"] == Decimal("40.00")
+
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session, nota.id_nota_credito, factura.id_factura, Decimal("40.00"), admin.id_usuario
+    )
+
+    completo = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)
+    assert completo["saldo_final"] == Decimal("0.00")
+    assert completo["saldo_a_favor"] == Decimal("0.00")
+    assert sum(f["abono"] for f in completo["filas"]) == Decimal("-100.00")
+
+
+def test_estado_cuenta_cliente_aplicar_el_excedente_de_un_sobreabono_no_lo_cuenta_dos_veces(db_session):
+    """Cuando el abono SI tiene lineas de pago, el excedente ya esta en la fila del pago: aplicarlo no suma otro."""
+    admin = crear_usuario_admin(db_session)
+    cliente = crear_cliente(db_session, limite_credito=Decimal("10000.00"))
+    caja = crear_caja(db_session)
+    CajaService.abrir_caja(db_session, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    _factura_a_credito(db_session, admin, cliente, "100.00", date.today() + timedelta(days=10))
+    PagoService.aplicar_abono_general_cliente(
+        db_session,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("120.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    segunda = _factura_a_credito(db_session, admin, cliente, "20.00", date.today() + timedelta(days=10))
+    nota = db_session.query(NotaCreditoCliente).filter_by(id_cliente=cliente.id_cliente).one()
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db_session, nota.id_nota_credito, segunda.id_factura, Decimal("20.00"), admin.id_usuario
+    )
+
+    resultado = ReporteService.estado_cuenta_cliente(db_session, admin.id_usuario, cliente.id_cliente)
+
+    assert resultado["saldo_final"] == Decimal("0.00")
+    assert sum(f["abono"] for f in resultado["filas"]) == Decimal("-120.00")
+
+
 def test_estado_cuenta_cliente_descripcion_de_transferencia(db_session):
     """Una transferencia muestra 'Bs. <monto_bs> - <tasa> - <banco>' en Descripcion."""
     admin = crear_usuario_admin(db_session)
@@ -3878,7 +3951,6 @@ def test_libro_ventas_informa_la_cantidad_de_facturas(db_session):
 # --- auditoria de reportes (2026-11): corte historico, BCV, kardex, libro de ventas ---------------------
 
 from app.db.models import ControlDeTasa, CuentaPorCobrarBCV, FacturaVenta, PagoCobro, PagoCobroBCV  # noqa: E402
-from app.services.notas_credito import NotaCreditoService  # noqa: E402
 from app.services.pagos_bcv import PagoBCVService  # noqa: E402
 
 

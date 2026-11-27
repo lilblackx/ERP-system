@@ -177,3 +177,18 @@ def test_dias_desde_emision_cuenta_desde_la_factura_y_nunca_es_negativo():
     assert bcv._dias_desde_emision(date.today()) == "0"
     assert bcv._dias_desde_emision(date.today() + timedelta(days=3)) == "0"  # fecha futura: no hay dias negativos
     assert bcv._dias_desde_emision(None) == "N/A"
+
+
+def test_el_total_muestra_la_deuda_de_todas_las_paginas_no_solo_la_visible(panel):
+    panel._mostrar_datos(
+        {
+            "items": [_item(saldo="100.00")],
+            "total": 45,
+            "pagina": 1,
+            "por_pagina": 20,
+            "saldo_total_general": Decimal("4500.00"),
+        }
+    )
+
+    assert panel.lbl_saldo_total.text() == "$4,500.00"
+    assert panel.lbl_total.text() == "45 clientes con saldo pendiente"

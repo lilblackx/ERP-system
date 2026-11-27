@@ -1764,9 +1764,6 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         total = resultado.get("total", 0)
         pagina = resultado.get("pagina", 1)
 
-        # Suma del saldo pendiente de las filas cargadas (ya filtradas), como en el panel
-        # de cuentas por cobrar normal: cambia con cada filtro que se aplica.
-        saldo_total = Decimal("0.00")
         for item in items:
             fila = self.tabla.rowCount()
             self.tabla.insertRow(fila)
@@ -1779,7 +1776,6 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
 
             # SALDO PENDIENTE (acumulado)
             saldo = _as_decimal(item.saldo_pendiente)
-            saldo_total += saldo
             saldo_text = f"${float(saldo):,.2f}"
             if self._tasa_bcv:
                 tasa_bcv = float(self._tasa_bcv) if not isinstance(self._tasa_bcv, float) else self._tasa_bcv
@@ -1821,6 +1817,8 @@ class CuentasPorCobrarBCVPanel(CargaAsincronaMixin, MixinPaginacion, QWidget):
         self.paginacion.actualizar_desde(resultado)
 
         self.lbl_total.setText(f"{total} clientes con saldo pendiente")
+        # Todas las paginas de los clientes filtrados (lo suma el servicio), igual que el conteo de arriba.
+        saldo_total = _as_decimal(resultado.get("saldo_total_general", Decimal("0.00")))
         self.lbl_saldo_total.setText(f"${float(saldo_total):,.2f}")
 
         logger.info(f"Mostrando {len(items)} clientes agrupados de {total} total, página {pagina}")

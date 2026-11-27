@@ -1315,3 +1315,65 @@ def test_el_pdf_del_estado_de_cuenta_avisa_cuando_no_incluye_las_facturas_anulad
     panel._ultimo_resultado = _resultado_estado_cuenta(incluir_anuladas=True)
     _titulo, filtros, _anchos = panel._info_pdf()
     assert filtros["Facturas anuladas"] is None
+
+
+# ── Estados de cuenta: exigen elegir un cliente o un proveedor ───────────────
+
+ESTADOS_DE_CUENTA = [
+    (rp.REPORTE_ESTADO_CTA_CLIENTE, "cliente_combo_ecc", "clientes", "un cliente"),
+    (rp.REPORTE_ESTADO_CTA_PROVEEDOR, "proveedor_combo_ecp", "proveedores", "un proveedor"),
+]
+
+
+def _generar_sin_elegir(panel, monkeypatch, modo, catalogos):
+    avisos = []
+    monkeypatch.setattr(rp.MessageBox, "information", lambda _padre, titulo, texto: avisos.append((titulo, texto)))
+    _WorkerRegistrado.creados = []
+    monkeypatch.setattr(rp, "QueryWorker", _WorkerRegistrado)
+    panel.tipo_combo.setCurrentIndex(panel.tipo_combo.findData(modo))
+    if catalogos is not None:
+        panel._llenar_catalogos(catalogos)
+
+    panel._generar()
+
+    assert _WorkerRegistrado.creados == []  # no se consulta nada
+    assert len(avisos) == 1
+    return avisos[0]
+
+
+@pytest.mark.parametrize(("modo", "nombre_combo", "clave", "uno"), ESTADOS_DE_CUENTA, ids=["cliente", "proveedor"])
+def test_el_estado_de_cuenta_no_ofrece_la_opcion_todos(panel_con_generar_real, modo, nombre_combo, clave, uno):
+    panel = panel_con_generar_real
+    panel.tipo_combo.setCurrentIndex(panel.tipo_combo.findData(modo))
+    panel._llenar_catalogos(_catalogos())
+    combo = getattr(panel, nombre_combo)
+
+    assert combo.itemText(0) == f"Seleccione {uno}…"
+    assert combo.currentData() is None
+    assert combo.count() == len(_catalogos()[clave]) + 1
+
+
+@pytest.mark.parametrize(("modo", "nombre_combo", "clave", "uno"), ESTADOS_DE_CUENTA, ids=["cliente", "proveedor"])
+def test_generar_el_estado_de_cuenta_sin_elegir_pide_elegir_y_no_dice_que_no_hay(
+    panel_con_generar_real, monkeypatch, modo, nombre_combo, clave, uno
+):
+    titulo, texto = _generar_sin_elegir(panel_con_generar_real, monkeypatch, modo, _catalogos())
+
+    assert titulo == f"Seleccione {uno}"
+    assert "No hay" not in texto
+
+
+@pytest.mark.parametrize(("modo", "nombre_combo", "clave", "uno"), ESTADOS_DE_CUENTA, ids=["cliente", "proveedor"])
+def test_el_estado_de_cuenta_dice_que_no_hay_solo_cuando_la_lista_esta_vacia(
+    panel_con_generar_real, monkeypatch, modo, nombre_combo, clave, uno
+):
+    titulo, texto = _generar_sin_elegir(panel_con_generar_real, monkeypatch, modo, _catalogos(**{clave: []}))
+
+    assert (titulo, texto) == (f"Sin {clave}", f"No hay {clave} registrados.")
+
+
+def test_el_estado_de_cuenta_con_las_listas_sin_llegar_pide_esperar(panel_con_generar_real, monkeypatch):
+    titulo, texto = _generar_sin_elegir(panel_con_generar_real, monkeypatch, rp.REPORTE_ESTADO_CTA_CLIENTE, None)
+
+    assert titulo == "Cargando listas"
+    assert "No hay" not in texto

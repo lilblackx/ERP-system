@@ -203,10 +203,8 @@ def _aplicaciones_nc_cliente(
             "fecha": fila.fecha_aplicacion,
             "id_nota_credito": fila.id_nota_credito,
             "numero_nota_credito": fila.numero_nota_credito,
-            # NOT NULL = la nota es el excedente de un abono: ese dinero ya salio en la
-            # fila del pago (monto exacto), asi que su aplicacion no debe contarse
-            # otra vez como abono.
-            "vinculada_a_abono": fila.fecha_pago_origen is not None,
+            # fecha_pago del abono que dejo la nota como excedente (None en las demas).
+            "fecha_pago_origen": fila.fecha_pago_origen,
             "id_factura": fila.id_factura,
             "monto": fila.monto,
         }
@@ -2535,9 +2533,11 @@ class ReporteService:
                 }
             )
         for aplicacion in aplicaciones_nc:
-            # La nota vinculada a un abono ya tiene su dinero dentro de la fila del pago
-            # (monto exacto): su aplicacion queda solo como constancia informativa para
-            # no contar el credito dos veces. Las demas si bajan el saldo como abono.
+            # Si la fila de un abono de ESTE reporte ya incluye el dinero de la nota, su
+            # aplicacion queda solo como constancia para no contarlo dos veces. Si no hay
+            # tal fila (anticipo de un cliente sin deuda, que no genera lineas de pago, o
+            # abono dejado fuera por los filtros), la aplicacion si baja el saldo. Mismo
+            # criterio que decide arriba si la nota se suma al abono o es fila propia.
             eventos.append(
                 {
                     "fecha": aplicacion["fecha"],
@@ -2545,7 +2545,9 @@ class ReporteService:
                     "id_factura": aplicacion["id_factura"],
                     "referencia": aplicacion["numero_nota_credito"],
                     "cargo": Decimal("0.00"),
-                    "abono": Decimal("0.00") if aplicacion["vinculada_a_abono"] else aplicacion["monto"],
+                    "abono": (
+                        Decimal("0.00") if aplicacion["fecha_pago_origen"] in fechas_con_pago else aplicacion["monto"]
+                    ),
                     "descripcion": "",
                 }
             )

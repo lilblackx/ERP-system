@@ -447,6 +447,13 @@ class PagoBCVService:
         # Solo mostrar clientes con saldo pendiente > 0
         query = query.having(func.sum(CuentaPorCobrarBCV.saldo_pendiente) > 0)
 
+        # Deuda de TODOS los clientes filtrados (todas las paginas), para el rotulo superior del panel -- `items`
+        # solo trae la pagina pedida. Se suma en la base sobre la misma consulta, antes de paginarla.
+        clientes_filtrados = query.subquery()
+        saldo_total_general = session.query(
+            func.coalesce(func.sum(clientes_filtrados.c.saldo_pendiente_total), 0)
+        ).scalar()
+
         resultado = paginar(query, pagina, por_pagina, Cliente.nombre_razon_social, Cliente.id_cliente)
         total = resultado["total"]
         logger.info(
@@ -490,7 +497,11 @@ class PagoBCVService:
 
         logger.info(f"BCV - Clientes agrupados recuperados: {len(items)}")
 
-        return {**resultado, "items": items}
+        return {
+            **resultado,
+            "items": items,
+            "saldo_total_general": Decimal(str(saldo_total_general)).quantize(Decimal("0.01")),
+        }
 
     @staticmethod
     def aplicar_abono_general_cliente_bcv(

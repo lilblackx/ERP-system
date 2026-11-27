@@ -11,6 +11,7 @@ sumando mal (p. ej. una tabla que terminaba en $160 con su cabecera en $130).
 
 from decimal import Decimal
 
+from app.db.models import NotaCreditoCliente
 from app.services.historial_cliente import (
     obtener_historial_cliente,
     obtener_saldo_total_pendiente,
@@ -263,6 +264,32 @@ def test_una_factura_bcv_con_abono_cuadra_con_el_reporte(db_session):
     _historial, reporte = _afirmar_que_cuadra(db, admin, cliente.id_cliente)
 
     assert reporte["saldo_final"] == Decimal("60.00")
+
+
+def test_un_anticipo_aplicado_a_una_factura_posterior_cuadra_con_el_reporte(db_session):
+    """El anticipo de un cliente sin deuda se aplica despues a una factura: queda saldada en las dos vistas."""
+    db = db_session
+    admin, vendedor, producto, cliente = _escenario(db)
+    caja = crear_caja(db)
+    CajaService.abrir_caja(db, caja.id_caja, id_usuario=admin.id_usuario, saldo_apertura=0)
+    PagoService.aplicar_abono_general_cliente(
+        db,
+        id_cliente=cliente.id_cliente,
+        monto_abono=Decimal("100.00"),
+        tasa_cambio=Decimal("900.00"),
+        metodo_pago="efectivo",
+        id_caja=caja.id_caja,
+        id_usuario=admin.id_usuario,
+    )
+    factura = _credito(db, admin, vendedor, producto, cliente, 5)
+    nota = db.query(NotaCreditoCliente).filter_by(id_cliente=cliente.id_cliente).one()
+    NotaCreditoService.aplicar_nota_credito_cliente(
+        db, nota.id_nota_credito, factura.id_factura, Decimal("100.00"), admin.id_usuario
+    )
+
+    _, reporte = _afirmar_que_cuadra(db, admin, cliente.id_cliente)
+
+    assert reporte["saldo_final"] == Decimal("0.00")
 
 
 def test_un_cliente_sin_facturas_no_rompe_la_comparacion(db_session):
