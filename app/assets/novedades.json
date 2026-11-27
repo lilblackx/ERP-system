@@ -1,6 +1,44 @@
 {
   "entregas": [
     {
+      "version": "1.1.3",
+      "fecha": "2026-11-26",
+      "titulo": "Anticipos de clientes, turnos de caja para cajeros y facturación más ágil",
+      "cambios": [
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "Con «Abono a Cliente» registras un pago aunque el cliente no deba nada, y queda como saldo a favor en su estado de cuenta.",
+          "modulos": ["cuentas_por_cobrar", "cuentas_por_cobrar_bcv"]
+        },
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "En Nueva Factura, F1 crea un cliente, Enter agrega el producto y al salir puedes mantener el pedido.",
+          "modulos": ["facturacion"]
+        },
+        {
+          "tipo": "nuevo",
+          "destacado": true,
+          "texto": "Los cajeros pueden abrir y cerrar su turno, y Cajas muestra el nombre del equipo y quién registró cada movimiento.",
+          "modulos": ["cajas"]
+        },
+        {
+          "tipo": "mejorado",
+          "texto": "En Rutas, traza la zona punto por punto y ciérrala tocando de nuevo el primer punto.",
+          "modulos": ["vendedores"]
+        },
+        {
+          "tipo": "mejorado",
+          "texto": "Al salir de un módulo, su búsqueda y sus filtros vuelven a como estaban al abrirlo."
+        },
+        {
+          "tipo": "general",
+          "texto": "Mejoras de estabilidad y funcionamiento."
+        }
+      ]
+    },
+    {
       "version": "1.1.2",
       "fecha": "2026-11-18",
       "titulo": "Estado de cuenta en el historial, ajuste de stock y conciliación exportable",
