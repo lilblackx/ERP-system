@@ -1710,6 +1710,19 @@ de servicio.
   "ver historial". Haría falta un servicio equivalente (compras, pagos, notas de crédito de proveedor,
   saldo corrido) y una ventana nueva abierta desde la ficha del proveedor, con la misma lógica de
   facturas pagadas visibles/ocultables.
+- **Pendiente (grave): costo por caja o por unidad en margen e inventario valorizado** (detectado el 2026-11-26
+  ensayando sobre una copia de producción del 2026-11-05). El código trata `inventario.costo_producto` como el
+  costo de **una unidad** (`ReporteService.margen_utilidad_productos` multiplica los bultos por `cantidad_caja`;
+  `ReporteService.valorizacion_inventario` hace `cantidad_unidad * costo_producto`), pero en los datos reales el
+  costo parece cargado **por caja**: en 33 de 34 productos con caja vendidos por caja el precio de la caja solo es
+  coherente con esa lectura, y todas las ventas por unidad que quedaban "bajo costo" dejan de estarlo si el costo
+  se divide entre `cantidad_caja`. Efecto: ambos reportes inflan el costo varias veces (el margen sale muy
+  negativo y el inventario muy sobrevalorado).
+  - Falta confirmar con el negocio: (1) si el costo se carga por caja o por unidad y (2) que el stock
+    (`cantidad_unidad`) está cargado en unidades.
+  - Según la respuesta: ajustar los dos reportes para dividir entre `cantidad_caja`, o corregir los costos ya
+    cargados. En ambos casos aclarar en el formulario de producto (`producto_form_dialog.py`, "Costo ($)") a qué
+    se refiere el costo, y revisar de qué forma lo llenan las compras antes de cambiar datos.
 
 ## 10. Checklist de producción (consolidado, reemplaza `docs/CHECKLIST_PRODUCCION.md`)
 
