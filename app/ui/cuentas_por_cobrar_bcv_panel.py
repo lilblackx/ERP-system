@@ -54,6 +54,7 @@ from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.permisos_ui import MixinPermisos, tiene_permiso
+from app.ui.referencia_duplicada import advertir_referencia_duplicada
 from app.ui.seleccionar_cliente_dialog import SeleccionarClienteDialog
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
@@ -546,6 +547,8 @@ class PagoCobroBCVDialog(ConversionBolivaresMixin, QDialog):
         try:
             session = self.session_factory()
             try:
+                if referencia and not advertir_referencia_duplicada(self, session, referencia):
+                    return
                 reintentar_en_deadlock(
                     lambda: PagoBCVService.registrar_pago_cobro_bcv(
                         session=session,
@@ -1107,6 +1110,9 @@ class AbonoGeneralBCVDialog(ConversionBolivaresMixin, QDialog):
             # Aplicar abono general usando el servicio BCV
             session = self.session_factory()
             try:
+                referencia = self.referencia_input.text().strip() or None
+                if referencia and not advertir_referencia_duplicada(self, session, referencia):
+                    return
                 self.abono_aplicado = reintentar_en_deadlock(
                     lambda: PagoBCVService.aplicar_abono_general_cliente_bcv(
                         session=session,
@@ -1120,7 +1126,7 @@ class AbonoGeneralBCVDialog(ConversionBolivaresMixin, QDialog):
                         moneda_pago=moneda_pago_por_tasa(self.tasa_combo.currentText())
                         if tipo_origen == "banco"
                         else None,
-                        referencia=self.referencia_input.text().strip() or None,
+                        referencia=referencia,
                         id_usuario=self.id_usuario,
                     ),
                     session=session,

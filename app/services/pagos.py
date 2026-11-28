@@ -11,9 +11,11 @@ from app.db.models import (
     Compra,
     CuentaBancaria,
     CuentaPorCobrar,
+    CuentaPorCobrarBCV,
     CuentaPorPagar,
     FacturaVenta,
     PagoCobro,
+    PagoCobroBCV,
     PagoProveedor,
     Proveedor,
 )
@@ -466,6 +468,62 @@ class PagoService:
             )
 
         return resultado
+
+    @staticmethod
+    def buscar_pagos_por_referencia(session: Session, referencia: str | None) -> list[dict]:
+        """Pagos de clientes (cartera normal y BCV) que ya registraron esta referencia
+        bancaria. La comparacion es sobre el texto tal cual (el COLLATION de la base
+        decide mayusculas/minusculas) y NO filtra por banco: una referencia repetida en
+        otro banco igual puede ser un cobro duplicado o un error de digitacion. Cada
+        fila trae lo que el aviso necesita: monto recibido, cliente, fecha y banco."""
+        ref = (referencia or "").strip()
+        if not ref:
+            return []
+
+        def _fila(pago, cliente):
+            cuenta_bancaria = pago.cuenta_bancaria
+            banco = cuenta_bancaria.banco if cuenta_bancaria is not None else None
+            if banco is not None and banco.nombre_banco:
+                destino = banco.nombre_banco
+            elif cuenta_bancaria is not None and cuenta_bancaria.numero_cuenta:
+                destino = cuenta_bancaria.numero_cuenta
+            else:
+                destino = "Efectivo"
+            return {
+                "monto": pago.monto,
+                "moneda": pago.moneda,
+                "monto_moneda_origen": pago.monto_moneda_origen,
+                "monto_bolivares": pago.monto_bolivares,
+                "fecha": pago.fecha_pago,
+                "cliente": cliente.nombre_razon_social if cliente else "",
+                "banco": destino,
+                "metodo": pago.metodo_pago,
+                "cartera": "BCV" if isinstance(pago, PagoCobroBCV) else "Normal",
+            }
+
+        filas = []
+        for pago, cliente in (
+            session.query(PagoCobro, Cliente)
+            .join(CuentaPorCobrar, CuentaPorCobrar.id_cuenta_por_cobrar == PagoCobro.id_cuenta_por_cobrar)
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrar.id_factura)
+            .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
+            .filter(PagoCobro.referencia == ref)
+            .all()
+        ):
+            filas.append(_fila(pago, cliente))
+        for pago, cliente in (
+            session.query(PagoCobroBCV, Cliente)
+            .join(
+                CuentaPorCobrarBCV,
+                CuentaPorCobrarBCV.id_cuenta_por_cobrar == PagoCobroBCV.id_cuenta_por_cobrar,
+            )
+            .join(FacturaVenta, FacturaVenta.id_factura == CuentaPorCobrarBCV.id_factura)
+            .join(Cliente, Cliente.id_cliente == FacturaVenta.id_cliente_factura)
+            .filter(PagoCobroBCV.referencia == ref)
+            .all()
+        ):
+            filas.append(_fila(pago, cliente))
+        return filas
 
     @staticmethod
     def aplicar_abono_general_cliente(

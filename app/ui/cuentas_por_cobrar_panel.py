@@ -68,6 +68,7 @@ from app.ui.paginacion import ControlPaginacion, MixinPaginacion
 from app.ui.pago_linea_dialog import METODOS_PAGO, METODOS_QUE_REQUIEREN_CAJA
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
 from app.ui.permisos_ui import MixinPermisos, tiene_permiso
+from app.ui.referencia_duplicada import advertir_referencia_duplicada
 from app.ui.seleccionar_cliente_dialog import SeleccionarClienteDialog
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
@@ -546,6 +547,10 @@ class PagoCobroDialog(ConversionBolivaresMixin, QDialog):
                 # Siempre guardar el ID de la tasa si está seleccionada
                 id_tasa = self._id_tasa_seleccionada
 
+            referencia = self.referencia_input.text().strip() or None
+            if referencia and not advertir_referencia_duplicada(self, self.session, referencia):
+                return
+
             self.pago_creado = reintentar_en_deadlock(
                 lambda: PagoService.registrar_pago_cobro(
                     self.session,
@@ -561,7 +566,7 @@ class PagoCobroDialog(ConversionBolivaresMixin, QDialog):
                     id_caja=id_origen if tipo_origen == "caja" else None,
                     id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
                     id_tasa=id_tasa,
-                    referencia=self.referencia_input.text().strip() or None,
+                    referencia=referencia,
                     id_usuario=self.id_usuario,
                 ),
                 session=self.session,
@@ -977,6 +982,10 @@ class AbonoGeneralDialog(ConversionBolivaresMixin, QDialog):
             # Aplicar abono general usando el servicio
             from app.services.pagos import PagoService
 
+            referencia = self.referencia_input.text().strip() or None
+            if referencia and not advertir_referencia_duplicada(self, self.session, referencia):
+                return
+
             self.abono_aplicado = reintentar_en_deadlock(
                 lambda: PagoService.aplicar_abono_general_cliente(
                     self.session,
@@ -988,7 +997,7 @@ class AbonoGeneralDialog(ConversionBolivaresMixin, QDialog):
                     id_cuenta_bancaria=id_origen if tipo_origen == "banco" else None,
                     id_tasa=id_tasa,
                     moneda_pago=moneda_pago_por_tasa(self.tasa_combo.currentText()) if tipo_origen == "banco" else None,
-                    referencia=self.referencia_input.text().strip() or None,
+                    referencia=referencia,
                     id_usuario=self.id_usuario,
                 ),
                 session=self.session,

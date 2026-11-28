@@ -202,6 +202,71 @@ def test_registrar_pago_cobro_por_banco_con_tasa_y_bolivares(db_session):
     assert movimiento.id_pago_cobro == pago.id_pago_cobro
 
 
+def test_buscar_pagos_por_referencia_cubre_ambas_carteras(db_session):
+    """La busqueda para el aviso de referencia duplicada encuentra el pago en la
+    cartera normal Y en la BCV (aunque el banco sea otro), con monto/cliente/fecha/
+    banco; vacia o sin coincidencias devuelve []."""
+    from app.db.models import CuentaPorCobrarBCV
+    from app.services.pagos_bcv import PagoBCVService
+
+    cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
+    cuenta = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("500.00"))
+    PagoService.registrar_pago_cobro(
+        db_session,
+        id_cuenta_por_cobrar=cxc.id_cuenta_por_cobrar,
+        monto=Decimal("30.00"),
+        metodo_pago="transferencia",
+        id_cuenta_bancaria=cuenta.id_cuenta,
+        referencia="REF-DUP-1",
+        id_usuario=admin.id_usuario,
+    )
+
+    # Un pago BCV con la MISMA referencia (otro banco): tambien debe aparecer.
+    vendedor = crear_vendedor(db_session)
+    producto = crear_producto(db_session, cantidad_unidad=100)
+    crear_precio_producto(db_session, producto, "100.00")
+    cliente_bcv = crear_cliente(db_session, limite_credito=Decimal("100000.00"))
+    factura_bcv = VentaService.emitir_factura(
+        db_session,
+        id_cliente=cliente_bcv.id_cliente,
+        id_usuario=admin.id_usuario,
+        id_vendedor=vendedor.id_vendedor,
+        condicion_pago="credito",
+        items=[{"id_producto": producto.id_producto, "cantidad": 1, "precio_unitario": "100.00"}],
+        porcentaje_bcv=Decimal("10"),
+    )
+    cuenta_bcv = db_session.query(CuentaPorCobrarBCV).filter_by(id_factura=factura_bcv.id_factura).one()
+    cuenta_bcv_banco = crear_cuenta_bancaria(db_session, saldo_total_banco=Decimal("0.00"))
+    PagoBCVService.registrar_pago_cobro_bcv(
+        db_session,
+        id_cuenta_por_cobrar=cuenta_bcv.id_cuenta_por_cobrar,
+        monto=Decimal("20.00"),
+        metodo_pago="transferencia",
+        monto_moneda_origen=Decimal("800.00"),
+        monto_bolivares=Decimal("800.00"),
+        tasa_cambio=Decimal("40.00"),
+        id_cuenta_bancaria=cuenta_bcv_banco.id_cuenta,
+        referencia="REF-DUP-1",
+        id_usuario=admin.id_usuario,
+    )
+
+    resultados = PagoService.buscar_pagos_por_referencia(db_session, "REF-DUP-1")
+    assert len(resultados) == 2
+    por_cartera = {r["cartera"]: r for r in resultados}
+    normal = por_cartera["Normal"]
+    assert normal["monto"] == Decimal("30.00")
+    assert normal["banco"] == cuenta.banco.nombre_banco
+    assert normal["fecha"] is not None
+    assert normal["cliente"]
+    bcv = por_cartera["BCV"]
+    assert bcv["monto"] == Decimal("20.00")
+    assert bcv["banco"] == cuenta_bcv_banco.banco.nombre_banco
+
+    assert PagoService.buscar_pagos_por_referencia(db_session, "OTRA-REF") == []
+    assert PagoService.buscar_pagos_por_referencia(db_session, "") == []
+    assert PagoService.buscar_pagos_por_referencia(db_session, None) == []
+
+
 def test_registrar_pago_cobro_por_banco_cuenta_inactiva_falla(db_session):
     cxc, admin = _crear_cxc(db_session, Decimal("100.00"))
     cuenta = crear_cuenta_bancaria(db_session, estado_cuenta="INACTIVO")

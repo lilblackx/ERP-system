@@ -29,6 +29,7 @@ from app.services.tesoreria import BancoService, CajaService
 from app.ui.message_box import MessageBox
 from app.ui.numeric_inputs import NumericFieldType, NumericLineEdit
 from app.ui.pantalla import ajustar_tamano, hacer_desplazable
+from app.ui.referencia_duplicada import advertir_referencia_duplicada
 from app.ui.styles import (
     ASTERISCO_REQUERIDO,
     COLOR_BLUE_LIGHTER,
@@ -590,6 +591,9 @@ class PagoLineaDialog(QDialog):
                     "Cuenta requerida",
                     "No hay ninguna cuenta bancaria activa para este método de pago.",
                 )
+            return
+        referencia = self.referencia_input.text().strip()
+        if referencia and not advertir_referencia_duplicada(self, self.session, referencia):
             return
         self.accept()
 
